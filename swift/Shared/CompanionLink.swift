@@ -129,15 +129,24 @@ import WatchConnectivity
     }
   }
   func recoverInbox() async {
-    guard let onFile else { return }
+    guard onFile != nil else { return }
     for envelope
       in (try? FileManager.default.contentsOfDirectory(at: inbox, includingPropertiesForKeys: nil))
       ?? [] where envelope.pathExtension == "json"
     {
       guard let metadata = try? Data(contentsOf: envelope) else { continue }
       let file = envelope.deletingPathExtension().appendingPathExtension("transfer")
-      if FileManager.default.fileExists(atPath: file.path) { await onFile(file, metadata) }
+      if FileManager.default.fileExists(atPath: file.path) { await deliver(file, metadata) }
     }
+  }
+  /// Inbox files being handed over. Recovery runs while a delivery may still
+  /// be awaiting the archive, and handing the same file over twice made the
+  /// second attempt fail on a file the first had already taken.
+  @ObservationIgnored private var delivering: Set<String> = []
+  private func deliver(_ file: URL, _ metadata: Data) async {
+    guard let onFile, delivering.insert(file.lastPathComponent).inserted else { return }
+    defer { delivering.remove(file.lastPathComponent) }
+    await onFile(file, metadata)
   }
   nonisolated func session(
     _ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState,
@@ -226,7 +235,7 @@ import WatchConnectivity
       deliveries.begin()
       Task { @MainActor in
         defer { self.deliveries.end() }
-        await self.onFile?(destination, envelope)
+        await self.deliver(destination, envelope)
       }
     } catch {
       try? FileManager.default.removeItem(at: destination)

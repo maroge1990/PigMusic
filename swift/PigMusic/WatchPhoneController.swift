@@ -47,6 +47,8 @@ import SwiftUI
   /// was last handed to WatchConnectivity, so nothing is queued twice.
   @ObservationIgnored private var sent: [String: Date] = [:]
   @ObservationIgnored private var lastAdvance = Date.distantPast
+  /// The context last handed to WatchConnectivity, which keeps delivering it.
+  @ObservationIgnored private var contextSent: CompanionContext?
   @ObservationIgnored private var deferredPublish: Task<Void, Never>?
   init(model: AppModel, defaults: UserDefaults) {
     self.model = model
@@ -539,9 +541,14 @@ import SwiftUI
         return
       }
     }
-    do { try link?.publish(context) } catch {
-      message = error.userMessage
-      return
+    // The Watch confirms every context it receives, and each confirmation
+    // publishes again: send the context only when it changed (or when asked).
+    if force || contextSent != context {
+      do { try link?.publish(context) } catch {
+        message = error.userMessage
+        return
+      }
+      contextSent = context
     }
     let outstanding = (link?.outstanding ?? []).compactMap {
       try? JSONDecoder().decode(CompanionEnvelope.self, from: $0)

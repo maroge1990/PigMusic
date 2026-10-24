@@ -217,11 +217,13 @@ private final class CopyProtocol: URLProtocol, @unchecked Sendable {
   }
   @Test func eventsParseBoundedFramesAndIgnoreKeepalives() throws {
     var parser = EventParser()
-    var events: [String] = []
-    for byte in Data(": ping\r\n\r\nevent: revision\r\ndata: {}\r\n\r\nevent: revoked\n\n".utf8) {
+    var events: [LiveEvent] = []
+    for byte in Data(
+      ": ping\r\n\r\nevent: revision\r\ndata: {\"revision\":7}\r\n\r\nevent: revoked\n\n".utf8)
+    {
       if let event = try parser.append(byte) { events.append(event) }
     }
-    #expect(events == ["revision", "revoked"])
+    #expect(events == [LiveEvent("revision", data: #"{"revision":7}"#), LiveEvent("revoked")])
     #expect(throws: NativeFailure.self) {
       for _ in 0...2 * 1024 * 1024 + 1 { _ = try parser.append(65) }
     }

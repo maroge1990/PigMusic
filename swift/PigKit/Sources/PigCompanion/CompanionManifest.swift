@@ -11,6 +11,21 @@ public struct CompanionContext: Codable, Sendable, Equatable {
     self.revision = revision
     self.account = account
   }
+  public enum Arrival: Sendable, Equatable {
+    /// A newer context: apply it.
+    case apply
+    /// The context in use, delivered again: nothing changes, so it is only
+    /// confirmed. Re-applying it made each confirmation draw another copy
+    /// from the phone (25 Oct diagnostics: hundreds a minute).
+    case repeated
+    /// Older, or a different context under the same revision: ignored.
+    case stale
+  }
+  /// What this context, just received, means against `current`.
+  public func arrival(over current: CompanionContext) -> Arrival {
+    if self == current { return .repeated }
+    return version == 1 && revision > current.revision ? .apply : .stale
+  }
 }
 public struct CompanionSong: Codable, Sendable, Identifiable, Hashable {
   public var track: Track

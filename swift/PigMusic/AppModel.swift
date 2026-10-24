@@ -125,6 +125,8 @@ enum PlayOrigin: Hashable {
     await refresh()
     startLiveUpdates()
   }
+  /// The last library revision the live updates announced, this account.
+  @ObservationIgnored private var libraryEvent: String?
   private func startLiveUpdates() {
     guard activeScene, liveTask == nil, let service else { return }
     let stamp = generation
@@ -137,13 +139,19 @@ enum PlayOrigin: Hashable {
           for try await event in events {
             guard generation == stamp, !Task.isCancelled else { return }
             delay = 1
-            if event == "revoked" {
+            if event.name == "revoked" {
               revoked(generation: stamp)
               return
             }
-            if event == "revision" { await refresh() }
+            // Every connection opens with the library's current revision. On
+            // a reconnect after the foreground refresh it is usually the one
+            // already seen, and refreshing again found nothing (25 Oct log).
+            if event.name == "revision", event.data == nil || event.data != libraryEvent {
+              libraryEvent = event.data
+              await refresh()
+            }
             // A request moved on the server: open request lists reload.
-            if event == "queue" {
+            if event.name == "queue" {
               requestsRevision += 1
               await refreshServerRequests()
             }
@@ -267,6 +275,7 @@ enum PlayOrigin: Hashable {
   private func attach(_ user: Person, service: NativeService) async throws {
     generation += 1
     refreshLoop.reset()
+    libraryEvent = nil
     let stamp = generation
     let base = try FileManager.default.url(
       for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
@@ -1174,6 +1183,7 @@ enum PlayOrigin: Hashable {
     watch?.disconnect()
     generation += 1
     refreshLoop.reset()
+    libraryEvent = nil
     liveTask?.cancel()
     liveTask = nil
     if let downloads { Task { await downloads.clear() } }

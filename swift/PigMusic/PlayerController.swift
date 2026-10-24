@@ -490,9 +490,10 @@ import PigSync
         startClock()
       } catch is CancellationError {} catch {
         guard generation == stamp else { return }
-        // A song that can't be fetched (not on this device or the server) is
-        // passed over, as the seamless engine does, until every song was tried.
-        if error as? NativeFailure != .authentication,
+        // A song the server says can't play is passed over, as the seamless
+        // engine does, until every song was tried. An unreachable server or a
+        // server error stops with its message: every song would fail the same.
+        if error.isSongUnavailable,
           unavailableRun + 1 < queue.items.count,
           queue.index + 1 < queue.items.count || repeatMode == .all
         {

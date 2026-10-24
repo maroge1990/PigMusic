@@ -173,3 +173,17 @@ private actor FailedSource: LibrarySource {
   #expect(!stale && latest)
   #expect(await model.appearance == "light")
 }
+
+struct SongFailureTests {
+  /// 22 Oct diagnostics: with the server out of reach, streaming passed over
+  /// every song of the queue in seconds. Only a song's own failure passes over.
+  @Test func onlyASongsOwnFailurePassesOverIt() {
+    #expect(NativeFailure.songUnavailable("gone").isSongUnavailable)
+    #expect(NativeFailure.invalidMediaURL.isSongUnavailable)
+    let server = NativeFailure.unavailable("Unable to prepare this song for playback.")
+    #expect(!server.isSongUnavailable)
+    #expect(!NativeFailure.authentication.isSongUnavailable)
+    #expect(!URLError(.cannotConnectToHost).isSongUnavailable)
+    #expect(!URLError(.notConnectedToInternet).isSongUnavailable)
+  }
+}

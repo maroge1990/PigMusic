@@ -314,9 +314,11 @@ import PigPlayback
     guard let archive else { return }
     do {
       let old = await archive.activeContext()
-      guard context.version == 1, context.revision >= old.revision,
-        context.revision != old.revision || context == old
-      else { return }
+      switch context.arrival(over: old) {
+      case .stale: return
+      case .repeated: return await acknowledge()
+      case .apply: break
+      }
       DiagnosticsLog.shared.record(
         "sync",
         "context revision \(context.revision)"
@@ -329,6 +331,8 @@ import PigPlayback
     } catch CompanionFailure.stale {} catch { message = error.localizedDescription }
   }
   private func fileReceived(_ file: URL, data: Data) async {
+    // Already taken by an earlier delivery of the same transfer.
+    guard FileManager.default.fileExists(atPath: file.path) else { return }
     guard let archive, let envelope = try? JSONDecoder().decode(CompanionEnvelope.self, from: data)
     else {
       deleteInbox(file)

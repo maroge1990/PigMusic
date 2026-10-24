@@ -5,14 +5,29 @@ import PigDomain
 public enum NativeFailure: Error, LocalizedError, Sendable, Equatable {
   case authentication, resync, changed
   case unavailable(String)
+  /// The server answered that this one song cannot play (gone, no stream
+  /// matched, remote streaming off). Other songs may still play.
+  case songUnavailable(String)
   case invalidMediaURL
   public var errorDescription: String? {
     switch self {
     case .authentication: "Please sign in again. This device session is no longer available."
     case .resync: "Your library needs a fresh sync."
     case .changed: "Your library changed during sync. Please try again."
-    case .unavailable(let message): message
+    case .unavailable(let message), .songUnavailable(let message): message
     case .invalidMediaURL: "The server returned an unsupported playback address."
+    }
+  }
+}
+
+extension Error {
+  /// Whether this failure belongs to the song alone, so a queue may pass
+  /// over it. An unreachable server or a server error fails every song:
+  /// passing over then ran through the whole queue in seconds (22 Oct).
+  public var isSongUnavailable: Bool {
+    switch self as? NativeFailure {
+    case .songUnavailable, .invalidMediaURL: true
+    default: false
     }
   }
 }
@@ -544,7 +559,7 @@ public actor NativeService: LibrarySource {
       return url
     case .unauthorized: throw NativeFailure.authentication
     case .notFound:
-      throw NativeFailure.unavailable("This song is no longer available on the server.")
+      throw NativeFailure.songUnavailable("This song is no longer available on the server.")
     default: throw NativeFailure.unavailable("Unable to prepare this song for playback.")
     }
   }
@@ -595,11 +610,11 @@ public actor NativeService: LibrarySource {
       return url
     case .unauthorized: throw NativeFailure.authentication
     case .conflict:
-      throw NativeFailure.unavailable(
+      throw NativeFailure.songUnavailable(
         "Remote streaming is disabled. You can still play saved songs or request this song in Song actions."
       )
     case .notFound:
-      throw NativeFailure.unavailable(
+      throw NativeFailure.songUnavailable(
         "No reliable remote stream matched this song. Saved music is still available.")
     default:
       throw NativeFailure.unavailable(

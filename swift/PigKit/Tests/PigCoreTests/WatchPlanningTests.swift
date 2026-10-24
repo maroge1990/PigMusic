@@ -5,6 +5,19 @@ import Testing
 
 struct WatchPlanningTests {
   typealias Plan = WatchPlaylistPlan
+  /// The context in use, delivered again, is only confirmed (25 Oct: each
+  /// re-application drew another copy from the phone, hundreds a minute).
+  @Test func aRepeatedContextIsConfirmedNotAppliedAgain() {
+    let current = CompanionContext(revision: 24, account: "a")
+    #expect(CompanionContext(revision: 24, account: "a").arrival(over: current) == .repeated)
+    #expect(CompanionContext(revision: 25, account: "a").arrival(over: current) == .apply)
+    #expect(CompanionContext(revision: 25, account: "b").arrival(over: current) == .apply)
+    #expect(CompanionContext(revision: 23, account: "a").arrival(over: current) == .stale)
+    #expect(CompanionContext(revision: 24, account: "b").arrival(over: current) == .stale)
+    var future = CompanionContext(revision: 25, account: "a")
+    future.version = 2
+    #expect(future.arrival(over: current) == .stale)
+  }
   @Test func emptiedPlaylistStaysFollowedAndRefills() {
     // Sent while it had songs, then emptied: still followed, songs released.
     var plan = Plan.make(

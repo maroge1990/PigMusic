@@ -1,12 +1,22 @@
 import Foundation
 import PigAPI
 
+/// One server-sent event: its name and the data it carried.
+public struct LiveEvent: Sendable, Equatable {
+  public let name: String
+  public let data: String?
+  public init(_ name: String, data: String? = nil) {
+    self.name = name
+    self.data = data
+  }
+}
 public struct EventParser: Sendable {
   private var line = Data()
   private var event: String?
+  private var data: String?
   private var bytes = 0
   public init() {}
-  public mutating func append(_ byte: UInt8) throws -> String? {
+  public mutating func append(_ byte: UInt8) throws -> LiveEvent? {
     bytes += 1
     guard bytes <= 4 * 1024 * 1024, line.count <= 2 * 1024 * 1024 else {
       throw NativeFailure.unavailable("The live update was too large. Refresh your library.")
@@ -20,12 +30,15 @@ public struct EventParser: Sendable {
     if value.isEmpty {
       defer {
         event = nil
+        data = nil
         bytes = 0
       }
-      return event
+      return event.map { LiveEvent($0, data: data) }
     }
     if value.hasPrefix("event:") {
       event = String(value.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+    } else if value.hasPrefix("data:") {
+      data = String(value.dropFirst(5)).trimmingCharacters(in: .whitespaces)
     }
     return nil
   }
@@ -44,7 +57,7 @@ public struct LiveEvents: Sendable {
     self.server = try ServerAddress.validate(server.absoluteString)
     self.vault = vault
   }
-  public func stream() -> AsyncThrowingStream<String, any Error> {
+  public func stream() -> AsyncThrowingStream<LiveEvent, any Error> {
     AsyncThrowingStream { continuation in
       let task = Task {
         let config = URLSessionConfiguration.ephemeral
@@ -83,7 +96,7 @@ public struct LiveEvents: Sendable {
   }
 }
 extension NativeService {
-  public func events() throws -> AsyncThrowingStream<String, any Error> {
+  public func events() throws -> AsyncThrowingStream<LiveEvent, any Error> {
     try LiveEvents(server: server, vault: vault).stream()
   }
 }
