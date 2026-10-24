@@ -176,7 +176,12 @@ import PigSync
         let options = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
         let shouldResume = AVAudioSession.InterruptionOptions(rawValue: options).contains(
           .shouldResume)
-        Task { @MainActor in self?.interruption(began: began, shouldResume: shouldResume) }
+        let disconnected =
+          (notification.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt)
+          == AVAudioSession.InterruptionReason.routeDisconnected.rawValue
+        Task { @MainActor in
+          self?.interruption(began: began, shouldResume: shouldResume, disconnected: disconnected)
+        }
       })
     observations.append(
       NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification).receive(
@@ -313,7 +318,9 @@ import PigSync
     player.replaceCurrentItem(with: nil)
     generation += 1
     if autoplay {
-      intent.play()
+      // Music the person chose plays even if iOS left an interruption open;
+      // a restart of the same queue keeps waiting for it.
+      if restored == nil { intent.choosePlay() } else { intent.play() }
       timeStart("play")
     } else {
       intent.pause()
@@ -607,9 +614,19 @@ import PigSync
   @ObservationIgnored private let addressed = AddressedOccurrences()
   @ObservationIgnored private var loggedState: QueuePlaybackState?
   @ObservationIgnored private var loggedIndex = -1
-  private func interruption(began: Bool, shouldResume: Bool) {
+  private func interruption(began: Bool, shouldResume: Bool, disconnected: Bool = false) {
     DiagnosticsLog.shared.record(
-      "audio", began ? "interruption began" : "interruption ended, resume=\(shouldResume)")
+      "audio",
+      began
+        ? "interruption began" + (disconnected ? " (output disconnected)" : "")
+        : "interruption ended, resume=\(shouldResume)")
+    if began, disconnected {
+      // The headphones went away: no end follows, so this is a pause the
+      // person can undo with Play, not something to wait out.
+      sessionActive = false
+      pause()
+      return
+    }
     if began {
       // The system deactivates the session during an interruption.
       sessionActive = false
@@ -659,6 +676,8 @@ import PigSync
   }
   func toggle() { intent.wantsPlayback ? pause() : resume() }
   func resume() {
+    // Play is the person's choice: it ends an interruption iOS never ended.
+    intent.choosePlay()
     if queueStart.waiting { return beginDeferred(autoplay: true) }
     if usingEngine, engine?.snapshot.state == .ended || engine?.snapshot.state == .failed {
       if let resolve, let artworkSource {
@@ -669,7 +688,6 @@ import PigSync
       return
     }
     if !usingEngine, atEnd { seek(0) }
-    intent.play()
     guard intent.canPlay else { return }
     let start = { [self] in
       if usingEngine { engine?.resume() } else if player.currentItem != nil { player.play() }

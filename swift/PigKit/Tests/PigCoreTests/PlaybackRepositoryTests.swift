@@ -129,4 +129,19 @@ struct PlaybackRepositoryTests {
     intent.endInterruption(shouldResume: false)
     #expect(!intent.wantsPlayback && !intent.interrupted)
   }
+
+  /// 25 Oct diagnostics: headphones came out, iOS began an interruption and
+  /// never ended it, and every Play afterwards prepared the song paused until
+  /// the app was relaunched. The person's own Play ends it.
+  @Test func playingAgainEndsAnInterruptionIOSNeverEnded() {
+    var intent = PlaybackIntent()
+    intent.play()
+    intent.beginInterruption()
+    intent.pause()
+    // Automatic resumption still waits for the interruption to end.
+    intent.play()
+    #expect(!intent.canPlay)
+    intent.choosePlay()
+    #expect(intent.canPlay && !intent.interrupted)
+  }
 }
