@@ -24,9 +24,21 @@ public struct SessionMiddleware: ClientMiddleware {
     }
 }
 
+/// Sends each request on the session `session` gives now, so its owner can
+/// swap in fresh connections (`RenewableSession`).
+public struct RenewableTransport: ClientTransport {
+    let session: @Sendable () -> URLSession
+    public init(session: @escaping @Sendable () -> URLSession) { self.session = session }
+    public func send(_ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String) async throws -> (HTTPResponse, HTTPBody?) {
+        try await URLSessionTransport(configuration: .init(session: session()))
+            .send(request, body: body, baseURL: baseURL, operationID: operationID)
+    }
+}
+
 public enum PigClient {
-    public static func make(server: String, vault: any DeviceTokenStore) throws -> Client {
+    public static func make(server: String, vault: any DeviceTokenStore,
+                            transport: any ClientTransport = URLSessionTransport()) throws -> Client {
         let url = try ServerAddress.validate(server)
-        return Client(serverURL:url, transport:URLSessionTransport(), middlewares:[try SessionMiddleware(vault:vault,origin:url), TransientRetryMiddleware()])
+        return Client(serverURL:url, transport:transport, middlewares:[try SessionMiddleware(vault:vault,origin:url), TransientRetryMiddleware()])
     }
 }

@@ -16,7 +16,8 @@ private final class NoArtworkRedirects: NSObject, URLSessionTaskDelegate, Sendab
 final class ArtworkTransport: Sendable {
   let server: URL
   let vault: any DeviceTokenStore
-  private let session: URLSession
+  private let sessions: RenewableSession
+  private var session: URLSession { sessions.session }
   init(
     server: URL, vault: any DeviceTokenStore, configuration: URLSessionConfiguration = .ephemeral
   ) {
@@ -28,10 +29,12 @@ final class ArtworkTransport: Sendable {
     configuration.httpMaximumConnectionsPerHost = 4
     configuration.timeoutIntervalForRequest = 20
     configuration.timeoutIntervalForResource = 30
-    session = URLSession(
-      configuration: configuration, delegate: NoArtworkRedirects(), delegateQueue: nil)
+    let settings = configuration.copy() as! URLSessionConfiguration
+    sessions = RenewableSession {
+      URLSession(configuration: settings, delegate: NoArtworkRedirects(), delegateQueue: nil)
+    }
   }
-  deinit { session.invalidateAndCancel() }
+  func renew() { sessions.renew() }
   /// Server-side artwork aliases. They answer with a redirect to stored bytes.
   enum Alias: Sendable {
     case artist(UUID), background(UUID), release(UUID), releaseGroup(UUID)

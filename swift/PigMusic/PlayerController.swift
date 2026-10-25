@@ -268,7 +268,9 @@ import PigSync
         try FileManager.default.removeItem(at: child)
       }
     }
-    repository = PlaybackSourceRepository(preparer: try AudioSourcePreparer(root: directory))
+    let preparer = try AudioSourcePreparer(root: directory)
+    self.preparer = preparer
+    repository = PlaybackSourceRepository(preparer: preparer)
     if engine == nil {
       let output = EngineQueueOutput()
       engineOutput = output
@@ -286,12 +288,16 @@ import PigSync
     stop()
     let old = repository
     repository = nil
+    preparer = nil
     let cleanup = engine?.stop()
     Task {
       await cleanup?.value
       await old?.reset()
     }
   }
+  @ObservationIgnored private var preparer: AudioSourcePreparer?
+  /// Fresh connections for the songs fetched next (see `RenewableSession`).
+  func renewConnections() { preparer?.renewConnections() }
   func cachedRevisions() async -> [String: String?] { await repository?.savedRevisions() ?? [:] }
   func invalidateSources() async {
     stop()

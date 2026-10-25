@@ -187,3 +187,18 @@ struct SongFailureTests {
     #expect(!URLError(.notConnectedToInternet).isSongUnavailable)
   }
 }
+
+struct RenewableSessionTests {
+  /// After a break, the next requests go out on a new session (new
+  /// connections); a request already running keeps its own.
+  @Test func renewingHandsOutAFreshSession() async throws {
+    let sessions = RenewableSession { URLSession(configuration: .ephemeral) }
+    let first = sessions.session
+    #expect(sessions.session === first)
+    sessions.renew()
+    let second = sessions.session
+    #expect(second !== first)
+    sessions.renew()
+    #expect(sessions.session !== second)
+  }
+}

@@ -111,10 +111,25 @@ enum PlayOrigin: Hashable {
       startLiveUpdates()
     } catch { message = error.userMessage }
   }
+  /// When the app last stopped being active.
+  @ObservationIgnored private var inactiveSince: ContinuousClock.Instant?
   func sceneActive(_ active: Bool) async {
     activeScene = active
     liveTask?.cancel()
     liveTask = nil
+    if !active, inactiveSince == nil { inactiveSince = .now }
+    if active, let since = inactiveSince {
+      inactiveSince = nil
+      // Connections kept through a break may be dead without the system
+      // knowing; the first request on one waited for its timeout.
+      let away = ContinuousClock.now - since
+      if away >= .seconds(30) {
+        service?.renewConnections()
+        player.renewConnections()
+        DiagnosticsLog.shared.record(
+          "network", "new connections after \(Int(away / .seconds(1))) s away")
+      }
+    }
     if !active {
       await downloads?.suspendPreparation()
       await watch?.suspend()
@@ -420,6 +435,7 @@ enum PlayOrigin: Hashable {
   private func refreshOnce() async {
     guard let service, let sync else { return }
     let stamp = generation
+    let began = ContinuousClock.now
     syncing = true
     defer { if generation == stamp { syncing = false } }
     do {
@@ -490,7 +506,9 @@ enum PlayOrigin: Hashable {
       await refreshServerRequests()
       guard generation == stamp else { return }
       DiagnosticsLog.shared.record(
-        "sync", "refreshed library" + (invalid ? "; cached playback invalidated" : ""))
+        "sync",
+        "refreshed library in \(Int((ContinuousClock.now - began) / .milliseconds(1))) ms"
+          + (invalid ? "; cached playback invalidated" : ""))
       message =
         invalid ? "Playback stopped because the server changed or removed cached music." : nil
     } catch NativeFailure.authentication {

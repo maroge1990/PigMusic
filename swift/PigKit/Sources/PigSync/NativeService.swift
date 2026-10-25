@@ -51,16 +51,33 @@ public actor NativeService: LibrarySource {
   public func qualifiedHistoryTrackID(_ id: String) -> String? {
     id.hasPrefix("mix:") ? id : playbackHistory[id]
   }
+  /// The API's connections, renewed when the app returns after a while.
+  private let connections: RenewableSession
   public init(server: String, vault: any DeviceTokenStore) throws {
     self.server = try ServerAddress.validate(server)
     self.vault = vault
     artworkTransport = ArtworkTransport(server: self.server, vault: vault)
-    client = try PigClient.make(server: server, vault: vault)
+    let connections = RenewableSession {
+      let configuration = URLSessionConfiguration.default
+      // A request on a dead connection fails within 20 s of silence, and a
+      // safe one is then retried on a new connection (TransientRetryMiddleware).
+      configuration.timeoutIntervalForRequest = 20
+      return URLSession(configuration: configuration)
+    }
+    self.connections = connections
+    client = try PigClient.make(
+      server: server, vault: vault, transport: RenewableTransport { connections.session })
+  }
+  /// New connections for the API and artwork, for use after the app was away.
+  public nonisolated func renewConnections() {
+    connections.renew()
+    artworkTransport.renew()
   }
   // Injectable generated client for isolated transport/fixture tests, not an app URL bypass.
   init(server: URL, client: Client, vault: any DeviceTokenStore) {
     self.server = server
     self.client = client
+    connections = RenewableSession { URLSession(configuration: .ephemeral) }
     self.vault = vault
     artworkTransport = ArtworkTransport(server: server, vault: vault)
   }

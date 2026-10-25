@@ -45,7 +45,7 @@ private final class NoMediaRedirects: NSObject, URLSessionTaskDelegate, Sendable
 /// The resolver owns authentication; media requests never receive a device bearer token.
 public actor AudioSourcePreparer {
   private let directory: URL
-  private let session: URLSession
+  private let sessions: RenewableSession
   private let maximumFileBytes: Int
   private let maximumTotalBytes: Int
   private var leases: [UUID: PreparedAudioSource] = [:]
@@ -73,14 +73,18 @@ public actor AudioSourcePreparer {
     configuration.httpShouldSetCookies = false
     configuration.timeoutIntervalForRequest = 20
     configuration.timeoutIntervalForResource = 120
-    session = URLSession(
-      configuration: configuration, delegate: NoMediaRedirects(), delegateQueue: nil)
+    let settings = configuration.copy() as! URLSessionConfiguration
+    sessions = RenewableSession {
+      URLSession(configuration: settings, delegate: NoMediaRedirects(), delegateQueue: nil)
+    }
   }
+  /// New connections for the next transfers, after the app was away; songs
+  /// already arriving carry on.
+  public nonisolated func renewConnections() { sessions.renew() }
 
   deinit {
     transfer?.cancel()
     for source in leases.values { (source.bytes as? ProgressiveDownload)?.close() }
-    session.invalidateAndCancel()
     try? FileManager.default.removeItem(at: directory)
   }
 
@@ -97,7 +101,7 @@ public actor AudioSourcePreparer {
     }
     let stamp = generation
     let directory = directory
-    let session = session
+    let session = sessions.session
     let limit = maximumFileBytes
     let predecessor = lastDownload?.busy == true ? lastDownload : nil
     let task = Task {
