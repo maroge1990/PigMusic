@@ -272,4 +272,27 @@ struct RenewableSessionTests {
     #expect(sessions.retiredCount == 0)
     #expect(try await invalidations.wait { invalidations.contains(outer) })
   }
+
+  /// A borrower cancelled while it holds the session (a page closed during
+  /// its token read, say) gives it back, so the replaced session still goes.
+  @Test func aCancelledBorrowerGivesTheSessionBack() async throws {
+    let invalidations = Invalidations()
+    let sessions = sessions(invalidations)
+    let lock = NSLock()
+    nonisolated(unsafe) var held: URLSession?
+    let waiting = Task {
+      try await sessions.withSession { session in
+        lock.withLock { held = session }
+        try await Task.sleep(for: .seconds(30))
+      }
+    }
+    while lock.withLock({ held }) == nil { await Task.yield() }
+    sessions.renew()
+    #expect(sessions.retiredCount == 1)
+    waiting.cancel()
+    await #expect(throws: CancellationError.self) { try await waiting.value }
+    #expect(sessions.retiredCount == 0)
+    let session = try #require(lock.withLock { held })
+    #expect(try await invalidations.wait { invalidations.contains(session) })
+  }
 }
