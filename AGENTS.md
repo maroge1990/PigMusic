@@ -35,6 +35,17 @@ The preview config `pig-music-dev` attaches to port 8765. A fresh install shows 
    For the two Swift contract tests, run `.venv/bin/python -m scripts.serve_contract_fixture` in another terminal and add `PIG_CONTRACT_SERVER=http://127.0.0.1:8781`. When Swift changes, also build: `xcodebuild -quiet -project swift/PigMusic.xcodeproj -scheme PigMusic -destination 'generic/platform=iOS Simulator' -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO build` (and `-scheme PigMusicWatch` with `generic/platform=watchOS Simulator`).
 3. **CI on push:** `.github/workflows/container.yml` runs dependency audits, the backend suite in the exact Linux image, 1 GB artwork/delivery/sync scale gates and web checks; `native.yml` runs the brand, contract, PigKit and unsigned app builds.
 
+## Independent review
+
+Once your checks pass, get an adversarial review by a different agent before pushing any change that either:
+- touches concurrency, session or object lifetimes, playback, sync, file moves/deletion (Tidy, Trash, organisation, export), auth, signing or security; or
+- changes more than about 3 non-test source files or 150 non-test lines.
+
+A plain review only reads the diff; ask for an adversarial one. If you can run it yourself (Claude Code with the Codex plugin: its `codex-companion.mjs adversarial-review --wait --base <ref> <focus>`), do so, return the output verbatim and don't apply findings unasked. Otherwise end your report with a ready-to-paste `/codex:adversarial-review --base <ref> <focus>` command. Either way:
+- `--base` is the commit before your work, so only your change is reviewed.
+- The focus names the risky parts, the failure being fixed, what your tests prove and don't, and asks for reproductions (`swift test`, small `swiftc` or pytest programs against the real sources), not only reading. It repeats the fixture rules: disposable data, `PIG_MUSIC_DATA` and `PIG_MUSIC_LIBRARY` set explicitly, no push or deploy.
+- A reviewer in a read-only sandbox can't run tests; say what it couldn't verify. Before acting on a finding, check it against the code.
+
 Tests mark provider rate limits off by default; `@pytest.mark.real_rate_limits` (see `tests/test_rate_limits.py`) keeps them.
 
 ## Ship
