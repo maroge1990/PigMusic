@@ -804,7 +804,9 @@ private func queueRoot() throws -> URL {
     try await eventually { await sources.entered }
     let started = ContinuousClock.now
     await stream.close()
-    #expect(ContinuousClock.now - started < .seconds(2))
+    // Closing does not wait out the 30 s replacement. Generous: a loaded
+    // shared CI runner took 2.2 s here (25 Oct).
+    #expect(ContinuousClock.now - started < .seconds(10))
     #expect(await sources.acquired == ["a", "b", "c"])
     #expect(await sources.active.isEmpty)
   }
