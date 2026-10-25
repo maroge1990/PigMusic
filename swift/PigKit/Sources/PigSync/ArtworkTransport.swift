@@ -17,7 +17,6 @@ final class ArtworkTransport: Sendable {
   let server: URL
   let vault: any DeviceTokenStore
   private let sessions: RenewableSession
-  private var session: URLSession { sessions.session }
   init(
     server: URL, vault: any DeviceTokenStore, configuration: URLSessionConfiguration = .ephemeral
   ) {
@@ -98,11 +97,15 @@ final class ArtworkTransport: Sendable {
     return data
   }
   private func send(_ url: URL) async throws -> (URLSession.AsyncBytes, HTTPURLResponse) {
-    guard let token = try await vault.read() else { throw NativeFailure.authentication }
-    var request = URLRequest(url: url)
-    request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
-    request.setValue("image/webp,image/jpeg,image/png", forHTTPHeaderField: "Accept")
-    let (bytes, response) = try await session.bytes(for: request)
+    // The session stays usable until its request has started, however long
+    // the token takes and however many renewals happen meanwhile.
+    let (bytes, response) = try await sessions.withSession { session in
+      guard let token = try await vault.read() else { throw NativeFailure.authentication }
+      var request = URLRequest(url: url)
+      request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+      request.setValue("image/webp,image/jpeg,image/png", forHTTPHeaderField: "Accept")
+      return try await session.bytes(for: request)
+    }
     guard let response = response as? HTTPURLResponse else {
       bytes.task.cancel()
       throw ArtworkFailure.unavailable

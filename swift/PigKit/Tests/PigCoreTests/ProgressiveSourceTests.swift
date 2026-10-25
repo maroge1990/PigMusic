@@ -596,8 +596,7 @@ private final class CompletedOn: NSObject, URLSessionDataDelegate, @unchecked Se
     await owner.release(next)
   }
 
-  /// Tasks start on the session current when they start; a session read just
-  /// before a renewal stays usable until the renewal after.
+  /// Tasks start on the session current when they start.
   @Test func renewedSessionsStartTasksOnTheCurrentSession() async throws {
     SlowMedia.shared.set(Data(repeating: 1, count: 1024))
     let lock = NSLock()
@@ -618,13 +617,9 @@ private final class CompletedOn: NSObject, URLSessionDataDelegate, @unchecked Se
       }
       return try #require(completed.sessions.last)
     }
-    let first = sessions.session
+    let first = await sessions.withSession { $0 }
     #expect(try await run() === first)
     sessions.renew()
-    // Read before the renewal: still usable.
-    let late = first.dataTask(with: URLRequest(url: url))
-    late.resume()
-    late.cancel()
     #expect(try await run() === lock.withLock { made[1] })
     sessions.renew()
     #expect(try await run() === lock.withLock { made[2] })

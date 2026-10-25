@@ -66,7 +66,8 @@ public actor NativeService: LibrarySource {
     }
     self.connections = connections
     client = try PigClient.make(
-      server: server, vault: vault, transport: RenewableTransport { connections.session })
+      server: server, vault: vault,
+      transport: RenewableTransport { send in try await connections.withSession(send) })
   }
   /// New connections for the API and artwork, for use after the app was away.
   public nonisolated func renewConnections() {

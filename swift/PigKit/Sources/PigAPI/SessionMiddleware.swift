@@ -24,14 +24,20 @@ public struct SessionMiddleware: ClientMiddleware {
     }
 }
 
-/// Sends each request on the session `session` gives now, so its owner can
-/// swap in fresh connections (`RenewableSession`).
+/// Sends each request on a session its owner lends for the whole send, so
+/// the owner can swap in fresh connections (`RenewableSession.withSession`)
+/// without invalidating a session a request is about to start on.
 public struct RenewableTransport: ClientTransport {
-    let session: @Sendable () -> URLSession
-    public init(session: @escaping @Sendable () -> URLSession) { self.session = session }
+    public typealias Sent = (HTTPResponse, HTTPBody?)
+    /// Runs the send with a session that stays usable until it returns.
+    public typealias Lend = @Sendable (_ send: (URLSession) async throws -> Sent) async throws -> Sent
+    let lend: Lend
+    public init(lend: @escaping Lend) { self.lend = lend }
     public func send(_ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String) async throws -> (HTTPResponse, HTTPBody?) {
-        try await URLSessionTransport(configuration: .init(session: session()))
-            .send(request, body: body, baseURL: baseURL, operationID: operationID)
+        try await lend { session in
+            try await URLSessionTransport(configuration: .init(session: session))
+                .send(request, body: body, baseURL: baseURL, operationID: operationID)
+        }
     }
 }
 

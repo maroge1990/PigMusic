@@ -1,9 +1,10 @@
 import Foundation
-import PigDomain
 import PigPlayback
 import PigStore
 import PigSync
 import Testing
+
+@testable import PigDomain
 
 @Test func queueKeepsRepeatedOccurrencesAndPreviousRestarts() {
   let song = Track(id: "same", title: "Song", artist: "Artist")
@@ -188,17 +189,87 @@ struct SongFailureTests {
   }
 }
 
+/// Records the sessions that became invalid.
+private final class Invalidations: NSObject, URLSessionDelegate, @unchecked Sendable {
+  private let lock = NSLock()
+  private var ended: Set<ObjectIdentifier> = []
+  func urlSession(_ session: URLSession, didBecomeInvalidWithError error: Error?) {
+    _ = lock.withLock { ended.insert(ObjectIdentifier(session)) }
+  }
+  var count: Int { lock.withLock { ended.count } }
+  func contains(_ session: URLSession) -> Bool {
+    lock.withLock { ended.contains(ObjectIdentifier(session)) }
+  }
+  /// Waits up to two seconds for `done`.
+  func wait(_ done: () -> Bool) async throws -> Bool {
+    for _ in 0..<100 where !done() { try await Task.sleep(for: .milliseconds(20)) }
+    return done()
+  }
+}
+
 struct RenewableSessionTests {
+  private func sessions(_ invalidations: Invalidations) -> RenewableSession {
+    RenewableSession {
+      URLSession(configuration: .ephemeral, delegate: invalidations, delegateQueue: nil)
+    }
+  }
+
   /// After a break, the next requests go out on a new session (new
   /// connections); a request already running keeps its own.
   @Test func renewingHandsOutAFreshSession() async throws {
     let sessions = RenewableSession { URLSession(configuration: .ephemeral) }
-    let first = sessions.session
-    #expect(sessions.session === first)
+    let first = await sessions.withSession { $0 }
+    #expect(await sessions.withSession { $0 } === first)
     sessions.renew()
-    let second = sessions.session
+    let second = await sessions.withSession { $0 }
     #expect(second !== first)
     sessions.renew()
-    #expect(sessions.session !== second)
+    #expect(await sessions.withSession { $0 } !== second)
+  }
+
+  /// A caller held up between taking a session and creating its task (a
+  /// slow token read, a descheduled thread) across several renewals still
+  /// creates it on a valid session: a fixed grace of one renewal once let
+  /// that raise "Task created in a session that has been invalidated" (re-
+  /// review of a442739). The borrowed session goes once it is given back;
+  /// the ones nobody borrowed go at once.
+  @Test func aBorrowedSessionOutlivesAnyNumberOfRenewals() async throws {
+    let invalidations = Invalidations()
+    let sessions = sessions(invalidations)
+    let borrowed = await sessions.withSession { session in
+      for _ in 0..<3 { sessions.renew() }
+      let task = session.dataTask(with: URLRequest(url: URL(string: "https://media.invalid/")!))
+      task.cancel()
+      #expect(sessions.retiredCount == 1)
+      #expect(!invalidations.contains(session))
+      return session
+    }
+    #expect(sessions.retiredCount == 0)
+    #expect(try await invalidations.wait { invalidations.contains(borrowed) })
+    // The three replaced sessions, and not the current one.
+    #expect(try await invalidations.wait { invalidations.count == 3 })
+    #expect(!invalidations.contains(await sessions.withSession { $0 }))
+  }
+
+  /// A session borrowed twice stays until both give it back; a borrower that
+  /// throws gives it back too.
+  @Test func everyBorrowerGivesTheSessionBack() async throws {
+    let invalidations = Invalidations()
+    let sessions = sessions(invalidations)
+    struct Failed: Error {}
+    let outer = try await sessions.withSession { session in
+      await #expect(throws: Failed.self) {
+        try await sessions.withSession { inner in
+          #expect(inner === session)
+          sessions.renew()
+          throw Failed()
+        }
+      }
+      #expect(sessions.retiredCount == 1)
+      _ = session.dataTask(with: URLRequest(url: URL(string: "https://media.invalid/")!))
+      return session
+    }
+    #expect(sessions.retiredCount == 0)
+    #expect(try await invalidations.wait { invalidations.contains(outer) })
   }
 }
