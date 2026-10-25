@@ -62,6 +62,7 @@ from .media import (
     public_settings,
     track_file,
     saved_track,
+    saved_track_ids,
     settings as private_media_settings,
 )
 from .remote import LABELS, RemoteAudio
@@ -1067,17 +1068,21 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         """Signed addresses for the songs a page shows, fetched ahead so a tap
         goes straight to the file. Household files stream for every member;
         mix songs keep their own per-play address."""
-        urls = {}
-        for track_id in dict.fromkeys(body.track_ids):
-            if len(track_id) > 64 or track_id.startswith("mix:"):
-                continue
-            if saved_track(store, track_id)[0] is None:
-                continue
-            urls[track_id] = security.sign_url(
+        wanted = [
+            i
+            for i in dict.fromkeys(body.track_ids)
+            if len(i) <= 64 and not i.startswith("mix:")
+        ]
+        known = saved_track_ids(store, wanted)
+        urls = {
+            track_id: security.sign_url(
                 "/api/v1/playback/files/" + track_id,
                 request.state.user,
                 request.state.session,
             )
+            for track_id in wanted
+            if track_id in known
+        }
         return {"urls": urls, "expires_in": 6 * 3600}
 
     @app.get("/api/v1/tracks/{track_id}/file", tags=["personal-library"])

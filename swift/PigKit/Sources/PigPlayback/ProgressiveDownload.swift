@@ -1,4 +1,5 @@
 import Foundation
+import PigDomain
 
 /// The bytes of one audio file, for the decoder. Reads may wait for bytes
 /// still downloading, so call them only from a decoder's own queue.
@@ -111,7 +112,9 @@ public final class ProgressiveDownload: AudioBytes, @unchecked Sendable {
   static let jumpWindow = 1024 * 1024
   public let file: URL
   public let mimeType: String
-  private let session: URLSession
+  /// Each range request starts on the current session, so a song resumed
+  /// after the connections were renewed fetches on the new ones.
+  private let sessions: RenewableSession
   private let resolve: @Sendable () async throws -> URL
   private let limit: Int
   private let readTimeout: TimeInterval
@@ -132,14 +135,14 @@ public final class ProgressiveDownload: AudioBytes, @unchecked Sendable {
   public private(set) var firstResponse: Duration?
 
   private init(
-    file: URL, mimeType: String, length: Int, session: URLSession,
+    file: URL, mimeType: String, length: Int, sessions: RenewableSession,
     resolve: @escaping @Sendable () async throws -> URL, limit: Int, readTimeout: TimeInterval,
     predecessor: ProgressiveDownload?, complete: Bool = false
   ) throws {
     self.file = file
     self.mimeType = mimeType
     total = length
-    self.session = session
+    self.sessions = sessions
     self.resolve = resolve
     self.limit = limit
     self.readTimeout = readTimeout
@@ -177,21 +180,22 @@ public final class ProgressiveDownload: AudioBytes, @unchecked Sendable {
   /// Starts fetching and returns once the first response shows a playable
   /// file. The body keeps arriving afterwards.
   static func start(
-    url: URL, directory: URL, session: URLSession, limit: Int, readTimeout: TimeInterval = 30,
+    url: URL, directory: URL, sessions: RenewableSession, limit: Int,
+    readTimeout: TimeInterval = 30,
     predecessor: ProgressiveDownload?, resolve: @escaping @Sendable () async throws -> URL
   ) async throws -> ProgressiveDownload {
     let started = ContinuousClock.now
-    let first = try await Request.open(session: session, url: url, from: 0, to: nil)
+    let first = try await Request.open(sessions: sessions, url: url, from: 0, to: nil)
     do {
       let response = try first.validated(limit: limit, start: 0)
       if response.total < 0 {
         return try await whole(
-          first, url: url, mime: response.mime, directory: directory, session: session,
+          first, url: url, mime: response.mime, directory: directory, sessions: sessions,
           limit: limit, readTimeout: readTimeout, resolve: resolve, started: started)
       }
       let download = try ProgressiveDownload(
         file: AudioSourcePreparer.file(in: directory, mime: response.mime, url: url),
-        mimeType: response.mime, length: response.total, session: session,
+        mimeType: response.mime, length: response.total, sessions: sessions,
         resolve: resolve, limit: limit, readTimeout: readTimeout, predecessor: predecessor)
       download.firstResponse = ContinuousClock.now - started
       download.fetching = Task.detached { [weak download] in
@@ -207,7 +211,8 @@ public final class ProgressiveDownload: AudioBytes, @unchecked Sendable {
   /// Without a size the file cannot be read before it has all arrived, so it
   /// is fetched whole first.
   private static func whole(
-    _ first: Request, url: URL, mime: String, directory: URL, session: URLSession, limit: Int,
+    _ first: Request, url: URL, mime: String, directory: URL, sessions: RenewableSession,
+    limit: Int,
     readTimeout: TimeInterval, resolve: @escaping @Sendable () async throws -> URL,
     started: ContinuousClock.Instant
   ) async throws -> ProgressiveDownload {
@@ -231,7 +236,7 @@ public final class ProgressiveDownload: AudioBytes, @unchecked Sendable {
     try handle.close()
     try FileManager.default.moveItem(at: partial, to: file)
     let download = try ProgressiveDownload(
-      file: file, mimeType: mime, length: count, session: session, resolve: resolve,
+      file: file, mimeType: mime, length: count, sessions: sessions, resolve: resolve,
       limit: limit, readTimeout: readTimeout, predecessor: nil, complete: true)
     download.firstResponse = ContinuousClock.now - started
     return download
@@ -364,7 +369,7 @@ public final class ProgressiveDownload: AudioBytes, @unchecked Sendable {
           continue
         case .fetch(let from, let to):
           do {
-            request = try await Request.open(session: session, url: url, from: from, to: to)
+            request = try await Request.open(sessions: sessions, url: url, from: from, to: to)
             _ = try request.validated(limit: limit, start: from, expected: total)
           } catch AudioSourceFailure.unauthorized where !refreshed {
             refreshed = true
@@ -487,23 +492,24 @@ final class Request: @unchecked Sendable {
   }
 
   /// Sends the request and returns once its response has arrived.
-  static func open(session: URLSession, url: URL, from start: Int, to end: Int?) async throws
-    -> Request
+  static func open(sessions: RenewableSession, url: URL, from start: Int, to end: Int?)
+    async throws -> Request
   {
     var request = URLRequest(url: url)
     request.setValue("audio/*,application/octet-stream", forHTTPHeaderField: "Accept")
     request.setValue(
       "bytes=\(start)-" + (end.map { String($0 - 1) } ?? ""), forHTTPHeaderField: "Range")
     let receiver = Receiver()
-    let task = session.dataTask(with: request)
-    task.delegate = receiver
     return try await withTaskCancellationHandler {
       try await withCheckedThrowingContinuation { (opened: CheckedContinuation<Request, Error>) in
-        receiver.setUp(opened: opened)
-        task.resume()
+        // A request cancelled before it starts is never sent.
+        guard receiver.setUp(opened: opened) else {
+          return opened.resume(throwing: CancellationError())
+        }
+        receiver.started(sessions.dataTask(with: request, delegate: receiver))
       }
     } onCancel: {
-      task.cancel()
+      receiver.cancel()
     }
   }
 }
@@ -513,9 +519,31 @@ private final class Receiver: NSObject, URLSessionDataDelegate, @unchecked Senda
   private let lock = NSLock()
   private var opened: CheckedContinuation<Request, Error>?
   private var continuation: AsyncThrowingStream<Data, Error>.Continuation?
+  private weak var task: URLSessionDataTask?
+  private var cancelled = false
 
-  func setUp(opened: CheckedContinuation<Request, Error>) {
-    lock.withLock { self.opened = opened }
+  /// Whether to start: false once cancelled.
+  func setUp(opened: CheckedContinuation<Request, Error>) -> Bool {
+    lock.withLock {
+      guard !cancelled else { return false }
+      self.opened = opened
+      return true
+    }
+  }
+  /// The task now running; one cancelled before it started stops at once.
+  func started(_ task: URLSessionDataTask) {
+    let stop = lock.withLock {
+      self.task = task
+      return cancelled
+    }
+    if stop { task.cancel() }
+  }
+  func cancel() {
+    let running = lock.withLock {
+      cancelled = true
+      return task
+    }
+    running?.cancel()
   }
   func urlSession(
     _ session: URLSession, task: URLSessionTask,

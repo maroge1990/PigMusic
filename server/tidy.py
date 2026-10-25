@@ -283,9 +283,13 @@ class Tidy:
                 if known["nas"]
                 else library_root(self.store) / known["staged"]
             )
-            if known["size"] is not None and path.stat().st_size != known["size"]:
+            try:
+                status = path.stat()
+            except FileNotFoundError:
                 return False
-            if known["mtime"] is not None and path.stat().st_mtime_ns != known["mtime"]:
+            if known["size"] is not None and status.st_size != known["size"]:
+                return False
+            if known["mtime"] is not None and status.st_mtime_ns != known["mtime"]:
                 return False
         return True
 
@@ -298,11 +302,16 @@ class Tidy:
         if not item or item["fingerprint"] != fingerprint:
             raise ValueError("These albums changed since the review.")
         files = self.files()
-        moving = [r["id"] for r in item["remove"]] + [
-            i for r in item["replace"] for i in (r["id"], r["replaces"]["id"])
-        ]
+        # The files that move, and the kept copies that justify a removal: a
+        # kept copy changed or gone since the scan must not stand in for a
+        # good one going to Trash.
+        checked = (
+            [r["id"] for r in item["remove"]]
+            + [r["kept"]["id"] for r in item["remove"]]
+            + [i for r in item["replace"] for i in (r["id"], r["replaces"]["id"])]
+        )
         if not self.unchanged(
-            files, [i for i in moving if files[i]["nas"] or files[i]["staged"]]
+            files, [i for i in checked if files[i]["nas"] or files[i]["staged"]]
         ):
             raise ValueError("Files changed since the last scan.")
         keeper = self.store.albums_by_id[album_id]

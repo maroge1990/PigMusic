@@ -1,3 +1,4 @@
+import contextlib
 import re
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -7,6 +8,7 @@ import stat
 from fastapi.testclient import TestClient
 import pytest
 
+from server import app as server_app, media
 from server.app import create_app
 from server.auth import AuthError
 from server.security import PUBLIC, api_routes, audit_routes, secret_file
@@ -226,6 +228,79 @@ def test_members_sign_a_page_of_playback_addresses_at_once(tmp_path, monkeypatch
             "/api/v1/playback-urls", json={"track_ids": ["song"] * 201}
         )
         assert too_many.status_code == 422
+
+
+def test_a_page_of_playback_addresses_takes_one_database_query(tmp_path, monkeypatch):
+    """200 songs: library songs come from the snapshot and downloaded ones
+    from one query, not a connection per song."""
+    monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(tmp_path / "nas"))
+    tracks = [
+        {
+            "id": f"song-{i}",
+            "title": f"Song {i}",
+            "artist": "Artist",
+            "album": "Album",
+            "relative_path": f"{i}.mp3",
+        }
+        for i in range(198)
+    ]
+    (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": tracks}))
+    app, owner = protected(tmp_path, monkeypatch)
+    store = app.state.store
+    with store.connect() as conn:
+        conn.execute(
+            "INSERT INTO acquired VALUES (?,?)",
+            (
+                "downloaded",
+                json.dumps(
+                    {
+                        "id": "downloaded",
+                        "title": "Downloaded",
+                        "artist": "Artist",
+                        "album": "Other",
+                        "relative_path": "d.mp3",
+                    }
+                ),
+            ),
+        )
+    setup = app.state.auth.setup_code(owner, "member", "Member")
+    app.state.auth.activate(setup["code"], PASSWORD, "fixture")
+    token = app.state.auth.login(
+        "member", PASSWORD, "device", "phone", "ios", "fixture"
+    )["token"]
+    wanted = [t["id"] for t in tracks] + ["downloaded", "missing"]
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token},
+    ) as client:
+        lookups = []
+        original = media.saved_track_ids
+
+        def counted(store, ids):
+            connect = store.connect
+
+            @contextlib.contextmanager
+            def counting():
+                lookups.append(1)
+                with connect() as conn:
+                    yield conn
+
+            store.connect = counting
+            try:
+                return original(store, ids)
+            finally:
+                del store.connect
+
+        monkeypatch.setattr(server_app, "saved_track_ids", counted)
+        result = client.post("/api/v1/playback-urls", json={"track_ids": wanted})
+        assert result.status_code == 200, result.text
+        assert list(result.json()["urls"]) == wanted[:-1]
+        assert lookups == [1]
+        # A page of library songs needs no query at all.
+        lookups.clear()
+        result = client.post("/api/v1/playback-urls", json={"track_ids": wanted[:5]})
+        assert list(result.json()["urls"]) == wanted[:5] and lookups == []
 
 
 def test_cookie_mutations_require_header_and_https(tmp_path, monkeypatch):

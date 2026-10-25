@@ -79,7 +79,8 @@ public actor AudioSourcePreparer {
     }
   }
   /// New connections for the next transfers, after the app was away; songs
-  /// already arriving carry on.
+  /// already arriving carry on, and a song kept for going back fetches its
+  /// remaining bytes on the new ones.
   public nonisolated func renewConnections() { sessions.renew() }
 
   deinit {
@@ -101,7 +102,7 @@ public actor AudioSourcePreparer {
     }
     let stamp = generation
     let directory = directory
-    let session = sessions.session
+    let sessions = sessions
     let limit = maximumFileBytes
     let predecessor = lastDownload?.busy == true ? lastDownload : nil
     let task = Task {
@@ -116,7 +117,7 @@ public actor AudioSourcePreparer {
         }
         do {
           return try await ProgressiveDownload.start(
-            url: url, directory: directory, session: session, limit: limit,
+            url: url, directory: directory, sessions: sessions, limit: limit,
             predecessor: predecessor, resolve: resolve)
         } catch AudioSourceFailure.unauthorized where attempt == 0 {
           continue

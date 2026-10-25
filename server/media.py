@@ -99,6 +99,23 @@ def saved_track(store, track_id):
     return track, Path(os.environ.get("PIG_MUSIC_LIBRARY", "/library"))
 
 
+def saved_track_ids(store, track_ids):
+    """The ids among `track_ids` that `saved_track` finds: library songs from
+    the snapshot, the rest from one query of acquired songs."""
+    known = {i for i in track_ids if i in store.snapshot_tracks}
+    rest = [i for i in track_ids if i not in known]
+    if rest:
+        with store.connect() as conn:
+            known.update(
+                identity
+                for (identity,) in conn.execute(
+                    "SELECT id FROM acquired WHERE id IN (SELECT value FROM json_each(?))",
+                    (json.dumps(rest),),
+                )
+            )
+    return known
+
+
 def track_file(store, track_id):
     track, root = saved_track(store, track_id)
     if track is None:

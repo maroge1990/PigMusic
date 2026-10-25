@@ -240,6 +240,37 @@ def test_a_file_changed_since_the_scan_stops_the_tidy_up(tmp_path, monkeypatch):
     assert len(tidy.store.library["albums"]) == 2
 
 
+@pytest.mark.parametrize("change", ["corrupted", "missing"])
+def test_a_kept_copy_changed_since_the_scan_stops_the_tidy_up(
+    tmp_path, monkeypatch, change
+):
+    """The kept Deluxe "Mr. Brightside" justifies sending the Standard one to
+    Trash; changed or gone after the review, nothing moves."""
+    tidy, root, member, _ = library(tmp_path, monkeypatch)
+    store = tidy.store
+    before = songs(store)
+    (item,) = tidy.plan()["albums"]
+    kept = root / "The Killers" / DELUXE / "02 Mr. Brightside.mp3"
+    duplicate = root / "The Killers" / STANDARD / "02 Mr. Brightside.mp3"
+    assert any(r["kept"]["title"] == "Mr. Brightside" for r in item["remove"])
+    if change == "corrupted":
+        kept.write_bytes(b"corrupted externally after the review")
+    else:
+        kept.unlink()
+    with pytest.raises(ValueError, match="Files changed"):
+        tidy.apply(item["id"], item["fingerprint"])
+    assert duplicate.exists()
+    assert (root / "The Killers" / STANDARD / "01 Jenny.flac").exists()
+    assert (root / "The Killers" / DELUXE / "01 Jenny.mp3").exists()
+    assert songs(store) == before
+    assert songs(store, member) == [(STANDARD, "Jenny"), (STANDARD, "Mr. Brightside")]
+    assert tidy.history() == []
+    with store.connect() as conn:
+        assert not conn.execute(
+            "SELECT 1 FROM documents WHERE name LIKE 'tidy:%'"
+        ).fetchone()
+
+
 def test_uncertain_quality_never_sends_a_copy_to_trash(tmp_path, monkeypatch):
     tracks = [
         # The kept copy's quality is unknown: the FLAC on the other edition

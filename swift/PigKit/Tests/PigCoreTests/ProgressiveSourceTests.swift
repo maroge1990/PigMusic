@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import PigDomain
 import Testing
 
 @testable import PigPlayback
@@ -93,6 +94,16 @@ private final class SlowProtocol: URLProtocol, @unchecked Sendable {
     if !finished.stopped {
       SlowMedia.shared.requestCancelled(request.value(forHTTPHeaderField: "Range") ?? "")
     }
+  }
+}
+
+/// Records the session each task completed on.
+private final class CompletedOn: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+  private let lock = NSLock()
+  private var values: [URLSession] = []
+  var sessions: [URLSession] { lock.withLock { values } }
+  func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    lock.withLock { values.append(session) }
   }
 }
 
@@ -505,4 +516,118 @@ private final class SlowProtocol: URLProtocol, @unchecked Sendable {
     #expect(try await waitForCancelledRequest("bytes=3990000-"))
     await owner.release(source)
   }
+
+  /// Renewal (after a break away) once invalidated the session a kept song had
+  /// started on; its next range request then raised an Objective-C exception
+  /// that ended the app (review, 25 Oct). A song skipped past, then revisited
+  /// after renewals, fetches its missing bytes, seeks and plays to its end.
+  @Test func aKeptSongResumesAfterTheConnectionsAreRenewed() async throws {
+    let root = try directory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let data = Data((0..<4_000_000).map { UInt8(truncatingIfNeeded: $0 &* 13) })
+    SlowMedia.shared.set(data, chunk: 32768, pause: 0.02)
+    let owner = try preparer(root)
+    let source = try await owner.prepare { url }
+    let download = try #require(source.bytes as? ProgressiveDownload)
+    #expect(try await read(download, at: 0, count: 4096) == data.prefix(4096))
+    // Skipped past: kept for going back, fetching nothing.
+    download.setIdle(true)
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(download.phase == .loading && !download.complete)
+    // The second renewal invalidates the session the song started on.
+    owner.renewConnections()
+    owner.renewConnections()
+    let before = SlowMedia.shared.requested().count
+    // Gone back to: a seek near the end, then the rest.
+    download.setIdle(false)
+    let far = 3_600_000
+    #expect(try await read(download, at: far, count: 8192) == data.subdata(in: far..<far + 8192))
+    #expect(SlowMedia.shared.requested().count > before)
+    #expect(try await readAll(source) == data)
+    await owner.release(source)
+  }
+
+  /// A song still being prepared when the connections are renewed starts on
+  /// a usable session, and fetches its later ranges on the fresh one.
+  @Test func aPreparationPendingDuringRenewalStillStarts() async throws {
+    let root = try directory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let data = Data((0..<2_000_000).map { UInt8(truncatingIfNeeded: $0 &* 7) })
+    SlowMedia.shared.set(data, chunk: 32768, pause: 0.01)
+    let owner = try preparer(root)
+    let source = try await owner.prepare {
+      owner.renewConnections()
+      owner.renewConnections()
+      return url
+    }
+    #expect(
+      try await read(source.bytes!, at: 1_900_000, count: 4096)
+        == data.subdata(in: 1_900_000..<1_904_096))
+    #expect(try await readAll(source) == data)
+    await owner.release(source)
+  }
+
+  /// Releasing a kept song, or resetting for another account, after renewals
+  /// stops its transfer and waiting reads; the next song starts as usual.
+  @Test func releaseAndResetAfterRenewalStopCleanly() async throws {
+    let root = try directory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let data = Data(repeating: 4, count: 3_000_000)
+    SlowMedia.shared.set(data, chunk: 16384, pause: 0.02)
+    let owner = try preparer(root)
+    let kept = try await owner.prepare { url }
+    (kept.bytes as? ProgressiveDownload)?.setIdle(true)
+    owner.renewConnections()
+    owner.renewConnections()
+    await owner.release(kept)
+    #expect(!FileManager.default.fileExists(atPath: kept.file.path))
+
+    let playing = try await owner.prepare { url }
+    let bytes = try #require(playing.bytes)
+    owner.renewConnections()
+    owner.renewConnections()
+    let waiting = Task { try await read(bytes, at: 2_900_000, count: 1024) }
+    await owner.reset()
+    await #expect(throws: CancellationError.self) { try await waiting.value }
+    #expect(!FileManager.default.fileExists(atPath: playing.file.path))
+
+    let next = try await owner.prepare { url }
+    #expect(try await readAll(next) == data)
+    await owner.release(next)
+  }
+
+  /// Tasks start on the session current when they start; a session read just
+  /// before a renewal stays usable until the renewal after.
+  @Test func renewedSessionsStartTasksOnTheCurrentSession() async throws {
+    SlowMedia.shared.set(Data(repeating: 1, count: 1024))
+    let lock = NSLock()
+    nonisolated(unsafe) var made: [URLSession] = []
+    let sessions = RenewableSession {
+      let configuration = URLSessionConfiguration.ephemeral
+      configuration.protocolClasses = [SlowProtocol.self]
+      let session = URLSession(configuration: configuration)
+      lock.withLock { made.append(session) }
+      return session
+    }
+    let completed = CompletedOn()
+    func run() async throws -> URLSession {
+      let count = completed.sessions.count
+      _ = sessions.dataTask(with: URLRequest(url: url), delegate: completed)
+      for _ in 0..<100 where completed.sessions.count == count {
+        try await Task.sleep(for: .milliseconds(20))
+      }
+      return try #require(completed.sessions.last)
+    }
+    let first = sessions.session
+    #expect(try await run() === first)
+    sessions.renew()
+    // Read before the renewal: still usable.
+    let late = first.dataTask(with: URLRequest(url: url))
+    late.resume()
+    late.cancel()
+    #expect(try await run() === lock.withLock { made[1] })
+    sessions.renew()
+    #expect(try await run() === lock.withLock { made[2] })
+  }
+
 }
