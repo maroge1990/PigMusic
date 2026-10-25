@@ -1239,6 +1239,28 @@ class Mixes:
                 )
             return self.cache.available(track)
 
+    def stand_in(self, user, track_id):
+        """Where a song from this person's edition plays once the edition no
+        longer does (rotated overnight, its play lease over: a queue paused
+        last night): the household's own file, else today's edition holding
+        the same song. None when neither has it."""
+        track = self.entry(user, track_id)
+        match = self.store.index.match(track).track
+        if match:
+            try:
+                track_file(self.store, match["id"])
+                return match["id"]
+            except FileNotFoundError:
+                pass
+        current = self.reference(user, track)
+        if current and current != track_id:
+            try:
+                self.playback(user, current)
+                return current
+            except (FileNotFoundError, LookupError):
+                pass
+        return None
+
     def reference(self, user, track):
         """A saved playlist can reuse audio from this person's rotating edition."""
         key = song_key(track)

@@ -142,7 +142,13 @@ class Security:
                         or request.url.path == f"/api/v1/tracks/{track_id}/file"
                     ):
                         raise LookupError()
-                    self.auth.store.mixes.entry(person["id"], track_id, playback=True)
+                    # Asking for an address needs only the person's own entry:
+                    # the endpoint finds a stand-in for an edition no longer
+                    # served. Files and streams still need a playable edition.
+                    asking = request.url.path == f"/api/v1/playback/{track_id}/url"
+                    self.auth.store.mixes.entry(
+                        person["id"], track_id, playback=not asking
+                    )
                 except (LookupError, AttributeError):
                     raise HTTPException(404, "Track not found")
                 request.state.user = person

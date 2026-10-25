@@ -303,6 +303,69 @@ def test_owned_mix_rows_keep_library_actions_separate_from_private_playback(
     assert mixes.playback(owner, row.id).read_bytes() == b"fixture audio"
 
 
+def test_yesterdays_mix_queue_still_plays_after_rotation(tmp_path, monkeypatch):
+    """26 Oct: a daily-mix queue paused at 22:08 and resumed at 08:35. The
+    edition rotated overnight and its play lease ran out, so every song
+    answered 404 and the app passed over the rest of the queue. A song the
+    household has plays from its file, one today's edition also holds plays
+    from there; only a song neither has is unavailable."""
+    nas = tmp_path / "nas"
+    nas.mkdir()
+    (nas / "song.mp3").write_bytes(b"household audio")
+    owned = track(1, id="owned", relative_path="song.mp3")
+    (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": [owned]}))
+    app, owner = protected(tmp_path, monkeypatch)
+    mixes = app.state.store.mixes
+    user, token = member(app, owner)
+    discovery, gone = track(2), track(3)
+    cached(mixes, discovery).write_bytes(b"discovery audio")
+    cached(mixes, gone)
+    yesterday = ready(
+        mixes, user, [owned, discovery, gone], day=mixes.day() - timedelta(days=1)
+    )
+    for i in range(3):
+        mixes.playback(user, f"mix:{yesterday}:{i}")  # Played last night.
+    today = ready(mixes, user, [discovery])
+    with mixes.store.connect() as conn:
+        conn.execute(
+            "UPDATE mix_editions SET active=0,retired_at=?,lease_until=? WHERE id=?",
+            (time.time() - 10 * 3600, time.time() - 4 * 3600, yesterday),
+        )
+    stranger = ready(mixes, owner, [owned], day=mixes.day() - timedelta(days=1))
+    with mixes.store.connect() as conn:
+        conn.execute(
+            "UPDATE mix_editions SET active=0,retired_at=?,lease_until=? WHERE id=?",
+            (time.time() - 10 * 3600, time.time() - 4 * 3600, stranger),
+        )
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token},
+    ) as client:
+
+        def play(track_id):
+            return client.post(f"/api/v1/playback/{track_id}/url")
+
+        place = {
+            "Song 1": f"mix:{yesterday}:0",
+            "Song 2": f"mix:{yesterday}:1",
+            "Song 3": f"mix:{yesterday}:2",
+        }
+        household = play(place["Song 1"])
+        assert household.status_code == 200, household.text
+        assert "/api/v1/playback/files/owned?" in household.json()["url"]
+        assert client.get(household.json()["url"]).content == b"household audio"
+        rotated = play(place["Song 2"])
+        assert rotated.status_code == 200, rotated.text
+        assert f"/api/v1/playback/files/mix:{today}:0?" in rotated.json()["url"]
+        assert client.get(rotated.json()["url"]).content == b"discovery audio"
+        assert play(place["Song 3"]).status_code == 404
+        # Another person's old edition still grants nothing.
+        assert play(f"mix:{stranger}:0").status_code == 404
+    # Nothing joined the member's library by playing.
+    assert not app.state.store.user_libraries.contains(user, "owned")
+
+
 def test_tag_candidates_accept_the_providers_list_response(tmp_path, monkeypatch):
     app, _ = protected(tmp_path, monkeypatch)
     home = HomeDiscovery(app.state.store, None)

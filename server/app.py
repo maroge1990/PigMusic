@@ -1045,16 +1045,22 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
 
     @app.post("/api/v1/playback/{track_id}/url", response_model=PlaybackURL)
     def playback_url(track_id: str, request: Request):
+        playing = track_id
         try:
             if track_id.startswith("mix:"):
-                mixes.playback(request.state.user["id"], track_id)
+                try:
+                    mixes.playback(request.state.user["id"], track_id)
+                except (FileNotFoundError, LookupError):
+                    playing = mixes.stand_in(request.state.user["id"], track_id)
+                    if not playing:
+                        raise LookupError(track_id)
             else:
                 track_file(store, track_id)
         except (FileNotFoundError, LookupError):
             raise HTTPException(404, "File unavailable")
         return {
             "url": security.sign_url(
-                "/api/v1/playback/files/" + track_id,
+                "/api/v1/playback/files/" + playing,
                 request.state.user,
                 request.state.session,
             ),
