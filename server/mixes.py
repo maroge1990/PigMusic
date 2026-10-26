@@ -16,6 +16,7 @@ from .paths import versioned
 from .artist_identity import cached_identity
 from .catalogue import background_metadata, credit
 from .home import release_choice
+from .matching import compatible
 from .media import chart_region, settings, track_file
 from .mix_cache import MixCache, MixDownloader, song_key
 from .playlists import Playlists
@@ -1242,8 +1243,10 @@ class Mixes:
     def stand_in(self, user, track_id):
         """Where a song from this person's edition plays once the edition no
         longer does (rotated overnight, its play lease over: a queue paused
-        last night): the household's own file, else today's edition holding
-        the same song. None when neither has it."""
+        last night): the household's own file, else the same song, on any
+        edition of any album, in one of this person's editions that still
+        plays (today's mixes, a leased one, today's radio). None when neither
+        has it."""
         track = self.entry(user, track_id)
         match = self.store.index.match(track).track
         if match:
@@ -1252,13 +1255,21 @@ class Mixes:
                 return match["id"]
             except FileNotFoundError:
                 pass
-        current = self.reference(user, track)
-        if current and current != track_id:
-            try:
-                self.playback(user, current)
-                return current
-            except (FileNotFoundError, LookupError):
-                pass
+        with self.store.connect() as conn:
+            rows = conn.execute(
+                "SELECT id,payload FROM mix_editions WHERE user_id=? AND id!=? AND (active=1 OR lease_until>? OR (kind='radio' AND retired_at IS NULL)) ORDER BY active DESC,id",
+                (user, track_id.split(":")[1], time.time()),
+            ).fetchall()
+        for identity, raw in rows:
+            for index, item in enumerate(json.loads(raw).get("tracks") or []):
+                if not compatible(item, track):
+                    continue
+                candidate = f"mix:{identity}:{index}"
+                try:
+                    self.playback(user, candidate)
+                    return candidate
+                except (FileNotFoundError, LookupError):
+                    pass
         return None
 
     def reference(self, user, track):

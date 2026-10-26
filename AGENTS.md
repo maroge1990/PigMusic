@@ -46,6 +46,8 @@ A plain review only reads the diff; ask for an adversarial one. If you can run i
 - The focus names the risky parts, the failure being fixed, what your tests prove and don't, and asks for reproductions (`swift test`, small `swiftc` or pytest programs against the real sources), not only reading. It repeats the fixture rules: disposable data, `PIG_MUSIC_DATA` and `PIG_MUSIC_LIBRARY` set explicitly, no push or deploy.
 - A reviewer in a read-only sandbox can't run tests; say what it couldn't verify. Before acting on a finding, check it against the code.
 
+Stopping rule, so review doesn't loop: at most two Codex rounds per batch of work. After the second round only high findings block the handoff; record medium and low ones in [docs/FINDINGS.md](docs/FINDINGS.md) for the owner to prioritise, and say so in the report.
+
 Tests mark provider rate limits off by default; `@pytest.mark.real_rate_limits` (see `tests/test_rate_limits.py`) keeps them.
 
 ## Ship

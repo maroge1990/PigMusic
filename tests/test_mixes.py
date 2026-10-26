@@ -366,6 +366,74 @@ def test_yesterdays_mix_queue_still_plays_after_rotation(tmp_path, monkeypatch):
     assert not app.state.store.user_libraries.contains(user, "owned")
 
 
+def test_a_rotated_mix_song_stands_in_from_any_edition_or_todays_radio(
+    tmp_path, monkeypatch
+):
+    """The same recording on another album in today's mix stands in, as does
+    today's radio (never "active" on Home, and unleased until it plays). A
+    live recording never stands in for the studio one. The retired edition's
+    own files stay closed, the stand-in's audio is leased, and listens still
+    count under the queued identity."""
+    app, owner = protected(tmp_path, monkeypatch)
+    mixes = app.state.store.mixes
+    user, token = member(app, owner)
+    original = track(4, album="Hot Fuss", musicbrainz_release_id="release-a")
+    reissue = track(4, album="Greatest Hits", musicbrainz_release_id="release-b")
+    studio, live = track(5), track(5, album="Live at Leeds")
+    on_radio = track(6)
+    for song in (original, reissue, studio, live, on_radio):
+        cached(mixes, song)
+    yesterday = ready(
+        mixes, user, [original, studio, on_radio], day=mixes.day() - timedelta(days=1)
+    )
+    for i in range(3):
+        mixes.playback(user, f"mix:{yesterday}:{i}")
+    today = ready(mixes, user, [reissue, live])
+    radio = ready(mixes, user, [on_radio], kind="radio")
+    with mixes.store.connect() as conn:
+        conn.execute(
+            "UPDATE mix_editions SET active=0,retired_at=?,lease_until=? WHERE id=?",
+            (time.time() - 10 * 3600, time.time() - 4 * 3600, yesterday),
+        )
+        conn.execute(
+            "UPDATE mix_editions SET active=0,retired_at=NULL,lease_until=0 WHERE id=?",
+            (radio,),
+        )
+        conn.execute("UPDATE mix_audio SET lease_until=0")
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token},
+    ) as client:
+
+        def signed(track_id):
+            response = client.post(f"/api/v1/playback/{track_id}/url")
+            return response.json()["url"] if response.status_code == 200 else None
+
+        assert f"/files/mix:{today}:0?" in signed(f"mix:{yesterday}:0")
+        assert signed(f"mix:{yesterday}:1") is None  # Only a live take today.
+        assert f"/files/mix:{radio}:0?" in signed(f"mix:{yesterday}:2")
+        for i in range(3):
+            response = client.get(f"/api/v1/playback/files/mix:{yesterday}:{i}")
+            assert response.status_code == 404
+        events = {
+            "events": [
+                {
+                    "track_id": f"mix:{yesterday}:0",
+                    "seconds": 30,
+                    "played_at": int(time.time()),
+                    "event_id": "rotated-listen",
+                }
+            ]
+        }
+        assert client.post("/api/v1/play-events", json=events).status_code == 200
+    with mixes.store.connect() as conn:
+        leases = dict(conn.execute("SELECT key,lease_until FROM mix_audio"))
+        assert conn.execute("SELECT COUNT(*) FROM mix_listens").fetchone()[0] == 1
+    assert leases[song_key(reissue)] > time.time() + 5 * 3600
+    assert leases[song_key(on_radio)] > time.time() + 5 * 3600
+
+
 def test_tag_candidates_accept_the_providers_list_response(tmp_path, monkeypatch):
     app, _ = protected(tmp_path, monkeypatch)
     home = HomeDiscovery(app.state.store, None)
