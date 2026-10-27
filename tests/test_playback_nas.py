@@ -117,15 +117,27 @@ def test_opens_never_walk_the_path_to_check_it(tmp_path, monkeypatch):
 
 
 def test_every_descriptor_is_closed(tmp_path, monkeypatch):
+    import types
+
     app, token, path = setup(tmp_path, monkeypatch)
     opened, closed = [], []
-    open_, close = os.open, os.close
-    monkeypatch.setattr(
-        media.os,
-        "open",
-        lambda *a, **k: (opened.append(fd := open_(*a, **k)), fd)[1],
+
+    def open_(*args, **kwargs):
+        fd = os.open(*args, **kwargs)
+        opened.append(fd)
+        return fd
+
+    def close(fd):
+        closed.append(fd)
+        os.close(fd)
+
+    # Only playback's own calls: other code in the process (the event loop,
+    # the test client) opens and closes descriptors of its own meanwhile.
+    own = types.SimpleNamespace(
+        **{name: getattr(os, name) for name in dir(os) if not name.startswith("__")}
     )
-    monkeypatch.setattr(media.os, "close", lambda fd: (closed.append(fd), close(fd)))
+    own.open, own.close = open_, close
+    monkeypatch.setattr(media, "os", own)
     with TestClient(
         app,
         base_url="https://private.ts.net",
@@ -136,7 +148,8 @@ def test_every_descriptor_is_closed(tmp_path, monkeypatch):
         client.head(url)
         client.get(url, headers={"Range": "bytes=0-1,4-5"})
         assert client.get(url, headers={"Range": "bytes=99-"}).status_code == 416
-    assert opened and sorted(opened) == sorted(closed)
+    # Each descriptor playback opened, it closed exactly once.
+    assert len(opened) == 4 and sorted(opened) == sorted(closed)
 
 
 def test_a_cancelled_response_leaves_no_descriptor_open(tmp_path, monkeypatch):
