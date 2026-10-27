@@ -110,7 +110,10 @@ def test_login_replaces_a_readable_token_file_with_a_private_one(tmp_path, monke
     client = httpx.Client(
         base_url="https://review.invalid",
         transport=httpx.MockTransport(
-            lambda request: httpx.Response(200, json={"token": "fresh-device-token"})
+            lambda request: httpx.Response(
+                200 if request.headers.get("x-pig-request") == "1" else 403,
+                json={"token": "fresh-device-token"},
+            )
         ),
     )
     args = SimpleNamespace(

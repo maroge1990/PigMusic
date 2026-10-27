@@ -250,8 +250,10 @@ def login(args, client=None):
     owned = client is None
     client = client or httpx.Client(base_url=args.server, timeout=30)
     try:
+        # Writes carry the header the apps send; the server refuses them without.
         answer = client.post(
             "/api/v1/auth/device",
+            headers={"X-Pig-Request": "1"},
             json={
                 "username": args.username,
                 "password": password,
