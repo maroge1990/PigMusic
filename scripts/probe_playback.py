@@ -16,8 +16,9 @@ nothing is downloaded into the library.
 
 Further scenarios take the same --server and --token-file: `remote` (online
 sources, asked twice), `idle` (a song after pauses), `browse` (the app's
-screens, opened twice), `artwork` (how much artwork is real) and `server`
-(the server's recent slow requests and stalls). Each ends with how often
+screens, opened twice), `artwork` (how much artwork is real), `watch` (the
+device copies the phone sends to the Watch) and `server` (the server's
+recent slow requests and stalls). Each ends with how often
 the server's event loop stalled while it ran.
 """
 
@@ -609,6 +610,88 @@ def artwork(args, api, media):
     return records
 
 
+@scenario("watch")
+def watch(args, api, media):
+    """What the phone does to send songs to the Watch: ask the server for a
+    device copy (AAC by default, converted on the server), wait until it is
+    ready, download it and check it against the advertised SHA-256."""
+    import hashlib
+
+    chosen = songs(api, args.songs, 0, args.track)
+    if not chosen:
+        sys.exit("No songs: add some to the probe's library, or pass --track.")
+    records = []
+    for song in chosen:
+        base = f"/api/v1/tracks/{song['id']}/copy"
+        params = {"quality": args.quality}
+        record = {"id": song["id"], "title": song["title"], "quality": args.quality}
+        asked, answer = timed(api, "POST", base, params=params)
+        record["request"] = asked
+        state = answer.json().get("state") if answer is not None else None
+        record["state_at_request"] = state
+        began = time.perf_counter()
+        polls = []
+        while state in ("queued", "preparing") and elapsed(began) < args.wait * 1000:
+            time.sleep(1)
+            poll, answer = timed(api, "GET", base, params=params)
+            polls.append(poll["ms"])
+            state = answer.json().get("state") if answer is not None else None
+        record["ready_ms"] = elapsed(began) if polls else 0
+        record["polls"] = len(polls)
+        record["slowest_poll_ms"] = max(polls) if polls else None
+        record["state"] = state
+        if state != "ready":
+            record["error"] = f"copy {state or 'unavailable'}"
+        else:
+            expected = answer.json()
+            digest = hashlib.sha256()
+            began = time.perf_counter()
+            with media.stream(
+                "GET",
+                base + "/file",
+                params=params,
+                headers={
+                    "Authorization": api.headers["Authorization"],
+                    "X-Request-ID": request_id(),
+                },
+            ) as response:
+                record["download_status"] = response.status_code
+                record["download_headers_ms"] = elapsed(began)
+                size = 0
+                for chunk in response.iter_bytes():
+                    size += len(chunk)
+                    digest.update(chunk)
+            seconds = max(time.perf_counter() - began, 1e-6)
+            record["download"] = {
+                "bytes": size,
+                "ms": round(seconds * 1000, 1),
+                "mbps": round(size * 8 / seconds / 1e6, 2),
+            }
+            record["intact"] = (
+                size == expected["bytes"] and digest.hexdigest() == expected["sha256"]
+            )
+            if record["download_status"] != 200:
+                record["error"] = f"download HTTP {record['download_status']}"
+            elif not record["intact"]:
+                record["error"] = "download does not match the advertised SHA-256"
+        records.append(record)
+        line = (
+            f"watch    {song['title'][:30]:30} {args.quality:8}"
+            f" request {asked['ms']:6.0f} ms ({record['state_at_request']})"
+            f"  ready after {record['ready_ms'] / 1000:5.1f} s ({record['polls']} polls)"
+        )
+        if "download" in record:
+            line += (
+                f"  download {record['download']['bytes'] // 1024} KB in"
+                f" {record['download']['ms']:.0f} ms ({record['download']['mbps']} Mbit/s)"
+                + ("" if record["intact"] else "  CORRUPT")
+            )
+        if "error" in record:
+            line += "  ERROR " + record["error"]
+        print(line, flush=True)
+    return records
+
+
 def server_command(args):
     """The server's recent record for the probe member: slow requests and stalls."""
     api, media = clients(args)
@@ -698,6 +781,7 @@ def main(argv=None):
         ("browse", "time the app's screens, opened twice"),
         ("artwork", "how much artwork is real, and filled in when asked"),
         ("server", "the server's recent slow requests and stalls"),
+        ("watch", "time the device copies the phone sends to the Watch"),
     ):
         command = commands.add_parser(name, help=help_text)
         command.add_argument("--server", required=True)
@@ -714,6 +798,13 @@ def main(argv=None):
             )
         if name == "artwork":
             command.add_argument("--settle", type=float, default=30)
+        if name == "watch":
+            command.add_argument("--songs", type=int, default=5)
+            command.add_argument("--track", action="append", default=[])
+            command.add_argument(
+                "--quality", choices=["aac", "original"], default="aac"
+            )
+            command.add_argument("--wait", type=float, default=300, help="seconds")
     args = parser.parse_args(argv)
     if args.command == "idle" and not args.gap:
         args.gap = [60, 300, 900]
@@ -725,6 +816,7 @@ def main(argv=None):
         "browse": browse,
         "artwork": artwork,
         "server": server_command,
+        "watch": watch,
     }[args.command](args)
 
 

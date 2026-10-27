@@ -1,3 +1,4 @@
+import hashlib
 import json
 import time
 from types import SimpleNamespace
@@ -328,3 +329,53 @@ def test_artwork_counts_real_art_and_what_arrives_when_asked(tmp_path, capsys):
     assert found["artist pages"] == (False, True)
     printed = capsys.readouterr().out
     assert "library artists   1/1   with artwork (0 at first ask)" in printed
+
+
+class CopyServer(FakeServer):
+    """Device copies: queued, then ready; the file is checked by its hash."""
+
+    def __init__(self, corrupt=False):
+        super().__init__()
+        self.body = b"aac audio" * 1000
+        self.corrupt = corrupt
+        self.polls = 0
+
+    def __call__(self, request):
+        path = request.url.path
+        if path.endswith("/copy/file"):
+            self.seen.append((request.method, path, dict(request.headers)))
+            body = self.body[:-1] + b"!" if self.corrupt else self.body
+            return httpx.Response(200, content=body)
+        if path.endswith("/copy"):
+            self.seen.append((request.method, path, dict(request.headers)))
+            self.polls += request.method == "GET"
+            ready = request.method == "GET" and self.polls >= 2
+            return httpx.Response(
+                200,
+                json={
+                    "state": "ready" if ready else "queued",
+                    "quality": "aac",
+                    "sha256": hashlib.sha256(self.body).hexdigest() if ready else None,
+                    "bytes": len(self.body) if ready else 0,
+                    "source_sha256": "s",
+                    "extension": "m4a",
+                    "key": "k",
+                },
+            )
+        return super().__call__(request)
+
+
+def test_watch_waits_for_the_copy_and_checks_its_hash(tmp_path, capsys):
+    args = args_for(tmp_path, songs=1, track=[], quality="aac", wait=10)
+    server = CopyServer()
+    (record,) = probe_playback.watch(args, *fake_clients(server))
+    assert record["state_at_request"] == "queued" and record["state"] == "ready"
+    assert record["polls"] == 2 and record["intact"] is True
+    assert record["download"]["bytes"] == len(server.body)
+    assert "error" not in record
+    # The copy is the person's own: its download carries the device token.
+    (download,) = [h for m, p, h in server.seen if p.endswith("/copy/file")]
+    assert download["authorization"] == "Bearer probe-token-value"
+    (corrupt,) = probe_playback.watch(args, *fake_clients(CopyServer(corrupt=True)))
+    assert corrupt["intact"] is False and "SHA-256" in corrupt["error"]
+    assert "CORRUPT" in capsys.readouterr().out

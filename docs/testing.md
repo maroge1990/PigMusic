@@ -149,7 +149,7 @@ Debug builds accept `--demo` and `--seamless-demo` for a synthetic library; remo
 
 ## Live playback diagnostics
 
-Use these for playback that is slow or patchy on the real server. All three read through a **dedicated test member** (invite one, add a few songs to its library; adding never downloads). Never use a household account, and never put the token in chat, Git or a command line.
+Use these for playback that is slow or patchy on the real server. The probe and harness read through a **dedicated test member** (invite one, add a few songs to its library; adding never downloads). Never use a household account, and never put the token in chat, Git or a command line.
 
 1. **Request IDs and server timing (always on).** Every response carries `X-Request-ID` and `Server-Timing` (`app` is the server's total; `auth-ready`, `auth-session`, `auth-link`, `auth-mix`, `auth-media` are sign-in; `handler` is when a sync endpoint got a worker thread; `mix-entry`, `mix-lock`, `mix-lease`, `mix-file`, `stand-in`, `file` are the playback lookup). The server logs every playback address and anything slower than 1 s, with how busy its worker pools were (`pig_music.timing`), and warns when the event loop was blocked or a pool had a queue. A loop stuck for 1 s or more also logs where it is stuck (`event loop stuck for … at:` with the loop's stack and any worker thread in server code), every 5 s while it lasts; nothing on the server answers during such a stall. The iPhone's diagnostics show the same ID and the server's share: `[network] playback_url 200 in 16211 ms, server 16100 ms: mix-lease 16050 (id …)`. To match a phone line on the server:
    ```sh
@@ -168,8 +168,13 @@ Use these for playback that is slow or patchy on the real server. All three read
    - `idle`: one song warm, then after each `--gap` seconds (default 60, 300 and 900) on the same connections.
    - `browse`: the app's screens and library sync, each opened twice.
    - `artwork`: the share of library, Home and artist artwork that is real, then again after `--settle` seconds (the server fetches missing art when asked).
+   - `watch`: what the phone does to send songs to the Watch: asks for a device copy (`--quality aac` by default, converted on the server), waits for it, downloads it and checks it against the advertised SHA-256.
    - `server`: the probe member's recent slow requests and the server's stalls, from `/api/v1/diagnostics`. The owner's `/api/v1/admin/diagnostics` adds everyone's requests, each route's p50/p95 and the stall stacks.
-3. **Harness** (the phone's own playback code on this Mac): the API client with its retries, `AudioSourcePreparer`, `PlaybackSourceRepository` and `QueuePCMStream`, wired as the seamless engine is. No sound: it decodes as fast as bytes arrive and reports each song's address, ready time, first audio and any silence a player would have had, then the run's diagnostics lines:
+3. **Diagnostics analyser** (an exported diagnostics file, iPhone and Watch logs together): time to sound by kind, slow requests with their IDs, queues that emptied themselves, refresh failures, Watch delivery rate, sync loops, account mismatches and crash reports, as plain findings.
+   ```sh
+   .venv/bin/python -m scripts.analyse_diagnostics PigMusic-diagnostics.txt --since 2026-10-26T08:00+11:00
+   ```
+4. **Harness** (the phone's own playback code on this Mac): the API client with its retries, `AudioSourcePreparer`, `PlaybackSourceRepository` and `QueuePCMStream`, wired as the seamless engine is. No sound: it decodes as fast as bytes arrive and reports each song's address, ready time, first audio and any silence a player would have had, then the run's diagnostics lines:
    ```sh
    swift run --package-path swift/PigKit PigPlaybackHarness --server https://music.markrogers.au --token-file ~/.config/pigmusic/probe-token --mix-songs 5 --library 3
    ```
