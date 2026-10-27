@@ -67,6 +67,8 @@ from .home import HomeDiscovery
 from .warmer import Warmer
 from .image_cache import variant
 from .media import (
+    playable,
+    playback_target,
     public_settings,
     track_file,
     saved_track,
@@ -1087,8 +1089,9 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                     if not playing:
                         raise LookupError(track_id)
             else:
+                # The snapshot's path, not the NAS (NAS1): opening checks it.
                 with phase("file"):
-                    track_file(store, track_id)
+                    playable(store, track_id)
         except (FileNotFoundError, LookupError):
             raise HTTPException(404, "File unavailable")
         return {
@@ -1130,12 +1133,14 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     @app.head("/api/v1/playback/files/{track_id}")
     def playback_file(track_id: str, request: Request):
         mark("handler")
+        info = None
         try:
-            target = (
-                mixes.playback(request.state.user["id"], track_id)
-                if track_id.startswith("mix:")
-                else track_file(store, track_id)
-            )
+            if track_id.startswith("mix:"):
+                target = mixes.playback(request.state.user["id"], track_id)
+            else:
+                # One NAS lookup per open or seek (NAS1); FileResponse reuses it.
+                with phase("file"):
+                    target, info = playback_target(store, track_id)
         except (FileNotFoundError, LookupError):
             raise HTTPException(404, "This saved file is unavailable on the server.")
         types = {
@@ -1151,6 +1156,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             target,
             media_type=types[target.suffix.lower()],
             headers={"Cache-Control": "private, no-cache"},
+            stat_result=info,
         )
 
     class PlaybackRequest(BaseModel):

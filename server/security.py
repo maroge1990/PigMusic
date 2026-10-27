@@ -135,7 +135,7 @@ class Security:
         ) or request.url.path.startswith("/api/v1/playback/")
         media_path = media_path or request.url.path.startswith("/api/v1/tracks/")
         if media_path:
-            from .media import saved_track
+            from .media import PLAYBACK_CACHE_SECONDS, saved_track
 
             track_id = request.path_params.get("track_id")
             if track_id and track_id.startswith("mix:"):
@@ -178,7 +178,8 @@ class Security:
                 ) and (
                     not streaming
                     or not track_id
-                    or saved_track(self.auth.store, track_id)[0] is None
+                    or saved_track(self.auth.store, track_id, PLAYBACK_CACHE_SECONDS)[0]
+                    is None
                 )
 
             # Database and NAS reads: never on the event loop (LOOP1).

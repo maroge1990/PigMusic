@@ -3,6 +3,8 @@
 import json
 import os
 import re
+import stat
+import time
 from pathlib import Path
 
 from .library import load_json
@@ -82,8 +84,9 @@ def save_settings(
     return public_settings(store)
 
 
-def saved_track(store, track_id):
+def saved_track(store, track_id, max_age=0):
     # Acquired tracks may be staged or published; snapshot tracks use the NAS root.
+    # `max_age`: reuse a recent mount check (reads only, see library_root).
     with store.connect() as conn:
         row = conn.execute(
             "SELECT payload FROM acquired WHERE id=?", (track_id,)
@@ -94,7 +97,7 @@ def saved_track(store, track_id):
             return {**track, "relative_path": track["export_relative_path"]}, Path(
                 os.environ.get("PIG_MUSIC_LIBRARY", "/library")
             )
-        return track, library_root(store)
+        return track, library_root(store, max_age)
     track = store.snapshot_tracks.get(track_id)
     return track, Path(os.environ.get("PIG_MUSIC_LIBRARY", "/library"))
 
@@ -116,6 +119,58 @@ def saved_track_ids(store, track_ids):
     return known
 
 
+AUDIO_SUFFIXES = {".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".wav"}
+# Playback reuses a mount check and a resolved path this long (NAS1): every
+# lookup on the SMB mount is a network round trip.
+PLAYBACK_CACHE_SECONDS = 60
+_RESOLVED = {}
+
+
+def saved_relative(track):
+    """The saved song's path below its root, checked by its spelling alone."""
+    if track is None:
+        raise FileNotFoundError
+    relative = track.get("relative_path", "").replace("\\", "/")
+    if (
+        not relative
+        or relative.startswith("/")
+        or ":" in relative
+        or ".." in relative.split("/")
+        or Path(relative).suffix.lower() not in AUDIO_SUFFIXES
+    ):
+        raise FileNotFoundError
+    return relative
+
+
+def playable(store, track_id):
+    """Whether a playback address may be given, without asking the NAS: the
+    snapshot's path is trusted here, and a missing file fails on open."""
+    track, _ = saved_track(store, track_id, PLAYBACK_CACHE_SECONDS)
+    saved_relative(track)
+
+
+def playback_target(store, track_id):
+    """The saved song's file and its `lstat`, for opening it to play: one
+    NAS lookup when its resolved path was checked within the last minute. A
+    deleted file still raises FileNotFoundError; a symlink is refused."""
+    track, root = saved_track(store, track_id, PLAYBACK_CACHE_SECONDS)
+    relative = saved_relative(track)
+    key = (str(root), relative)
+    cached = _RESOLVED.get(key)
+    now = time.monotonic()
+    if cached and now - cached[1] < PLAYBACK_CACHE_SECONDS:
+        target = cached[0]
+    else:
+        target = track_file(store, track_id)
+        if len(_RESOLVED) > 10000:
+            _RESOLVED.clear()
+        _RESOLVED[key] = (target, now)
+    info = os.lstat(target)
+    if not stat.S_ISREG(info.st_mode):
+        raise FileNotFoundError
+    return target, info
+
+
 def track_file(store, track_id):
     track, root = saved_track(store, track_id)
     if track is None:
@@ -133,8 +188,7 @@ def track_file(store, track_id):
     if (
         not target.is_relative_to(root)
         or not target.is_file()
-        or target.suffix.lower()
-        not in {".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".wav"}
+        or target.suffix.lower() not in AUDIO_SUFFIXES
     ):
         raise FileNotFoundError
     return target

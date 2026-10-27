@@ -3,6 +3,7 @@
 import hashlib
 import os
 from pathlib import Path
+import time
 
 
 def require_library_mount(
@@ -20,16 +21,27 @@ def require_library_mount(
             raise ValueError("The expected SMB library mount is unavailable.")
 
 
-def download_root(store):
+# Mount checks a reader may reuse for a while: {store directory: monotonic
+# time the check passed}. File moves always check afresh (max_age 0).
+_MOUNT_CHECKED = {}
+
+
+def download_root(store, max_age=0):
     value = os.environ.get("PIG_MUSIC_DOWNLOAD_ROOT")
     if value:
-        root = Path(os.environ.get("PIG_MUSIC_LIBRARY", "/library"))
-        require_library_mount(store.directory, root, required=True)
+        key = str(store.directory)
+        checked = _MOUNT_CHECKED.get(key)
+        if not (max_age and checked and time.monotonic() - checked < max_age):
+            root = Path(os.environ.get("PIG_MUSIC_LIBRARY", "/library"))
+            require_library_mount(store.directory, root, required=True)
+            _MOUNT_CHECKED[key] = time.monotonic()
     return Path(value or store.directory / "downloads")
 
 
-def library_root(store):
-    return download_root(store) / "library"
+def library_root(store, max_age=0):
+    """`max_age`: seconds a passed mount check may be reused, for reads only
+    (playback, NAS1); anything that writes or deletes keeps the default."""
+    return download_root(store, max_age) / "library"
 
 
 def file_sha256(path):
