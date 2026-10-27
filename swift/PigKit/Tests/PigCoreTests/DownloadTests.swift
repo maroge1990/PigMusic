@@ -43,6 +43,30 @@ private actor AheadSource: DeviceCopySource {
     URLRequest(url: URL(string: "https://server.invalid/" + trackId)!)
   }
 }
+/// Holds the first request ahead ("two") until the test opens it.
+private actor GatedSource: DeviceCopySource {
+  var calls: [String] = []
+  var gate: CheckedContinuation<Void, Never>?
+  let ready: DeviceCopy
+  let preparing: DeviceCopy
+  init(ready: DeviceCopy, preparing: DeviceCopy) {
+    self.ready = ready
+    self.preparing = preparing
+  }
+  var waiting: Bool { gate != nil }
+  func open() {
+    gate?.resume()
+    gate = nil
+  }
+  func deviceCopy(trackId: String, quality: String, create: Bool) async throws -> DeviceCopy {
+    calls.append((create ? "create " : "poll ") + trackId)
+    if trackId == "two" && create { await withCheckedContinuation { gate = $0 } }
+    return trackId == "one" ? preparing : ready
+  }
+  func copyRequest(trackId: String, quality: String) async throws -> URLRequest {
+    URLRequest(url: URL(string: "https://server.invalid/" + trackId)!)
+  }
+}
 @Suite struct DownloadTests {
   func track() throws -> Track {
     try LibraryCodec.decoder().decode(
@@ -95,6 +119,41 @@ private actor AheadSource: DeviceCopySource {
     #expect(calls.prefix(poll).contains("create two"))
     #expect(calls.prefix(poll).contains("create three"))
     #expect(await archive.snapshot().allSatisfy { $0.state == "ready" })
+  }
+  @MainActor @Test func pausingStopsTheCopiesAskedForAhead() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let archive = try archive(root)
+    let songs = try ["one", "two", "three", "four"].map { id in
+      try LibraryCodec.decoder().decode(
+        Track.self,
+        from: Data(
+          #"{"id":"\#(id)","title":"Song","artist":"Artist","source_revision":"v1"}"#.utf8))
+    }
+    try await archive.enqueue(songs, quality: "original")
+    var preparing =
+      try JSONSerialization.jsonObject(
+        with: LibraryCodec.encoder().encode(copy())) as! [String: Any]
+    preparing["state"] = "preparing"
+    let source = GatedSource(
+      ready: try copy(),
+      preparing: try LibraryCodec.decoder().decode(
+        DeviceCopy.self, from: JSONSerialization.data(withJSONObject: preparing)))
+    let controller = DownloadController(archive: archive, source: source)
+    controller.resume()
+    for _ in 0..<100 where !(await source.waiting) {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(await source.waiting)
+    let paused = Task { await controller.pause() }
+    try await Task.sleep(for: .milliseconds(50))
+    await source.open()
+    await paused.value
+    try await Task.sleep(for: .milliseconds(300))  // Time for any leftover requests.
+    // The request under way finished; none of the others went out.
+    let calls = await source.calls
+    #expect(calls.contains("create two"))
+    #expect(!calls.contains("create three") && !calls.contains("create four"))
   }
   @Test func verifiedCopySurvivesRestartThenReconcilesOnlyAuthoritativeChanges() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

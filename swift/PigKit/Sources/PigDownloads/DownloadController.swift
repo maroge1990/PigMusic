@@ -63,6 +63,8 @@ import PigDomain
   @ObservationIgnored private let source: any DeviceCopySource
   @ObservationIgnored private let onFailure: @MainActor (any Error) -> Void
   @ObservationIgnored private var worker: Task<Void, Never>?
+  /// Copies asked for ahead of their turn; it stops with the worker.
+  @ObservationIgnored private var ahead: Task<Void, Never>?
   @ObservationIgnored private var generation = 0
   @ObservationIgnored private var userPaused = false
   @ObservationIgnored private var preparationAllowed = true
@@ -144,14 +146,7 @@ import PigDomain
         .prefix(Self.requestAhead)
         if !ahead.isEmpty {
           asked.formUnion(ahead.map(\.id))
-          let source = source
-          let wanted = ahead.map { ($0.id, $0.quality) }
-          Task.detached(priority: .utility) {
-            for (id, quality) in wanted {
-              guard !Task.isCancelled else { return }
-              _ = try? await source.deviceCopy(trackId: id, quality: quality, create: true)
-            }
-          }
+          requestAhead(ahead.map { ($0.id, $0.quality) }, stamp: stamp)
         }
         do {
           var manifest = try await source.deviceCopy(
@@ -185,6 +180,25 @@ import PigDomain
         }
         guard generation == stamp else { break }
         await reload()
+      }
+    }
+  }
+  /// Asks the server to start preparing these copies, one request at a
+  /// time, until the worker that asked stops (a pause, a removal, a new run).
+  /// Only a head start: the first failure (a lost session, an unreachable
+  /// server) ends it, and each copy's own turn asks again and reports it.
+  private func requestAhead(_ wanted: [(id: String, quality: String)], stamp: Int) {
+    let previous = ahead
+    let source = source
+    ahead = Task(priority: .utility) { [weak self] in
+      await previous?.value
+      for (id, quality) in wanted {
+        guard !Task.isCancelled, self?.generation == stamp else { return }
+        do {
+          _ = try await source.deviceCopy(trackId: id, quality: quality, create: true)
+        } catch {
+          return
+        }
       }
     }
   }
@@ -231,8 +245,12 @@ import PigDomain
     generation += 1
     let previous = worker
     previous?.cancel()
+    let preparing = ahead
+    preparing?.cancel()
     await previous?.value
+    await preparing?.value
     worker = nil
+    if ahead == preparing { ahead = nil }
     running = false
   }
   public func pause() async {

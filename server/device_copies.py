@@ -283,10 +283,7 @@ class DeviceCopies:
                     raise ValueError("Source changed")
                 size = temporary.stat().st_size
                 sha = await asyncio.to_thread(checksum, temporary)
-                await asyncio.to_thread(self.prune, size)
-                temporary.replace(output)
-                job.update(state="ready", bytes=size, sha256=sha, touched=time.time())
-                await asyncio.to_thread(self.save, job)
+                await asyncio.to_thread(self.admit, job, temporary, output, size, sha)
             except asyncio.CancelledError:
                 job["state"] = "queued"
                 await asyncio.to_thread(self.save, job)
@@ -296,6 +293,16 @@ class DeviceCopies:
                 await asyncio.to_thread(self.save, job)
             finally:
                 temporary.unlink(missing_ok=True)
+
+    def admit(self, job, temporary, output, size, sha):
+        """Make room, publish the copy and record it as ready in one step
+        under the cache lock, so two conversions finishing together never
+        both fit into the same free space."""
+        with self.lock:
+            self.prune(size)
+            temporary.replace(output)
+            job.update(state="ready", bytes=size, sha256=sha, touched=time.time())
+            self.save(job)
 
     def prune(self, incoming):
         with self.lock, self.store.connect() as conn:

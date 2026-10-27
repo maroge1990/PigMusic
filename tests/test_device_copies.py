@@ -367,3 +367,42 @@ def test_only_a_download_being_published_holds_copies_up(
         return finished
 
     assert asyncio.run(exercise()) is not waits
+
+
+def test_copies_finishing_together_stay_within_the_quota(tmp_path, monkeypatch):
+    import threading
+
+    copies = several_sources(tmp_path, monkeypatch, 2)
+    copies.quota = 32 * 1024 * 1024
+    jobs = []
+    for index in range(2):
+        temporary = copies.root / f"job{index}.partial.m4a"
+        temporary.write_bytes(b"\0" * (24 * 1024 * 1024))
+        job = {"id": f"job{index}", "state": "preparing", "touched": 0}
+        copies.save(job)
+        jobs.append((job, temporary, copies.root / f"job{index}.m4a"))
+    results = []
+    start = threading.Barrier(2)
+
+    def finish(job, temporary, output):
+        start.wait()
+        try:
+            copies.admit(job, temporary, output, 24 * 1024 * 1024, "sha")
+            results.append("ready")
+        except ValueError:
+            results.append("full")
+
+    threads = [threading.Thread(target=finish, args=job) for job in jobs]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    with copies.store.connect() as conn:
+        ready = [
+            json.loads(raw)
+            for (raw,) in conn.execute("SELECT payload FROM device_copies")
+            if json.loads(raw)["state"] == "ready"
+        ]
+    # The first evicts nothing and fits; the second evicts the first.
+    assert sum(j["bytes"] for j in ready) <= copies.quota
+    assert len(ready) == 1 and sorted(results) == ["ready", "ready"]
