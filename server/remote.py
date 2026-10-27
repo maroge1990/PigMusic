@@ -443,7 +443,7 @@ class RemoteAudio:
                 timeout=3,
                 follow_redirects=False,
             ) as stream:
-                if stream.status_code == 429 or stream.status_code >= 500:
+                if stream.status_code in {408, 429} or stream.status_code >= 500:
                     # The CDN is busy or failing, not missing the song.
                     raise TimeoutError("JioSaavn's audio did not answer.")
                 if stream.status_code not in {200, 206} or not stream.headers.get(

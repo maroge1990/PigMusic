@@ -559,7 +559,7 @@ def test_a_provider_outage_is_never_a_long_miss(tmp_path, kind):
         assert expiry - time.monotonic() <= remote.FAILURE_SECONDS
 
 
-@pytest.mark.parametrize("status", [429, 503])
+@pytest.mark.parametrize("status", [408, 429, 503])
 def test_a_busy_jiosaavn_cdn_is_never_a_long_miss(status):
     import time
 
