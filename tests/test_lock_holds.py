@@ -1,5 +1,6 @@
 """LOCK1: lifecycle_lock is held only to publish, never to hash or transfer."""
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -264,36 +265,49 @@ def test_library_readers_never_wait_for_a_refresh_build(tmp_path, monkeypatch):
     assert "song" in {t["id"] for a in store.library["albums"] for t in a["tracks"]}
 
 
-def test_a_refresh_that_read_older_state_never_replaces_a_newer_one(
+def test_a_refresh_builds_only_after_the_previous_one_saved_its_anchors(
     tmp_path, monkeypatch
 ):
+    # Codex (LOCK1 round 1, reproduced): a second build that read the
+    # edition anchors before the first saved them overwrote the first's
+    # anchors, so an album's ID could move to another edition.
     store, _ = nas_with(tmp_path, monkeypatch, [])
-    built, publish = threading.Event(), threading.Event()
-    build = store._build_library
-    calls = []
+    track = {**download(store, "song"), "musicbrainz_release_id": "release-a"}
+    with store.connect() as conn:  # An edition the first build anchors.
+        conn.execute(
+            "UPDATE acquired SET payload=? WHERE id='song'", (json.dumps(track),)
+        )
+    publishing, release = threading.Event(), threading.Event()
+    build, publish = store._build_library, store._publish_library
+    read, published = [], []
 
-    def build_once_then_wait():
-        result = build()
-        calls.append(result)
-        if len(calls) == 1:  # The older build finishes last.
-            built.set()
-            publish.wait(5)
-        return result
+    def recording_build():
+        read.append(store.read_document("album-edition-anchors"))
+        return build()
 
-    monkeypatch.setattr(store, "_build_library", build_once_then_wait)
-    monkeypatch.setattr(store.covers, "lock", threading.RLock())
-    older = threading.Thread(target=store.refresh_library)
-    older.start()
-    assert built.wait(5)
-    # The first build is done but unpublished; a song lands and a second,
-    # newer refresh publishes it. covers.lock is replaced above so the two
-    # builds can overlap as they would around the swap.
-    download(store, "newer")
-    store.refresh_library()
-    publish.set()
-    older.join(5)
-    ids = {t["id"] for a in store.library["albums"] for t in a["tracks"]}
-    assert "newer" in ids
+    def slow_first_publish(built):
+        if not published:
+            publishing.set()
+            release.wait(5)
+        publish(built)
+        published.append(store.read_document("album-edition-anchors"))
+
+    monkeypatch.setattr(store, "_build_library", recording_build)
+    monkeypatch.setattr(store, "_publish_library", slow_first_publish)
+    with store.connect() as conn:  # Anchors the first build will create.
+        conn.execute("DELETE FROM documents WHERE name='album-edition-anchors'")
+    first = threading.Thread(target=store.refresh_library)
+    first.start()
+    assert publishing.wait(5)
+    second = threading.Thread(target=store.refresh_library)
+    second.start()
+    second.join(0.3)
+    assert len(read) == 1, "the second build waited for the first to publish"
+    release.set()
+    first.join(5)
+    second.join(5)
+    assert list(published[0].values()) == ["release-a"]
+    assert read == [{}, published[0]]
 
 
 def test_an_unchanged_export_pass_does_not_rebuild_the_library(tmp_path, monkeypatch):

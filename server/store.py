@@ -49,9 +49,8 @@ class Store:
         # cleanup takes this after lifecycle_lock, never the other way round.
         self.mix_lock = threading.RLock()
         self.library_lock = TimedRLock("library_lock")
-        # Refreshes build outside library_lock; the newest build to start wins.
-        self._refreshes = threading.Lock()
-        self._refresh_started = self._refresh_published = 0
+        # One refresh at a time, built outside library_lock (LOCK1).
+        self.refresh_lock = threading.RLock()
         directory.mkdir(parents=True, exist_ok=True)
         self.cover_dir = directory / "covers"
         self.cover_dir.mkdir(exist_ok=True)
@@ -71,18 +70,14 @@ class Store:
         """Rebuild the library from the snapshot and the database. The build
         (reads, cover lookups, the index and fingerprint: 1-2 s live) runs
         outside library_lock, which is held only to swap the result in, so
-        readers never wait for it (LOCK1, 28 Oct). A build that started
-        before one already published is dropped: it read older state."""
-        with self._refreshes:
-            self._refresh_started += 1
-            generation = self._refresh_started
-        with self.covers.lock:
-            built = self._build_library()
-        with self.library_lock:
-            if generation < self._refresh_published:
-                return
-            self._refresh_published = generation
-            self._publish_library(built)
+        readers never wait for it (LOCK1, 28 Oct). Refreshes run one at a
+        time: each build reads the edition anchors the previous one saved,
+        so a stale build can never move an album's ID."""
+        with self.refresh_lock:
+            with self.covers.lock:
+                built = self._build_library()
+            with self.library_lock:
+                self._publish_library(built)
 
     def _build_library(self):
         snapshot = load_json(self.directory / "library-snapshot.json")
