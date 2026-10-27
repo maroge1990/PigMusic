@@ -397,16 +397,14 @@ def test_a_cover_that_does_not_exist_is_asked_for_again_only_tomorrow(tmp_path):
 
 
 def test_opening_a_discography_warms_its_first_covers(tmp_path, monkeypatch):
-    from server.warmer import SEARCH, Warmer
+    from server.warmer import Warmer
 
     groups = [
         {"id": f"{index:08d}-2222-4222-8222-222222222222", "title": f"Album {index}"}
         for index in range(30)
     ]
-    submitted = []
-    monkeypatch.setattr(
-        Warmer, "submit", lambda self, *args, **kwargs: submitted.append((args, kwargs))
-    )
+    queued = []
+    monkeypatch.setattr(Warmer, "covers", lambda self, items: queued.append(items))
 
     def transport(request):
         return httpx.Response(
@@ -430,6 +428,42 @@ def test_opening_a_discography_warms_its_first_covers(tmp_path, monkeypatch):
         page = client.get(f"/api/v1/catalogue/artists/{artist}/releases")
         assert page.status_code == 200, page.text
         app.state.http = original
-    ((args, kwargs),) = submitted
-    assert args == (artist,) and kwargs["priority"] == SEARCH
-    assert kwargs["covers"] == [("release-group", g["id"]) for g in groups[:24]]
+    assert queued == [[("release-group", g["id"]) for g in groups[:24]]]
+
+
+def test_page_covers_wait_once_within_a_bound_and_only_while_warming():
+    import asyncio
+
+    from server import warmer as warming
+    from server.warmer import Warmer
+
+    warmer = Warmer(None, None, None)
+    page = [("release-group", f"group-{index}") for index in range(24)]
+    assert warmer.covers(page) == 0  # Warming is off: nothing waits.
+    warmer.state["running"] = True
+    # An artist page's work already pending never swallows its covers.
+    warmer.pending["artist"] = (warming.SEARCH, True)
+    assert warmer.covers(page) == 24
+    assert warmer.covers(page) == 0  # Opened again: nothing new to wait for.
+    for index in range(20):
+        warmer.covers([("release-group", f"other-{index}-{n}") for n in range(24)])
+    assert len(warmer.cover_pending) == warming.COVER_BACKLOG
+    queued = sum(len(job[4]) for job in warmer.queue._queue)
+    assert queued == warming.COVER_BACKLOG
+
+    async def fetched():
+        # Once fetched, a cover may be asked for again.
+        done = []
+
+        async def cover(kind, item_id):
+            done.append(item_id)
+            return True
+
+        warmer.cover = cover
+        task = asyncio.ensure_future(warmer.work())
+        await warmer.queue.join()
+        task.cancel()
+        return done
+
+    assert len(asyncio.run(fetched())) == warming.COVER_BACKLOG
+    assert not warmer.cover_pending and warmer.covers(page[:1]) == 1

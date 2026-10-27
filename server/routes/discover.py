@@ -24,7 +24,6 @@ from ..api_models import (
 )
 from ..conditional import CONDITIONAL_RESPONSES, conditional_json
 from ..user_library import track_dto
-from ..warmer import SEARCH
 
 
 # A trailing qualifier that names an edition of the same album. Anything else
@@ -203,12 +202,8 @@ def discover_router(store, catalogue, popularity=None, warmer=None, http_client=
         if warmer is not None and groups:
             # The page shows these covers next: fetch them now, ahead of the
             # background pass (ART2: 50-56 of 72 at first ask).
-            warmer.submit(
-                valid(artist_id),
-                priority=SEARCH,
-                covers=[
-                    ("release-group", r["id"]) for r in groups[:ARTIST_PAGE_COVERS]
-                ],
+            warmer.covers(
+                [("release-group", r["id"]) for r in groups[:ARTIST_PAGE_COVERS]]
             )
         return {
             "total": result.get("count", result.get("release-group-count", 0)),
