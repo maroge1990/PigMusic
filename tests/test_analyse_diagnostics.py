@@ -72,3 +72,39 @@ def test_since_keeps_only_later_entries(tmp_path, capsys):
 def test_an_unreadable_crash_report_is_said_so():
     report = analyse_diagnostics.analyse("== crash-2.json ==\n{not json\n")
     assert report["findings"] == ["Crash report crash-2.json: unreadable."]
+
+
+def test_bad_lines_and_crash_reports_are_reported_not_fatal():
+    deep = "[" * 1200 + "]" * 1200
+    export = (
+        "== iPhone log ==\n"
+        "2026-13-26T08:00:00Z [playback] address in 900 ms\n"
+        "2026-10-26T08:00:01.000+11:00 [playback] address in 120 ms\n"
+        "2026-10-26T08:00:02.000+11:00 [network] playback_url URLError -1001 in 120000 ms (id 0123456789abcdef)\n"
+        "2026-10-26T08:00:03.000+11:00 [network] me_api 502 in 40 ms (id fedcba9876543210)\n"
+        f"== crash-deep.json ==\n{deep}\n"
+    )
+    report = analyse_diagnostics.analyse(export)
+    assert report["malformed_lines"] == 1
+    assert report["iphone"]["playback"]["address_ms"]["count"] == 1
+    slowest = report["iphone"]["playback"]["slowest_requests"][0]
+    # A timeout is the case that matters most; its ID must survive.
+    assert (
+        slowest["outcome"] == "URLError -1001" and slowest["id"] == "0123456789abcdef"
+    )
+    text = "\n".join(report["findings"])
+    assert "Requests failed: 1× URLError -1001, 1× 502" in text
+    assert "Crash report crash-deep.json: unreadable." in text
+    assert "1 lines had an impossible time and were left out." in text
+
+
+def test_a_file_far_larger_than_an_export_is_not_read(tmp_path, monkeypatch):
+    export = tmp_path / "huge.txt"
+    export.write_text("x" * 100)
+    monkeypatch.setattr(analyse_diagnostics, "MAX_EXPORT_BYTES", 50)
+    try:
+        analyse_diagnostics.main([str(export)])
+    except SystemExit as exc:
+        assert "larger than any diagnostics export" in str(exc)
+    else:
+        raise AssertionError("an oversized file was read")

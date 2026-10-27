@@ -21,6 +21,10 @@ LINE = re.compile(
     r"^(\d{4}-\d\d-\d\dT[\d:.]+[+-]\d\d:\d\d|\d{4}-\d\d-\d\dT[\d:.]+Z) \[(\w+)\] (.*)$"
 )
 SECTION = re.compile(r"^== (.+?) ==$")
+# Exports are a few hundred KB (each log keeps 512 KB at most); anything far
+# larger is not an export, and a crash report this big is not read.
+MAX_EXPORT_BYTES = 32 * 1024 * 1024
+MAX_CRASH_BYTES = 2 * 1024 * 1024
 
 
 def parse(text):
@@ -31,6 +35,7 @@ def parse(text):
         "devices": defaultdict(list),
         "crashes": [],
         "watch_sent": None,
+        "malformed_lines": 0,
     }
     section, crash = None, None
     for raw in text.splitlines():
@@ -58,7 +63,12 @@ def parse(text):
             continue
         found = LINE.match(raw)
         if found:
-            stamp = datetime.fromisoformat(found.group(1).replace("Z", "+00:00"))
+            try:
+                stamp = datetime.fromisoformat(found.group(1).replace("Z", "+00:00"))
+            except ValueError:
+                # A line with an impossible date is counted, not trusted.
+                result["malformed_lines"] += 1
+                continue
             result["devices"][section].append((stamp, found.group(2), found.group(3)))
     for crash in result["crashes"]:
         crash["summary"] = crash_summary("\n".join(crash.pop("text")))
@@ -66,34 +76,33 @@ def parse(text):
 
 
 def crash_summary(text):
-    """When it happened and how it ended, from a MetricKit crash report."""
+    """When it happened and how it ended, from a MetricKit crash report.
+    Empty when it cannot be read: too large, not JSON, or nested too deep."""
+    if len(text) > MAX_CRASH_BYTES:
+        return {}
     try:
         data = json.loads(text)
-    except ValueError:
+    except (ValueError, RecursionError):
         return {}
+    wanted = (
+        "signal",
+        "exceptionType",
+        "exceptionCode",
+        "terminationReason",
+        "timeStampEnd",
+    )
     found = {}
-
-    def walk(value):
+    # Walked with a stack, not recursion: depth cannot end the analysis.
+    pending = [data]
+    while pending:
+        value = pending.pop()
         if isinstance(value, dict):
             for key, inner in value.items():
-                if (
-                    key
-                    in (
-                        "signal",
-                        "exceptionType",
-                        "exceptionCode",
-                        "terminationReason",
-                        "timeStampEnd",
-                    )
-                    and key not in found
-                ):
+                if key in wanted and key not in found:
                     found[key] = inner
-                walk(inner)
+                pending.append(inner)
         elif isinstance(value, list):
-            for inner in value:
-                walk(inner)
-
-    walk(data)
+            pending.extend(value)
     reason = found.get("terminationReason")
     if isinstance(reason, str):
         # Keep the code and the explanation, not the whole system report.
@@ -158,7 +167,8 @@ def playback(entries):
             play[f"{match.group(1)} ({match.group(3)})"].append(float(match.group(2)))
     slow_network = []
     for stamp, category, message in entries:
-        match = re.match(r"(\S+) (\S+) in (\d+) ms(.*)\(id (\w+)\)$", message)
+        # The outcome is a status ("200") or a failure ("URLError -1001").
+        match = re.match(r"(\S+) (.+?) in (\d+) ms(.*)\(id (\w+)\)$", message)
         if category == "network" and match:
             slow_network.append(
                 {
@@ -198,6 +208,7 @@ def playback(entries):
             for at, n in bursts(entries, "passed over an unavailable song")
         ],
         "slowest_requests": sorted(slow_network, key=lambda r: -r["ms"])[:10],
+        "requests": slow_network,
     }
 
 
@@ -308,6 +319,16 @@ def findings(report):
     found = []
     phone = report["iphone"]
     play = phone["playback"]
+    failed = Counter(
+        r["outcome"]
+        for r in play["requests"]
+        if not r["outcome"].isdigit() or int(r["outcome"]) >= 500
+    )
+    if failed:
+        kinds = ", ".join(f"{n}× {outcome}" for outcome, n in failed.most_common())
+        found.append(
+            f"Requests failed: {kinds} (their IDs are in the slowest requests)."
+        )
     for kind, values in play["time_to_sound_ms"].items():
         if values and values["max"] >= 5000:
             found.append(
@@ -384,8 +405,13 @@ def analyse(text, since=None):
             "log_sent": parsed["watch_sent"],
         },
         "crashes": parsed["crashes"],
+        "malformed_lines": parsed["malformed_lines"],
     }
     report["findings"] = findings(report)
+    if parsed["malformed_lines"]:
+        report["findings"].append(
+            f"{parsed['malformed_lines']} lines had an impossible time and were left out."
+        )
     return report
 
 
@@ -437,6 +463,8 @@ def main(argv=None):
         since = datetime.fromisoformat(args.since)
         if since.tzinfo is None:
             since = since.astimezone()
+    if args.export.stat().st_size > MAX_EXPORT_BYTES:
+        sys.exit(f"{args.export} is larger than any diagnostics export; not read.")
     report = analyse(args.export.read_text(errors="replace"), since)
     if args.json:
         json.dump(report, sys.stdout, indent=2, default=str)

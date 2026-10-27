@@ -295,6 +295,18 @@ def save(args, record):
             handle.write(json.dumps(record) + "\n")
 
 
+class Records(list):
+    """A list that saves each record as it is added."""
+
+    def __init__(self, keep):
+        super().__init__()
+        self.keep = keep
+
+    def append(self, record):
+        super().append(record)
+        self.keep(record)
+
+
 def scenario(name):
     """Runs a scenario with its own clients unless given some, then says
     how often the server's event loop stalled while it ran."""
@@ -306,13 +318,13 @@ def scenario(name):
             if owned:
                 api, media = clients(args)
             began = time.time()
+            # Each record is saved as it is made: a later failure keeps it.
+            records = Records(lambda r: save(args, {"scenario": name, **r}))
             try:
-                records = body(args, api, media)
-                for record in records:
-                    save(args, {"scenario": name, **record})
-                print(server_report(api, began))
+                body(args, api, media, records)
                 return records
             finally:
+                print(server_report(api, began))
                 if owned:
                     api.close()
                     media.close()
@@ -385,10 +397,9 @@ def owned(api, artist, title):
 
 
 @scenario("remote")
-def remote(args, api, media):
+def remote(args, api, media, records):
     """Songs not in the household, from online sources as the phone streams
     them: asked twice, so the second shows the server's relay cache."""
-    records = []
     for entry in args.song or REMOTE_SONGS:
         artist, title, album, seconds = (entry.split("|") + ["", "", "", "0"])[:4]
         if owned(api, artist, title):
@@ -435,13 +446,12 @@ def remote(args, api, media):
 
 
 @scenario("idle")
-def idle(args, api, media):
+def idle(args, api, media, records):
     """One library song played warm, then again after each pause, on the
     same connections, as a phone left alone and picked up again."""
     chosen = songs(api, 1, 0, args.track[:1])
     if not chosen:
         sys.exit("No songs: add some to the probe's library, or pass --track.")
-    records = []
     for gap in [0, 0, *args.gap]:
         if gap:
             print(f"idle     waiting {gap:.0f} s", flush=True)
@@ -491,9 +501,8 @@ def browse_steps(api):
 
 
 @scenario("browse")
-def browse(args, api, media):
+def browse(args, api, media, records):
     """Each screen's requests timed twice: as opened, and opened again."""
-    records = []
     for label, path, params in browse_steps(api):
         for attempt in ("first", "again"):
             record, _ = timed(api, "GET", path, params=params)
@@ -577,7 +586,7 @@ def has_artwork(api, path):
 
 
 @scenario("artwork")
-def artwork(args, api, media):
+def artwork(args, api, media, records):
     """How much of the artwork the app shows is real, and how much the
     server fills in after being asked (it fetches missing art lazily)."""
     items = artwork_items(api)
@@ -588,7 +597,6 @@ def artwork(args, api, media):
         time.sleep(args.settle)
     later = {path: has_artwork(api, path) for path in missing} if args.settle else {}
     groups = {}
-    records = []
     for group, name, path in items:
         found = later.get(path, first[path])
         record = {"group": group, "name": name, "path": path}
@@ -610,76 +618,113 @@ def artwork(args, api, media):
     return records
 
 
-@scenario("watch")
-def watch(args, api, media):
-    """What the phone does to send songs to the Watch: ask the server for a
-    device copy (AAC by default, converted on the server), wait until it is
-    ready, download it and check it against the advertised SHA-256."""
+def copy_manifest(answer):
+    """The device copy's manifest from an answer, or why there is none."""
+    if answer is None:
+        return None, "no answer"
+    if answer.status_code != 200:
+        return None, f"HTTP {answer.status_code}"
+    try:
+        manifest = answer.json()
+    except ValueError:
+        return None, "the answer was not JSON"
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("state"), str):
+        return None, "the answer had no copy state"
+    return manifest, None
+
+
+def fetch_copy(api, media, base, params, expected, record):
+    """Downloads a ready copy and checks its size and SHA-256 against the
+    manifest. The device token goes only to this server: `base` is a path."""
     import hashlib
 
+    if not isinstance(expected.get("bytes"), int) or not isinstance(
+        expected.get("sha256"), str
+    ):
+        record["error"] = "the ready copy had no size or SHA-256"
+        return
+    digest = hashlib.sha256()
+    began = time.perf_counter()
+    with media.stream(
+        "GET",
+        base + "/file",
+        params=params,
+        headers={
+            "Authorization": api.headers["Authorization"],
+            "X-Request-ID": request_id(),
+        },
+    ) as response:
+        record["download_status"] = response.status_code
+        record["download_headers_ms"] = elapsed(began)
+        size = 0
+        for chunk in response.iter_bytes():
+            size += len(chunk)
+            digest.update(chunk)
+    seconds = max(time.perf_counter() - began, 1e-6)
+    record["download"] = {
+        "bytes": size,
+        "ms": round(seconds * 1000, 1),
+        "mbps": round(size * 8 / seconds / 1e6, 2),
+    }
+    record["intact"] = (
+        size == expected["bytes"] and digest.hexdigest() == expected["sha256"]
+    )
+    if record["download_status"] != 200:
+        record["error"] = f"download HTTP {record['download_status']}"
+    elif not record["intact"]:
+        record["error"] = "download does not match the advertised SHA-256"
+
+
+@scenario("watch")
+def watch(args, api, media, records):
+    """What the phone does to send songs to the Watch: ask the server for a
+    device copy (AAC by default, converted on the server), wait until it is
+    ready, download it and check it against the advertised SHA-256. A song
+    that fails is recorded with why, and the rest carry on."""
     chosen = songs(api, args.songs, 0, args.track)
     if not chosen:
         sys.exit("No songs: add some to the probe's library, or pass --track.")
-    records = []
     for song in chosen:
         base = f"/api/v1/tracks/{song['id']}/copy"
         params = {"quality": args.quality}
         record = {"id": song["id"], "title": song["title"], "quality": args.quality}
-        asked, answer = timed(api, "POST", base, params=params)
-        record["request"] = asked
-        state = answer.json().get("state") if answer is not None else None
-        record["state_at_request"] = state
-        began = time.perf_counter()
-        polls = []
-        while state in ("queued", "preparing") and elapsed(began) < args.wait * 1000:
-            time.sleep(1)
-            poll, answer = timed(api, "GET", base, params=params)
-            polls.append(poll["ms"])
-            state = answer.json().get("state") if answer is not None else None
-        record["ready_ms"] = elapsed(began) if polls else 0
-        record["polls"] = len(polls)
-        record["slowest_poll_ms"] = max(polls) if polls else None
-        record["state"] = state
-        if state != "ready":
-            record["error"] = f"copy {state or 'unavailable'}"
-        else:
-            expected = answer.json()
-            digest = hashlib.sha256()
+        record["polls"], record["ready_ms"] = 0, 0
+        try:
+            asked, answer = timed(api, "POST", base, params=params)
+            record["request"] = asked
+            manifest, problem = copy_manifest(answer)
+            state = manifest["state"] if manifest else None
+            record["state_at_request"] = state
             began = time.perf_counter()
-            with media.stream(
-                "GET",
-                base + "/file",
-                params=params,
-                headers={
-                    "Authorization": api.headers["Authorization"],
-                    "X-Request-ID": request_id(),
-                },
-            ) as response:
-                record["download_status"] = response.status_code
-                record["download_headers_ms"] = elapsed(began)
-                size = 0
-                for chunk in response.iter_bytes():
-                    size += len(chunk)
-                    digest.update(chunk)
-            seconds = max(time.perf_counter() - began, 1e-6)
-            record["download"] = {
-                "bytes": size,
-                "ms": round(seconds * 1000, 1),
-                "mbps": round(size * 8 / seconds / 1e6, 2),
-            }
-            record["intact"] = (
-                size == expected["bytes"] and digest.hexdigest() == expected["sha256"]
-            )
-            if record["download_status"] != 200:
-                record["error"] = f"download HTTP {record['download_status']}"
-            elif not record["intact"]:
-                record["error"] = "download does not match the advertised SHA-256"
+            polls = []
+            # Bounded by --wait; one poll a second, as the app does.
+            while (
+                state in ("queued", "preparing") and elapsed(began) < args.wait * 1000
+            ):
+                time.sleep(1)
+                poll, answer = timed(api, "GET", base, params=params)
+                polls.append(poll["ms"])
+                manifest, problem = copy_manifest(answer)
+                state = manifest["state"] if manifest else None
+            record["ready_ms"] = elapsed(began) if polls else 0
+            record["polls"] = len(polls)
+            record["slowest_poll_ms"] = max(polls) if polls else None
+            record["state"] = state
+            if problem:
+                record["error"] = "copy: " + problem
+            elif state != "ready":
+                record["error"] = f"copy {state}"
+            else:
+                fetch_copy(api, media, base, params, manifest, record)
+        except httpx.HTTPError as exc:
+            record["error"] = f"{type(exc).__name__} during the copy"
         records.append(record)
-        line = (
-            f"watch    {song['title'][:30]:30} {args.quality:8}"
-            f" request {asked['ms']:6.0f} ms ({record['state_at_request']})"
-            f"  ready after {record['ready_ms'] / 1000:5.1f} s ({record['polls']} polls)"
-        )
+        line = f"watch    {song['title'][:30]:30} {args.quality:8}"
+        if "request" in record:
+            line += (
+                f" request {record['request']['ms']:6.0f} ms ({record.get('state_at_request')})"
+                f"  ready after {record['ready_ms'] / 1000:5.1f} s ({record['polls']} polls)"
+            )
         if "download" in record:
             line += (
                 f"  download {record['download']['bytes'] // 1024} KB in"

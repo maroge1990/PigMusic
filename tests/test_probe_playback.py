@@ -379,3 +379,50 @@ def test_watch_waits_for_the_copy_and_checks_its_hash(tmp_path, capsys):
     (corrupt,) = probe_playback.watch(args, *fake_clients(CopyServer(corrupt=True)))
     assert corrupt["intact"] is False and "SHA-256" in corrupt["error"]
     assert "CORRUPT" in capsys.readouterr().out
+
+
+class FlakyCopyServer(CopyServer):
+    """Three songs: an HTML 502 for the first copy, a download that times
+    out for the second, and a good third."""
+
+    def __call__(self, request):
+        path = request.url.path
+        if path == "/api/v1/library-pages/tracks":
+            items = [{"id": f"song{n}", "title": f"Song {n}"} for n in (1, 2, 3)]
+            return httpx.Response(200, json={"items": items})
+        if path == "/api/v1/tracks/song1/copy":
+            return httpx.Response(502, text="<html>Bad gateway</html>")
+        if path == "/api/v1/tracks/song2/copy/file":
+            raise httpx.ReadTimeout("slow", request=request)
+        if path.startswith("/api/v1/tracks/song") and path.endswith("/copy"):
+            self.polls = 2  # Ready at once.
+        return super().__call__(request)
+
+
+def test_watch_records_each_failure_and_keeps_going(tmp_path):
+    args = args_for(tmp_path, songs=3, track=[], quality="aac", wait=5)
+    records = probe_playback.watch(args, *fake_clients(FlakyCopyServer()))
+    errors = [r.get("error") for r in records]
+    assert errors[0] == "copy: HTTP 502"
+    assert errors[1] == "ReadTimeout during the copy"
+    assert errors[2] is None and records[2]["intact"] is True
+    # Every record was saved as it was made.
+    saved = (tmp_path / "out.jsonl").read_text().splitlines()
+    assert [json.loads(line)["id"] for line in saved] == ["song1", "song2", "song3"]
+
+
+def test_records_made_before_a_crash_are_kept(tmp_path):
+    server, calls = FakeServer(), []
+
+    def broken(request):
+        if request.url.path.endswith("/url"):
+            calls.append(1)
+            if len(calls) == 3:
+                raise RuntimeError("probe bug")
+        return server(request)
+
+    args = args_for(tmp_path, track=[], gap=[0.01])
+    with pytest.raises(RuntimeError):
+        probe_playback.idle(args, *fake_clients(broken))
+    # The two plays before it were saved as they finished.
+    assert len((tmp_path / "out.jsonl").read_text().splitlines()) == 2
