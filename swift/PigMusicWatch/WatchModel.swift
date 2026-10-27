@@ -353,6 +353,11 @@ import PigPlayback
         guard manifest.context == envelope.context else { throw CompanionFailure.invalid }
         let previous = await archive.snapshot()
         let applied = await archive.receipt().manifestApplied
+        // A newer context may have arrived while this one was read: a
+        // superseded manifest never stops what is playing.
+        guard await archive.activeContext() == envelope.context else {
+          throw CompanionFailure.stale
+        }
         if previous != manifest || !applied {
           // Keep playing when every queued song is unchanged in the new library.
           let unchanged = manifest.keepsPlaying(queue.map(\.track.id), replacing: previous)
