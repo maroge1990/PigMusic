@@ -234,3 +234,41 @@ def test_an_identity_already_stored_is_unchanged(tmp_path):
     )
     found = resolve_credit(store, Fake(), "Coldplay feat. Rihanna", ALBUMS)
     assert found == {"id": ARTIST, "name": "Coldplay feat. Rihanna"}
+
+
+VARIOUS = {"id": "89ad4ac3-39f7-470e-963a-56509c546377", "name": "Various Artists"}
+
+
+def test_a_band_on_a_various_artists_release_is_found_by_its_whole_name(tmp_path):
+    band = {"id": ARTIST, "name": "Hall & Oates"}
+    searched = []
+
+    def artist(path, params):
+        searched.append(params["query"])
+        if params["query"] == 'artist:"Hall & Oates"':
+            return {"count": 1, "artists": [band]}
+        return {"count": 1, "artists": [{"id": OTHER, "name": "Hall"}]}
+
+    catalogue = Fake(
+        release=lambda path, params: {"artist-credit": [{"artist": VARIOUS}]},
+        artist=artist,
+    )
+    store = Store(tmp_path)
+    assert resolve_credit(store, catalogue, "Hall & Oates", ALBUMS) == band
+    assert searched == ['artist:"Hall & Oates"']
+    assert store.read_document("library-artist:lib-credit")["id"] == ARTIST
+
+
+def test_various_artists_is_never_a_performers_identity(tmp_path):
+    def artist(path, params):
+        return {"count": 0, "artists": []}
+
+    catalogue = Fake(
+        release=lambda path, params: {"artist-credit": [{"artist": VARIOUS}]},
+        artist=artist,
+    )
+    store = Store(tmp_path)
+    albums = [{**ALBUMS[0], "title": "Film", "category": "soundtrack"}]
+    with pytest.raises(Ambiguous):
+        resolve_credit(store, catalogue, "Singer A & Singer B", albums)
+    assert store.read_document("library-artist:lib-credit") == {}

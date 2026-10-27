@@ -8,6 +8,15 @@ from .matching import lead_artist
 # Albums whose songs credit performers one by one (a cast recording, a
 # soundtrack): a song's credit files under the album's own artist.
 STAGED = {"musical", "soundtrack"}
+# MusicBrainz's catch-all credits (Various Artists, [unknown], [anonymous],
+# [no artist], [traditional]): never a performer's identity.
+SPECIAL = {
+    "89ad4ac3-39f7-470e-963a-56509c546377",
+    "125ec42a-7229-4250-afc5-e057484327fe",
+    "f731ccc4-e22a-43af-a747-64213329e088",
+    "eec63d3c-3b81-4ad4-b1e4-7c147d4d2b61",
+    "9be7f096-97ec-4615-8957-8d40b5dcbc41",
+}
 
 
 class Ambiguous(Exception):
@@ -88,23 +97,27 @@ async def resolve_artist(store, catalogue, client, artist, albums):
         # MATCH1: never one artist named after a whole credit. A cast or
         # soundtrack album's songs file under the album's lead artist; others
         # under the credit's lead, as the release credits name them.
+        performers = [
+            c for c in released if c.get("artist", {}).get("id") not in SPECIAL
+        ]
         if any(album.get("category") in STAGED for album in albums):
-            chosen = released[0].get("artist", {})
+            chosen = performers[0].get("artist", {}) if performers else {}
         else:
             chosen = next(
                 (
                     c.get("artist", {})
-                    for c in released
+                    for c in performers
                     if normalise(c.get("artist", {}).get("name", "")) == lead
                 ),
                 {},
             )
         if chosen.get("id"):
             identities[chosen["id"]] = {"id": chosen["id"], "name": chosen["name"]}
+    # When the release credits bore the collaboration out, the whole credit is
+    # never searched for; otherwise (a band on a compilation credited to
+    # Various Artists) its whole name is tried before its lead.
     matches = []
-    if not identities and collaborative and released:
-        pass  # Its releases are known: no search for the whole credit.
-    elif not identities:
+    if not identities:
         result = await catalogue.get(
             client, "artist/", query="artist:" + quoted(artist["name"]), limit=100
         )
