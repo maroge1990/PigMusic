@@ -252,3 +252,33 @@ def test_diagnostics_show_members_their_own_requests_and_owners_everything(
             r for r in everything["routes"] if r["route"] == "GET /api/v1/library"
         ]
         assert library["count"] == 2 and library["p95_ms"] >= library["p50_ms"]
+
+
+def test_made_up_methods_and_paths_never_grow_the_route_history(tmp_path, monkeypatch):
+    request_timing.RECENT.clear()
+    request_timing.ROUTES.clear()
+    app, _ = protected(tmp_path, monkeypatch)
+    with TestClient(app, base_url="https://private.ts.net") as client:
+        # No credentials: rejected by routing or the guard, still recorded.
+        for n in range(1000):
+            client.request(f"CUSTOM{n}", "/api/v1/library")
+            client.get(f"/api/v1/no-such-route-{n}/" + "x" * 500)
+        keys = set(request_timing.ROUTES)
+        assert len(keys) <= 2, keys
+        assert all(key.split(" ", 1)[0] in {"GET", "OTHER"} for key in keys)
+        assert len(request_timing.RECENT) == request_timing.RECENT.maxlen
+        assert all(len(r["path"]) <= 300 for r in request_timing.RECENT)
+        assert {r["method"] for r in request_timing.RECENT} <= {"GET", "OTHER"}
+    # A backstop holds even if the app had more routes than expected.
+    request_timing.ROUTES.clear()
+    monkeypatch.setattr(request_timing, "MAX_ROUTES", 3)
+    timing = RequestTiming(None)
+
+    class Route:
+        def __init__(self, path):
+            self.path = path
+
+    for n in range(10):
+        scope = {"method": "GET", "path": "/api/x", "route": Route(f"/api/{n}")}
+        timing.report(scope, request_timing.Trace("backstop"), 200, 1.0)
+    assert len(request_timing.ROUTES) == 3

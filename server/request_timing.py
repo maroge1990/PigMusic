@@ -37,7 +37,10 @@ STARTED = time.time()
 # headers times of each route, event-loop blocks and stall stacks. Deques
 # append atomically, so the stall thread can add to them too.
 RECENT = collections.deque(maxlen=500)
-ROUTES = collections.defaultdict(lambda: collections.deque(maxlen=200))
+ROUTES = {}
+# Route keys come from the app's own routes, so this is only a backstop.
+MAX_ROUTES = 400
+METHODS = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 BLOCKS = collections.deque(maxlen=200)
 STALLS = collections.deque(maxlen=50)
 
@@ -188,24 +191,30 @@ class RequestTiming:
         # A relayed stream's path is its credential.
         if path.startswith("/api/v1/remote-playback/streams/"):
             path = "/api/v1/remote-playback/streams/[redacted]"
-        route = getattr(scope.get("route"), "path", None) or "unmatched"
-        user = (scope.get("state") or {}).get("user") or {}
+        # Anything a client can make up is folded away: an unknown method or
+        # an unmatched path never becomes a key of its own.
+        route = getattr(scope.get("route"), "path", None)
+        method = method if method in METHODS else "OTHER"
+        state = scope.get("state")
+        user = (state.get("user") if isinstance(state, dict) else None) or {}
         RECENT.append(
             {
                 "id": trace.id,
                 "at": round(time.time(), 3),
                 "user": user.get("id"),
                 "method": method,
-                "path": path,
-                "route": route,
+                "path": path[:300],
+                "route": route or "unmatched",
                 "status": status,
                 "headers_ms": None if headers_ms is None else round(headers_ms, 1),
                 "done_ms": round(trace.elapsed(), 1),
                 "phases": [[name, round(ms, 1)] for name, ms in trace.phases],
             }
         )
-        if headers_ms is not None:
-            ROUTES[f"{method} {route}"].append(headers_ms)
+        if headers_ms is not None and route:
+            key = f"{method} {route}"
+            if key in ROUTES or len(ROUTES) < MAX_ROUTES:
+                ROUTES.setdefault(key, collections.deque(maxlen=200)).append(headers_ms)
         slow = headers_ms is None or headers_ms >= self.slow_ms
         if not (slow or always_logged(method, path) or (status or 0) >= 500):
             return
