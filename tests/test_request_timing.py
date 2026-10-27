@@ -1,11 +1,12 @@
 import asyncio
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi.testclient import TestClient
 
-from server.request_timing import RequestTiming, phase, watch_event_loop
+from server.request_timing import RequestTiming, StallWatch, phase, watch_event_loop
 from test_mixes import cached, member, ready, track
 from test_security import protected
 from test_downloader import audio  # noqa: F401  Shared real MP3 fixture.
@@ -132,3 +133,38 @@ def test_event_loop_watch_reports_a_blocked_loop_and_a_thread_queue(caplog):
     messages = [r.getMessage() for r in caplog.records]
     assert any(m.startswith("event loop blocked for") for m in messages), messages
     assert any(m.startswith("worker threads saturated") for m in messages), messages
+
+
+def test_stall_watch_logs_where_the_loop_is_stuck(caplog):
+    caplog.set_level(logging.INFO, "pig_music.timing")
+    lock = threading.Lock()
+    held = threading.Event()
+
+    def hold_the_lock():
+        with lock:
+            held.set()
+            time.sleep(0.6)
+
+    def hold_the_loop():
+        # A sync call on the loop waiting for a lock a worker holds.
+        with lock:
+            pass
+
+    async def scenario():
+        stall = StallWatch(stalled_seconds=0.2, repeat_seconds=10, check_every=0.05)
+        stall.start()
+        watcher = asyncio.create_task(watch_event_loop(interval=0.05, stall=stall))
+        await asyncio.sleep(0.1)
+        worker = asyncio.get_running_loop().run_in_executor(None, hold_the_lock)
+        held.wait()
+        hold_the_loop()
+        await worker
+        await asyncio.sleep(0.2)
+        stall.stop()
+        watcher.cancel()
+
+    asyncio.run(scenario())
+    stuck = [r.getMessage() for r in caplog.records if "stuck for" in r.getMessage()]
+    # Once per stall, with the loop's own stack and the default pool's load.
+    assert len(stuck) == 1, stuck
+    assert "in hold_the_loop" in stuck[0] and "asyncio 1/" in stuck[0]

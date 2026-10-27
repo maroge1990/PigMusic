@@ -23,7 +23,13 @@ from .routes.auth import auth_router, set_cookie
 from .routes.personal import personal_router
 from .security import Security, audit_routes
 from .request_limits import JsonBodyLimit
-from .request_timing import RequestTiming, mark, phase, watch_event_loop
+from .request_timing import (
+    RequestTiming,
+    StallWatch,
+    mark,
+    phase,
+    watch_event_loop,
+)
 from .transport import public_origin
 from .enrichment import Enrichment
 from .image_cache import public_image
@@ -172,7 +178,9 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                 warmer.start()
                 mixes.start(client)
             maintenance_task = asyncio.create_task(maintain_artwork())
-            loop_watch = asyncio.create_task(watch_event_loop())
+            stall_watch = StallWatch()
+            stall_watch.start()
+            loop_watch = asyncio.create_task(watch_event_loop(stall=stall_watch))
             if (
                 scanner.root.is_dir()
                 and not (store.directory / "library-snapshot.json").exists()
@@ -196,6 +204,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                 await enrichment.close()
                 maintenance_task.cancel()
                 loop_watch.cancel()
+                stall_watch.stop()
                 await task
                 await export_task
                 try:

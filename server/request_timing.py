@@ -15,7 +15,10 @@ import contextvars
 import logging
 import re
 import secrets
+import sys
+import threading
 import time
+import traceback
 
 import anyio.to_thread
 
@@ -67,14 +70,15 @@ def mark(name):
         trace.add(name, trace.elapsed())
 
 
-def pools():
+def pools(loop=None):
     """How busy the two worker pools are: the event loop's default executor
     (`asyncio.to_thread`) and AnyIO's (sync endpoints and dependencies), as
     (busy, size, waiting) each. Call on the event loop. Reads private
-    executor state, so best effort: None for a pool it cannot read."""
+    executor state, so best effort: None for a pool it cannot read. From
+    another thread, pass the loop; AnyIO's pool is then unknown."""
     default = anyio_pool = None
     try:
-        loop = asyncio.get_running_loop()
+        loop = loop or asyncio.get_running_loop()
         executor = getattr(loop, "_default_executor", None)
         if executor is not None:
             idle = executor._idle_semaphore._value
@@ -186,15 +190,83 @@ class RequestTiming:
             log.info("%s", line)
 
 
-async def watch_event_loop(interval=0.25, blocked_ms=500, quiet_seconds=10):
+class StallWatch:
+    """A thread that logs where the event loop is stuck while it is stuck:
+    after `stalled_seconds` without a heartbeat from `watch_event_loop`,
+    then every `repeat_seconds` while the stall lasts. Stacks show files,
+    lines and code, never values."""
+
+    def __init__(self, stalled_seconds=2.0, repeat_seconds=5.0, check_every=0.25):
+        self.stalled_seconds = stalled_seconds
+        self.repeat_seconds = repeat_seconds
+        self.check_every = check_every
+        self.beat = time.monotonic()
+        self.loop_thread = None
+        self.loop = None
+        self.stopping = threading.Event()
+
+    def start(self):
+        """Call on the event loop's thread."""
+        self.loop_thread = threading.get_ident()
+        self.loop = asyncio.get_running_loop()
+        self.beat = time.monotonic()
+        threading.Thread(
+            target=self.watch, name="loop-stall-watch", daemon=True
+        ).start()
+
+    def stop(self):
+        self.stopping.set()
+
+    def watch(self):
+        reported = None
+        while not self.stopping.wait(self.check_every):
+            beat, now = self.beat, time.monotonic()
+            stuck = now - beat
+            if stuck < self.stalled_seconds:
+                continue
+            if (
+                reported
+                and reported[0] == beat
+                and now - reported[1] < self.repeat_seconds
+            ):
+                continue
+            reported = (beat, now)
+            frames = sys._current_frames()
+            frame = frames.pop(self.loop_thread, None)
+            if frame is None:
+                continue
+            stack = "".join(traceback.format_stack(frame)[-25:])
+            # A worker holding a lock the loop waits for shows up here.
+            workers = [
+                "".join(traceback.format_stack(other)[-6:])
+                for other in frames.values()
+                if "/server/" in "".join(traceback.format_stack(other))
+            ]
+            log.warning(
+                "event loop stuck for %.1f s; %s; at:\n%s%s",
+                stuck,
+                describe(pools(self.loop)),
+                stack.rstrip(),
+                "".join(
+                    "\nworker thread in server code:\n" + w.rstrip() for w in workers
+                ),
+            )
+
+
+async def watch_event_loop(interval=0.25, blocked_ms=500, quiet_seconds=10, stall=None):
     """Logs when the event loop could not run for a while, and when worker
-    threads have a queue, at most once per `quiet_seconds` each."""
+    threads have a queue, at most once per `quiet_seconds` each. Beats
+    `stall`'s heartbeat."""
     loop = asyncio.get_running_loop()
     last_blocked = last_queued = 0.0
     while True:
         began = loop.time()
+        if stall is not None:
+            stall.beat = time.monotonic()
         await asyncio.sleep(interval)
         now = loop.time()
+        if stall is not None:
+            stall.beat = time.monotonic()
         lag = (now - began - interval) * 1000
         if lag >= blocked_ms and now - last_blocked >= quiet_seconds:
             last_blocked = now
