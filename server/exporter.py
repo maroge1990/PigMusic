@@ -345,6 +345,10 @@ class Exporter:
                 raise ValueError(
                     "Destination contains different content; export refused."
                 )
+            # A separate copy lets the source be deleted below: the source's
+            # own bytes must be read now, not remembered.
+            if not self.linked(source, target, expected):
+                raise ValueError("Validated download changed; export refused.")
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
             stage = contained(
@@ -391,7 +395,7 @@ class Exporter:
             )
         # The NAS copy is verified and its location durably committed before
         # deleting the staging-library copy. Restart can finish this cleanup.
-        if source.exists() and self.digest(source, this_pass=True) == expected:
+        if source.exists() and self.linked(source, target, expected):
             source.unlink()
 
     def process(self):

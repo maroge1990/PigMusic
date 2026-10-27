@@ -221,3 +221,18 @@ def test_publication_reads_a_separate_copy_before_deleting_the_source(
     with pytest.raises(ValueError, match="verification failed"):
         exporter.publish(track)
     assert source.read_bytes() == b"song"
+
+
+def test_an_edited_source_is_kept_beside_a_separate_valid_copy(tmp_path, monkeypatch):
+    store, root = nas_with(tmp_path, monkeypatch, [])
+    track = download(store, "song")
+    (source,) = (store.directory / "downloads" / "library").rglob("song.mp3")
+    exporter = Exporter(store, root)
+    copy_at_destination(store, root, exporter, track)  # The expected bytes.
+    exporter.pass_id += 1
+    assert exporter.warm(track)  # This pass's reads...
+    edit_keeping_size_and_time(source, b"gnos")  # ...then the source changes.
+    with pytest.raises(ValueError, match="download changed"):
+        exporter.publish(track)
+    assert source.read_bytes() == b"gnos"
+    assert Exporter(store, root).records()[0].get("export_relative_path") is None
