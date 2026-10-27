@@ -231,26 +231,41 @@ class StallWatch:
             ):
                 continue
             reported = (beat, now)
-            frames = sys._current_frames()
-            frame = frames.pop(self.loop_thread, None)
-            if frame is None:
+            try:
+                stacks = self.snapshot()
+            except Exception:
+                log.exception("Could not read the stalled event loop's stack")
                 continue
-            stack = "".join(traceback.format_stack(frame)[-25:])
-            # A worker holding a lock the loop waits for shows up here.
-            workers = [
-                "".join(traceback.format_stack(other)[-6:])
-                for other in frames.values()
-                if "/server/" in "".join(traceback.format_stack(other))
-            ]
+            if stacks is None:
+                continue
+            stack, workers = stacks
             log.warning(
                 "event loop stuck for %.1f s; %s; at:\n%s%s",
                 stuck,
                 describe(pools(self.loop)),
-                stack.rstrip(),
-                "".join(
-                    "\nworker thread in server code:\n" + w.rstrip() for w in workers
-                ),
+                stack,
+                "".join("\nworker thread in server code:\n" + w for w in workers),
             )
+
+    def snapshot(self):
+        """The loop's stack and the innermost frames of workers in server
+        code (a lock holder shows up there), as text. Frames are released on
+        return: holding one keeps a finished job's locals in memory."""
+        frames = sys._current_frames()
+        try:
+            frame = frames.pop(self.loop_thread, None)
+            if frame is None:
+                return None
+            stack = "".join(traceback.format_stack(frame)[-25:]).rstrip()
+            workers = []
+            for other in frames.values():
+                lines = traceback.format_stack(other)
+                if "/server/" in "".join(lines):
+                    workers.append("".join(lines[-6:]).rstrip())
+            return stack, workers
+        finally:
+            frame = other = None
+            frames.clear()
 
 
 async def watch_event_loop(interval=0.25, blocked_ms=500, quiet_seconds=10, stall=None):

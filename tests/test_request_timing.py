@@ -1,7 +1,9 @@
 import asyncio
+import gc
 import logging
 import threading
 import time
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi.testclient import TestClient
@@ -168,3 +170,38 @@ def test_stall_watch_logs_where_the_loop_is_stuck(caplog):
     # Once per stall, with the loop's own stack and the default pool's load.
     assert len(stuck) == 1, stuck
     assert "in hold_the_loop" in stuck[0] and "asyncio 1/" in stuck[0]
+
+
+def test_stall_watch_lets_a_finished_jobs_memory_go(caplog):
+    caplog.set_level(logging.INFO, "pig_music.timing")
+
+    class Payload:
+        pass
+
+    gone = threading.Event()
+    stalled = threading.Event()
+
+    def job():
+        payload = Payload()
+        weakref.finalize(payload, gone.set)
+        stalled.wait(2)  # Its frame, holding the payload, is live during the stall.
+
+    async def scenario():
+        stall = StallWatch(stalled_seconds=0.2, repeat_seconds=10, check_every=0.05)
+        stall.start()
+        watcher = asyncio.create_task(watch_event_loop(interval=0.05, stall=stall))
+        await asyncio.sleep(0.1)
+        worker = asyncio.get_running_loop().run_in_executor(None, job)
+        time.sleep(0.5)  # Stall the loop while the job runs.
+        stalled.set()
+        await worker
+        # The loop is healthy again and the watchdog still running.
+        await asyncio.sleep(0.3)
+        gc.collect()
+        collected = gone.is_set()
+        stall.stop()
+        watcher.cancel()
+        return collected
+
+    assert asyncio.run(scenario())
+    assert any("stuck for" in r.getMessage() for r in caplog.records)
