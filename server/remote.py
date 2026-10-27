@@ -163,8 +163,10 @@ class RemoteAudio:
         if self.directory is None:
             self.timing(track, None, began, steps)
             raise failure
-        # A relayed song no source has is a miss, however JioSaavn failed.
-        failure = ValueError("No relayed source matched this recording.")
+        # Only a song every source said it does not have is a miss (404,
+        # remembered long); a timeout, a provider error or a failed transfer
+        # leaves it uncertain (503, remembered briefly).
+        uncertain = isinstance(failure, (httpx.HTTPError, TimeoutError))
         async with self.relay_slots:
             # Every source searches at once; the best in priority order wins
             # and only it is transferred.
@@ -184,9 +186,14 @@ class RemoteAudio:
                     )
                 except TimeoutError:
                     step(source, "too slow", searched)
+                    uncertain = True
+                    continue
+                except ValueError:
+                    step(source, "no match", searched)
                     continue
                 except Exception:  # One broken source must not stop the next.
-                    step(source, "no match", searched)
+                    step(source, "failed", searched)
+                    uncertain = True
                     continue
                 step(source, "found", searched)
                 fetched = time.monotonic()
@@ -196,12 +203,15 @@ class RemoteAudio:
                     )
                 except Exception:
                     step(source, "transfer failed", fetched)
+                    uncertain = True
                     continue
                 step(source, "transfer", fetched)
                 self.timing(track, source, began, steps)
                 return {"path": path, "source": source}
         self.timing(track, None, began, steps)
-        raise failure
+        if uncertain:
+            raise TimeoutError("A source did not answer. Try again shortly.")
+        raise ValueError("No source has this recording.")
 
     @staticmethod
     def timing(track, source, began, steps):

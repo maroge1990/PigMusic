@@ -451,3 +451,81 @@ def test_jiosaavn_rejections_are_logged_with_their_reasons(caplog):
     (line,) = [r.getMessage() for r in caplog.records]
     assert "2 results, 0 addresses matched" in line
     assert "album 'Currents (B-Sides)'" in line and "not the recording" in line
+
+
+@pytest.mark.parametrize("trouble", ["search timeout", "provider error", "transfer"])
+def test_a_transient_failure_is_never_a_long_miss(tmp_path, monkeypatch, trouble):
+    import time
+
+    from server import remote
+    from server.providers import network
+
+    monkeypatch.setattr(remote, "DEFAULT_SEARCH_SECONDS", 0.2)
+    monkeypatch.setattr(remote, "SEARCH_SECONDS", {})
+    candidate = {
+        "channel": "Artist",
+        "title": "Song",
+        "duration": 3,
+        "source_url": "https://meln.top/song.mp3",
+    }
+    asked = []
+
+    def relay_search(source, track):
+        asked.append(source)
+        if trouble == "search timeout":
+            time.sleep(0.5)
+        if trouble == "provider error":
+            raise httpx.ConnectError("provider down")
+        return [candidate] if trouble == "transfer" and source == "freemp3cloud" else []
+
+    def transfer(url, hosts, path, context):
+        raise httpx.ReadTimeout("transfer stalled")
+
+    monkeypatch.setattr(network, "transfer", transfer)
+
+    def jiosaavn(*_):
+        raise TimeoutError("JioSaavn did not answer")
+
+    resolver = RemoteAudio(
+        jiosaavn, directory=tmp_path / "relay", relay_search=relay_search
+    )
+
+    async def play():
+        async with httpx.AsyncClient() as client:
+            return await resolver.stream(
+                client,
+                {"artist": "Artist", "title": "Song", "album": "Album"},
+                "member",
+            )
+
+    # Uncertain: the remote route answers 503, and the sources are asked again
+    # minutes later, not half an hour.
+    with pytest.raises(TimeoutError):
+        asyncio.run(play())
+    ((expiry, kind, _),) = resolver.misses.values()
+    assert kind is TimeoutError
+    assert expiry - time.monotonic() <= remote.FAILURE_SECONDS
+
+
+def test_every_source_saying_no_is_a_long_miss(tmp_path):
+    import time
+
+    from server import remote
+
+    resolver = RemoteAudio(
+        lambda *_: [], directory=tmp_path / "relay", relay_search=lambda *_: []
+    )
+
+    async def play():
+        async with httpx.AsyncClient() as client:
+            return await resolver.stream(
+                client,
+                {"artist": "Artist", "title": "Song", "album": "Album"},
+                "member",
+            )
+
+    with pytest.raises(ValueError):
+        asyncio.run(play())
+    ((expiry, kind, _),) = resolver.misses.values()
+    assert kind is ValueError
+    assert expiry - time.monotonic() > remote.FAILURE_SECONDS
