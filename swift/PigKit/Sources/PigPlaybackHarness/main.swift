@@ -133,13 +133,13 @@ do {
   var failedAt: [Int: String] = [:]
   let began = ContinuousClock.now
 
-  // A song that cannot be prepared ends the queue's stream; the player then
-  // passes over it, so the harness starts again from the next song.
+  // The queue passes over a song it cannot prepare, as the player does. A
+  // song failing mid-song, or none of the rest preparing, ends the stream;
+  // the harness then starts again after the songs that failed.
   var start = 0
   while start < items.count {
     var timeline = PlaybackTimeline(sampleRate: rate)
     let queueBegan = ContinuousClock.now
-    var reached = start
     var stream: QueuePCMStream?
     do {
       let queue = try await QueuePCMStream(
@@ -154,7 +154,8 @@ do {
             await acquisitions.ready(item.id, .now - asked)
             return source
           } catch {
-            await acquisitions.failed(item.id, error)
+            // A preparation cancelled by closing the queue is not a failure.
+            if !(error is CancellationError) { await acquisitions.failed(item.id, error) }
             throw error
           }
         }, release: { await repository.release($0) })
@@ -162,7 +163,6 @@ do {
       while let block = try await queue.next() {
         timeline.received(
           frames: block.pcm.frameCount, markers: block.markers, at: .now - queueBegan)
-        reached = timeline.songs.last?.index ?? reached
       }
       await queue.close()
       timelines.append((start, timeline))
@@ -170,10 +170,12 @@ do {
     } catch {
       await stream?.close()
       timelines.append((start, timeline))
-      // The song after the last one heard is the one that failed to start.
-      let failed = timeline.songs.isEmpty ? start : min(reached + 1, items.count - 1)
-      failedAt[failed] = error.localizedDescription
-      start = failed + 1
+      let unprepared = await acquisitions.entries.filter { $0.value.failure != nil }.keys
+      let failed = PlaybackTimeline.failedSongs(
+        start: start, lastHeard: timeline.songs.last?.index,
+        unprepared: Set(items.indices.filter { unprepared.contains(items[$0].id) }))
+      for index in failed { failedAt[index] = error.localizedDescription }
+      start = failed.last! + 1
     }
   }
 

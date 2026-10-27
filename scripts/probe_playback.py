@@ -22,6 +22,7 @@ import os
 import secrets
 import statistics
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -218,11 +219,37 @@ def read_token(path):
     return path.read_text().strip()
 
 
-def login(args):
+def require_https(server):
+    """Passwords, tokens and signed links go only to an HTTPS origin."""
+    parts = urlsplit(server)
+    if parts.scheme != "https" or not parts.hostname:
+        sys.exit("Use the server's HTTPS address.")
+
+
+def save_token(path, token):
+    """Writes the token through a new private file, then moves it into place:
+    an existing file's looser permissions never apply to the token."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".probe-token-")
+    try:
+        with os.fdopen(descriptor, "w") as handle:
+            handle.write(token)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
+def login(args, client=None):
     """Signs in once and saves only the device token, readable only by you."""
+    require_https(args.server)
     path = Path(args.token_file).expanduser()
     password = getpass.getpass(f"Password for {args.username}: ")
-    with httpx.Client(base_url=args.server, timeout=30) as client:
+    owned = client is None
+    client = client or httpx.Client(base_url=args.server, timeout=30)
+    try:
         answer = client.post(
             "/api/v1/auth/device",
             json={
@@ -232,19 +259,17 @@ def login(args):
                 "platform": "ios",
             },
         )
+    finally:
+        if owned:
+            client.close()
     if answer.status_code != 200:
         sys.exit(f"Sign-in failed: HTTP {answer.status_code}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "w") as handle:
-        handle.write(answer.json()["token"])
+    save_token(path, answer.json()["token"])
     print(f"Saved the probe's device token to {path}")
 
 
 def run(args, api=None, media=None):
-    host = urlsplit(args.server)
-    if host.scheme != "https" and host.hostname not in {"127.0.0.1", "localhost"}:
-        sys.exit("Use the server's HTTPS address.")
+    require_https(args.server)
     owned = api is None
     if owned:
         token = read_token(args.token_file)

@@ -1,6 +1,9 @@
 import json
 from types import SimpleNamespace
 
+import httpx
+import pytest
+
 from fastapi.testclient import TestClient
 
 from scripts import probe_playback
@@ -77,3 +80,43 @@ def test_token_file_must_be_private(tmp_path):
         raise AssertionError("a readable token file was accepted")
     path.chmod(0o600)
     assert probe_playback.read_token(path) == "disposable"
+
+
+def test_login_refuses_plain_http_before_asking_for_a_password(tmp_path, monkeypatch):
+    asked = []
+    monkeypatch.setattr(probe_playback.getpass, "getpass", lambda _: asked.append(1))
+    sent = []
+    client = httpx.Client(
+        base_url="http://review.invalid",
+        transport=httpx.MockTransport(lambda request: sent.append(request)),
+    )
+    for server in ("http://review.invalid", "http://127.0.0.1:8765", "review.invalid"):
+        args = SimpleNamespace(
+            server=server, username="probe", token_file=str(tmp_path / "token")
+        )
+        with pytest.raises(SystemExit, match="HTTPS"):
+            probe_playback.login(args, client=client)
+        with pytest.raises(SystemExit, match="HTTPS"):
+            probe_playback.run(SimpleNamespace(server=server, token_file="unused"))
+    assert asked == [] and sent == []
+    assert not (tmp_path / "token").exists()
+
+
+def test_login_replaces_a_readable_token_file_with_a_private_one(tmp_path, monkeypatch):
+    monkeypatch.setattr(probe_playback.getpass, "getpass", lambda _: "disposable")
+    path = tmp_path / "token"
+    path.write_text("old")
+    path.chmod(0o644)
+    client = httpx.Client(
+        base_url="https://review.invalid",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json={"token": "fresh-device-token"})
+        ),
+    )
+    args = SimpleNamespace(
+        server="https://review.invalid", username="probe", token_file=str(path)
+    )
+    probe_playback.login(args, client=client)
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert probe_playback.read_token(path) == "fresh-device-token"
+    assert [p.name for p in tmp_path.iterdir()] == ["token"]
