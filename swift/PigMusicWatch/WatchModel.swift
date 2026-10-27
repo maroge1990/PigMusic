@@ -28,6 +28,8 @@ import PigPlayback
     manifest.songs.filter { receipt?.ready[$0.id] == $0.checksum }
   }
   var playback = QueuePlaybackSnapshot()
+  /// Contexts announced so far, noted before any await (APP1).
+  @ObservationIgnored private var contextFence = CompanionContextFence()
   var repeatMode: PlaybackRepeat =
     PlaybackRepeat(rawValue: UserDefaults.standard.string(forKey: "watch.repeat") ?? "off") ?? .off
   {
@@ -312,6 +314,7 @@ import PigPlayback
   }
   private func contextReceived(_ context: CompanionContext) async {
     guard let archive else { return }
+    contextFence.note(context)
     do {
       let old = await archive.activeContext()
       switch context.arrival(over: old) {
@@ -358,6 +361,9 @@ import PigPlayback
         guard await archive.activeContext() == envelope.context else {
           throw CompanionFailure.stale
         }
+        // A context announced while that answer came back is not in it yet;
+        // nothing below awaits before playback may stop.
+        guard contextFence.admits(envelope.context) else { throw CompanionFailure.stale }
         if previous != manifest || !applied {
           // Keep playing when every queued song is unchanged in the new library.
           let unchanged = manifest.keepsPlaying(queue.map(\.track.id), replacing: previous)

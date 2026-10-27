@@ -27,6 +27,18 @@ public struct CompanionContext: Codable, Sendable, Equatable {
     return version == 1 && revision > current.revision ? .apply : .stale
   }
 }
+/// The newest context revision the Watch has been told about, noted the
+/// moment a context arrives, before applying it suspends. A manifest read
+/// meanwhile is admitted only if no newer context has been announced, so it
+/// never stops playback for a library already superseded (APP1).
+public struct CompanionContextFence: Sendable, Equatable {
+  public private(set) var newest: Int64 = 0
+  public init() {}
+  public mutating func note(_ context: CompanionContext) {
+    if context.version == 1 { newest = max(newest, context.revision) }
+  }
+  public func admits(_ context: CompanionContext) -> Bool { context.revision >= newest }
+}
 public struct CompanionSong: Codable, Sendable, Identifiable, Hashable {
   public var track: Track
   public var checksum: String

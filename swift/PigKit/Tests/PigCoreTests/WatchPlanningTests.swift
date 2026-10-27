@@ -18,6 +18,23 @@ struct WatchPlanningTests {
     future.version = 2
     #expect(future.arrival(over: current) == .stale)
   }
+  /// A manifest read while a newer context was arriving is not admitted,
+  /// even though the archive still reports its own context (RV25).
+  @Test func aManifestIsNotAdmittedOnceANewerContextIsAnnounced() {
+    var fence = CompanionContextFence()
+    let a = CompanionContext(revision: 24, account: "a")
+    fence.note(a)
+    #expect(fence.admits(a))
+    fence.note(CompanionContext(revision: 25, account: "b"))
+    #expect(!fence.admits(a))
+    #expect(fence.admits(CompanionContext(revision: 25, account: "b")))
+    // An older or unknown-version context never moves the fence back or on.
+    fence.note(CompanionContext(revision: 3, account: "a"))
+    var future = CompanionContext(revision: 99, account: "a")
+    future.version = 2
+    fence.note(future)
+    #expect(fence.newest == 25)
+  }
   @Test func emptiedPlaylistStaysFollowedAndRefills() {
     // Sent while it had songs, then emptied: still followed, songs released.
     var plan = Plan.make(
