@@ -196,24 +196,24 @@ def open_playback(store, track_id):
     return fd, info, Path(relative).suffix.lower()
 
 
+def descriptor_name(fd):
+    """A name that opens this very descriptor's file again, without walking
+    any library path (Linux /proc, macOS /dev/fd)."""
+    return f"/dev/fd/{fd}" if sys.platform == "darwin" else f"/proc/self/fd/{fd}"
+
+
 class DescriptorFileResponse(FileResponse):
-    """A FileResponse for a file already opened and checked: every read of
-    it uses that descriptor (a duplicate per open), never the path again."""
+    """A FileResponse for a file already opened and checked: each read opens
+    that descriptor's own name, never the library path again. Nothing is
+    allocated before such an open, so a cancelled request leaks nothing; the
+    checked descriptor closes when the response ends."""
 
     def __init__(self, fd, info, **options):
         self.fd = fd
-        super().__init__("", stat_result=info, **options)
-
-    @property
-    def path(self):
-        return os.dup(self.fd)
-
-    @path.setter
-    def path(self, value):
-        pass
+        super().__init__(descriptor_name(fd), stat_result=info, **options)
 
     async def __call__(self, scope, receive, send):
-        # The server must not send by path: there is no trusted path.
+        # The server must not send by path: the name is this process's own.
         extensions = dict(scope.get("extensions") or {})
         extensions.pop("http.response.pathsend", None)
         try:

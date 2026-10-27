@@ -137,3 +137,34 @@ def test_every_descriptor_is_closed(tmp_path, monkeypatch):
         client.get(url, headers={"Range": "bytes=0-1,4-5"})
         assert client.get(url, headers={"Range": "bytes=99-"}).status_code == 416
     assert opened and sorted(opened) == sorted(closed)
+
+
+def test_a_cancelled_response_leaves_no_descriptor_open(tmp_path, monkeypatch):
+    import anyio
+
+    app, token, path = setup(tmp_path, monkeypatch)
+    store = app.state.store
+    before = set(os.listdir("/dev/fd"))
+
+    async def cancelled(headers):
+        fd, info, _ = media.open_playback(store, "song")
+        response = media.DescriptorFileResponse(fd, info, media_type="audio/mpeg")
+        scope = {"type": "http", "method": "GET", "headers": headers}
+
+        sent = []
+
+        async def send(message):
+            sent.append(message["type"])
+
+        async def receive():
+            return {"type": "http.request"}
+
+        # Cancelled once the headers are out, before the file is opened.
+        with anyio.CancelScope() as scope_:
+            scope_.cancel()
+            await response(scope, receive, send)
+        assert sent and "http.response.body" not in sent
+
+    for headers in ([], [(b"range", b"bytes=0-3")]):
+        anyio.run(cancelled, headers)
+    assert set(os.listdir("/dev/fd")) <= before
