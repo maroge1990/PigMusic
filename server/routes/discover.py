@@ -24,6 +24,7 @@ from ..api_models import (
 )
 from ..conditional import CONDITIONAL_RESPONSES, conditional_json
 from ..user_library import track_dto
+from ..warmer import SEARCH
 
 
 # A trailing qualifier that names an edition of the same album. Anything else
@@ -51,6 +52,9 @@ def title_key(title):
     return normalise(text) or normalise(title)
 
 
+# Covers fetched as soon as an artist's discography is opened: a phone's
+# first screen of release tiles.
+ARTIST_PAGE_COVERS = 24
 ACTIVE = {"waiting_for_sources", "searching", "downloading", "validating", "importing"}
 
 
@@ -195,6 +199,17 @@ def discover_router(store, catalogue, popularity=None, warmer=None, http_client=
                 "saved_songs": album.get("track_count", 0) if album else 0,
             }
 
+        groups = result.get("release-groups", [])
+        if warmer is not None and groups:
+            # The page shows these covers next: fetch them now, ahead of the
+            # background pass (ART2: 50-56 of 72 at first ask).
+            warmer.submit(
+                valid(artist_id),
+                priority=SEARCH,
+                covers=[
+                    ("release-group", r["id"]) for r in groups[:ARTIST_PAGE_COVERS]
+                ],
+            )
         return {
             "total": result.get("count", result.get("release-group-count", 0)),
             "offset": offset,
@@ -206,7 +221,7 @@ def discover_router(store, catalogue, popularity=None, warmer=None, http_client=
                     "type": r.get("primary-type") or "Release",
                     **owned(r),
                 }
-                for r in result.get("release-groups", [])
+                for r in groups
             ],
         }
 

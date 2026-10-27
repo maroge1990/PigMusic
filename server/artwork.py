@@ -212,6 +212,14 @@ class Artwork:
                     content = await self.front(client, kind, item_id)
                     await asyncio.to_thread(self.save, content, target)
                     return target
+                except httpx.HTTPStatusError as exc:
+                    # A cover that does not exist is asked for again tomorrow,
+                    # not on every warm pass (ART2: each retry also costs a
+                    # MusicBrainz request song matching waits for).
+                    self.remember_missing(
+                        key, 86400 if exc.response.status_code == 404 else 300
+                    )
+                    return None
                 except (
                     httpx.HTTPError,
                     ValueError,

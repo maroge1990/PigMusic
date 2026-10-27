@@ -358,3 +358,78 @@ def test_library_cover_falls_back_from_unscanned_edition_to_its_release_group(
         assert client.get(library["artists"][0]["cover_url"]).status_code == 200
         assert len(calls) == 3
         app.state.http = original
+
+
+def test_a_cover_that_does_not_exist_is_asked_for_again_only_tomorrow(tmp_path):
+    import time
+
+    statuses = {GROUP: 404, RELEASE: 503}
+    calls = []
+
+    def transport(request):
+        calls.append(request.url.path)
+        for item, status in statuses.items():
+            if item in request.url.path:
+                return httpx.Response(status)
+        return httpx.Response(500)
+
+    app = create_app(tmp_path)
+    with TestClient(app) as client:
+        original = app.state.http
+        app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+        for kind, item in (("release-group", GROUP), ("release", RELEASE)):
+            assert (
+                settled_get(
+                    client, app, f"/api/v1/catalogue/artwork/{kind}/{item}"
+                ).status_code
+                == 404
+            )
+        store = app.state.store
+        missing = store.read_document("catalogue-artwork:release-group:" + GROUP)
+        busy = store.read_document("catalogue-artwork:release:" + RELEASE)
+        assert missing["retry_after"] - time.time() > 86000
+        assert busy["retry_after"] - time.time() <= 300
+        # A pass soon after asks again only for the one that was busy.
+        asked = len(calls)
+        settled_get(client, app, "/api/v1/catalogue/artwork/release-group/" + GROUP)
+        assert len(calls) == asked
+        app.state.http = original
+
+
+def test_opening_a_discography_warms_its_first_covers(tmp_path, monkeypatch):
+    from server.warmer import SEARCH, Warmer
+
+    groups = [
+        {"id": f"{index:08d}-2222-4222-8222-222222222222", "title": f"Album {index}"}
+        for index in range(30)
+    ]
+    submitted = []
+    monkeypatch.setattr(
+        Warmer, "submit", lambda self, *args, **kwargs: submitted.append((args, kwargs))
+    )
+
+    def transport(request):
+        return httpx.Response(
+            200, json={"release-group-count": 30, "release-groups": groups}
+        )
+
+    from test_security import PASSWORD, protected
+
+    app, _ = protected(tmp_path, monkeypatch)
+    token = app.state.auth.login("mark", PASSWORD, "device", "phone", "ios", "f")[
+        "token"
+    ]
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token},
+    ) as client:
+        original = app.state.http
+        app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+        artist = "11111111-1111-4111-8111-111111111111"
+        page = client.get(f"/api/v1/catalogue/artists/{artist}/releases")
+        assert page.status_code == 200, page.text
+        app.state.http = original
+    ((args, kwargs),) = submitted
+    assert args == (artist,) and kwargs["priority"] == SEARCH
+    assert kwargs["covers"] == [("release-group", g["id"]) for g in groups[:24]]
