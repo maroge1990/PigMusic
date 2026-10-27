@@ -6,6 +6,8 @@ from pathlib import Path
 import threading
 import time
 
+import pytest
+
 from server import exporter as exporter_module
 from server.exporter import Exporter
 from server.lifecycle import TimedRLock
@@ -171,3 +173,51 @@ def test_library_add_copies_a_mix_cache_file_without_lifecycle_lock(
     Downloader(store, providers={}).process(store.claim_request())
     assert copies == [False]
     assert store.queue()["items"][0]["status"] == "completed"
+
+
+def edit_keeping_size_and_time(path, content):
+    info = os.stat(path)
+    path.write_bytes(content)
+    os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns))
+    assert os.stat(path).st_size == info.st_size
+
+
+def copy_at_destination(store, root, exporter, track):
+    target = root / exporter.relative(track)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(track["id"].encode())
+    settle(target)
+    return target
+
+
+def test_an_edit_that_restores_the_time_never_lets_a_pass_delete_the_source(
+    tmp_path, monkeypatch
+):
+    store, root = nas_with(tmp_path, monkeypatch, [])
+    track = download(store, "song")
+    (source,) = (store.directory / "downloads" / "library").rglob("song.mp3")
+    exporter = Exporter(store, root)
+    target = copy_at_destination(store, root, exporter, track)
+    exporter.digest(target)  # Remembered by an earlier pass.
+    edit_keeping_size_and_time(target, b"gnos")
+    exporter.process()
+    status = store.read_document("library-export-status")
+    assert status["status"] == "partial"
+    assert "different content" in status["needs_review"][0]["error"]
+    assert source.read_bytes() == b"song"
+    assert Exporter(store, root).records()[0].get("export_relative_path") is None
+
+
+def test_publication_reads_a_separate_copy_before_deleting_the_source(
+    tmp_path, monkeypatch
+):
+    store, root = nas_with(tmp_path, monkeypatch, [])
+    track = download(store, "song")
+    (source,) = (store.directory / "downloads" / "library").rglob("song.mp3")
+    exporter = Exporter(store, root)
+    target = copy_at_destination(store, root, exporter, track)
+    exporter.digest(target, this_pass=True)  # Read in this very pass...
+    edit_keeping_size_and_time(target, b"gnos")  # ...then edited.
+    with pytest.raises(ValueError, match="verification failed"):
+        exporter.publish(track)
+    assert source.read_bytes() == b"song"

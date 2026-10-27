@@ -85,13 +85,22 @@ class Exporter:
         # SHA-256 by path and file identity (device, inode, size, modification
         # time), so an unchanged pass reads no audio and hashing happens before
         # lifecycle_lock is taken (LOCK1). A changed file is hashed again.
+        # Metadata cannot see an edit that restores the modification time, so
+        # only the read-only check of a song already published trusts an
+        # earlier pass; publishing trusts only a read made in this pass, and
+        # deleting the source needs a hard link or a read made just now.
         self.digests = {}
+        self.pass_id = 0
 
-    def digest(self, path):
+    def digest(self, path, this_pass=False):
         key = os.fspath(path)
         before = fingerprint(path)
         cached = self.digests.get(key)
-        if cached and cached[0] == before:
+        if (
+            cached
+            and cached[0] == before
+            and (not this_pass or cached[2] == self.pass_id)
+        ):
             return cached[1]
         started = time.time_ns()
         value = digest(path)
@@ -100,13 +109,14 @@ class Exporter:
         if fingerprint(path) == before and settled(before, started):
             if len(self.digests) > 20000:
                 self.digests.clear()
-            self.digests[key] = (before, value)
+            self.digests[key] = (before, value, self.pass_id)
         return value
 
     def linked(self, path, source, expected):
-        """A hard link of the source just verified needs no second read."""
+        """Whether `path` holds the verified source's bytes: a hard link of it,
+        or read again now. This decides whether the source may be deleted."""
         try:
-            return os.path.samefile(path, source) or self.digest(path) == expected
+            return os.path.samefile(path, source) or digest(path) == expected
         except OSError:
             return False
 
@@ -127,11 +137,15 @@ class Exporter:
         publication never hashes it under the lock."""
         try:
             source, _, target = self.paths(track)
+            # A song already published whose download is gone only needs its
+            # copy checked: an earlier pass's read will do. Anything else
+            # publishes, so it is read in this pass.
+            published = track.get("export_relative_path") and not source.is_file()
             for path in (source, target):
                 if path.is_file():
                     if not settled(fingerprint(path)):
                         return False
-                    self.digest(path)
+                    self.digest(path, this_pass=not published)
         except (OSError, ValueError, KeyError):
             pass  # publish() reports it.
         return True
@@ -324,10 +338,10 @@ class Exporter:
             ):
                 return
             raise ValueError("Validated download is unavailable; export deferred.")
-        if self.digest(source) != expected:
+        if self.digest(source, this_pass=True) != expected:
             raise ValueError("Validated download changed; export refused.")
         if target.exists():
-            if not target.is_file() or self.digest(target) != expected:
+            if not target.is_file() or self.digest(target, this_pass=True) != expected:
                 raise ValueError(
                     "Destination contains different content; export refused."
                 )
@@ -357,7 +371,7 @@ class Exporter:
                 try:
                     os.link(stage, target)
                 except FileExistsError:
-                    if self.digest(target) != expected:
+                    if not self.linked(target, source, expected):
                         raise ValueError("Destination changed during export.")
             finally:
                 stage.unlink(missing_ok=True)
@@ -377,7 +391,7 @@ class Exporter:
             )
         # The NAS copy is verified and its location durably committed before
         # deleting the staging-library copy. Restart can finish this cleanup.
-        if source.exists() and self.digest(source) == expected:
+        if source.exists() and self.digest(source, this_pass=True) == expected:
             source.unlink()
 
     def process(self):
@@ -387,6 +401,7 @@ class Exporter:
             blocking=False
         ):
             return
+        self.pass_id += 1
         try:
             if not self.root.is_dir():
                 raise ValueError("Library mount unavailable; export deferred.")
