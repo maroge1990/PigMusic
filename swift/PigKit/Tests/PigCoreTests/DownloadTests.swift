@@ -43,10 +43,14 @@ private actor AheadSource: DeviceCopySource {
     URLRequest(url: URL(string: "https://server.invalid/" + trackId)!)
   }
 }
-/// Holds the first request ahead ("two") until the test opens it.
+/// Holds the first request ahead ("create two") until the test opens it or
+/// its task is cancelled, as a URL request would be.
 private actor GatedSource: DeviceCopySource {
   var calls: [String] = []
   var gate: CheckedContinuation<Void, Never>?
+  var held = false
+  var released = false
+  var slowFirst = true
   let ready: DeviceCopy
   let preparing: DeviceCopy
   init(ready: DeviceCopy, preparing: DeviceCopy) {
@@ -54,18 +58,37 @@ private actor GatedSource: DeviceCopySource {
     self.preparing = preparing
   }
   var waiting: Bool { gate != nil }
+  func readyAtOnce() { slowFirst = false }
   func open() {
+    released = true
     gate?.resume()
     gate = nil
   }
+  private func hold() async {
+    await withCheckedContinuation { continuation in
+      if released { continuation.resume() } else { gate = continuation }
+    }
+  }
   func deviceCopy(trackId: String, quality: String, create: Bool) async throws -> DeviceCopy {
     calls.append((create ? "create " : "poll ") + trackId)
-    if trackId == "two" && create { await withCheckedContinuation { gate = $0 } }
-    return trackId == "one" ? preparing : ready
+    if trackId == "two" && create && !held {
+      held = true
+      await withTaskCancellationHandler {
+        await hold()
+      } onCancel: {
+        Task { await self.open() }
+      }
+      try Task.checkCancellation()
+    }
+    return trackId == "one" && slowFirst ? preparing : ready
   }
   func copyRequest(trackId: String, quality: String) async throws -> URLRequest {
     URLRequest(url: URL(string: "https://server.invalid/" + trackId)!)
   }
+}
+private actor Flag {
+  var value = false
+  func set() { value = true }
 }
 @Suite struct DownloadTests {
   func track() throws -> Track {
@@ -154,6 +177,43 @@ private actor GatedSource: DeviceCopySource {
     let calls = await source.calls
     #expect(calls.contains("create two"))
     #expect(!calls.contains("create three") && !calls.contains("create four"))
+  }
+  @MainActor @Test func pausingCancelsEveryBatchAskedForAhead() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let archive = try archive(root)
+    // More than one batch: the first song's turn ends at once and the next
+    // batch waits on the stalled first one.
+    let ids = ["one", "two"] + (3...40).map { "song\($0)" }
+    let songs = try ids.map { id in
+      try LibraryCodec.decoder().decode(
+        Track.self,
+        from: Data(
+          #"{"id":"\#(id)","title":"Song","artist":"Artist","source_revision":"v1"}"#.utf8))
+    }
+    try await archive.enqueue(songs, quality: "original")
+    let source = GatedSource(ready: try copy(), preparing: try copy())
+    await source.readyAtOnce()
+    let controller = DownloadController(archive: archive, source: source)
+    controller.resume()
+    for _ in 0..<300 where !(await source.waiting) {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(await source.waiting)
+    try await Task.sleep(for: .milliseconds(200))  // Later turns queue another batch.
+    // Without opening the stalled request: pausing cancels it.
+    let done = Flag()
+    let paused = Task {
+      await controller.pause()
+      await done.set()
+    }
+    for _ in 0..<300 where !(await done.value) {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    let finishedAlone = await done.value
+    if !finishedAlone { await source.open() }  // Unblock it so the test ends.
+    await paused.value
+    #expect(finishedAlone)
   }
   @Test func verifiedCopySurvivesRestartThenReconcilesOnlyAuthoritativeChanges() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

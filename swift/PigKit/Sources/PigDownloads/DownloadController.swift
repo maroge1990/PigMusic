@@ -191,7 +191,12 @@ import PigDomain
     let previous = ahead
     let source = source
     ahead = Task(priority: .utility) { [weak self] in
-      await previous?.value
+      // Stopping this batch stops the one before it too, mid-request.
+      await withTaskCancellationHandler {
+        await previous?.value
+      } onCancel: {
+        previous?.cancel()
+      }
       for (id, quality) in wanted {
         guard !Task.isCancelled, self?.generation == stamp else { return }
         do {
