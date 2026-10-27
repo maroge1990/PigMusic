@@ -121,7 +121,13 @@ def test_remote_falls_back_in_order_to_a_relayed_lossy_source(
     # Every source is searched at once; the best match in order is relayed.
     assert found["source"] == "freemp3cloud"
     # The server log says where the wait went.
-    (timing,) = [r.getMessage() for r in caplog.records]
+    (timing,) = [
+        r.getMessage() for r in caplog.records if r.getMessage().startswith("Remote")
+    ]
+    (rejected,) = [
+        r.getMessage() for r in caplog.records if r.getMessage().startswith("JioSaavn")
+    ]
+    assert rejected.endswith("0 results, 0 addresses matched; no results")
     assert timing.startswith("Remote playback: Artist - Song from freemp3cloud in ")
     for step in ("jiosaavn no match", "zvu4no no match", "freemp3cloud found"):
         assert step in timing
@@ -275,3 +281,173 @@ def test_relayed_mp3_gets_a_length_header_without_reencoding(tmp_path):
     assert b"Xing" in after[:4096] or b"Info" in after[:4096]
     # Audio frames are copied, not re-encoded: the size barely changes.
     assert abs(len(after) - len(before)) < 4096
+
+
+def test_a_song_no_source_has_is_remembered_as_a_miss(tmp_path, monkeypatch):
+    import time
+
+    from server import remote
+
+    asked = []
+
+    def relay_search(source, track):
+        asked.append(source)
+        return []
+
+    resolver = RemoteAudio(
+        lambda *_: asked.append("jiosaavn") or [],
+        directory=tmp_path / "relay",
+        relay_search=relay_search,
+    )
+    target = {"artist": "Artist", "title": "Creep (Live)", "album": "Album"}
+
+    async def play():
+        async with httpx.AsyncClient() as client:
+            return await resolver.stream(client, target, "member")
+
+    with pytest.raises(ValueError):
+        asyncio.run(play())
+    assert sorted(asked) == ["freemp3cloud", "jiosaavn", "youtube", "zvu4no"]
+    started = time.monotonic()
+    with pytest.raises(ValueError):
+        asyncio.run(play())
+    assert time.monotonic() - started < 1 and len(asked) == 4
+    # Once the miss has expired, the sources are asked again.
+    for name, (_, kind, message) in list(resolver.misses.items()):
+        resolver.misses[name] = (time.monotonic() - 1, kind, message)
+    with pytest.raises(ValueError):
+        asyncio.run(play())
+    assert len(asked) == 8
+
+
+def test_a_network_failure_is_remembered_only_briefly():
+    from server import remote
+
+    def search(*_):
+        raise TimeoutError("JioSaavn did not answer")
+
+    resolver = RemoteAudio(search)
+    target = {"artist": "Artist", "title": "Song", "album": "Album"}
+
+    async def play():
+        async with httpx.AsyncClient() as client:
+            return await resolver.stream(client, target, "member")
+
+    with pytest.raises(TimeoutError):
+        asyncio.run(play())
+    ((expiry, kind, _),) = resolver.misses.values()
+    assert kind is TimeoutError
+    import time
+
+    assert expiry - time.monotonic() <= remote.FAILURE_SECONDS
+    with pytest.raises(TimeoutError):
+        asyncio.run(play())  # From memory: the remote route answers 503.
+
+
+def test_a_slow_source_gives_way_within_its_limit(tmp_path, monkeypatch):
+    import shutil
+    import subprocess
+    import time
+
+    from server import remote
+    from server.providers import network
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        pytest.skip("FFmpeg is required for the relay probe")
+    fixture = tmp_path / "fixture.mp3"
+    subprocess.run(
+        [ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=duration=3", str(fixture)],
+        check=True,
+    )
+    monkeypatch.setattr(remote, "DEFAULT_SEARCH_SECONDS", 0.3)
+    candidate = {
+        "channel": "Artist",
+        "title": "Song",
+        "duration": 3,
+        "source_url": "https://meln.top/song.mp3",
+        "quality": "320kbps",
+    }
+
+    def relay_search(source, track):
+        if source == "zvu4no":
+            time.sleep(2)  # The first choice is stuck.
+        return [candidate] if source == "freemp3cloud" else []
+
+    monkeypatch.setattr(
+        network,
+        "transfer",
+        lambda url, hosts, path, context: shutil.copyfile(fixture, path),
+    )
+    resolver = RemoteAudio(
+        lambda *_: [], directory=tmp_path / "relay", relay_search=relay_search
+    )
+
+    async def play():
+        started = time.monotonic()
+        async with httpx.AsyncClient() as client:
+            found = await resolver.stream(
+                client,
+                {"artist": "Artist", "title": "Song", "album": "Album", "duration": 3},
+                "member",
+            )
+        # Answered before the stuck search ends (asyncio.run waits for it).
+        return found, time.monotonic() - started
+
+    found, seconds = asyncio.run(play())
+    assert found["source"] == "freemp3cloud" and seconds < 1.5
+
+
+def test_a_jiosaavn_lookup_never_waits_behind_relays():
+    candidate = {
+        "channel": "Artist",
+        "title": "Song",
+        "album": "Album",
+        "duration": 180,
+        "source_url": "https://aac.saavncdn.com/music.m4a",
+    }
+    target = {"artist": "Artist", "title": "Song", "album": "Album", "duration": 180}
+
+    async def run():
+        resolver = RemoteAudio(lambda *_: [candidate])
+        for _ in range(3):  # Three songs transferring from relayed sources.
+            await resolver.relay_slots.acquire()
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(206, headers={"content-type": "audio/mp4"})
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await asyncio.wait_for(resolver.resolve(client, target), 1)
+
+    assert asyncio.run(run()) == candidate["source_url"]
+
+
+def test_jiosaavn_rejections_are_logged_with_their_reasons(caplog):
+    target = {"artist": "Tame Impala", "title": "The Less I Know the Better"}
+    target["album"] = "Currents"
+    results = [
+        {
+            "channel": "Tame Impala",
+            "title": "The Less I Know the Better",
+            "album": "Currents (B-Sides)",
+            "duration": 216,
+            "source_url": "https://aac.saavncdn.com/a.m4a",
+        },
+        {
+            "channel": "Someone Else",
+            "title": "The Less I Know the Better",
+            "album": "Covers",
+            "duration": 200,
+            "source_url": "https://aac.saavncdn.com/b.m4a",
+        },
+    ]
+
+    async def run():
+        async with httpx.AsyncClient() as client:
+            await RemoteAudio(lambda *_: results).resolve(client, target)
+
+    with caplog.at_level("INFO", logger="pig_music.remote"):
+        with pytest.raises(ValueError):
+            asyncio.run(run())
+    (line,) = [r.getMessage() for r in caplog.records]
+    assert "2 results, 0 addresses matched" in line
+    assert "album 'Currents (B-Sides)'" in line and "not the recording" in line

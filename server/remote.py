@@ -37,6 +37,14 @@ MEDIA_TYPES = {".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".opus": "audio/ogg"}
 RELAY_SECONDS = 14 * 86400
 RELAY_BYTES = 5_000_000_000
 TOKEN_SECONDS = 6 * 3600
+# A song no source has is not searched for again for a while; a failure of a
+# source or the network only briefly (REMOTE1: a miss took 30-35 s each time).
+MISS_SECONDS = 30 * 60
+FAILURE_SECONDS = 2 * 60
+# Each relayed source's search gets this long, from when they all start
+# (YouTube search took up to 15 s); a slower one counts as no match.
+SEARCH_SECONDS = {"youtube": 10}
+DEFAULT_SEARCH_SECONDS = 8
 
 
 class RemoteAudio:
@@ -45,7 +53,12 @@ class RemoteAudio:
     def __init__(self, search=None, directory=None, runtime=None, relay_search=None):
         self.search = search or search_jiosaavn
         self.cache = {}
+        # JioSaavn lookups and relays wait for their own slots: a lookup
+        # never queues behind another song's transfer.
         self.slots = asyncio.Semaphore(3)
+        self.relay_slots = asyncio.Semaphore(3)
+        # {name: (monotonic expiry, exception type, message)}
+        self.misses = {}
         # Other sources are fetched by the server into a short-lived cache and
         # served from this origin; without a directory only JioSaavn is used.
         self.directory = Path(directory) if directory else None
@@ -85,6 +98,9 @@ class RemoteAudio:
     async def shared(self, client, track):
         # Playing a song that is being prepared joins that work.
         name = self.name(track)
+        missed = self.misses.get(name)
+        if missed and missed[0] > time.monotonic():
+            raise missed[1](missed[2])
         task = self.inflight.get(name)
         if task is None:
             task = asyncio.ensure_future(self.locate(client, track))
@@ -93,6 +109,25 @@ class RemoteAudio:
         return await asyncio.shield(task)
 
     async def locate(self, client, track):
+        try:
+            return await self._locate(client, track)
+        except (ValueError, KeyError, TypeError) as exc:
+            self.remember_miss(track, ValueError, exc, MISS_SECONDS)
+            raise
+        except (httpx.HTTPError, TimeoutError) as exc:
+            self.remember_miss(track, type(exc), exc, FAILURE_SECONDS)
+            raise
+
+    def remember_miss(self, track, kind, exc, seconds):
+        if len(self.misses) > 2000:
+            now = time.monotonic()
+            self.misses = {k: v for k, v in self.misses.items() if v[0] > now}
+        # httpx errors need a request to be raised again; TimeoutError does not.
+        if not issubclass(kind, (ValueError, TimeoutError)):
+            kind = TimeoutError
+        self.misses[self.name(track)] = (time.monotonic() + seconds, kind, str(exc))
+
+    async def _locate(self, client, track):
         # A copy already relayed for this recording plays at once, before any
         # provider is asked again.
         if self.directory is not None:
@@ -108,9 +143,11 @@ class RemoteAudio:
             seconds = time.monotonic() - since
             steps.append(f"{name} {outcome} {seconds:.1f} s")
             # The same steps in Server-Timing: "youtube-found", "jiosaavn-miss".
-            outcome = {"no match": "miss", "transfer failed": "failed"}.get(
-                outcome, outcome
-            )
+            outcome = {
+                "no match": "miss",
+                "transfer failed": "failed",
+                "too slow": "timeout",
+            }.get(outcome, outcome)
             add_phase(f"{name}-{outcome}".lower(), seconds * 1000)
 
         try:
@@ -126,7 +163,9 @@ class RemoteAudio:
         if self.directory is None:
             self.timing(track, None, began, steps)
             raise failure
-        async with self.slots:
+        # A relayed song no source has is a miss, however JioSaavn failed.
+        failure = ValueError("No relayed source matched this recording.")
+        async with self.relay_slots:
             # Every source searches at once; the best in priority order wins
             # and only it is transferred.
             searched = time.monotonic()
@@ -137,8 +176,15 @@ class RemoteAudio:
             for search in searches:
                 search.add_done_callback(lambda t: t.cancelled() or t.exception())
             for source, search in zip(RELAYED, searches):
+                limit = SEARCH_SECONDS.get(source, DEFAULT_SEARCH_SECONDS)
+                left = searched + limit - time.monotonic()
                 try:
-                    candidate = await search
+                    candidate = await asyncio.wait_for(
+                        asyncio.shield(search), max(left, 0.01)
+                    )
+                except TimeoutError:
+                    step(source, "too slow", searched)
+                    continue
                 except Exception:  # One broken source must not stop the next.
                     step(source, "no match", searched)
                     continue
@@ -337,6 +383,7 @@ class RemoteAudio:
             ]
             urls = {c.get("source_url"): c for c in candidates}
             if len(urls) != 1:
+                self.rejected(track, results, len(urls))
                 raise ValueError(
                     "No unique remote recording matched this release. Downloading remains available."
                 )
@@ -365,6 +412,36 @@ class RemoteAudio:
                 self.cache.clear()
             self.cache[key] = (time.monotonic() + 90, url)
             return url
+
+    @staticmethod
+    def rejected(track, results, matched):
+        """Why JioSaavn's results did not give one address (REMOTE1: the same
+        song matched on one run and not the next)."""
+        reasons = []
+        for c in results[:8]:
+            if not matches(track, c):
+                why = "not the recording"
+            elif normalise(c.get("album", "")) != normalise(track["album"]):
+                why = "album " + repr(c.get("album", ""))
+            elif (
+                track.get("isrcs") and c.get("isrc") and c["isrc"] not in track["isrcs"]
+            ):
+                why = "ISRC " + c["isrc"]
+            else:
+                why = "matched"
+            reasons.append(
+                f"{c.get('channel') or c.get('artist')} - {c.get('title')} "
+                f"({c.get('duration')} s): {why}"
+            )
+        log.info(
+            "JioSaavn: %s - %s (%s): %d results, %d addresses matched; %s",
+            track.get("artist"),
+            track.get("title"),
+            track.get("album"),
+            len(results),
+            matched,
+            "; ".join(reasons) or "no results",
+        )
 
 
 def add_length_header(path):
