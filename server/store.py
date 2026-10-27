@@ -49,8 +49,6 @@ class Store:
         # cleanup takes this after lifecycle_lock, never the other way round.
         self.mix_lock = threading.RLock()
         self.library_lock = TimedRLock("library_lock")
-        # One refresh at a time, built outside library_lock (LOCK1).
-        self.refresh_lock = threading.RLock()
         directory.mkdir(parents=True, exist_ok=True)
         self.cover_dir = directory / "covers"
         self.cover_dir.mkdir(exist_ok=True)
@@ -70,12 +68,13 @@ class Store:
         """Rebuild the library from the snapshot and the database. The build
         (reads, cover lookups, the index and fingerprint: 1-2 s live) runs
         outside library_lock, which is held only to swap the result in, so
-        readers never wait for it (LOCK1, 28 Oct). Refreshes run one at a
-        time: each build reads the edition anchors the previous one saved,
-        so a stale build can never move an album's ID."""
-        with self.refresh_lock:
-            with self.covers.lock:
-                built = self._build_library()
+        readers never wait for it (LOCK1, 28 Oct). covers.lock, held from
+        build to swap, runs refreshes one at a time, so each build reads the
+        edition anchors the previous one saved; it is also the lock a scan
+        already holds when it refreshes, so the order is always covers.lock,
+        then library_lock."""
+        with self.covers.lock:
+            built = self._build_library()
             with self.library_lock:
                 self._publish_library(built)
 

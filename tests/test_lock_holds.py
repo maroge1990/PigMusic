@@ -352,3 +352,31 @@ def test_a_coordinated_method_is_named_even_from_a_worker_thread(tmp_path, caplo
         pool.submit(store.recover_requests).result()
     holds = [r.message for r in caplog.records if "lifecycle_lock held" in r.message]
     assert any("store.Store.recover_requests" in m for m in holds), holds
+
+
+def test_a_scan_holding_the_cover_lock_still_refreshes_beside_another_refresh(
+    tmp_path, monkeypatch
+):
+    # Codex (LOCK1 round 2, reproduced): a scan holds covers.lock through its
+    # refresh; a separate refresh lock taken first by another refresh
+    # deadlocked the two, with lifecycle_lock held.
+    store, _ = nas_with(tmp_path, monkeypatch, [])
+    held, go, done = threading.Event(), threading.Event(), threading.Event()
+
+    def scan():
+        with store.covers.lock:  # As LibraryScanner.run does.
+            held.set()
+            go.wait(5)
+            store.refresh_library()
+        done.set()
+
+    scanner = threading.Thread(target=scan, daemon=True)
+    scanner.start()
+    assert held.wait(5)
+    other = threading.Thread(target=store.refresh_library, daemon=True)
+    other.start()
+    other.join(0.2)  # Now waiting for the scan.
+    go.set()
+    assert done.wait(5), "the scan's refresh deadlocked"
+    other.join(5)
+    assert not other.is_alive()
