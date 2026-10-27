@@ -177,12 +177,13 @@ def test_a_cast_albums_song_credit_files_under_the_album_artist(tmp_path):
     catalogue = Fake(
         release=lambda path, params: {
             "artist-credit": [{"artist": LIN, "name": "Lin-Manuel Miranda"}]
-        }
+        },
+        artist=lambda path, params: {"count": 0, "artists": []},
     )
     albums = [{**ALBUMS[0], "title": "Hamilton", "category": "musical"}]
     assert resolve_credit(store, catalogue, CAST, albums) == LIN
-    # No catalogue search ever names the whole credit.
-    assert catalogue.paths == ["release/" + RELEASE]
+    # The whole credit is looked for once (no artist has that name).
+    assert catalogue.paths == ["release/" + RELEASE, "artist/"]
     # Remembered for that credit: asked again, nothing is fetched.
     again = Fake()
     assert resolve_credit(store, again, CAST, albums)["id"] == LIN["id"]
@@ -196,11 +197,12 @@ def test_a_featured_credit_resolves_to_its_lead(tmp_path):
                 {"artist": {"id": ARTIST, "name": "Coldplay"}, "joinphrase": " & "},
                 {"artist": {"id": OTHER, "name": "Rihanna"}},
             ]
-        }
+        },
+        artist=lambda path, params: {"count": 0, "artists": []},
     )
     found = resolve_credit(Store(tmp_path), catalogue, "Coldplay feat. Rihanna", ALBUMS)
     assert found == {"id": ARTIST, "name": "Coldplay"}
-    assert catalogue.paths == ["release/" + RELEASE]
+    assert catalogue.paths == ["release/" + RELEASE, "artist/"]
 
 
 def test_without_releases_the_lead_is_found_by_exactly_their_name(tmp_path):
@@ -271,4 +273,56 @@ def test_various_artists_is_never_a_performers_identity(tmp_path):
     albums = [{**ALBUMS[0], "title": "Film", "category": "soundtrack"}]
     with pytest.raises(Ambiguous):
         resolve_credit(store, catalogue, "Singer A & Singer B", albums)
+    assert store.read_document("library-artist:lib-credit") == {}
+
+
+def test_a_band_on_a_soundtrack_is_still_found_by_its_whole_name(tmp_path):
+    band = {"id": ARTIST, "name": "Earth, Wind & Fire"}
+    composer = {"id": OTHER, "name": "Composer"}
+    catalogue = Fake(
+        release=lambda path, params: {"artist-credit": [{"artist": composer}]},
+        artist=lambda path, params: {"count": 1, "artists": [band]},
+    )
+    albums = [{**ALBUMS[0], "title": "Film", "category": "soundtrack"}]
+    assert resolve_credit(Store(tmp_path), catalogue, band["name"], albums) == band
+
+
+def test_namesake_leads_across_releases_are_the_owners_choice(tmp_path):
+    first = {"id": ARTIST, "name": "John Williams"}
+    second = {"id": OTHER, "name": "John Williams"}
+    credits = iter([[{"artist": first}], [{"artist": second}]])
+    catalogue = Fake(
+        release=lambda path, params: {"artist-credit": next(credits)},
+        artist=lambda path, params: {"count": 0, "artists": []},
+    )
+    albums = [
+        {"id": "a", "title": "One", "musicbrainz_release_id": RELEASE},
+        {
+            "id": "b",
+            "title": "Two",
+            "musicbrainz_release_id": "55555555-5555-4555-8555-555555555555",
+        },
+    ]
+    with pytest.raises(Ambiguous) as caught:
+        resolve_credit(Store(tmp_path), catalogue, "John Williams & Orchestra", albums)
+    assert {c["id"] for c in caught.value.candidates} == {ARTIST, OTHER}
+
+
+@pytest.mark.parametrize(
+    "special",
+    [
+        "89ad4ac3-39f7-470e-963a-56509c546377",
+        "125ec42a-7229-4250-afc5-e057484327fe",
+        "f731ccc4-e22a-43af-a747-64213329e088",
+        "eec63d3c-3b81-4ad4-b1e4-7c147d4d2b61",
+        "9be7f096-97ec-4615-8957-8d40b5dcbc41",
+    ],
+)
+def test_a_catch_all_artist_is_never_chosen(tmp_path, special):
+    catch_all = {"id": special, "name": "[traditional]"}
+    catalogue = Fake(artist=lambda path, params: {"count": 1, "artists": [catch_all]})
+    store = Store(tmp_path)
+    for name in ("[traditional]", "[traditional] & Guest"):
+        with pytest.raises(Ambiguous):
+            resolve_credit(store, catalogue, name, [])
     assert store.read_document("library-artist:lib-credit") == {}

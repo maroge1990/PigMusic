@@ -64,11 +64,23 @@ async def resolve_artist(store, catalogue, client, artist, albums):
     def credits(items):
         for item in items:
             candidate = item.get("artist", {})
-            if candidate.get("id") and normalise(candidate.get("name", "")) == wanted:
+            if (
+                candidate.get("id")
+                and candidate["id"] not in SPECIAL
+                and normalise(candidate.get("name", "")) == wanted
+            ):
                 identities[candidate["id"]] = {
                     "id": candidate["id"],
                     "name": candidate["name"],
                 }
+
+    def exact(result, name):
+        """Search results that are exactly this name, never a catch-all."""
+        return [
+            a
+            for a in result.get("artists", [])
+            if normalise(a["name"]) == name and a.get("id") not in SPECIAL
+        ]
 
     # Release credits distinguish namesakes without guessing from popularity.
     release_ids = list(
@@ -78,10 +90,6 @@ async def resolve_artist(store, catalogue, client, artist, albums):
             if a.get("musicbrainz_release_id")
         )
     )
-    # "A, B & C" or "A feat. B": several people, unless MusicBrainz knows an
-    # artist by that whole name (Earth, Wind & Fire), which is tried first.
-    lead = normalise(lead_artist(artist["name"]))
-    collaborative = lead != wanted
     released = []
     for release_id in release_ids[:3]:
         try:
@@ -93,37 +101,12 @@ async def resolve_artist(store, catalogue, client, artist, albums):
         )
         released += release.get("artist-credit", [])
         credits(release.get("artist-credit", []))
-    if not identities and collaborative and released:
-        # MATCH1: never one artist named after a whole credit. A cast or
-        # soundtrack album's songs file under the album's lead artist; others
-        # under the credit's lead, as the release credits name them.
-        performers = [
-            c for c in released if c.get("artist", {}).get("id") not in SPECIAL
-        ]
-        if any(album.get("category") in STAGED for album in albums):
-            chosen = performers[0].get("artist", {}) if performers else {}
-        else:
-            chosen = next(
-                (
-                    c.get("artist", {})
-                    for c in performers
-                    if normalise(c.get("artist", {}).get("name", "")) == lead
-                ),
-                {},
-            )
-        if chosen.get("id"):
-            identities[chosen["id"]] = {"id": chosen["id"], "name": chosen["name"]}
-    # When the release credits bore the collaboration out, the whole credit is
-    # never searched for; otherwise (a band on a compilation credited to
-    # Various Artists) its whole name is tried before its lead.
     matches = []
     if not identities:
         result = await catalogue.get(
             client, "artist/", query="artist:" + quoted(artist["name"]), limit=100
         )
-        matches = [
-            a for a in result.get("artists", []) if normalise(a["name"]) == wanted
-        ]
+        matches = exact(result, wanted)
         if len(matches) == 1 and result.get("count", len(matches)) <= 100:
             identities[matches[0]["id"]] = {
                 "id": matches[0]["id"],
@@ -152,18 +135,42 @@ async def resolve_artist(store, catalogue, client, artist, albums):
                                 if c.get("artist", {}).get("id") in candidates
                             ]
                         )
-    if not identities and collaborative and not matches:
-        # The lead artist, found by exactly their name.
-        name = lead_artist(artist["name"])
-        result = await catalogue.get(
-            client, "artist/", query="artist:" + quoted(name), limit=100
-        )
-        found = [a for a in result.get("artists", []) if normalise(a["name"]) == lead]
-        if len(found) == 1 and result.get("count", len(found)) <= 100:
-            identities[found[0]["id"]] = {
-                "id": found[0]["id"],
-                "name": found[0]["name"],
-            }
+    # MATCH1: "A, B & C" or "A feat. B", which MusicBrainz knows by no single
+    # artist (Earth, Wind & Fire was tried whole above): a cast or soundtrack
+    # album's songs file under the album's own artist, others under the
+    # credit's lead, as the release credits or an exact search name them.
+    lead = normalise(lead_artist(artist["name"]))
+    if not identities and not matches and lead != wanted:
+        performers = [
+            c.get("artist", {})
+            for c in released
+            if c.get("artist", {}).get("id")
+            and c.get("artist", {}).get("id") not in SPECIAL
+        ]
+        if performers and any(album.get("category") in STAGED for album in albums):
+            chosen = [performers[0]]
+        else:
+            chosen = list(
+                {
+                    a["id"]: a
+                    for a in performers
+                    if normalise(a.get("name", "")) == lead
+                }.values()
+            )
+            if not chosen:
+                result = await catalogue.get(
+                    client,
+                    "artist/",
+                    query="artist:" + quoted(lead_artist(artist["name"])),
+                    limit=100,
+                )
+                found = exact(result, lead)
+                if result.get("count", len(found)) <= 100:
+                    chosen = found
+        if len(chosen) > 1:
+            matches = chosen  # Namesakes: the owner chooses.
+        for a in chosen[:1] if len(chosen) == 1 else []:
+            identities[a["id"]] = {"id": a["id"], "name": a["name"]}
     if len(identities) != 1:
         options = matches or list(identities.values())
         raise Ambiguous(
