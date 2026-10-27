@@ -611,3 +611,36 @@ def test_a_miss_holds_only_for_the_same_constraints():
     assert (
         asyncio.run(play({**base, "isrcs": ["GOOD"]}))["url"] == candidate["source_url"]
     )
+
+
+def test_a_jiosaavn_outage_falls_back_to_relays_and_is_remembered_briefly(
+    tmp_path, monkeypatch
+):
+    import time
+
+    from server import remote
+    from server.vendor import jiosaavn
+
+    def offline(*args, **kwargs):
+        raise httpx.ConnectError("JioSaavn unreachable")
+
+    monkeypatch.setattr(jiosaavn.httpx, "get", offline)
+    relayed = []
+    resolver = RemoteAudio(
+        directory=tmp_path / "relay",
+        relay_search=lambda source, track: relayed.append(source) or [],
+    )
+    target = {"artist": "Artist", "title": "Song", "album": "Album"}
+
+    async def play():
+        async with httpx.AsyncClient() as client:
+            return await resolver.stream(client, target, "member")
+
+    # The real vendored search: its wrapped failure still lets the relays
+    # answer, and the outcome is uncertain (503, minutes).
+    with pytest.raises(TimeoutError):
+        asyncio.run(play())
+    assert sorted(relayed) == ["freemp3cloud", "youtube", "zvu4no"]
+    ((expiry, kind, _),) = resolver.misses.values()
+    assert kind is TimeoutError
+    assert expiry - time.monotonic() <= remote.FAILURE_SECONDS

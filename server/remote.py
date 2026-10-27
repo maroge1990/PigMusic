@@ -398,12 +398,17 @@ class RemoteAudio:
         if cached and cached[0] > time.monotonic():
             return cached[1]
         async with self.slots:
-            results = await asyncio.wait_for(
-                asyncio.to_thread(
-                    self.search, track["artist"] + " " + track["title"], 40
-                ),
-                timeout=5,
-            )
+            try:
+                results = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.search, track["artist"] + " " + track["title"], 40
+                    ),
+                    timeout=5,
+                )
+            except RuntimeError as exc:
+                # The vendored search wraps any failure, a network error
+                # included: JioSaavn is uncertain, the relays still answer.
+                raise TimeoutError("JioSaavn search unavailable.") from exc
             candidates = [
                 c
                 for c in results
