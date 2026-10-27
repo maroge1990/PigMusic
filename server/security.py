@@ -13,6 +13,7 @@ from urllib.parse import urlencode
 from fastapi import HTTPException, Request
 
 from .auth import AuthError, COOKIE, public_user, records
+from .request_timing import phase
 
 PUBLIC = frozenset(
     {
@@ -83,7 +84,9 @@ class Security:
             ("POST", "/api/v1/setup/owner"),
         }:
             return None
-        if not await asyncio.to_thread(self.auth.ready):
+        with phase("auth-ready"):
+            ready = await asyncio.to_thread(self.auth.ready)
+        if not ready:
             raise HTTPException(503, "setup_required")
         if (request.method, request.url.path) in PUBLIC:
             return None
@@ -101,13 +104,15 @@ class Security:
                 and request.method in {"GET", "HEAD"}
                 and any(key in request.query_params for key in ("exp", "sid", "sig"))
             ):
-                person, session = await asyncio.to_thread(
-                    self.verify_url, request.url.path, dict(request.query_params)
-                )
+                with phase("auth-link"):
+                    person, session = await asyncio.to_thread(
+                        self.verify_url, request.url.path, dict(request.query_params)
+                    )
             else:
-                person, session = await asyncio.to_thread(
-                    self.auth.authenticate, token, kind
-                )
+                with phase("auth-session"):
+                    person, session = await asyncio.to_thread(
+                        self.auth.authenticate, token, kind
+                    )
         except AuthError as exc:
             raise HTTPException(exc.status, exc.code)
         if kind == "web" and request.method not in {"GET", "HEAD", "OPTIONS"}:
@@ -146,9 +151,10 @@ class Security:
                     # the endpoint finds a stand-in for an edition no longer
                     # served. Files and streams still need a playable edition.
                     asking = request.url.path == f"/api/v1/playback/{track_id}/url"
-                    self.auth.store.mixes.entry(
-                        person["id"], track_id, playback=not asking
-                    )
+                    with phase("auth-mix"):
+                        self.auth.store.mixes.entry(
+                            person["id"], track_id, playback=not asking
+                        )
                 except (LookupError, AttributeError):
                     raise HTTPException(404, "Track not found")
                 request.state.user = person
@@ -162,11 +168,15 @@ class Security:
                 )
                 or request.url.path == f"/api/v1/tracks/{track_id}/file"
             )
-            if not self.auth.store.user_libraries.contains(person["id"], track_id) and (
-                not streaming
-                or not track_id
-                or saved_track(self.auth.store, track_id)[0] is None
-            ):
+            with phase("auth-media"):
+                denied = not self.auth.store.user_libraries.contains(
+                    person["id"], track_id
+                ) and (
+                    not streaming
+                    or not track_id
+                    or saved_track(self.auth.store, track_id)[0] is None
+                )
+            if denied:
                 raise HTTPException(404, "Track not found")
             scoped = True
         if person["role"] != "owner" and request.url.path.startswith(

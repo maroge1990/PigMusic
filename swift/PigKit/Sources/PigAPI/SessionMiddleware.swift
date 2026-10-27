@@ -43,8 +43,11 @@ public struct RenewableTransport: ClientTransport {
 
 public enum PigClient {
     public static func make(server: String, vault: any DeviceTokenStore,
-                            transport: any ClientTransport = URLSessionTransport()) throws -> Client {
+                            transport: any ClientTransport = URLSessionTransport(),
+                            trace: RequestTraceMiddleware? = nil) throws -> Client {
         let url = try ServerAddress.validate(server)
-        return Client(serverURL:url, transport:transport, middlewares:[try SessionMiddleware(vault:vault,origin:url), TransientRetryMiddleware()])
+        var middlewares: [any ClientMiddleware] = [try SessionMiddleware(vault:vault,origin:url), TransientRetryMiddleware()]
+        if let trace { middlewares.append(trace) }
+        return Client(serverURL:url, transport:transport, middlewares:middlewares)
     }
 }

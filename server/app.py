@@ -23,6 +23,7 @@ from .routes.auth import auth_router, set_cookie
 from .routes.personal import personal_router
 from .security import Security, audit_routes
 from .request_limits import JsonBodyLimit
+from .request_timing import RequestTiming, mark, phase, watch_event_loop
 from .transport import public_origin
 from .enrichment import Enrichment
 from .image_cache import public_image
@@ -171,6 +172,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                 warmer.start()
                 mixes.start(client)
             maintenance_task = asyncio.create_task(maintain_artwork())
+            loop_watch = asyncio.create_task(watch_event_loop())
             if (
                 scanner.root.is_dir()
                 and not (store.directory / "library-snapshot.json").exists()
@@ -193,16 +195,18 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                 await warmer.close()
                 await enrichment.close()
                 maintenance_task.cancel()
+                loop_watch.cancel()
                 await task
                 await export_task
                 try:
                     await preload_task
                 except asyncio.CancelledError:
                     pass
-                try:
-                    await maintenance_task
-                except asyncio.CancelledError:
-                    pass
+                for watcher in (maintenance_task, loop_watch):
+                    try:
+                        await watcher
+                    except asyncio.CancelledError:
+                        pass
                 if scan_task:
                     await scan_task
 
@@ -308,6 +312,9 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         }:
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response
+
+    # Added last, so it is outermost: its times include the middleware above.
+    app.add_middleware(RequestTiming)
 
     from fastapi.exceptions import RequestValidationError
     from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -1045,17 +1052,20 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
 
     @app.post("/api/v1/playback/{track_id}/url", response_model=PlaybackURL)
     def playback_url(track_id: str, request: Request):
+        mark("handler")
         playing = track_id
         try:
             if track_id.startswith("mix:"):
                 try:
                     mixes.playback(request.state.user["id"], track_id)
                 except (FileNotFoundError, LookupError):
-                    playing = mixes.stand_in(request.state.user["id"], track_id)
+                    with phase("stand-in"):
+                        playing = mixes.stand_in(request.state.user["id"], track_id)
                     if not playing:
                         raise LookupError(track_id)
             else:
-                track_file(store, track_id)
+                with phase("file"):
+                    track_file(store, track_id)
         except (FileNotFoundError, LookupError):
             raise HTTPException(404, "File unavailable")
         return {
@@ -1096,6 +1106,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     @app.get("/api/v1/playback/files/{track_id}")
     @app.head("/api/v1/playback/files/{track_id}")
     def playback_file(track_id: str, request: Request):
+        mark("handler")
         try:
             target = (
                 mixes.playback(request.state.user["id"], track_id)

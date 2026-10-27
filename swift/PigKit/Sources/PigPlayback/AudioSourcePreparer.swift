@@ -143,7 +143,9 @@ public actor AudioSourcePreparer {
       DiagnosticsLog.shared.record(
         "playback",
         "source answered in \(delay.milliseconds) ms"
-          + " (\(download.mimeType), \(download.length / 1024) KB)")
+          + " (\(download.mimeType), \(download.length / 1024) KB"
+          + (ServerTiming.summary(download.firstServerTiming).map { ", " + $0 } ?? "")
+          + (download.firstRequestID.map { ", id " + $0 } ?? "") + ")")
     }
     let result = PreparedAudioSource(
       file: download.file, byteCount: download.length, bytes: download)

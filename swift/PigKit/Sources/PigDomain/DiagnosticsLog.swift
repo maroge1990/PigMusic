@@ -7,7 +7,12 @@ import Foundation
 /// Entries never hold credentials or signed links: addresses keep only their
 /// host, and token-like values are masked before anything is written.
 public final class DiagnosticsLog: @unchecked Sendable {
-  public static let shared = DiagnosticsLog()
+  /// Tools off the device (the playback harness) keep their log apart by
+  /// setting `PIG_MUSIC_DIAGNOSTICS` to a folder before first use.
+  public static let shared = DiagnosticsLog(
+    directory: ProcessInfo.processInfo.environment["PIG_MUSIC_DIAGNOSTICS"].map {
+      URL(fileURLWithPath: $0, isDirectory: true)
+    })
 
   private let queue = DispatchQueue(label: "au.com.pig.music.diagnostics")
   private let file: URL?

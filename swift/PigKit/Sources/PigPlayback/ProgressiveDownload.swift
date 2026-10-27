@@ -133,6 +133,9 @@ public final class ProgressiveDownload: AudioBytes, @unchecked Sendable {
   private var idle = false
   /// When the response to the first request arrived.
   public private(set) var firstResponse: Duration?
+  /// The first request's ID and the server's timing of it, for diagnostics.
+  public private(set) var firstRequestID: String?
+  public private(set) var firstServerTiming: String?
 
   private init(
     file: URL, mimeType: String, length: Int, sessions: RenewableSession,
@@ -198,6 +201,7 @@ public final class ProgressiveDownload: AudioBytes, @unchecked Sendable {
         mimeType: response.mime, length: response.total, sessions: sessions,
         resolve: resolve, limit: limit, readTimeout: readTimeout, predecessor: predecessor)
       download.firstResponse = ContinuousClock.now - started
+      download.noteFirst(first)
       download.fetching = Task.detached { [weak download] in
         await download?.run(first: first, url: url)
       }
@@ -239,7 +243,12 @@ public final class ProgressiveDownload: AudioBytes, @unchecked Sendable {
       file: file, mimeType: mime, length: count, sessions: sessions, resolve: resolve,
       limit: limit, readTimeout: readTimeout, predecessor: nil, complete: true)
     download.firstResponse = ContinuousClock.now - started
+    download.noteFirst(first)
     return download
+  }
+  private func noteFirst(_ request: Request) {
+    firstRequestID = request.requestID
+    firstServerTiming = request.response.value(forHTTPHeaderField: "Server-Timing")
   }
 
   public func read(offset: Int, count: Int, into buffer: UnsafeMutableRawPointer, stop: ReadStop)
@@ -426,16 +435,19 @@ public final class ProgressiveDownload: AudioBytes, @unchecked Sendable {
 /// reference going, cancels the data task.
 final class Request: @unchecked Sendable {
   let response: HTTPURLResponse
+  /// Sent as `X-Request-ID`; the server's log names the request by it.
+  let requestID: String
   let chunks: AsyncThrowingStream<Data, Error>
   private let task: URLSessionDataTask
   private let continuation: AsyncThrowingStream<Data, Error>.Continuation
 
   fileprivate init(
-    response: HTTPURLResponse, task: URLSessionDataTask,
+    response: HTTPURLResponse, requestID: String, task: URLSessionDataTask,
     chunks: AsyncThrowingStream<Data, Error>,
     continuation: AsyncThrowingStream<Data, Error>.Continuation
   ) {
     self.response = response
+    self.requestID = requestID
     self.task = task
     self.chunks = chunks
     self.continuation = continuation
@@ -499,7 +511,9 @@ final class Request: @unchecked Sendable {
     request.setValue("audio/*,application/octet-stream", forHTTPHeaderField: "Accept")
     request.setValue(
       "bytes=\(start)-" + (end.map { String($0 - 1) } ?? ""), forHTTPHeaderField: "Range")
-    let receiver = Receiver()
+    let requestID = ServerTiming.newRequestID()
+    request.setValue(requestID, forHTTPHeaderField: "X-Request-ID")
+    let receiver = Receiver(requestID: requestID)
     return try await withTaskCancellationHandler {
       try await withCheckedThrowingContinuation { (opened: CheckedContinuation<Request, Error>) in
         // A request cancelled before it starts is never sent.
@@ -521,6 +535,8 @@ private final class Receiver: NSObject, URLSessionDataDelegate, @unchecked Senda
   private var continuation: AsyncThrowingStream<Data, Error>.Continuation?
   private weak var task: URLSessionDataTask?
   private var cancelled = false
+  private let requestID: String
+  init(requestID: String) { self.requestID = requestID }
 
   /// Whether to start: false once cancelled.
   func setUp(opened: CheckedContinuation<Request, Error>) -> Bool {
@@ -562,7 +578,8 @@ private final class Receiver: NSObject, URLSessionDataDelegate, @unchecked Senda
     let (stream, continuation) = AsyncThrowingStream<Data, Error>.makeStream(
       bufferingPolicy: .unbounded)
     let request = Request(
-      response: http, task: dataTask, chunks: stream, continuation: continuation)
+      response: http, requestID: requestID, task: dataTask, chunks: stream,
+      continuation: continuation)
     let waiting = lock.withLock {
       self.continuation = continuation
       defer { opened = nil }

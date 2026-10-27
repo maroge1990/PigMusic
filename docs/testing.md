@@ -146,3 +146,24 @@ Simulator builds and PCM captures don't prove device behaviour. For each finding
 7. **Server:** match server state and provider acquisition on an isolated Unraid library copy, with a backup.
 
 Debug builds accept `--demo` and `--seamless-demo` for a synthetic library; remove them for real acceptance.
+
+## Live playback diagnostics
+
+Use these for playback that is slow or patchy on the real server. All three read through a **dedicated test member** (invite one, add a few songs to its library; adding never downloads). Never use a household account, and never put the token in chat, Git or a command line.
+
+1. **Request IDs and server timing (always on).** Every response carries `X-Request-ID` and `Server-Timing` (`app` is the server's total; `auth-ready`, `auth-session`, `auth-link`, `auth-mix`, `auth-media` are sign-in; `handler` is when a sync endpoint got a worker thread; `mix-entry`, `mix-lock`, `mix-lease`, `mix-file`, `stand-in`, `file` are the playback lookup). The server logs every playback address and anything slower than 1 s, with how busy its worker pools were (`pig_music.timing`), and warns when the event loop was blocked or a pool had a queue. The iPhone's diagnostics show the same ID and the server's share: `[network] playback_url 200 in 16211 ms, server 16100 ms: mix-lease 16050 (id …)`. To match a phone line on the server:
+   ```sh
+   ssh root@192.168.1.235 "docker logs --since 24h PigMusic 2>&1 | grep <id>"
+   ```
+   A large client time with a small `server` is the connection; a large `handler` with small phases is a worker-thread queue; a large `auth-*` or `mix-lock`/`mix-lease` is the server's own wait.
+2. **Probe** (Python, any machine): sign in once, which asks for the password and keeps only the token, private to you:
+   ```sh
+   .venv/bin/python -m scripts.probe_playback login --server https://music.markrogers.au --username <test member> --token-file ~/.config/pigmusic/probe-token
+   .venv/bin/python -m scripts.probe_playback run --server https://music.markrogers.au --token-file ~/.config/pigmusic/probe-token --output probe.jsonl
+   ```
+   Each song: its address, the file's opening (`Range: bytes=0-`, as playback asks) and a read near its end, each with the server's timing and ID; `--full` also times whole files. `--repeat 0 --interval 300` keeps going as a canary. It changes nothing beyond the test member's own mix leases.
+3. **Harness** (the phone's own playback code on this Mac): the API client with its retries, `AudioSourcePreparer`, `PlaybackSourceRepository` and `QueuePCMStream`, wired as the seamless engine is. No sound: it decodes as fast as bytes arrive and reports each song's address, ready time, first audio and any silence a player would have had, then the run's diagnostics lines:
+   ```sh
+   swift run --package-path swift/PigKit PigPlaybackHarness --server https://music.markrogers.au --token-file ~/.config/pigmusic/probe-token --mix-songs 5 --library 3
+   ```
+   It proves transfers, decoding and queue timing over the real route, not the audio session, interruptions or background behaviour, which need a device.

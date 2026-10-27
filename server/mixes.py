@@ -20,6 +20,7 @@ from .matching import compatible
 from .media import chart_region, settings, track_file
 from .mix_cache import MixCache, MixDownloader, song_key
 from .playlists import Playlists
+from .request_timing import phase
 from .api_models import TrackDTO
 
 log = logging.getLogger("pig_music.mixes")
@@ -1221,24 +1222,33 @@ class Mixes:
             raise LookupError("Mix song not found") from None
 
     def playback(self, user, track_id):
-        track = self.entry(user, track_id, playback=True)
+        with phase("mix-entry"):
+            track = self.entry(user, track_id, playback=True)
         identity = track_id.split(":")[1]
-        with self.store.mix_lock, self.store.connect() as conn:
-            until = time.time() + 6 * 3600
-            conn.execute(
-                "UPDATE mix_editions SET lease_until=? WHERE id=?", (until, identity)
-            )
-            payload = json.loads(
-                conn.execute(
-                    "SELECT payload FROM mix_editions WHERE id=?", (identity,)
-                ).fetchone()[0]
-            )
-            for item in payload["tracks"]:
-                conn.execute(
-                    "UPDATE mix_audio SET lease_until=MAX(lease_until,?) WHERE key=?",
-                    (until, song_key(item)),
-                )
-            return self.cache.available(track)
+        with phase("mix-lock"):
+            self.store.mix_lock.acquire()
+        try:
+            with self.store.connect() as conn:
+                with phase("mix-lease"):
+                    until = time.time() + 6 * 3600
+                    conn.execute(
+                        "UPDATE mix_editions SET lease_until=? WHERE id=?",
+                        (until, identity),
+                    )
+                    payload = json.loads(
+                        conn.execute(
+                            "SELECT payload FROM mix_editions WHERE id=?", (identity,)
+                        ).fetchone()[0]
+                    )
+                    for item in payload["tracks"]:
+                        conn.execute(
+                            "UPDATE mix_audio SET lease_until=MAX(lease_until,?) WHERE key=?",
+                            (until, song_key(item)),
+                        )
+                with phase("mix-file"):
+                    return self.cache.available(track)
+        finally:
+            self.store.mix_lock.release()
 
     def stand_in(self, user, track_id):
         """Where a song from this person's edition plays once the edition no

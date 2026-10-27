@@ -14,6 +14,7 @@ let package = Package(
     .library(name: "PigPlayback", targets: ["PigPlayback"]),
     .library(name: "PigCompanion", targets: ["PigCompanion"]),
     .executable(name: "PigAudioProbe", targets: ["PigAudioProbe"]),
+    .executable(name: "PigPlaybackHarness", targets: ["PigPlaybackHarness"]),
   ],
   dependencies: [
     .package(url: "https://github.com/apple/swift-http-types", from: "1.0.0"),
@@ -42,6 +43,8 @@ let package = Package(
     .target(name: "PigPlayback", dependencies: ["PigDomain"]),
     .target(name: "PigCompanion", dependencies: ["PigDomain"]),
     .executableTarget(name: "PigAudioProbe", dependencies: ["PigPlayback"]),
+    .executableTarget(
+      name: "PigPlaybackHarness", dependencies: ["PigAPI", "PigDomain", "PigSync", "PigPlayback"]),
     .testTarget(
       name: "PigCoreTests",
       dependencies: [

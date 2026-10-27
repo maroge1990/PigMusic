@@ -67,6 +67,8 @@ private final class SlowProtocol: URLProtocol, @unchecked Sendable {
     let headers = [
       "Content-Type": type, "Content-Length": String(end - start + 1),
       "Content-Range": "bytes \(start)-\(end)/\(data.count)",
+      "Server-Timing": "app;dur=3.0, auth-link;dur=1.0",
+      "X-Request-ID": request.value(forHTTPHeaderField: "X-Request-ID") ?? "",
     ]
     client?.urlProtocol(
       self,
@@ -150,6 +152,9 @@ private final class CompletedOn: NSObject, URLSessionDataDelegate, @unchecked Se
     // CI runners took nearly 2 s to answer a stubbed request under load).
     #expect(download.phase == .loading)
     #expect(source.byteCount == data.count)
+    // The first request's ID and the server's timing reach diagnostics.
+    #expect(download.firstRequestID?.count == 16)
+    #expect(ServerTiming.summary(download.firstServerTiming) == "server 3 ms")
     // The opening is here almost at once.
     #expect(try await read(download, at: 0, count: 4096) == data.prefix(4096))
     // A read near the end (a seek, or an index stored there) jumps the transfer.

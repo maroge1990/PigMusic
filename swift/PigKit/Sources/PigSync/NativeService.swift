@@ -67,7 +67,23 @@ public actor NativeService: LibrarySource {
     self.connections = connections
     client = try PigClient.make(
       server: server, vault: vault,
-      transport: RenewableTransport { send in try await connections.withSession(send) })
+      transport: RenewableTransport { send in try await connections.withSession(send) },
+      trace: RequestTraceMiddleware(newID: ServerTiming.newRequestID) { trace in
+        if let line = Self.diagnosticsLine(trace) { DiagnosticsLog.shared.record("network", line) }
+      })
+  }
+  /// Every playback address, as a baseline, and any request that was slow or
+  /// failed, with the server's share of the wait and the ID its log uses.
+  static func diagnosticsLine(_ trace: RequestTrace, slow: Duration = .seconds(1)) -> String? {
+    let name = trace.operation.components(separatedBy: "_api_v1").first ?? trace.operation
+    let address = name == "playback_url" || name == "playback_remote"
+    guard address || trace.duration >= slow || trace.failure != nil || (trace.status ?? 0) >= 500
+    else { return nil }
+    let ms = trace.duration.components.seconds * 1000
+      + trace.duration.components.attoseconds / 1_000_000_000_000_000
+    let outcome = trace.status.map(String.init) ?? (trace.failure ?? "failed")
+    let server = ServerTiming.summary(trace.serverTiming).map { ", " + $0 } ?? ""
+    return "\(name) \(outcome) in \(ms) ms\(server) (id \(trace.requestID))"
   }
   /// New connections for the API and artwork, for use after the app was away.
   public nonisolated func renewConnections() {
