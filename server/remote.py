@@ -17,6 +17,7 @@ from .request_timing import add_phase, phase
 from .library import normalise
 from .providers.process import run_checked
 from .downloader import FREEMP3CLOUD_RETRY_PAUSE, matches
+from .providers.contracts import ProviderError
 from .vendor.jiosaavn import search_jiosaavn
 
 log = logging.getLogger("pig_music.remote")
@@ -98,7 +99,7 @@ class RemoteAudio:
     async def shared(self, client, track):
         # Playing a song that is being prepared joins that work.
         name = self.name(track)
-        missed = self.misses.get(name)
+        missed = self.misses.get(self.miss_key(track))
         if missed and missed[0] > time.monotonic():
             raise missed[1](missed[2])
         task = self.inflight.get(name)
@@ -111,6 +112,9 @@ class RemoteAudio:
     async def locate(self, client, track):
         try:
             return await self._locate(client, track)
+        except ProviderError as exc:  # A provider down or limited: uncertain.
+            self.remember_miss(track, TimeoutError, exc, FAILURE_SECONDS)
+            raise TimeoutError(str(exc)) from exc
         except (ValueError, KeyError, TypeError) as exc:
             self.remember_miss(track, ValueError, exc, MISS_SECONDS)
             raise
@@ -125,7 +129,23 @@ class RemoteAudio:
         # httpx errors need a request to be raised again; TimeoutError does not.
         if not issubclass(kind, (ValueError, TimeoutError)):
             kind = TimeoutError
-        self.misses[self.name(track)] = (time.monotonic() + seconds, kind, str(exc))
+        self.misses[self.miss_key(track)] = (
+            time.monotonic() + seconds,
+            kind,
+            str(exc),
+        )
+
+    def miss_key(self, track):
+        """A miss holds only for a request with the same constraints: an
+        ISRC, a length or an edition another request lacks may still match."""
+        constraints = [
+            self.name(track),
+            sorted(track.get("isrcs") or []),
+            track.get("duration"),
+            bool(track.get("explicit_edition")),
+            track.get("recording_kind"),
+        ]
+        return hashlib.sha256(json.dumps(constraints, default=str).encode()).hexdigest()
 
     async def _locate(self, client, track):
         # A copy already relayed for this recording plays at once, before any
@@ -166,7 +186,7 @@ class RemoteAudio:
         # Only a song every source said it does not have is a miss (404,
         # remembered long); a timeout, a provider error or a failed transfer
         # leaves it uncertain (503, remembered briefly).
-        uncertain = isinstance(failure, (httpx.HTTPError, TimeoutError))
+        uncertain = isinstance(failure, (httpx.HTTPError, TimeoutError, ProviderError))
         async with self.relay_slots:
             # Every source searches at once; the best in priority order wins
             # and only it is transferred.
@@ -186,6 +206,10 @@ class RemoteAudio:
                     )
                 except TimeoutError:
                     step(source, "too slow", searched)
+                    uncertain = True
+                    continue
+                except ProviderError:  # Down, limited or answering oddly.
+                    step(source, "failed", searched)
                     uncertain = True
                     continue
                 except ValueError:
@@ -414,6 +438,9 @@ class RemoteAudio:
                 timeout=3,
                 follow_redirects=False,
             ) as stream:
+                if stream.status_code == 429 or stream.status_code >= 500:
+                    # The CDN is busy or failing, not missing the song.
+                    raise TimeoutError("JioSaavn's audio did not answer.")
                 if stream.status_code not in {200, 206} or not stream.headers.get(
                     "content-type", ""
                 ).split(";")[0].startswith(("audio/", "application/octet-stream")):

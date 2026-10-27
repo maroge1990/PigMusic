@@ -529,3 +529,85 @@ def test_every_source_saying_no_is_a_long_miss(tmp_path):
     ((expiry, kind, _),) = resolver.misses.values()
     assert kind is ValueError
     assert expiry - time.monotonic() > remote.FAILURE_SECONDS
+
+
+@pytest.mark.parametrize("kind", ["unavailable", "limit"])
+def test_a_provider_outage_is_never_a_long_miss(tmp_path, kind):
+    import time
+
+    from server import remote
+    from server.providers.contracts import ProviderError
+
+    def relay_search(source, track):
+        raise ProviderError(kind)
+
+    resolver = RemoteAudio(
+        lambda *_: [], directory=tmp_path / "relay", relay_search=relay_search
+    )
+    only_jiosaavn = RemoteAudio(lambda *_: (_ for _ in ()).throw(ProviderError(kind)))
+    target = {"artist": "Artist", "title": "Song", "album": "Album"}
+
+    async def play(audio):
+        async with httpx.AsyncClient() as client:
+            return await audio.stream(client, target, "member")
+
+    for audio in (resolver, only_jiosaavn):
+        with pytest.raises(TimeoutError):
+            asyncio.run(play(audio))
+        ((expiry, cached, _),) = audio.misses.values()
+        assert cached is TimeoutError
+        assert expiry - time.monotonic() <= remote.FAILURE_SECONDS
+
+
+@pytest.mark.parametrize("status", [429, 503])
+def test_a_busy_jiosaavn_cdn_is_never_a_long_miss(status):
+    import time
+
+    from server import remote
+
+    candidate = {
+        "channel": "Artist",
+        "title": "Song",
+        "album": "Album",
+        "duration": 180,
+        "source_url": "https://aac.saavncdn.com/music.m4a",
+    }
+    target = {"artist": "Artist", "title": "Song", "album": "Album", "duration": 180}
+    resolver = RemoteAudio(lambda *_: [candidate])
+
+    async def play():
+        transport = httpx.MockTransport(lambda request: httpx.Response(status))
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await resolver.stream(client, target, "member")
+
+    with pytest.raises(TimeoutError):
+        asyncio.run(play())
+    ((expiry, cached, _),) = resolver.misses.values()
+    assert cached is TimeoutError
+    assert expiry - time.monotonic() <= remote.FAILURE_SECONDS
+
+
+def test_a_miss_holds_only_for_the_same_constraints():
+    candidate = {
+        "channel": "Artist",
+        "title": "Song",
+        "album": "Album",
+        "duration": 180,
+        "isrc": "GOOD",
+        "source_url": "https://aac.saavncdn.com/music.m4a",
+    }
+    resolver = RemoteAudio(lambda *_: [candidate])
+    base = {"artist": "Artist", "title": "Song", "album": "Album", "duration": 180}
+
+    async def play(target):
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(206, headers={"content-type": "audio/mp4"})
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await resolver.stream(client, target, "member")
+
+    with pytest.raises(ValueError):
+        asyncio.run(play({**base, "isrcs": ["OTHER"]}))
+    assert (
+        asyncio.run(play({**base, "isrcs": ["GOOD"]}))["url"] == candidate["source_url"]
+    )
