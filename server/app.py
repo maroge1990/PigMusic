@@ -412,7 +412,8 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         if not artist:
             raise HTTPException(404, "Artist not found.")
         identity = await library_artist_catalogue(artist_id)
-        artist_jobs.cancel(identity["id"])
+        # The artist lock can wait behind a submission on lifecycle_lock.
+        await asyncio.to_thread(artist_jobs.cancel, identity["id"])
         count = 0
         for album in [
             a for a in store.library["albums"] if a["artist_id"] == artist_id

@@ -239,14 +239,14 @@ class ArtistJobs:
 
         initialise_owner(self.store)
         with self.store.connect() as conn:
-            rows = [
-                (key, json.loads(value))
-                for key, value in conn.execute(
-                    "SELECT name,payload FROM documents WHERE name LIKE 'artist-job:%'"
+            keys = [
+                key
+                for (key,) in conn.execute(
+                    "SELECT name FROM documents WHERE name LIKE 'artist-job:%'"
                 )
             ]
         jobs = []
-        for key, state in rows:
+        for key in keys:
             parts = key.split(":")
             if len(parts) == 2:
                 if self.owner():
@@ -256,33 +256,39 @@ class ArtistJobs:
                 scoped, identity = self.scoped(parts[1]), parts[2]
             else:
                 continue
-            jobs.append((scoped, identity, state))
+            jobs.append((scoped, identity))
         return jobs
 
-    def due(self, identity, state):
-        if not self.active():
-            return None
-        if (
-            state.get("monitor")
-            and time.time() - state.get("checked_at", 0) > 86400
-            and state.get("status") not in {"queued", "running"}
-        ):
-            state = self.configure(
-                identity, state["kinds"], True, request=True, periodic=True
-            )
-        return state if state.get("status") in {"queued", "running"} else None
+    def due(self, identity):
+        """The job to run now, if any. Reads its state afresh under the lock,
+        so a cancellation or request since `pending()` is never undone."""
+        with self.lock:
+            if not self.active():
+                return None
+            state = self.state(identity)
+            if (
+                state.get("monitor")
+                and time.time() - state.get("checked_at", 0) > 86400
+                and state.get("status") not in {"queued", "running"}
+            ):
+                state = self.configure(
+                    identity, state["kinds"], True, request=True, periodic=True
+                )
+            return state if state.get("status") in {"queued", "running"} else None
 
     async def run(self, client):
         background_metadata.set(True)
         while not self.stopping.is_set():
-            for jobs, identity, state in await asyncio.to_thread(self.pending):
+            for jobs, identity in await asyncio.to_thread(self.pending):
                 if self.stopping.is_set():
                     return
-                state = await asyncio.to_thread(jobs.due, identity, state)
-                if state is not None:
-                    try:
+                state = None
+                try:
+                    state = await asyncio.to_thread(jobs.due, identity)
+                    if state is not None:
                         await jobs.acquire(client, identity, state)
-                    except Exception:
+                except Exception:
+                    if state is not None:
                         await asyncio.to_thread(
                             jobs.progress,
                             identity,
