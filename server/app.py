@@ -26,6 +26,7 @@ from .request_limits import JsonBodyLimit
 from .request_timing import (
     RequestTiming,
     StallWatch,
+    diagnostics as request_diagnostics,
     mark,
     phase,
     watch_event_loop,
@@ -1019,6 +1020,17 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         return True
 
     warmer.cover = warm_cover
+
+    @app.get("/api/v1/diagnostics", tags=["personal-library"])
+    async def own_diagnostics(request: Request):
+        """Your own recent requests with the server's timing, and when the
+        server stalled: what the playback probe compares its waits with."""
+        return request_diagnostics(request.state.user["id"])
+
+    @app.get("/api/v1/admin/diagnostics")
+    async def admin_diagnostics():
+        """Every recent request, each route's timing, stalls with stacks."""
+        return request_diagnostics()
 
     @app.get("/api/v1/admin/warmer")
     def warmer_status():

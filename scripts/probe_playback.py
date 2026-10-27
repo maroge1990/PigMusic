@@ -13,6 +13,12 @@ nothing is downloaded into the library.
 
     .venv/bin/python -m scripts.probe_playback login --server https://music.example --username probe --token-file ~/.config/pigmusic/probe-token
     .venv/bin/python -m scripts.probe_playback run --server https://music.example --token-file ~/.config/pigmusic/probe-token --output probe.jsonl
+
+Further scenarios take the same --server and --token-file: `remote` (online
+sources, asked twice), `idle` (a song after pauses), `browse` (the app's
+screens, opened twice), `artwork` (how much artwork is real) and `server`
+(the server's recent slow requests and stalls). Each ends with how often
+the server's event loop stalled while it ran.
 """
 
 import argparse
@@ -270,6 +276,352 @@ def login(args, client=None):
     print(f"Saved the probe's device token to {path}")
 
 
+def clients(args):
+    """An API client with the token and a media client without it."""
+    require_https(args.server)
+    token = read_token(args.token_file)
+    api = httpx.Client(
+        base_url=args.server,
+        timeout=120,
+        headers={"Authorization": "Bearer " + token, "X-Pig-Request": "1"},
+    )
+    return api, httpx.Client(base_url=args.server, timeout=120)
+
+
+def save(args, record):
+    if getattr(args, "output", None):
+        with Path(args.output).expanduser().open("a") as handle:
+            handle.write(json.dumps(record) + "\n")
+
+
+def scenario(name):
+    """Runs a scenario with its own clients unless given some, then says
+    how often the server's event loop stalled while it ran."""
+
+    def wrap(body):
+        def run_scenario(args, api=None, media=None):
+            require_https(args.server)
+            owned = api is None
+            if owned:
+                api, media = clients(args)
+            began = time.time()
+            try:
+                records = body(args, api, media)
+                for record in records:
+                    save(args, {"scenario": name, **record})
+                print(server_report(api, began))
+                return records
+            finally:
+                if owned:
+                    api.close()
+                    media.close()
+
+        return run_scenario
+
+    return wrap
+
+
+def server_report(api, since):
+    """The server's own record of this run: event-loop blocks and stalls."""
+    try:
+        answer = api.get("/api/v1/diagnostics")
+        answer.raise_for_status()
+        data = answer.json()
+    except (httpx.HTTPError, ValueError):
+        return "server: diagnostics unavailable"
+    blocks = [b["ms"] for b in data.get("blocks", []) if b["at"] >= since]
+    stalls = [s["seconds"] for s in data.get("stalls", []) if s["at"] >= since]
+    if not blocks:
+        return "server: no event-loop stalls during this run"
+    return (
+        f"server: event loop blocked {len(blocks)} times during this run,"
+        f" {sum(blocks) / 1000:.1f} s in all, longest {max(blocks) / 1000:.1f} s"
+        + (f"; {len(stalls)} stall stacks logged" if stalls else "")
+    )
+
+
+def timed(api, method, path, **kwargs):
+    """One request with an ID: status, time, size and the server's phases."""
+    rid = request_id()
+    headers = {"X-Request-ID": rid, **kwargs.pop("headers", {})}
+    began = time.perf_counter()
+    try:
+        answer = api.request(method, path, headers=headers, **kwargs)
+    except httpx.HTTPError as exc:
+        return {
+            "request_id": rid,
+            "error": type(exc).__name__,
+            "ms": elapsed(began),
+        }, None
+    return {
+        "request_id": rid,
+        "status": answer.status_code,
+        "ms": elapsed(began),
+        "bytes": len(answer.content),
+        "server": server_timing(answer.headers.get("server-timing")),
+    }, answer
+
+
+REMOTE_SONGS = [
+    "The Weeknd|Blinding Lights|After Hours|200",
+    "a-ha|Take On Me|Hunting High and Low|225",
+    "Dua Lipa|Levitating|Future Nostalgia|203",
+    "Tame Impala|The Less I Know the Better|Currents|216",
+    "Lorde|Royals|Pure Heroine|190",
+    "Kate Bush|Running Up That Hill (A Deal with God)|Hounds of Love|300",
+]
+
+
+def owned(api, artist, title):
+    found = api.get("/api/v1/search", params={"q": f"{artist} {title}"})
+    if found.status_code != 200:
+        return False
+    data = found.json()
+    return any(
+        t["title"].lower() == title.lower() and artist.lower() in t["artist"].lower()
+        for t in data.get("household_tracks", []) + data.get("tracks", [])
+    )
+
+
+@scenario("remote")
+def remote(args, api, media):
+    """Songs not in the household, from online sources as the phone streams
+    them: asked twice, so the second shows the server's relay cache."""
+    records = []
+    for entry in args.song or REMOTE_SONGS:
+        artist, title, album, seconds = (entry.split("|") + ["", "", "", "0"])[:4]
+        if owned(api, artist, title):
+            print(f"remote   {artist} - {title}: in the household library, skipped")
+            continue
+        for attempt in ("first", "again"):
+            body = {"title": title, "artist": artist, "album": album}
+            if float(seconds or 0) > 0:
+                body["duration"] = float(seconds)
+            record, answer = timed(api, "POST", "/api/v1/remote-playback", json=body)
+            record.update({"song": f"{artist} - {title}", "attempt": attempt})
+            if answer is not None and answer.status_code == 200:
+                found = answer.json()
+                record["source"] = found.get("source")
+                url = found["url"]
+                record["route"] = "relayed" if url.startswith("/") else "direct"
+                try:
+                    record["open"] = timed_get(media, url)
+                except httpx.HTTPError as exc:
+                    record["error"] = f"open: {type(exc).__name__}"
+            elif "error" not in record:
+                record["error"] = f"HTTP {record['status']}"
+            records.append(record)
+            phases = ", ".join(
+                f"{k} {v:.0f}"
+                for k, v in sorted(
+                    record.get("server", {}).items(), key=lambda kv: -kv[1]
+                )
+                if k != "app" and v >= 20
+            )
+            print(
+                f"remote   {record['song'][:40]:40} {attempt:5} {record['ms']:7.0f} ms"
+                f"  {record.get('source') or record.get('error', '')}"
+                + (
+                    f"  open {record['open']['opening_ms']:.0f} ms"
+                    if "open" in record
+                    else ""
+                )
+                + (f"  [{phases}]" if phases else "")
+                + f"  id {record['request_id']}",
+                flush=True,
+            )
+    return records
+
+
+@scenario("idle")
+def idle(args, api, media):
+    """One library song played warm, then again after each pause, on the
+    same connections, as a phone left alone and picked up again."""
+    chosen = songs(api, 1, 0, args.track[:1])
+    if not chosen:
+        sys.exit("No songs: add some to the probe's library, or pass --track.")
+    records = []
+    for gap in [0, 0, *args.gap]:
+        if gap:
+            print(f"idle     waiting {gap:.0f} s", flush=True)
+            time.sleep(gap)
+        record = {"after_idle_s": gap, **probe_song(api, media, chosen[0])}
+        records.append(record)
+        print(f"idle     after {gap:5.0f} s  " + describe(record), flush=True)
+    return records
+
+
+def browse_steps(api):
+    """What the app asks for when opened and browsed, in that order."""
+    steps = [
+        ("me", "/api/v1/me", {}),
+        ("library summary", "/api/v1/library", {}),
+        ("sync tracks", "/api/v1/library/tracks", {}),
+        ("sync albums", "/api/v1/library/albums", {}),
+        ("sync artists", "/api/v1/library/artists", {}),
+        ("home recent", "/api/v1/home/recent", {}),
+        ("home popular", "/api/v1/home/popular", {}),
+        ("home recommended", "/api/v1/home/recommended", {}),
+        ("home mixes", "/api/v1/home/mixes", {}),
+        ("search", "/api/v1/search", {"q": "love"}),
+        ("playlists", "/api/v1/playlists", {}),
+    ]
+    try:
+        albums = api.get("/api/v1/library/albums").json()["items"]
+        artists = api.get("/api/v1/library/artists").json()["items"]
+        lists = api.get("/api/v1/playlists").json()["playlists"]
+        popular = api.get("/api/v1/home/popular").json()
+    except (httpx.HTTPError, ValueError, KeyError):
+        return steps
+    if albums:
+        steps.append(("album page", f"/api/v1/albums/{albums[0]['id']}", {}))
+    if artists:
+        steps.append(("artist page", f"/api/v1/artists/{artists[0]['id']}", {}))
+    if lists:
+        steps.append(("playlist", f"/api/v1/playlists/{lists[0]['id']}", {}))
+    for artist in (popular.get("artists") or [])[:1]:
+        base = f"/api/v1/catalogue/artists/{artist['id']}"
+        steps += [
+            ("catalogue profile", base + "/profile", {}),
+            ("catalogue releases", base + "/releases", {}),
+            ("catalogue popularity", base + "/popularity", {}),
+        ]
+    return steps
+
+
+@scenario("browse")
+def browse(args, api, media):
+    """Each screen's requests timed twice: as opened, and opened again."""
+    records = []
+    for label, path, params in browse_steps(api):
+        for attempt in ("first", "again"):
+            record, _ = timed(api, "GET", path, params=params)
+            record.update({"step": label, "path": path, "attempt": attempt})
+            records.append(record)
+            server = record.get("server", {}).get("app")
+            print(
+                f"browse   {label:22} {attempt:5} {record['ms']:7.0f} ms"
+                + (f"  (server {server:.0f})" if server is not None else "")
+                + f"  {record.get('status', record.get('error'))}"
+                f"  {record.get('bytes', 0) // 1024} KB  id {record['request_id']}",
+                flush=True,
+            )
+    return records
+
+
+def artwork_items(api):
+    """(group, name, path) for the artwork the app shows."""
+    items = []
+    for kind in ("albums", "artists"):
+        answer = api.get(f"/api/v1/library/{kind}")
+        if answer.status_code == 200:
+            for item in answer.json()["items"]:
+                if item.get("cover_url"):
+                    name = item.get("title") or item.get("name")
+                    items.append((f"library {kind}", name, item["cover_url"]))
+    for feed in ("popular", "recommended"):
+        answer = api.get(f"/api/v1/home/{feed}")
+        if answer.status_code != 200:
+            continue
+        data = answer.json()
+        for album in data.get("albums") or []:
+            items.append(
+                (
+                    "home albums",
+                    f"{album['artist']} - {album['name']}",
+                    f"/api/v1/catalogue/artwork/release-group/{album['id']}",
+                )
+            )
+        for song in data.get("songs") or []:
+            if song.get("release_id"):
+                items.append(
+                    (
+                        "home songs",
+                        f"{song['artist']} - {song['name']}",
+                        f"/api/v1/catalogue/artwork/release/{song['release_id']}",
+                    )
+                )
+        for artist in data.get("artists") or []:
+            items.append(
+                (
+                    "home artists",
+                    artist["name"],
+                    f"/api/v1/catalogue/artists/{artist['id']}/artwork",
+                )
+            )
+    return list(dict.fromkeys(items))
+
+
+def has_artwork(api, path):
+    """True for an image (or a redirect to one), False for none yet."""
+    answer = api.get(path, params={"w": 256}, follow_redirects=False)
+    if answer.status_code in (200, 301, 302, 303, 307, 308):
+        return True
+    if answer.status_code == 404:
+        return False
+    return None
+
+
+@scenario("artwork")
+def artwork(args, api, media):
+    """How much of the artwork the app shows is real, and how much the
+    server fills in after being asked (it fetches missing art lazily)."""
+    items = artwork_items(api)
+    first = {path: has_artwork(api, path) for _, _, path in items}
+    missing = [path for path, found in first.items() if found is False]
+    if missing and args.settle:
+        print(f"artwork  {len(missing)} missing; asking again in {args.settle:.0f} s")
+        time.sleep(args.settle)
+    later = {path: has_artwork(api, path) for path in missing} if args.settle else {}
+    groups = {}
+    records = []
+    for group, name, path in items:
+        found = later.get(path, first[path])
+        record = {"group": group, "name": name, "path": path}
+        record["first"], record["after_settle"] = first[path], found
+        records.append(record)
+        totals = groups.setdefault(group, [0, 0, 0, []])
+        totals[0] += 1
+        totals[1] += bool(first[path])
+        totals[2] += bool(found)
+        if not found:
+            totals[3].append(name)
+    for group, (count, at_first, settled, absent) in groups.items():
+        print(
+            f"artwork  {group:14} {settled:3}/{count:<3} with artwork"
+            f" ({at_first} at first ask)"
+            + (f"; missing: {', '.join(absent[:6])}" if absent else ""),
+            flush=True,
+        )
+    return records
+
+
+def server_command(args):
+    """The server's recent record for the probe member: slow requests and stalls."""
+    api, media = clients(args)
+    try:
+        data = api.get("/api/v1/diagnostics").raise_for_status().json()
+    finally:
+        api.close()
+        media.close()
+    print(f"server up {data['uptime_seconds'] / 3600:.1f} h; pools {data['pools']}")
+    blocks = [b["ms"] for b in data["blocks"]]
+    if blocks:
+        print(
+            f"event loop blocked {len(blocks)} times recently,"
+            f" {sum(blocks) / 1000:.1f} s in all, longest {max(blocks) / 1000:.1f} s"
+        )
+    slow = sorted(
+        (r for r in data["requests"] if r["headers_ms"] is not None),
+        key=lambda r: -r["headers_ms"],
+    )[:10]
+    for r in slow:
+        phases = ", ".join(f"{n} {ms:.0f}" for n, ms in r["phases"] if ms >= 20)
+        print(
+            f"{r['headers_ms']:8.0f} ms  {r['method']} {r['route']}  [{phases}]  id {r['id']}"
+        )
+
+
 def run(args, api=None, media=None):
     require_https(args.server)
     owned = api is None
@@ -327,8 +679,40 @@ def main(argv=None):
     probe.add_argument("--repeat", type=int, default=1, help="rounds; 0 runs on")
     probe.add_argument("--interval", type=float, default=300, help="seconds between")
     probe.add_argument("--output", help="append JSON lines here")
+    for name, help_text in (
+        ("remote", "time songs from online sources, twice each"),
+        ("idle", "time a song after pauses, as a phone picked up again"),
+        ("browse", "time the app's screens, opened twice"),
+        ("artwork", "how much artwork is real, and filled in when asked"),
+        ("server", "the server's recent slow requests and stalls"),
+    ):
+        command = commands.add_parser(name, help=help_text)
+        command.add_argument("--server", required=True)
+        command.add_argument("--token-file", required=True)
+        command.add_argument("--output", help="append JSON lines here")
+        if name == "remote":
+            command.add_argument(
+                "--song", action="append", default=[], help="Artist|Title|Album|Seconds"
+            )
+        if name == "idle":
+            command.add_argument("--track", action="append", default=[])
+            command.add_argument(
+                "--gap", type=float, action="append", default=[], help="seconds idle"
+            )
+        if name == "artwork":
+            command.add_argument("--settle", type=float, default=30)
     args = parser.parse_args(argv)
-    login(args) if args.command == "login" else run(args)
+    if args.command == "idle" and not args.gap:
+        args.gap = [60, 300, 900]
+    {
+        "login": login,
+        "run": run,
+        "remote": remote,
+        "idle": idle,
+        "browse": browse,
+        "artwork": artwork,
+        "server": server_command,
+    }[args.command](args)
 
 
 if __name__ == "__main__":

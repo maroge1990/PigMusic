@@ -1,6 +1,7 @@
 import asyncio
 import httpx
 import pytest
+from server import request_timing
 from server.remote import RemoteAudio
 
 
@@ -102,9 +103,18 @@ def test_remote_falls_back_in_order_to_a_relayed_lossy_source(
         lambda *_: [], directory=tmp_path / "relay", relay_search=relay_search
     )
 
+    traces = []
+
     async def run():
-        async with httpx.AsyncClient() as client:
-            return await resolver.stream(client, target, "member")
+        # As inside a request: the steps also become Server-Timing phases.
+        trace = request_timing.Trace("remote-test")
+        traces.append(trace)
+        token = request_timing._trace.set(trace)
+        try:
+            async with httpx.AsyncClient() as client:
+                return await resolver.stream(client, target, "member")
+        finally:
+            request_timing._trace.reset(token)
 
     with caplog.at_level("INFO", logger="pig_music.remote"):
         found = asyncio.run(run())
@@ -117,6 +127,15 @@ def test_remote_falls_back_in_order_to_a_relayed_lossy_source(
         assert step in timing
     assert "freemp3cloud transfer " in timing
     assert sorted(searched) == ["freemp3cloud", "youtube", "zvu4no"]
+    phases = [name for name, _ in traces[0].phases]
+    for name in ("relay-cache", "jiosaavn-miss", "zvu4no-miss", "freemp3cloud-found"):
+        assert name in phases, phases
+    assert "freemp3cloud-transfer" in phases
+    # Played again, it comes from the relay cache without asking any source.
+    with caplog.at_level("INFO", logger="pig_music.remote"):
+        again = asyncio.run(run())
+    assert again["source"] == "freemp3cloud"
+    assert [name for name, _ in traces[1].phases] == ["relay-cache"]
     path, media_type = resolver.relay(found["relay"], "member")
     # The same audio, with at most a length header added (never re-encoded).
     assert media_type == "audio/mpeg"

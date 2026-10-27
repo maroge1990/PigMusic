@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from .request_timing import add_phase, phase
 from .library import normalise
 from .providers.process import run_checked
 from .downloader import FREEMP3CLOUD_RETRY_PAUSE, matches
@@ -95,7 +96,8 @@ class RemoteAudio:
         # A copy already relayed for this recording plays at once, before any
         # provider is asked again.
         if self.directory is not None:
-            found = await asyncio.to_thread(self.cached, track)
+            with phase("relay-cache"):
+                found = await asyncio.to_thread(self.cached, track)
             if found:
                 return {"path": found[0], "source": found[1]}
         began = time.monotonic()
@@ -103,7 +105,13 @@ class RemoteAudio:
         steps = []
 
         def step(name, outcome, since):
-            steps.append(f"{name} {outcome} {time.monotonic() - since:.1f} s")
+            seconds = time.monotonic() - since
+            steps.append(f"{name} {outcome} {seconds:.1f} s")
+            # The same steps in Server-Timing: "youtube-found", "jiosaavn-miss".
+            outcome = {"no match": "miss", "transfer failed": "failed"}.get(
+                outcome, outcome
+            )
+            add_phase(f"{name}-{outcome}".lower(), seconds * 1000)
 
         try:
             url = await self.resolve(client, track)

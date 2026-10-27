@@ -8,9 +8,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 from fastapi.testclient import TestClient
 
+from server import request_timing
 from server.request_timing import RequestTiming, StallWatch, phase, watch_event_loop
 from test_mixes import cached, member, ready, track
-from test_security import protected
+from test_security import PASSWORD, protected
 from test_downloader import audio  # noqa: F401  Shared real MP3 fixture.
 
 
@@ -205,3 +206,49 @@ def test_stall_watch_lets_a_finished_jobs_memory_go(caplog):
 
     assert asyncio.run(scenario())
     assert any("stuck for" in r.getMessage() for r in caplog.records)
+
+
+def test_diagnostics_show_members_their_own_requests_and_owners_everything(
+    tmp_path, monkeypatch
+):
+    # The history is the process's own; other tests' requests are in it too.
+    request_timing.RECENT.clear()
+    request_timing.ROUTES.clear()
+    request_timing.STALLS.clear()
+    request_timing.STALLS.append({"at": 1.0, "seconds": 3.0, "stack": "File x"})
+    app, owner = protected(tmp_path, monkeypatch)
+    user, member_token = member(app, owner)
+    owner_token = app.state.auth.login(
+        "mark", PASSWORD, "device", "phone", "ios", "fixture"
+    )["token"]
+    with TestClient(app, base_url="https://private.ts.net") as client:
+        as_member = {"Authorization": "Bearer " + member_token}
+        as_owner = {"Authorization": "Bearer " + owner_token}
+        client.get(
+            "/api/v1/library", headers={**as_member, "X-Request-ID": "member-01"}
+        )
+        client.get(
+            "/api/v1/library", headers={**as_owner, "X-Request-ID": "owner-0001"}
+        )
+        own = client.get("/api/v1/diagnostics", headers=as_member).json()
+        ids = [r["id"] for r in own["requests"]]
+        assert "member-01" in ids and "owner-0001" not in ids
+        (seen,) = [r for r in own["requests"] if r["id"] == "member-01"]
+        assert seen["route"] == "/api/v1/library" and seen["status"] == 200
+        assert seen["headers_ms"] > 0
+        assert "auth-session" in [name for name, _ in seen["phases"]]
+        # Members see when the server stalled, never where.
+        assert own["stalls"] == [{"at": 1.0, "seconds": 3.0}]
+        assert "routes" not in own and set(own["pools"]) == {"asyncio", "anyio"}
+        assert (
+            client.get("/api/v1/admin/diagnostics", headers=as_member).status_code
+            == 403
+        )
+        everything = client.get("/api/v1/admin/diagnostics", headers=as_owner).json()
+        ids = [r["id"] for r in everything["requests"]]
+        assert "member-01" in ids and "owner-0001" in ids
+        assert everything["stalls"][0]["stack"] == "File x"
+        (library,) = [
+            r for r in everything["routes"] if r["route"] == "GET /api/v1/library"
+        ]
+        assert library["count"] == 2 and library["p95_ms"] >= library["p50_ms"]

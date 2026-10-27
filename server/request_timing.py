@@ -10,6 +10,7 @@ links carry their signature, and a relayed stream's path is masked.
 """
 
 import asyncio
+import collections
 import contextlib
 import contextvars
 import logging
@@ -30,6 +31,15 @@ PHASE_NAME = re.compile(r"[a-z][a-z0-9-]{0,31}")
 MAX_PHASES = 24
 
 _trace = contextvars.ContextVar("pig_music_request_trace", default=None)
+
+STARTED = time.time()
+# Bounded history for the diagnostics endpoints: recent API requests, the
+# headers times of each route, event-loop blocks and stall stacks. Deques
+# append atomically, so the stall thread can add to them too.
+RECENT = collections.deque(maxlen=500)
+ROUTES = collections.defaultdict(lambda: collections.deque(maxlen=200))
+BLOCKS = collections.deque(maxlen=200)
+STALLS = collections.deque(maxlen=50)
 
 
 class Trace:
@@ -60,6 +70,13 @@ def phase(name):
     finally:
         if trace is not None:
             trace.add(name, (time.perf_counter() - began) * 1000)
+
+
+def add_phase(name, ms):
+    """Records a phase timed elsewhere (`ms` long) on the current request."""
+    trace = _trace.get()
+    if trace is not None:
+        trace.add(name, ms)
 
 
 def mark(name):
@@ -166,14 +183,32 @@ class RequestTiming:
 
     def report(self, scope, trace, status, headers_ms):
         method, path = scope.get("method", ""), scope.get("path", "")
-        if not path.startswith("/api/"):
-            return
-        slow = headers_ms is None or headers_ms >= self.slow_ms
-        if not (slow or always_logged(method, path) or (status or 0) >= 500):
+        if not path.startswith("/api/") or path == "/api/health":
             return
         # A relayed stream's path is its credential.
         if path.startswith("/api/v1/remote-playback/streams/"):
             path = "/api/v1/remote-playback/streams/[redacted]"
+        route = getattr(scope.get("route"), "path", None) or "unmatched"
+        user = (scope.get("state") or {}).get("user") or {}
+        RECENT.append(
+            {
+                "id": trace.id,
+                "at": round(time.time(), 3),
+                "user": user.get("id"),
+                "method": method,
+                "path": path,
+                "route": route,
+                "status": status,
+                "headers_ms": None if headers_ms is None else round(headers_ms, 1),
+                "done_ms": round(trace.elapsed(), 1),
+                "phases": [[name, round(ms, 1)] for name, ms in trace.phases],
+            }
+        )
+        if headers_ms is not None:
+            ROUTES[f"{method} {route}"].append(headers_ms)
+        slow = headers_ms is None or headers_ms >= self.slow_ms
+        if not (slow or always_logged(method, path) or (status or 0) >= 500):
+            return
         phases = " ".join(f"{name}={ms:.0f}" for name, ms in trace.phases)
         answered = (
             f"{status} headers {headers_ms:.0f} ms"
@@ -196,7 +231,7 @@ class StallWatch:
     then every `repeat_seconds` while the stall lasts. Stacks show files,
     lines and code, never values."""
 
-    def __init__(self, stalled_seconds=2.0, repeat_seconds=5.0, check_every=0.25):
+    def __init__(self, stalled_seconds=1.0, repeat_seconds=5.0, check_every=0.25):
         self.stalled_seconds = stalled_seconds
         self.repeat_seconds = repeat_seconds
         self.check_every = check_every
@@ -239,12 +274,19 @@ class StallWatch:
             if stacks is None:
                 continue
             stack, workers = stacks
+            # "server frames" rather than "...code:", which the credential
+            # filter reads as a secret and masks the line after.
+            text = stack + "".join(
+                "\nworker thread, server frames\n" + w for w in workers
+            )
+            STALLS.append(
+                {"at": round(time.time(), 3), "seconds": round(stuck, 1), "stack": text}
+            )
             log.warning(
-                "event loop stuck for %.1f s; %s; at:\n%s%s",
+                "event loop stuck for %.1f s; %s; at:\n%s",
                 stuck,
                 describe(pools(self.loop)),
-                stack,
-                "".join("\nworker thread in server code:\n" + w for w in workers),
+                text,
             )
 
     def snapshot(self):
@@ -283,6 +325,8 @@ async def watch_event_loop(interval=0.25, blocked_ms=500, quiet_seconds=10, stal
         if stall is not None:
             stall.beat = time.monotonic()
         lag = (now - began - interval) * 1000
+        if lag >= blocked_ms:
+            BLOCKS.append({"at": round(time.time(), 3), "ms": round(lag)})
         if lag >= blocked_ms and now - last_blocked >= quiet_seconds:
             last_blocked = now
             log.warning("event loop blocked for %.0f ms; %s", lag, describe(pools()))
@@ -291,3 +335,46 @@ async def watch_event_loop(interval=0.25, blocked_ms=500, quiet_seconds=10, stal
         if waiting and now - last_queued >= quiet_seconds:
             last_queued = now
             log.warning("worker threads saturated; %s", describe(state))
+
+
+def percentile(values, share):
+    ordered = sorted(values)
+    return round(ordered[min(len(ordered) - 1, round(share * (len(ordered) - 1)))], 1)
+
+
+def diagnostics(user_id=None):
+    """Recent server timing. With `user_id`, only that person's requests and
+    stalls without their stacks (a member's view); otherwise everything,
+    with each route's headers times (the owner's). Call on the event loop."""
+    requests = [r for r in list(RECENT) if user_id is None or r["user"] == user_id]
+    result = {
+        "uptime_seconds": round(time.time() - STARTED),
+        "requests": requests[-200:],
+        "blocks": list(BLOCKS)[-100:],
+        "stalls": [
+            {k: v for k, v in stall.items() if user_id is None or k != "stack"}
+            for stall in list(STALLS)
+        ],
+        "pools": {
+            name: (
+                None if value is None else dict(zip(("busy", "size", "waiting"), value))
+            )
+            for name, value in pools().items()
+        },
+    }
+    if user_id is None:
+        result["routes"] = sorted(
+            (
+                {
+                    "route": route,
+                    "count": len(values),
+                    "p50_ms": percentile(values, 0.5),
+                    "p95_ms": percentile(values, 0.95),
+                    "max_ms": round(max(values), 1),
+                }
+                for route, values in ((k, list(v)) for k, v in list(ROUTES.items()))
+                if values
+            ),
+            key=lambda r: -r["p95_ms"],
+        )
+    return result

@@ -1,4 +1,5 @@
 import json
+import time
 from types import SimpleNamespace
 
 import httpx
@@ -123,3 +124,202 @@ def test_login_replaces_a_readable_token_file_with_a_private_one(tmp_path, monke
     assert path.stat().st_mode & 0o777 == 0o600
     assert probe_playback.read_token(path) == "fresh-device-token"
     assert [p.name for p in tmp_path.iterdir()] == ["token"]
+
+
+class FakeServer:
+    """A server shaped like PigMusic for the probe's scenarios."""
+
+    def __init__(self):
+        self.started = time.time()
+        self.asked = {}
+        self.seen = []
+
+    def __call__(self, request):
+        path = request.url.path
+        self.seen.append((request.method, path, dict(request.headers)))
+        timing = {"server-timing": "app;dur=12.0, auth-ready;dur=2.0"}
+        if path == "/api/v1/search":
+            owned = "Mr. Brightside" in request.url.params["q"]
+            track = {"title": "Mr. Brightside", "artist": "The Killers"}
+            return httpx.Response(
+                200, json={"household_tracks": [track] if owned else []}
+            )
+        if path == "/api/v1/remote-playback":
+            found = {
+                "url": "/api/v1/remote-playback/streams/relay-token",
+                "source": "Remote · YouTube",
+            }
+            return httpx.Response(
+                200,
+                json=found,
+                headers={"server-timing": "app;dur=15000, youtube-found;dur=12000"},
+            )
+        if path.startswith("/api/v1/remote-playback/streams/") or path.startswith(
+            "/api/v1/playback/files/"
+        ):
+            body = b"\0" * (300 * 1024)
+            return httpx.Response(
+                206,
+                content=body,
+                headers={
+                    "content-type": "audio/mpeg",
+                    "content-range": f"bytes 0-{len(body) - 1}/{len(body)}",
+                    **timing,
+                },
+            )
+        if path.endswith("/url"):
+            return httpx.Response(
+                200, json={"url": "/api/v1/playback/files/song?sig=s"}, headers=timing
+            )
+        if path == "/api/v1/library-pages/tracks":
+            return httpx.Response(
+                200, json={"items": [{"id": "song", "title": "Song"}]}
+            )
+        if path == "/api/v1/library/albums":
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "id": "al",
+                            "title": "Album",
+                            "cover_url": "/api/v1/library-artwork/albums/al",
+                        }
+                    ]
+                },
+            )
+        if path == "/api/v1/library/artists":
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "id": "ar",
+                            "name": "Artist",
+                            "cover_url": "/api/v1/library-artwork/artists/ar",
+                        }
+                    ]
+                },
+            )
+        if path == "/api/v1/home/popular":
+            return httpx.Response(
+                200,
+                json={
+                    "albums": [{"id": "rg", "name": "Hit", "artist": "Star"}],
+                    "songs": [],
+                    "artists": [{"id": "mb", "name": "Star"}],
+                },
+            )
+        if path == "/api/v1/playlists":
+            return httpx.Response(
+                200, json={"playlists": [{"id": "pl", "name": "Probe test"}]}
+            )
+        if "artwork" in path:
+            # The album has art; the rest arrive once asked a second time.
+            self.asked[path] = self.asked.get(path, 0) + 1
+            if path.endswith("/al") or self.asked[path] > 1:
+                return httpx.Response(307, headers={"location": "/api/v1/covers/x.jpg"})
+            return httpx.Response(404)
+        if path == "/api/v1/diagnostics":
+            blocks = [
+                {"at": self.started - 600, "ms": 9000},
+                {"at": time.time(), "ms": 2500},
+            ]
+            return httpx.Response(
+                200,
+                json={
+                    "blocks": blocks,
+                    "stalls": [],
+                    "requests": [],
+                    "pools": {},
+                    "uptime_seconds": 60,
+                },
+            )
+        return httpx.Response(200, json={}, headers=timing)
+
+
+def fake_clients(server):
+    api = httpx.Client(
+        base_url="https://pig.test",
+        transport=httpx.MockTransport(server),
+        headers={"Authorization": "Bearer probe-token-value"},
+    )
+    media = httpx.Client(
+        base_url="https://pig.test", transport=httpx.MockTransport(server)
+    )
+    return api, media
+
+
+def args_for(tmp_path, **extra):
+    return SimpleNamespace(
+        server="https://pig.test",
+        token_file="unused",
+        output=str(tmp_path / "out.jsonl"),
+        **extra,
+    )
+
+
+def test_remote_skips_household_songs_and_asks_twice(tmp_path, capsys):
+    server = FakeServer()
+    args = args_for(
+        tmp_path,
+        song=[
+            "The Killers|Mr. Brightside|Hot Fuss|222",
+            "The Weeknd|Blinding Lights|After Hours|200",
+        ],
+    )
+    records = probe_playback.remote(args, *fake_clients(server))
+    assert [r["attempt"] for r in records] == ["first", "again"]
+    assert all(r["song"] == "The Weeknd - Blinding Lights" for r in records)
+    first = records[0]
+    assert first["source"] == "Remote · YouTube" and first["route"] == "relayed"
+    assert first["server"]["youtube-found"] == 12000 and first["open"]["status"] == 206
+    # The relayed audio is fetched without the device token.
+    media = [
+        h for m, p, h in server.seen if p.startswith("/api/v1/remote-playback/streams/")
+    ]
+    assert media and all("authorization" not in h for h in media)
+    printed = capsys.readouterr().out
+    assert "in the household library, skipped" in printed
+    # Only the stall during this run counts.
+    assert "blocked 1 times during this run, 2.5 s in all" in printed
+    saved = (tmp_path / "out.jsonl").read_text()
+    assert '"scenario": "remote"' in saved and "probe-token-value" not in saved
+
+
+def test_idle_plays_warm_then_after_each_pause(tmp_path, capsys):
+    records = probe_playback.idle(
+        args_for(tmp_path, track=[], gap=[0.01, 0.02]), *fake_clients(FakeServer())
+    )
+    assert [r["after_idle_s"] for r in records] == [0, 0, 0.01, 0.02]
+    assert all("error" not in r and r["open"]["status"] == 206 for r in records)
+
+
+def test_browse_times_each_screen_twice(tmp_path):
+    records = probe_playback.browse(args_for(tmp_path), *fake_clients(FakeServer()))
+    steps = [r["step"] for r in records]
+    for step in (
+        "sync tracks",
+        "home mixes",
+        "album page",
+        "artist page",
+        "playlist",
+        "catalogue profile",
+    ):
+        assert steps.count(step) == 2, step
+    assert all(r["status"] == 200 for r in records)
+
+
+def test_artwork_counts_real_art_and_what_arrives_when_asked(tmp_path, capsys):
+    records = probe_playback.artwork(
+        args_for(tmp_path, settle=0.01), *fake_clients(FakeServer())
+    )
+    found = {r["group"]: (r["first"], r["after_settle"]) for r in records}
+    assert found["library albums"] == (True, True)
+    assert found["library artists"] == (False, True)
+    assert found["home albums"] == (False, True) and found["home artists"] == (
+        False,
+        True,
+    )
+    printed = capsys.readouterr().out
+    assert "library artists   1/1   with artwork (0 at first ask)" in printed
