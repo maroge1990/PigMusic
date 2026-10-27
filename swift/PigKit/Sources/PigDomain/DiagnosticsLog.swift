@@ -19,6 +19,15 @@ public final class DiagnosticsLog: @unchecked Sendable {
   private let marker: URL?
   private let limit: Int
   private var lines: [String]
+  /// A write to disk is due (the queue's own state).
+  private var persistPending = false
+  /// Formatting stays on the queue, off the caller's thread (APP1).
+  private let stamps: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    formatter.timeZone = .current
+    return formatter
+  }()
   /// True when the previous run ended without reaching the background or a
   /// clean exit: most often a crash or a system termination.
   public let previousRunEndedUnexpectedly: Bool
@@ -41,7 +50,8 @@ public final class DiagnosticsLog: @unchecked Sendable {
     lines =
       file.flatMap { try? String(contentsOf: $0, encoding: .utf8) }?
       .split(separator: "\n").map(String.init) ?? []
-    previousRunEndedUnexpectedly = marker.map { FileManager.default.fileExists(atPath: $0.path) }
+    previousRunEndedUnexpectedly =
+      marker.map { FileManager.default.fileExists(atPath: $0.path) }
       ?? false
   }
 
@@ -62,17 +72,30 @@ public final class DiagnosticsLog: @unchecked Sendable {
   /// suspended app at any time without that being a crash.
   public func background() {
     record("lifecycle", "background")
+    // The system may suspend the app now: write what is pending at once.
+    queue.async { [self] in
+      persistPending = false
+      persist()
+    }
     setRunning(false)
   }
 
+  /// Cheap on the caller's thread, often the main one (APP1): the entry is
+  /// formatted, redacted and kept on the log's own queue, and written to disk
+  /// at most every half second rather than once per entry.
   public func record(_ category: String, _ message: String) {
-    let stamp = ISO8601DateFormatter.string(
-      from: Date(), timeZone: .current, formatOptions: [.withInternetDateTime, .withFractionalSeconds])
-    let line = "\(stamp) [\(category)] \(Self.redact(message))"
+    let now = Date()
     queue.async { [self] in
+      let line = "\(stamps.string(from: now)) [\(category)] \(Self.redact(message))"
       lines.append(String(line.prefix(400)))
       if lines.count > limit + limit / 4 { lines.removeFirst(lines.count - limit) }
-      persist()
+      guard !persistPending else { return }
+      persistPending = true
+      queue.asyncAfter(deadline: .now() + 0.5) { [self] in
+        guard persistPending else { return }
+        persistPending = false
+        persist()
+      }
     }
   }
 

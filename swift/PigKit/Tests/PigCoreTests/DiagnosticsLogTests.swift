@@ -42,4 +42,33 @@ struct DiagnosticsLogTests {
     #expect(lines.count <= 25)
     #expect(lines.last?.hasSuffix("entry 99") == true)
   }
+  @Test func recordingCostsTheCallerAlmostNothing() {
+    let root = folder()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let log = DiagnosticsLog(directory: root)
+    let message =
+      "playback_url 200 in 812 ms, server 41 ms (id abcdef) https://music.example.au/api/v1/x?sig=1"
+    let clock = ContinuousClock()
+    let spent = clock.measure {
+      for _ in 0..<2000 { log.record("network", message) }
+    }
+    // Formatting, redaction and writing happen on the log's own queue.
+    print("2000 records on the caller: \(spent)")
+    #expect(spent < .milliseconds(100))
+    let text = log.text()
+    #expect(text.split(separator: "\n").count >= 1500)
+    #expect(text.contains("https://music.example.au/…") && !text.contains("sig=1"))
+  }
+  @Test func entriesReachTheFileSoonAndAtOnceInTheBackground() async throws {
+    let root = folder()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let log = DiagnosticsLog(directory: root)
+    log.record("test", "soon")
+    try await Task.sleep(for: .seconds(1))
+    #expect(DiagnosticsLog(directory: root).text().contains("soon"))
+    log.record("test", "suspended")
+    log.background()
+    _ = log.text()
+    #expect(DiagnosticsLog(directory: root).text().contains("suspended"))
+  }
 }
