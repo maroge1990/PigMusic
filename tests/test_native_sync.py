@@ -228,3 +228,32 @@ def test_later_pages_never_wait_for_the_household_locks(tmp_path, monkeypatch):
     # A revision kept too long is captured again, as before.
     monkeypatch.setattr(native_sync, "CURSOR_SECONDS", 0)
     assert sync.page(owner, "tracks", first["next_cursor"], 1)["items"][0]["id"] == "1"
+
+
+def test_later_pages_are_the_captured_objects_not_rebuilt(tmp_path):
+    store, owner, _ = fixture(tmp_path)
+    sync = NativeSync(store)
+    first = sync.page(owner, "tracks", limit=1)
+    album = first["items"][0]["album_id"]
+    # The household index moves a song meanwhile (and may move it back before
+    # the next capture): this revision's pages must not show that.
+    store.index.album_by_track["1"] = "elsewhere"
+    later = sync.page(owner, "tracks", first["next_cursor"], 1)
+    assert later["items"][0]["id"] == "1" and later["items"][0]["album_id"] == album
+
+
+def test_kept_captures_expire_and_stay_bounded(tmp_path, monkeypatch):
+    from server import native_sync
+
+    store, owner, member = fixture(tmp_path)
+    sync = NativeSync(store)
+    for index in range(12):
+        sync.remember(f"person-{index}", {"revision": "r", "payloads": {}})
+    assert sum(len(kept) for kept in sync.captured.values()) == native_sync.CAPTURES
+    for revision in ("a", "b", "c"):
+        sync.remember(owner, {"revision": revision, "payloads": {}})
+    assert list(sync.captured[owner]) == ["b", "c"]
+    monkeypatch.setattr(native_sync, "CURSOR_SECONDS", 0)
+    sync.remember(member, {"revision": "now", "payloads": {}})
+    # Everything older is released, whoever it belonged to.
+    assert sync.captured == {member: sync.captured[member]}

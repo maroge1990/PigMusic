@@ -9,6 +9,7 @@ import base64
 import functools
 import hashlib
 import json
+import threading
 import time
 import uuid
 from .api_models import ArtistDTO, AlbumDTO, TrackDTO, PlaylistDTO
@@ -31,6 +32,11 @@ PAGE_BYTES = 2 * 1024 * 1024
 # kept this long in memory (SYNC1): no capture and no lock per page, and a
 # change meanwhile no longer restarts a phone's download.
 CURSOR_SECONDS = 15 * 60
+# Kept captures: two per person, eight in all, each the serialised pages of
+# one revision (tens of MB for a very large library).
+CAPTURES_PER_PERSON = 2
+CAPTURES = 8
+PAGED = ("tracks", "albums", "artists")
 
 
 class ResyncRequired(ValueError):
@@ -58,8 +64,10 @@ class NativeSync:
         # keeps the same objects across playlist-only edits, so those skip
         # validation and serialisation entirely.
         self.clean = {}
-        # {user: {revision: (captured data, monotonic time)}}, a few each.
+        # {user: {revision: ({kind: [payload JSON]}, monotonic time)}}: the
+        # exact objects a revision holds, served to its later pages.
         self.captured = {}
+        self.captured_lock = threading.Lock()
 
     def dto(self, kind, raw):
         if kind == "tracks":
@@ -96,8 +104,22 @@ class NativeSync:
                     and previous[1] == signature
                     and previous[2] >= int(time.time()) - 30 * 86400
                 ):
+                    # Unchanged: the stored objects are this revision's.
+                    payloads = {}
+                    for kind in PAGED:
+                        rows = dict(
+                            conn.execute(
+                                "SELECT entity_id,payload FROM sync_entities WHERE user_id=? AND entity=?",
+                                (user_id, kind),
+                            )
+                        )
+                        payloads[kind] = [
+                            rows.get(raw["id"]) or self.payload(kind, raw)
+                            for raw in projection[kind]
+                        ]
                     return self.remember(
-                        user_id, {**projection, "revision": previous[0]}
+                        user_id,
+                        {**projection, "revision": previous[0], "payloads": payloads},
                     )
                 from .playlists import Playlists
                 from .routes.personal import playlist_dto
@@ -115,6 +137,7 @@ class NativeSync:
                 deletes = {kind: [] for kind in MODELS}
                 known = self.clean.get(user_id, {})
                 verified = {kind: {} for kind in MODELS}
+                payloads = {kind: [] for kind in MODELS}
                 for kind, model in MODELS.items():
                     before = dict(
                         conn.execute(
@@ -126,12 +149,13 @@ class NativeSync:
                     for raw in projection[kind]:
                         verified[kind][id(raw)] = raw
                         if unchanged.get(id(raw)) is raw and raw["id"] in before:
-                            del before[raw["id"]]
+                            payloads[kind].append(before.pop(raw["id"]))
                             continue
                         item = self.dto(kind, raw)
                         payload = json.dumps(
                             item, sort_keys=True, separators=(",", ":")
                         )
+                        payloads[kind].append(payload)
                         if before.pop(item["id"], None) != payload:
                             upserts[kind].append(item)
                             conn.execute(
@@ -159,20 +183,50 @@ class NativeSync:
                 )
             # Only after the commit: these objects now match their rows.
             self.clean[user_id] = verified
-            return self.remember(user_id, {**projection, "revision": revision})
+            return self.remember(
+                user_id,
+                {
+                    **projection,
+                    "revision": revision,
+                    "payloads": {kind: payloads[kind] for kind in PAGED},
+                },
+            )
+
+    def payload(self, kind, raw):
+        return json.dumps(self.dto(kind, raw), sort_keys=True, separators=(",", ":"))
 
     def remember(self, user_id, data):
-        kept = self.captured.setdefault(user_id, {})
-        kept.pop(data["revision"], None)
-        kept[data["revision"]] = (data, time.monotonic())
-        while len(kept) > 3:
-            kept.pop(next(iter(kept)))
+        now = time.monotonic()
+        with self.captured_lock:
+            for person in list(self.captured):
+                kept = self.captured[person]
+                for revision in [
+                    r for r, v in kept.items() if now - v[1] >= CURSOR_SECONDS
+                ]:
+                    del kept[revision]
+                if not kept:
+                    del self.captured[person]
+            kept = self.captured.setdefault(user_id, {})
+            kept.pop(data["revision"], None)
+            kept[data["revision"]] = (data["payloads"], now)
+            while len(kept) > CAPTURES_PER_PERSON:
+                kept.pop(next(iter(kept)))
+            while sum(len(k) for k in self.captured.values()) > CAPTURES:
+                oldest = min(
+                    (v[1], person, revision)
+                    for person, k in self.captured.items()
+                    for revision, v in k.items()
+                )
+                del self.captured[oldest[1]][oldest[2]]
+                if not self.captured[oldest[1]]:
+                    del self.captured[oldest[1]]
         return data
 
     def recalled(self, user_id, revision):
-        found = self.captured.get(user_id, {}).get(revision)
+        with self.captured_lock:
+            found = self.captured.get(user_id, {}).get(revision)
         if found and time.monotonic() - found[1] < CURSOR_SECONDS:
-            return found[0]
+            return {"revision": revision, "payloads": found[0]}
         return None
 
     def page(self, user_id, kind, cursor=None, limit=200):
@@ -198,14 +252,14 @@ class NativeSync:
             data = self.recalled(user_id, revision) or self.capture(user_id)
             if revision != data["revision"]:
                 raise ResyncRequired("Pagination changed. Restart this collection.")
-        values = data[kind]
+        # The objects as captured, never rebuilt from today's library.
+        values = data["payloads"][kind]
         items, size = [], 0
         for value in values[offset : offset + limit]:
-            item = self.dto(kind, value)
-            size += len(json.dumps(item, separators=(",", ":")))
+            size += len(value)
             if items and size > PAGE_BYTES:
                 break
-            items.append(item)
+            items.append(json.loads(value))
         following = offset + len(items)
         next_cursor = (
             base64.urlsafe_b64encode(
