@@ -207,10 +207,16 @@ class MixCache:
                 return False
             try:
                 source = self.file(key)
-                target = downloader.staging / (job["id"] + "-mix" + source.suffix)
-                shutil.copyfile(source, target)
             except FileNotFoundError:
                 return False
+        # The durable lease keeps cleanup away; copy without lifecycle_lock
+        # (LOCK1). The copy is validated again before publication.
+        target = downloader.staging / (job["id"] + "-mix" + source.suffix)
+        try:
+            shutil.copyfile(source, target)
+        except FileNotFoundError:
+            target.unlink(missing_ok=True)
+            return False
         try:
             downloader.complete(job, target, target.suffix, "mix-cache", profile)
             return True

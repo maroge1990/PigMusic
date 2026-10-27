@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import stat
+import threading
 
 from fastapi.testclient import TestClient
 import pytest
@@ -279,10 +280,14 @@ def test_a_page_of_playback_addresses_takes_one_database_query(tmp_path, monkeyp
 
         def counted(store, ids):
             connect = store.connect
+            caller = threading.get_ident()
 
             @contextlib.contextmanager
             def counting():
-                lookups.append(1)
+                # Only this lookup's queries: background workers (the
+                # downloader's thread) use the same store meanwhile.
+                if threading.get_ident() == caller:
+                    lookups.append(1)
                 with connect() as conn:
                     yield conn
 

@@ -1,4 +1,4 @@
-from .lifecycle import coordinated
+from .lifecycle import TimedRLock, coordinated
 import json
 import hashlib
 import os
@@ -42,12 +42,13 @@ class Store:
 
     def __init__(self, directory: Path):
         self.directory = directory
-        self.lifecycle_lock = threading.RLock()
+        # Holds over a second are logged with their holder (LOCK1).
+        self.lifecycle_lock = TimedRLock("lifecycle_lock")
         # Mix playback leases against mix cache cleanup only. Playback must not
         # wait for library work (syncs, scans, exports) under lifecycle_lock;
         # cleanup takes this after lifecycle_lock, never the other way round.
         self.mix_lock = threading.RLock()
-        self.library_lock = threading.RLock()
+        self.library_lock = TimedRLock("library_lock")
         directory.mkdir(parents=True, exist_ok=True)
         self.cover_dir = directory / "covers"
         self.cover_dir.mkdir(exist_ok=True)

@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -66,12 +67,92 @@ def contained(root, relative):
     return target
 
 
+def fingerprint(path):
+    info = os.stat(path)
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+
+
+def settled(identity, now=None):
+    return identity[3] < (time.time_ns() if now is None else now) - 2_000_000_000
+
+
 class Exporter:
     def __init__(self, store, root=None):
         self.store = store
         self.root = Path(root or os.environ.get("PIG_MUSIC_LIBRARY", "/library"))
         self.lock = threading.Lock()
         self.stopping = asyncio.Event()
+        # SHA-256 by path and file identity (device, inode, size, modification
+        # time), so an unchanged pass reads no audio and hashing happens before
+        # lifecycle_lock is taken (LOCK1). A changed file is hashed again.
+        self.digests = {}
+
+    def digest(self, path):
+        key = os.fspath(path)
+        before = fingerprint(path)
+        cached = self.digests.get(key)
+        if cached and cached[0] == before:
+            return cached[1]
+        started = time.time_ns()
+        value = digest(path)
+        # A file written moments ago could change again within one timestamp
+        # tick without its size changing: remember only settled files.
+        if fingerprint(path) == before and settled(before, started):
+            if len(self.digests) > 20000:
+                self.digests.clear()
+            self.digests[key] = (before, value)
+        return value
+
+    def linked(self, path, source, expected):
+        """A hard link of the source just verified needs no second read."""
+        try:
+            return os.path.samefile(path, source) or self.digest(path) == expected
+        except OSError:
+            return False
+
+    def paths(self, track):
+        """The download's source and its NAS destination."""
+        source_root = library_root(self.store)
+        if not contained(source_root, track["relative_path"]).is_file():
+            legacy = self.store.directory / "downloads" / "library"
+            if contained(legacy, track["relative_path"]).is_file():
+                source_root = legacy
+        source = contained(source_root, track["relative_path"])
+        relative = track.get("export_relative_path") or self.relative(track)
+        return source, relative, contained(self.root, relative)
+
+    def warm(self, track):
+        """Hash what publication will check, outside lifecycle_lock. False
+        when a file was written moments ago: it waits for the next pass, so
+        publication never hashes it under the lock."""
+        try:
+            source, _, target = self.paths(track)
+            for path in (source, target):
+                if path.is_file():
+                    if not settled(fingerprint(path)):
+                        return False
+                    self.digest(path)
+        except (OSError, ValueError, KeyError):
+            pass  # publish() reports it.
+        return True
+
+    def current(self, conn, track):
+        """The download as it stands now: still the same file, not in Trash."""
+        row = conn.execute(
+            "SELECT payload FROM acquired WHERE id=?", (track["id"],)
+        ).fetchone()
+        if not row or json.loads(row[0]).get("sha256") != track["sha256"]:
+            return False
+        for (raw,) in conn.execute(
+            "SELECT payload FROM documents WHERE name LIKE 'removed:%'"
+        ):
+            value = json.loads(raw)
+            if value.get("track_id") == track["id"] and value.get("status") in {
+                "removing",
+                "removed",
+            }:
+                return False
+        return True
 
     def config(self):
         return load_json(self.store.directory / "library-export.json")
@@ -157,7 +238,7 @@ class Exporter:
         # A same-extension quality replacement must coexist with the original
         # until publication succeeds. Unknown collisions remain review errors.
         target = contained(self.root, relative)
-        if target.is_file() and digest(target) != track["sha256"]:
+        if target.is_file() and self.digest(target) != track["sha256"]:
             with self.store.connect() as conn:
                 old = [
                     json.loads(r[0])
@@ -169,7 +250,7 @@ class Exporter:
             if any(
                 (v.get("export_relative_path") or v.get("nas_relative_path"))
                 == relative
-                and v.get("sha256") == digest(target)
+                and v.get("sha256") == self.digest(target)
                 for v in old
             ):
                 relative = (
@@ -230,27 +311,23 @@ class Exporter:
 
     @coordinated
     def publish(self, track):
-        source_root = library_root(self.store)
-        if not contained(source_root, track["relative_path"]).is_file():
-            legacy = self.store.directory / "downloads" / "library"
-            if contained(legacy, track["relative_path"]).is_file():
-                source_root = legacy
-        source = contained(source_root, track["relative_path"])
-        relative = track.get("export_relative_path") or self.relative(track)
-        target = contained(self.root, relative)
+        with self.store.connect() as conn:
+            if not self.current(conn, track):
+                return False  # Replaced or removed since this pass began.
+        source, relative, target = self.paths(track)
         expected = track["sha256"]
         if not source.is_file():
             if (
                 track.get("export_relative_path")
                 and target.is_file()
-                and digest(target) == expected
+                and self.digest(target) == expected
             ):
                 return
             raise ValueError("Validated download is unavailable; export deferred.")
-        if digest(source) != expected:
+        if self.digest(source) != expected:
             raise ValueError("Validated download changed; export refused.")
         if target.exists():
-            if not target.is_file() or digest(target) != expected:
+            if not target.is_file() or self.digest(target) != expected:
                 raise ValueError(
                     "Destination contains different content; export refused."
                 )
@@ -273,18 +350,18 @@ class Exporter:
                         shutil.copyfileobj(incoming, outgoing, 1024 * 1024)
                         outgoing.flush()
                         os.fsync(outgoing.fileno())
-                if digest(stage) != expected:
+                if not self.linked(stage, source, expected):
                     raise ValueError("Export verification failed.")
                 # Hard-link publication is atomic and cannot replace a competing
                 # file. Both files are on the same NAS filesystem.
                 try:
                     os.link(stage, target)
                 except FileExistsError:
-                    if digest(target) != expected:
+                    if self.digest(target) != expected:
                         raise ValueError("Destination changed during export.")
             finally:
                 stage.unlink(missing_ok=True)
-        if digest(target) != expected:
+        if not self.linked(target, source, expected):
             raise ValueError("Published file verification failed.")
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -300,11 +377,12 @@ class Exporter:
             )
         # The NAS copy is verified and its location durably committed before
         # deleting the staging-library copy. Restart can finish this cleanup.
-        if source.exists() and digest(source) == expected:
+        if source.exists() and self.digest(source) == expected:
             source.unlink()
 
-    @coordinated
     def process(self):
+        # Not one lifecycle_lock hold for the whole pass: each song's
+        # publication takes it (LOCK1), after its files are hashed.
         if self.config().get("enabled") is not True or not self.lock.acquire(
             blocking=False
         ):
@@ -332,8 +410,11 @@ class Exporter:
             for track in self.records():
                 # One song that needs a decision (or whose file is refused)
                 # waits on its own; the rest still publish.
+                if not self.warm(track):
+                    continue
                 try:
-                    self.publish(track)
+                    if self.publish(track) is False:
+                        continue
                 except (OSError, ValueError, KeyError) as exc:
                     waiting.append(
                         {

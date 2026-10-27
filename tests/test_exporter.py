@@ -1,5 +1,7 @@
 import hashlib
 import json
+import os
+import time
 from pathlib import Path
 
 import pytest
@@ -342,6 +344,10 @@ def nas_with(tmp_path, monkeypatch, existing):
 
 def download(store, identity, disc=1, album="Album"):
     track, path = acquired(store, identity.encode(), identity)
+    # Finished a minute ago: the exporter leaves files written moments ago
+    # for its next pass.
+    old = time.time() - 60
+    os.utime(path, (old, old))
     track = {**track, "disc_number": disc, "album": album, "title": identity}
     with store.connect() as conn:
         conn.execute(
