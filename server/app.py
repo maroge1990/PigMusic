@@ -67,8 +67,9 @@ from .home import HomeDiscovery
 from .warmer import Warmer
 from .image_cache import variant
 from .media import (
+    DescriptorFileResponse,
+    open_playback,
     playable,
-    playback_target,
     public_settings,
     track_file,
     saved_track,
@@ -1133,14 +1134,14 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     @app.head("/api/v1/playback/files/{track_id}")
     def playback_file(track_id: str, request: Request):
         mark("handler")
-        info = None
+        opened = None
         try:
             if track_id.startswith("mix:"):
                 target = mixes.playback(request.state.user["id"], track_id)
             else:
-                # One NAS lookup per open or seek (NAS1); FileResponse reuses it.
+                # One NAS open per request, served from that descriptor (NAS1).
                 with phase("file"):
-                    target, info = playback_target(store, track_id)
+                    opened = open_playback(store, track_id)
         except (FileNotFoundError, LookupError):
             raise HTTPException(404, "This saved file is unavailable on the server.")
         types = {
@@ -1152,11 +1153,14 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             ".opus": "audio/ogg",
             ".wav": "audio/wav",
         }
+        headers = {"Cache-Control": "private, no-cache"}
+        if opened:
+            fd, info, suffix = opened
+            return DescriptorFileResponse(
+                fd, info, media_type=types[suffix], headers=headers
+            )
         return FileResponse(
-            target,
-            media_type=types[target.suffix.lower()],
-            headers={"Cache-Control": "private, no-cache"},
-            stat_result=info,
+            target, media_type=types[target.suffix.lower()], headers=headers
         )
 
     class PlaybackRequest(BaseModel):

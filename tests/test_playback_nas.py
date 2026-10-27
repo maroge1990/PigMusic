@@ -72,7 +72,26 @@ def test_a_file_replaced_by_a_symlink_is_refused(tmp_path, monkeypatch):
         assert client.get(url).status_code == 404
 
 
-def test_a_second_open_looks_the_file_up_once(tmp_path, monkeypatch):
+def test_a_folder_replaced_by_a_symlink_outside_is_refused(tmp_path, monkeypatch):
+    app, token, path = setup(tmp_path, monkeypatch)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "song.mp3").write_bytes(b"not for playback")
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token},
+    ) as client:
+        url = client.post("/api/v1/playback/song/url").json()["url"]
+        assert client.get(url).status_code == 200
+        path.parent.rename(path.parent.with_name("Moved"))
+        os.symlink(outside, path.parent)
+        assert client.get(url).status_code == 404
+        assert client.get(url, headers={"Range": "bytes=0-6"}).status_code == 404
+        assert client.head(url).status_code == 404
+
+
+def test_opens_never_walk_the_path_to_check_it(tmp_path, monkeypatch):
     app, token, _ = setup(tmp_path, monkeypatch)
     resolved, looked = [], []
     track_file, lstat = media.track_file, os.lstat
@@ -88,10 +107,33 @@ def test_a_second_open_looks_the_file_up_once(tmp_path, monkeypatch):
         headers={"Authorization": "Bearer " + token},
     ) as client:
         url = client.post("/api/v1/playback/song/url").json()["url"]
-        assert resolved == [] and not any("song.mp3" in p for p in looked)
         for _ in range(3):
             answer = client.get(url, headers={"Range": "bytes=8-12"})
             assert answer.status_code == 206 and answer.content == b"audio"
-    assert resolved == [1]
-    # Resolving it on the first open, then one lookup per open.
-    assert len([p for p in looked if p.endswith("song.mp3")]) == 1 + 3
+        assert client.head(url).headers["content-length"] == "19"
+        assert client.get(url).content == b"fixture audio bytes"
+    assert resolved == []
+    assert not [p for p in looked if p.endswith("song.mp3")]
+
+
+def test_every_descriptor_is_closed(tmp_path, monkeypatch):
+    app, token, path = setup(tmp_path, monkeypatch)
+    opened, closed = [], []
+    open_, close = os.open, os.close
+    monkeypatch.setattr(
+        media.os,
+        "open",
+        lambda *a, **k: (opened.append(fd := open_(*a, **k)), fd)[1],
+    )
+    monkeypatch.setattr(media.os, "close", lambda fd: (closed.append(fd), close(fd)))
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token},
+    ) as client:
+        url = client.post("/api/v1/playback/song/url").json()["url"]
+        client.get(url)
+        client.head(url)
+        client.get(url, headers={"Range": "bytes=0-1,4-5"})
+        assert client.get(url, headers={"Range": "bytes=99-"}).status_code == 416
+    assert opened and sorted(opened) == sorted(closed)

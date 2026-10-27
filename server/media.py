@@ -4,8 +4,11 @@ import json
 import os
 import re
 import stat
+import sys
 import time
 from pathlib import Path
+
+from starlette.responses import FileResponse
 
 from .library import load_json
 from .storage import library_root
@@ -120,10 +123,10 @@ def saved_track_ids(store, track_ids):
 
 
 AUDIO_SUFFIXES = {".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".wav"}
-# Playback reuses a mount check and a resolved path this long (NAS1): every
-# lookup on the SMB mount is a network round trip.
+# Playback reuses a mount check and the resolved library root this long
+# (NAS1): every lookup on the SMB mount is a network round trip.
 PLAYBACK_CACHE_SECONDS = 60
-_RESOLVED = {}
+_ROOTS = {}
 
 
 def saved_relative(track):
@@ -149,26 +152,74 @@ def playable(store, track_id):
     saved_relative(track)
 
 
-def playback_target(store, track_id):
-    """The saved song's file and its `lstat`, for opening it to play: one
-    NAS lookup when its resolved path was checked within the last minute. A
-    deleted file still raises FileNotFoundError; a symlink is refused."""
+def resolved_root(root):
+    key = str(root)
+    cached = _ROOTS.get(key)
+    if cached and time.monotonic() - cached[1] < PLAYBACK_CACHE_SECONDS:
+        return cached[0]
+    value = Path(root).resolve()
+    _ROOTS[key] = (value, time.monotonic())
+    return value
+
+
+def descriptor_path(fd):
+    """Where the kernel says an open file is, symlinks followed; no lookup."""
+    if sys.platform == "darwin":
+        import fcntl
+
+        raw = fcntl.fcntl(fd, fcntl.F_GETPATH, bytes(1024))
+        return os.fsdecode(raw.split(b"\0", 1)[0])
+    return os.readlink(f"/proc/self/fd/{fd}")
+
+
+def open_playback(store, track_id):
+    """The saved song opened for playing, its fstat and its file type: one NAS
+    open, and no
+    path walk to check first (NAS1). The descriptor itself must lie inside
+    the library root, so a symlinked file or folder pointing elsewhere is
+    refused, and a deleted file raises FileNotFoundError. The caller closes
+    the descriptor."""
     track, root = saved_track(store, track_id, PLAYBACK_CACHE_SECONDS)
     relative = saved_relative(track)
-    key = (str(root), relative)
-    cached = _RESOLVED.get(key)
-    now = time.monotonic()
-    if cached and now - cached[1] < PLAYBACK_CACHE_SECONDS:
-        target = cached[0]
-    else:
-        target = track_file(store, track_id)
-        if len(_RESOLVED) > 10000:
-            _RESOLVED.clear()
-        _RESOLVED[key] = (target, now)
-    info = os.lstat(target)
-    if not stat.S_ISREG(info.st_mode):
-        raise FileNotFoundError
-    return target, info
+    try:
+        fd = os.open(Path(root) / relative, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        raise FileNotFoundError from exc
+    try:
+        info = os.fstat(fd)
+        inside = Path(descriptor_path(fd)).is_relative_to(resolved_root(root))
+        if not stat.S_ISREG(info.st_mode) or not inside:
+            raise FileNotFoundError
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd, info, Path(relative).suffix.lower()
+
+
+class DescriptorFileResponse(FileResponse):
+    """A FileResponse for a file already opened and checked: every read of
+    it uses that descriptor (a duplicate per open), never the path again."""
+
+    def __init__(self, fd, info, **options):
+        self.fd = fd
+        super().__init__("", stat_result=info, **options)
+
+    @property
+    def path(self):
+        return os.dup(self.fd)
+
+    @path.setter
+    def path(self, value):
+        pass
+
+    async def __call__(self, scope, receive, send):
+        # The server must not send by path: there is no trusted path.
+        extensions = dict(scope.get("extensions") or {})
+        extensions.pop("http.response.pathsend", None)
+        try:
+            await super().__call__({**scope, "extensions": extensions}, receive, send)
+        finally:
+            os.close(self.fd)
 
 
 def track_file(store, track_id):
