@@ -3,6 +3,11 @@
 from .artwork import quoted
 from .catalogue import mbid
 from .library import normalise
+from .matching import lead_artist
+
+# Albums whose songs credit performers one by one (a cast recording, a
+# soundtrack): a song's credit files under the album's own artist.
+STAGED = {"musical", "soundtrack"}
 
 
 class Ambiguous(Exception):
@@ -26,7 +31,9 @@ def cached_identities(store, artists):
 
 
 def _identity(known, artist):
-    if known and normalise(known.get("name", "")) == normalise(artist["name"]):
+    # An identity found for a collaborative credit records that credit.
+    named = known.get("credit") or known.get("name", "") if known else ""
+    if known and normalise(named) == normalise(artist["name"]):
         try:
             return {"id": mbid(known["id"]), "name": artist["name"]}
         except (ValueError, TypeError, KeyError, AttributeError):
@@ -62,6 +69,11 @@ async def resolve_artist(store, catalogue, client, artist, albums):
             if a.get("musicbrainz_release_id")
         )
     )
+    # "A, B & C" or "A feat. B": several people, unless MusicBrainz knows an
+    # artist by that whole name (Earth, Wind & Fire), which is tried first.
+    lead = normalise(lead_artist(artist["name"]))
+    collaborative = lead != wanted
+    released = []
     for release_id in release_ids[:3]:
         try:
             release_id = mbid(release_id)
@@ -70,9 +82,29 @@ async def resolve_artist(store, catalogue, client, artist, albums):
         release = await catalogue.get(
             client, "release/" + release_id, inc="artist-credits"
         )
+        released += release.get("artist-credit", [])
         credits(release.get("artist-credit", []))
+    if not identities and collaborative and released:
+        # MATCH1: never one artist named after a whole credit. A cast or
+        # soundtrack album's songs file under the album's lead artist; others
+        # under the credit's lead, as the release credits name them.
+        if any(album.get("category") in STAGED for album in albums):
+            chosen = released[0].get("artist", {})
+        else:
+            chosen = next(
+                (
+                    c.get("artist", {})
+                    for c in released
+                    if normalise(c.get("artist", {}).get("name", "")) == lead
+                ),
+                {},
+            )
+        if chosen.get("id"):
+            identities[chosen["id"]] = {"id": chosen["id"], "name": chosen["name"]}
     matches = []
-    if not identities:
+    if not identities and collaborative and released:
+        pass  # Its releases are known: no search for the whole credit.
+    elif not identities:
         result = await catalogue.get(
             client, "artist/", query="artist:" + quoted(artist["name"]), limit=100
         )
@@ -107,6 +139,18 @@ async def resolve_artist(store, catalogue, client, artist, albums):
                                 if c.get("artist", {}).get("id") in candidates
                             ]
                         )
+    if not identities and collaborative and not matches:
+        # The lead artist, found by exactly their name.
+        name = lead_artist(artist["name"])
+        result = await catalogue.get(
+            client, "artist/", query="artist:" + quoted(name), limit=100
+        )
+        found = [a for a in result.get("artists", []) if normalise(a["name"]) == lead]
+        if len(found) == 1 and result.get("count", len(found)) <= 100:
+            identities[found[0]["id"]] = {
+                "id": found[0]["id"],
+                "name": found[0]["name"],
+            }
     if len(identities) != 1:
         options = matches or list(identities.values())
         raise Ambiguous(
@@ -118,5 +162,8 @@ async def resolve_artist(store, catalogue, client, artist, albums):
             for a in options
         )
     identity = next(iter(identities.values()))
-    store.write_document("library-artist:" + artist["id"], identity)
+    stored = dict(identity)
+    if normalise(identity["name"]) != wanted:
+        stored["credit"] = artist["name"]
+    store.write_document("library-artist:" + artist["id"], stored)
     return identity

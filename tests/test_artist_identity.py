@@ -158,3 +158,79 @@ def test_ambiguous_saved_artist_returns_candidates_and_owner_can_link(
         stored = app.state.store.read_document("library-artist:" + artist_id)
         assert stored["id"] == OTHER
         assert client.get(path, headers=as_member).json()["id"] == OTHER
+
+
+CAST = "Anthony Ramos, Okieriete Onaodowan, Daveed Diggs, Lin-Manuel Miranda & Leslie Odom Jr."
+LIN = {"id": "44444444-4444-4444-8444-444444444444", "name": "Lin-Manuel Miranda"}
+
+
+def credit_row(name):
+    return {"id": "lib-credit", "name": name}
+
+
+def resolve_credit(store, catalogue, name, albums):
+    return asyncio.run(resolve_artist(store, catalogue, None, credit_row(name), albums))
+
+
+def test_a_cast_albums_song_credit_files_under_the_album_artist(tmp_path):
+    store = Store(tmp_path)
+    catalogue = Fake(
+        release=lambda path, params: {
+            "artist-credit": [{"artist": LIN, "name": "Lin-Manuel Miranda"}]
+        }
+    )
+    albums = [{**ALBUMS[0], "title": "Hamilton", "category": "musical"}]
+    assert resolve_credit(store, catalogue, CAST, albums) == LIN
+    # No catalogue search ever names the whole credit.
+    assert catalogue.paths == ["release/" + RELEASE]
+    # Remembered for that credit: asked again, nothing is fetched.
+    again = Fake()
+    assert resolve_credit(store, again, CAST, albums)["id"] == LIN["id"]
+    assert again.paths == []
+
+
+def test_a_featured_credit_resolves_to_its_lead(tmp_path):
+    catalogue = Fake(
+        release=lambda path, params: {
+            "artist-credit": [
+                {"artist": {"id": ARTIST, "name": "Coldplay"}, "joinphrase": " & "},
+                {"artist": {"id": OTHER, "name": "Rihanna"}},
+            ]
+        }
+    )
+    found = resolve_credit(Store(tmp_path), catalogue, "Coldplay feat. Rihanna", ALBUMS)
+    assert found == {"id": ARTIST, "name": "Coldplay"}
+    assert catalogue.paths == ["release/" + RELEASE]
+
+
+def test_without_releases_the_lead_is_found_by_exactly_their_name(tmp_path):
+    searched = []
+
+    def artist(path, params):
+        searched.append(params["query"])
+        if "Lin-Manuel Miranda &" in params["query"]:
+            return {"count": 0, "artists": []}
+        return {"count": 1, "artists": [LIN]}
+
+    found = resolve_credit(
+        Store(tmp_path), Fake(artist=artist), "Lin-Manuel Miranda & Leslie Odom Jr.", []
+    )
+    assert found == LIN
+    assert searched[-1] == 'artist:"Lin-Manuel Miranda"'
+
+
+def test_a_band_named_with_an_ampersand_stays_one_artist(tmp_path):
+    band = {"id": ARTIST, "name": "Simon & Garfunkel"}
+    catalogue = Fake(release=lambda path, params: {"artist-credit": [{"artist": band}]})
+    assert (
+        resolve_credit(Store(tmp_path), catalogue, "Simon & Garfunkel", ALBUMS) == band
+    )
+
+
+def test_an_identity_already_stored_is_unchanged(tmp_path):
+    store = Store(tmp_path)
+    store.write_document(
+        "library-artist:lib-credit", {"id": ARTIST, "name": "Coldplay feat. Rihanna"}
+    )
+    found = resolve_credit(store, Fake(), "Coldplay feat. Rihanna", ALBUMS)
+    assert found == {"id": ARTIST, "name": "Coldplay feat. Rihanna"}
