@@ -39,6 +39,8 @@ def test_downloads_group_by_request_and_collapse_repeats(tmp_path, monkeypatch):
         headers={"Authorization": "Bearer " + token},
     ) as client:
         live = app.state.store
+        # Grouping only: the downloader must not start these requests.
+        monkeypatch.setattr(live, "claim_request", lambda: None)
         live.save_download_settings({"enabled": True, "sources": ["freemp3cloud"]})
         live.submit_catalogue(
             [song("Foreword", 1), song("Don't Stay", 2), song("Somewhere", 3)],

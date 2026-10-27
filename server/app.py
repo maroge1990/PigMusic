@@ -171,6 +171,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                 runtime=source_runtime,
                 resolver=EditionResolver(store, music_catalogue, artwork, client),
             )
+            app.state.downloader = downloader
             task = asyncio.create_task(downloader.run())
             export_task = asyncio.create_task(exporter.run())
             artist_task = asyncio.create_task(artist_jobs.run(client))

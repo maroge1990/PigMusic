@@ -424,17 +424,21 @@ def bump(conn, user_id):
 
 
 def initialise_owner(store):
+    # Once done, the migration stays done: skip its lock and write transaction
+    # on every later call (LOOP1; it ran on each media request).
+    if getattr(store, "owner_initialised", False):
+        return
     with store.library_lock, store.connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         owner = conn.execute(
             "SELECT id FROM users WHERE role='owner' AND disabled=0 ORDER BY created_at LIMIT 1"
         ).fetchone()
-        if (
-            not owner
-            or conn.execute(
-                "SELECT 1 FROM documents WHERE name='household-membership-initialised'"
-            ).fetchone()
-        ):
+        if not owner:
+            return
+        if conn.execute(
+            "SELECT 1 FROM documents WHERE name='household-membership-initialised'"
+        ).fetchone():
+            store.owner_initialised = True
             return
         identity = owner[0]
         now = int(time.time())
@@ -478,6 +482,8 @@ def initialise_owner(store):
             "INSERT INTO documents VALUES ('household-membership-initialised',?)",
             (json.dumps({"owner_id": identity}),),
         )
+    # Only after the transaction committed.
+    store.owner_initialised = True
 
 
 class UserLibrary:

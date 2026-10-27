@@ -289,6 +289,8 @@ def test_member_artwork_is_limited_to_personal_library(tmp_path, monkeypatch):
         base_url="https://private.ts.net",
         headers={"Authorization": "Bearer " + token},
     ) as client:
+        # The downloader's startup recovery refreshes the library off the loop.
+        assert app.state.downloader.recovered.wait(10)
         album = store.library["albums"][0]
         album["cover_url"] = "/api/v1/covers/" + sha + ".jpg"
         path = album["cover_url"]

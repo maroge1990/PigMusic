@@ -191,6 +191,8 @@ class Downloader:
         self.runtime = runtime or Runtime(store)
         self.soulseek = Soulseek(store)
         self.stopping = asyncio.Event()
+        # Set once staged downloads are recovered (and the library refreshed).
+        self.recovered = threading.Event()
         self.deadlines = {}
         self.context = threading.local()
         configured = Path(
@@ -281,31 +283,38 @@ class Downloader:
         )
 
     async def run(self):
-        recovered = False
+        # Store calls wait on lifecycle_lock and the NAS, so none runs on the
+        # event loop (LOOP1): a long download holding the lock stalled every
+        # request the server answered.
         tasks = set()
         next_scan = 0
         try:
             while not self.stopping.is_set():
                 try:
-                    self.prepare_storage()
+                    await asyncio.to_thread(self.prepare_storage)
                 except (OSError, ValueError):
                     try:
                         await asyncio.wait_for(self.stopping.wait(), timeout=5)
                     except TimeoutError:
                         pass
                     continue
-                if not recovered:
-                    self.store.recover_requests()
-                    recovered = True
+                if not self.recovered.is_set():
+                    await asyncio.to_thread(self.store.recover_requests)
+                    self.recovered.set()
                 tasks = {t for t in tasks if not t.done()}
                 if time.monotonic() >= next_scan:
-                    self.store.schedule_upgrades()
+                    await asyncio.to_thread(self.store.schedule_upgrades)
                     next_scan = time.monotonic() + 60
-                limit = self.store.download_settings()["concurrent_downloads"]
-                while len(tasks) < limit and not self.stopping.is_set():
-                    job = self.store.claim_request()
+                settings = await asyncio.to_thread(self.store.download_settings)
+                while (
+                    len(tasks) < settings["concurrent_downloads"]
+                    and not self.stopping.is_set()
+                ):
+                    job = await asyncio.to_thread(self.store.claim_request)
                     if not job:
                         break
+                    # A claimed job always gets its handler, even when stopping
+                    # began meanwhile: process() then cancels it as before.
                     tasks.add(asyncio.create_task(self.handle(job)))
                 try:
                     await asyncio.wait_for(self.stopping.wait(), timeout=0.5)

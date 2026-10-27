@@ -152,8 +152,11 @@ class Security:
                     # served. Files and streams still need a playable edition.
                     asking = request.url.path == f"/api/v1/playback/{track_id}/url"
                     with phase("auth-mix"):
-                        self.auth.store.mixes.entry(
-                            person["id"], track_id, playback=not asking
+                        await asyncio.to_thread(
+                            self.auth.store.mixes.entry,
+                            person["id"],
+                            track_id,
+                            playback=not asking,
                         )
                 except (LookupError, AttributeError):
                     raise HTTPException(404, "Track not found")
@@ -168,14 +171,19 @@ class Security:
                 )
                 or request.url.path == f"/api/v1/tracks/{track_id}/file"
             )
-            with phase("auth-media"):
-                denied = not self.auth.store.user_libraries.contains(
+
+            def media_denied():
+                return not self.auth.store.user_libraries.contains(
                     person["id"], track_id
                 ) and (
                     not streaming
                     or not track_id
                     or saved_track(self.auth.store, track_id)[0] is None
                 )
+
+            # Database and NAS reads: never on the event loop (LOOP1).
+            with phase("auth-media"):
+                denied = await asyncio.to_thread(media_denied)
             if denied:
                 raise HTTPException(404, "Track not found")
             scoped = True

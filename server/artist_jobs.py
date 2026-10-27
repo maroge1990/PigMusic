@@ -135,20 +135,45 @@ class ArtistJobs:
             self.save(self.key(identity), state)
             return state
 
-    async def acquire(self, client, identity, state):
+    def start(self, identity, state):
         with self.lock:
             current = self.state(identity)
             if not self.active() or current.get("status") not in {"queued", "running"}:
-                return
+                return None
             generation = current.get("generation") or uuid.uuid4().hex
             current.update(generation=generation, status="running", error=None)
             self.save(self.key(identity), current)
             state["generation"] = generation
-            state = current
+            return current
+
+    def submit(self, identity, generation, group_id, tracks):
+        # Generation validation and queue submission stay under one lock.
+        with self.lock:
+            current = self.current(identity, generation)
+            if current is None:
+                return False
+            result = self.store.submit_catalogue(tracks, user_id=self.owner())
+            self.progress(
+                identity,
+                generation,
+                created=current.get("created", 0) + result["created"],
+                done=[*current.get("done", []), group_id],
+            )
+            return True
+
+    async def acquire(self, client, identity, state):
+        # Every store call runs in a worker thread: submit_catalogue waits on
+        # lifecycle_lock, which a download may hold for minutes (LOOP1).
+        state = await asyncio.to_thread(self.start, identity, state)
+        if state is None:
+            return
+        generation = state["generation"]
         groups = []
         for kind in state["kinds"]:
             offset = 0
-            while not self.stopping.is_set() and self.current(identity, generation):
+            while not self.stopping.is_set() and await asyncio.to_thread(
+                self.current, identity, generation
+            ):
                 data = await self.catalogue.get(
                     client,
                     "release-group/",
@@ -161,18 +186,23 @@ class ArtistJobs:
                 offset += len(rows)
                 if not rows or offset >= data.get("count", 0):
                     break
-        if not self.progress(identity, generation, total=len(groups)):
+        if not await asyncio.to_thread(
+            self.progress, identity, generation, total=len(groups)
+        ):
             return
         for group in groups:
-            current = self.current(identity, generation)
+            current = await asyncio.to_thread(self.current, identity, generation)
             if self.stopping.is_set() or current is None:
                 return
             if group["id"] in current.get("done", []):
                 continue
             if current.get("baseline_pending"):
                 # Existing releases at follow time are known, not requested.
-                self.progress(
-                    identity, generation, done=[*current.get("done", []), group["id"]]
+                await asyncio.to_thread(
+                    self.progress,
+                    identity,
+                    generation,
+                    done=[*current.get("done", []), group["id"]],
                 )
                 continue
             editions = await self.catalogue.get(
@@ -188,20 +218,15 @@ class ArtistJobs:
                     "release/" + ranked[0]["id"],
                     inc=RELEASE_INC,
                 )
-                tracks = Catalogue(self.store).presence(release_tracks(release))
-            # No await between generation validation and queue submission.
-            with self.lock:
-                current = self.current(identity, generation)
-                if current is None:
-                    return
-                result = self.store.submit_catalogue(tracks, user_id=self.owner())
-                self.progress(
-                    identity,
-                    generation,
-                    created=current.get("created", 0) + result["created"],
-                    done=[*current.get("done", []), group["id"]],
+                tracks = await asyncio.to_thread(
+                    Catalogue(self.store).presence, release_tracks(release)
                 )
-        self.progress(
+            if not await asyncio.to_thread(
+                self.submit, identity, generation, group["id"], tracks
+            ):
+                return
+        await asyncio.to_thread(
+            self.progress,
             identity,
             generation,
             status="completed",
@@ -209,46 +234,57 @@ class ArtistJobs:
             baseline_pending=False,
         )
 
+    def pending(self):
+        from .user_library import initialise_owner
+
+        initialise_owner(self.store)
+        with self.store.connect() as conn:
+            rows = [
+                (key, json.loads(value))
+                for key, value in conn.execute(
+                    "SELECT name,payload FROM documents WHERE name LIKE 'artist-job:%'"
+                )
+            ]
+        jobs = []
+        for key, state in rows:
+            parts = key.split(":")
+            if len(parts) == 2:
+                if self.owner():
+                    continue  # Legacy rows are retained, but migrated owner jobs run instead.
+                scoped, identity = self, parts[1]
+            elif len(parts) == 3:
+                scoped, identity = self.scoped(parts[1]), parts[2]
+            else:
+                continue
+            jobs.append((scoped, identity, state))
+        return jobs
+
+    def due(self, identity, state):
+        if not self.active():
+            return None
+        if (
+            state.get("monitor")
+            and time.time() - state.get("checked_at", 0) > 86400
+            and state.get("status") not in {"queued", "running"}
+        ):
+            state = self.configure(
+                identity, state["kinds"], True, request=True, periodic=True
+            )
+        return state if state.get("status") in {"queued", "running"} else None
+
     async def run(self, client):
         background_metadata.set(True)
         while not self.stopping.is_set():
-            from .user_library import initialise_owner
-
-            initialise_owner(self.store)
-            with self.store.connect() as conn:
-                rows = [
-                    (key, json.loads(value))
-                    for key, value in conn.execute(
-                        "SELECT name,payload FROM documents WHERE name LIKE 'artist-job:%'"
-                    )
-                ]
-            for key, state in rows:
+            for jobs, identity, state in await asyncio.to_thread(self.pending):
                 if self.stopping.is_set():
                     return
-                parts = key.split(":")
-                if len(parts) == 2:
-                    if self.owner():
-                        continue  # Legacy rows are retained, but migrated owner jobs run instead.
-                    jobs, identity = self, parts[1]
-                elif len(parts) == 3:
-                    jobs, identity = self.scoped(parts[1]), parts[2]
-                    if not jobs.active():
-                        continue
-                else:
-                    continue
-                if (
-                    state.get("monitor")
-                    and time.time() - state.get("checked_at", 0) > 86400
-                    and state.get("status") not in {"queued", "running"}
-                ):
-                    state = jobs.configure(
-                        identity, state["kinds"], True, request=True, periodic=True
-                    )
-                if state.get("status") in {"queued", "running"}:
+                state = await asyncio.to_thread(jobs.due, identity, state)
+                if state is not None:
                     try:
                         await jobs.acquire(client, identity, state)
                     except Exception:
-                        jobs.progress(
+                        await asyncio.to_thread(
+                            jobs.progress,
                             identity,
                             state.get("generation"),
                             status="failed",
