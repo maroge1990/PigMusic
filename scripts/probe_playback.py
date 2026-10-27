@@ -549,6 +549,19 @@ def artwork_items(api):
                     f"/api/v1/catalogue/artists/{artist['id']}/artwork",
                 )
             )
+        # An artist page's discography: the covers there come from the catalogue.
+        for artist in (data.get("artists") or [])[:3]:
+            answer = api.get(f"/api/v1/catalogue/artists/{artist['id']}/releases")
+            if answer.status_code != 200:
+                continue
+            for release in answer.json().get("releases", [])[:12]:
+                items.append(
+                    (
+                        "artist pages",
+                        f"{artist['name']} - {release['title']}",
+                        f"/api/v1/catalogue/artwork/release-group/{release['id']}",
+                    )
+                )
     return list(dict.fromkeys(items))
 
 

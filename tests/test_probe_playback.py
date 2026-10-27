@@ -210,6 +210,10 @@ class FakeServer:
                     "artists": [{"id": "mb", "name": "Star"}],
                 },
             )
+        if path.endswith("/releases"):
+            return httpx.Response(
+                200, json={"releases": [{"id": "single", "title": "Single"}]}
+            )
         if path == "/api/v1/playlists":
             return httpx.Response(
                 200, json={"playlists": [{"id": "pl", "name": "Probe test"}]}
@@ -321,5 +325,6 @@ def test_artwork_counts_real_art_and_what_arrives_when_asked(tmp_path, capsys):
         False,
         True,
     )
+    assert found["artist pages"] == (False, True)
     printed = capsys.readouterr().out
     assert "library artists   1/1   with artwork (0 at first ask)" in printed
