@@ -1,4 +1,5 @@
 import Foundation
+import OpenAPIRuntime
 import PigAPI
 import PigDomain
 
@@ -53,9 +54,12 @@ public actor NativeService: LibrarySource {
   }
   /// The API's connections, renewed when the app returns after a while.
   private let connections: RenewableSession
+  /// The wait before asking for a failed library page again, longer each time.
+  private let pageRetryPause: Duration
   public init(server: String, vault: any DeviceTokenStore) throws {
     self.server = try ServerAddress.validate(server)
     self.vault = vault
+    pageRetryPause = .seconds(1)
     artworkTransport = ArtworkTransport(server: self.server, vault: vault)
     let connections = RenewableSession {
       let configuration = URLSessionConfiguration.default
@@ -91,9 +95,13 @@ public actor NativeService: LibrarySource {
     artworkTransport.renew()
   }
   // Injectable generated client for isolated transport/fixture tests, not an app URL bypass.
-  init(server: URL, client: Client, vault: any DeviceTokenStore) {
+  init(
+    server: URL, client: Client, vault: any DeviceTokenStore,
+    pageRetryPause: Duration = .seconds(1)
+  ) {
     self.server = server
     self.client = client
+    self.pageRetryPause = pageRetryPause
     connections = RenewableSession { URLSession(configuration: .ephemeral) }
     self.vault = vault
     artworkTransport = ArtworkTransport(server: server, vault: vault)
@@ -447,52 +455,57 @@ public actor NativeService: LibrarySource {
 
   public func bootstrap() async throws -> LibrarySnapshot {
     var snapshot = LibrarySnapshot(revision: "")
-    var cursor: String?
-    repeat {
-      try Task.checkCancellation()
-      switch try await client.tracks_api_v1_library_tracks_get(
+    let tracks = try await collection { cursor in
+      switch try await self.client.tracks_api_v1_library_tracks_get(
         .init(query: .init(cursor: cursor, limit: 1000)))
       {
       case .ok(let success):
         let page = try success.body.json
-        try check(page.revision, snapshot: &snapshot)
-        snapshot.tracks += try page.items.map { try LibraryCodec.convert($0, to: Track.self) }
-        cursor = page.next_cursor
+        return (
+          try page.items.map { try LibraryCodec.convert($0, to: Track.self) }, page.revision,
+          page.next_cursor
+        )
       case .unauthorized: throw NativeFailure.authentication
-      case .conflict: throw NativeFailure.changed
+      case .conflict: return nil
       default: throw NativeFailure.unavailable("Unable to sync songs.")
       }
-    } while cursor != nil
-    repeat {
-      try Task.checkCancellation()
-      switch try await client.albums_api_v1_library_albums_get(
+    }
+    let albums = try await collection { cursor in
+      switch try await self.client.albums_api_v1_library_albums_get(
         .init(query: .init(cursor: cursor, limit: 1000)))
       {
       case .ok(let success):
         let page = try success.body.json
-        try check(page.revision, snapshot: &snapshot)
-        snapshot.albums += try page.items.map { try LibraryCodec.convert($0, to: Album.self) }
-        cursor = page.next_cursor
+        return (
+          try page.items.map { try LibraryCodec.convert($0, to: Album.self) }, page.revision,
+          page.next_cursor
+        )
       case .unauthorized: throw NativeFailure.authentication
-      case .conflict: throw NativeFailure.changed
+      case .conflict: return nil
       default: throw NativeFailure.unavailable("Unable to sync albums.")
       }
-    } while cursor != nil
-    repeat {
-      try Task.checkCancellation()
-      switch try await client.artists_api_v1_library_artists_get(
+    }
+    let artists = try await collection { cursor in
+      switch try await self.client.artists_api_v1_library_artists_get(
         .init(query: .init(cursor: cursor, limit: 1000)))
       {
       case .ok(let success):
         let page = try success.body.json
-        try check(page.revision, snapshot: &snapshot)
-        snapshot.artists += try page.items.map { try LibraryCodec.convert($0, to: Artist.self) }
-        cursor = page.next_cursor
+        return (
+          try page.items.map { try LibraryCodec.convert($0, to: Artist.self) }, page.revision,
+          page.next_cursor
+        )
       case .unauthorized: throw NativeFailure.authentication
-      case .conflict: throw NativeFailure.changed
+      case .conflict: return nil
       default: throw NativeFailure.unavailable("Unable to sync artists.")
       }
-    } while cursor != nil
+    }
+    // Each collection is one revision; a later one may be newer. The delta
+    // from the first revision below brings all of them to the latest.
+    snapshot.revision = tracks.revision
+    snapshot.tracks = tracks.items
+    snapshot.albums = albums.items
+    snapshot.artists = artists.items
     switch try await client.playlists_api_v1_playlists_get(.init()) {
     case .ok(let success):
       for summary in try success.body.json.playlists {
@@ -521,9 +534,54 @@ public actor NativeService: LibrarySource {
     snapshot.revision = delta.revision
     return snapshot
   }
-  private func check(_ revision: String, snapshot: inout LibrarySnapshot) throws {
-    if snapshot.revision.isEmpty { snapshot.revision = revision }
-    guard snapshot.revision == revision else { throw NativeFailure.changed }
+  /// One library collection, page by page, at one revision. A page that
+  /// fails on the way (a timeout, a server error) is asked for again from the
+  /// same cursor, twice at most, so a slow server costs a retry rather than
+  /// the whole refresh (SYNC1). A cursor the server no longer keeps (`nil`
+  /// from `page`) restarts this collection alone.
+  private func collection<Item: Sendable>(
+    _ page: (String?) async throws -> (items: [Item], revision: String, next: String?)?
+  ) async throws -> (items: [Item], revision: String) {
+    var items: [Item] = []
+    var revision: String?
+    var cursor: String?
+    var restarts = 0
+    while true {
+      var attempt = 0
+      var fetched: (items: [Item], revision: String, next: String?)?
+      while true {
+        try Task.checkCancellation()
+        do {
+          fetched = try await page(cursor)
+          break
+        } catch let error where Self.retriesPage(after: error) && attempt < 2 {
+          attempt += 1
+          try await Task.sleep(for: pageRetryPause * attempt)
+        }
+      }
+      guard let fetched else {
+        restarts += 1
+        guard restarts <= 2 else { throw NativeFailure.changed }
+        (items, revision, cursor) = ([], nil, nil)
+        continue
+      }
+      if revision == nil { revision = fetched.revision }
+      guard revision == fetched.revision else { throw NativeFailure.changed }
+      items += fetched.items
+      cursor = fetched.next
+      if cursor == nil { return (items, fetched.revision) }
+    }
+  }
+  /// Worth asking for the same page again: the server or the network failed,
+  /// not the session, the request or the decoding.
+  static func retriesPage(after error: Error) -> Bool {
+    switch error {
+    case is CancellationError, is DecodingError: false
+    case let error as ClientError: retriesPage(after: error.underlyingError)
+    case let failure as NativeFailure:
+      if case .unavailable = failure { true } else { false }
+    default: true
+    }
   }
   private func merge<T: Identifiable>(_ current: [T], upserts: [T], deletes: [String]) -> [T]
   where T.ID == String {

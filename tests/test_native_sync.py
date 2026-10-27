@@ -56,8 +56,13 @@ def test_cursor_scoped_revision_and_durable_deletes(tmp_path):
     changed = sync.changes(owner, first["revision"])
     assert changed["deletes"]["tracks"] == ["1"]
     assert NativeSync(Store(tmp_path)).changes(owner, first["revision"]) == changed
+    # The collection continues at its own revision (SYNC1); the delta above
+    # brings it up to date. Without that revision in memory, it restarts.
+    later = sync.page(owner, "tracks", first["next_cursor"], 1)
+    assert later["revision"] == first["revision"]
+    assert later["items"][0]["id"] == "1"
     with pytest.raises(ResyncRequired):
-        sync.page(owner, "tracks", first["next_cursor"], 1)
+        NativeSync(store).page(owner, "tracks", first["next_cursor"], 1)
     with pytest.raises(ResyncRequired):
         sync.changes(member, first["revision"])
 
@@ -188,3 +193,38 @@ def test_existing_clients_get_fields_an_upgraded_server_adds(tmp_path, monkeypat
     ]
     # A second read is quiet again.
     assert sync.changes(owner, changed["revision"])["upserts"]["artists"] == []
+
+
+def test_later_pages_never_wait_for_the_household_locks(tmp_path, monkeypatch):
+    import threading
+    import time
+
+    from server import native_sync
+
+    store, owner, _ = fixture(tmp_path)
+    sync = NativeSync(store)
+    first = sync.page(owner, "tracks", limit=1)
+    held, release = threading.Event(), threading.Event()
+
+    def hold():
+        # A publication and a library change in progress elsewhere.
+        with store.lifecycle_lock, store.library_lock:
+            held.set()
+            release.wait(10)
+
+    holder = threading.Thread(target=hold)
+    holder.start()
+    try:
+        assert held.wait(5)
+        started = time.monotonic()
+        second = sync.page(owner, "tracks", first["next_cursor"], 1)
+        third = sync.page(owner, "tracks", second["next_cursor"], 1)
+        assert time.monotonic() - started < 0.5
+        assert [second["items"][0]["id"], third["items"][0]["id"]] == ["1", "2"]
+        assert third["next_cursor"] is None
+    finally:
+        release.set()
+        holder.join(5)
+    # A revision kept too long is captured again, as before.
+    monkeypatch.setattr(native_sync, "CURSOR_SECONDS", 0)
+    assert sync.page(owner, "tracks", first["next_cursor"], 1)["items"][0]["id"] == "1"

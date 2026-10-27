@@ -27,6 +27,10 @@ MODELS = {
 # but never much more than PAGE_BYTES of JSON, whatever the metadata.
 PAGE_LIMIT = 1000
 PAGE_BYTES = 2 * 1024 * 1024
+# A collection's later pages come from the revision its first page captured,
+# kept this long in memory (SYNC1): no capture and no lock per page, and a
+# change meanwhile no longer restarts a phone's download.
+CURSOR_SECONDS = 15 * 60
 
 
 class ResyncRequired(ValueError):
@@ -54,6 +58,8 @@ class NativeSync:
         # keeps the same objects across playlist-only edits, so those skip
         # validation and serialisation entirely.
         self.clean = {}
+        # {user: {revision: (captured data, monotonic time)}}, a few each.
+        self.captured = {}
 
     def dto(self, kind, raw):
         if kind == "tracks":
@@ -90,7 +96,9 @@ class NativeSync:
                     and previous[1] == signature
                     and previous[2] >= int(time.time()) - 30 * 86400
                 ):
-                    return {**projection, "revision": previous[0]}
+                    return self.remember(
+                        user_id, {**projection, "revision": previous[0]}
+                    )
                 from .playlists import Playlists
                 from .routes.personal import playlist_dto
 
@@ -151,31 +159,45 @@ class NativeSync:
                 )
             # Only after the commit: these objects now match their rows.
             self.clean[user_id] = verified
-            return {**projection, "revision": revision}
+            return self.remember(user_id, {**projection, "revision": revision})
+
+    def remember(self, user_id, data):
+        kept = self.captured.setdefault(user_id, {})
+        kept.pop(data["revision"], None)
+        kept[data["revision"]] = (data, time.monotonic())
+        while len(kept) > 3:
+            kept.pop(next(iter(kept)))
+        return data
+
+    def recalled(self, user_id, revision):
+        found = self.captured.get(user_id, {}).get(revision)
+        if found and time.monotonic() - found[1] < CURSOR_SECONDS:
+            return found[0]
+        return None
 
     def page(self, user_id, kind, cursor=None, limit=200):
         if not 1 <= limit <= PAGE_LIMIT:
             raise ValueError(f"Page limit must be between 1 and {PAGE_LIMIT}")
-        data = self.capture(user_id)
         offset = 0
-        if cursor:
+        if not cursor:
+            data = self.capture(user_id)
+        else:
             try:
                 encoded = json.loads(
                     base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
                 )
                 identity, collection, revision, offset = encoded
-                if (
-                    identity != user_id
-                    or collection != kind
-                    or revision != data["revision"]
-                ):
-                    raise ResyncRequired("Pagination changed. Restart this collection.")
                 if not isinstance(offset, int) or offset < 0:
                     raise ValueError()
-            except ResyncRequired:
-                raise
             except (ValueError, TypeError):
                 raise ValueError("Invalid cursor")
+            if identity != user_id or collection != kind:
+                raise ResyncRequired("Pagination changed. Restart this collection.")
+            # The cursor's own revision when still kept; otherwise only an
+            # unchanged library continues it.
+            data = self.recalled(user_id, revision) or self.capture(user_id)
+            if revision != data["revision"]:
+                raise ResyncRequired("Pagination changed. Restart this collection.")
         values = data[kind]
         items, size = [], 0
         for value in values[offset : offset + limit]:
