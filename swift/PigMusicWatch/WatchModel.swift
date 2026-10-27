@@ -346,8 +346,10 @@ import PigPlayback
         guard envelope.context == context,
           (try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) <= 2 * 1024 * 1024
         else { throw CompanionFailure.stale }
-        let manifest = try JSONDecoder().decode(
-          CompanionManifest.self, from: Data(contentsOf: file))
+        // Up to 2 MB of JSON: read and decoded off the main thread (APP1).
+        let manifest = try await Task.detached(priority: .userInitiated) {
+          try JSONDecoder().decode(CompanionManifest.self, from: Data(contentsOf: file))
+        }.value
         guard manifest.context == envelope.context else { throw CompanionFailure.invalid }
         let previous = await archive.snapshot()
         let applied = await archive.receipt().manifestApplied
