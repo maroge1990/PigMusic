@@ -49,6 +49,9 @@ class Store:
         # cleanup takes this after lifecycle_lock, never the other way round.
         self.mix_lock = threading.RLock()
         self.library_lock = TimedRLock("library_lock")
+        # Refreshes build outside library_lock; the newest build to start wins.
+        self._refreshes = threading.Lock()
+        self._refresh_started = self._refresh_published = 0
         directory.mkdir(parents=True, exist_ok=True)
         self.cover_dir = directory / "covers"
         self.cover_dir.mkdir(exist_ok=True)
@@ -65,10 +68,23 @@ class Store:
         initialise_owner(self)
 
     def refresh_library(self):
-        with self.covers.lock, self.library_lock:
-            self._refresh_library()
+        """Rebuild the library from the snapshot and the database. The build
+        (reads, cover lookups, the index and fingerprint: 1-2 s live) runs
+        outside library_lock, which is held only to swap the result in, so
+        readers never wait for it (LOCK1, 28 Oct). A build that started
+        before one already published is dropped: it read older state."""
+        with self._refreshes:
+            self._refresh_started += 1
+            generation = self._refresh_started
+        with self.covers.lock:
+            built = self._build_library()
+        with self.library_lock:
+            if generation < self._refresh_published:
+                return
+            self._refresh_published = generation
+            self._publish_library(built)
 
-    def _refresh_library(self):
+    def _build_library(self):
         snapshot = load_json(self.directory / "library-snapshot.json")
         with self.connect() as conn:
             extra = [
@@ -89,8 +105,7 @@ class Store:
             }
         extra = [t for t in extra if t["id"] not in removed]
         anchors = self.read_document("album-edition-anchors")
-        self.edition_anchors = anchors
-        self.library = build_library(
+        library = build_library(
             {
                 **snapshot,
                 "tracks": [
@@ -107,22 +122,31 @@ class Store:
             categories,
             anchors,
         )
+        self._cache_covers(snapshot.get("tracks", []), library)
+        return {
+            "library": library,
+            "anchors": anchors,
+            "albums_by_id": {a["id"]: a for a in library["albums"]},
+            "artists_by_id": {a["id"]: a for a in library["artists"]},
+            "index": LibraryIndex(library),
+            "snapshot_tracks": {t["id"]: t for t in snapshot.get("tracks", [])},
+            # A content revision survives restart: a reset counter could leave an
+            # already-open browser displaying stale content after a new scan/start.
+            "library_revision": hashlib.sha256(
+                json.dumps(library, sort_keys=True).encode()
+            ).hexdigest(),
+        }
+
+    def _publish_library(self, built):
+        anchors = built.pop("anchors")
         with self.connect() as conn:
             conn.execute(
                 "INSERT INTO documents VALUES (?,?) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",
                 ("album-edition-anchors", json.dumps(anchors)),
             )
-        self._cache_covers(snapshot.get("tracks", []))
-        self.albums_by_id = {a["id"]: a for a in self.library["albums"]}
-        self.artists_by_id = {a["id"]: a for a in self.library["artists"]}
-        self.index = LibraryIndex(self.library)
-        self.snapshot_tracks = {t["id"]: t for t in snapshot.get("tracks", [])}
-        fingerprint = hashlib.sha256(
-            json.dumps(self.library, sort_keys=True).encode()
-        ).hexdigest()
-        # A content revision survives restart: a reset counter could leave an
-        # already-open browser displaying stale content after a new scan/start.
-        self.library_revision = fingerprint
+        self.edition_anchors = anchors
+        for name, value in built.items():
+            setattr(self, name, value)
         from .household_policy import HouseholdPolicy
 
         with self.connect() as conn:
@@ -990,10 +1014,10 @@ class Store:
             ).fetchall()
         return {name: json.loads(payload) for name, payload in rows}
 
-    def _cache_covers(self, snapshot_tracks):
+    def _cache_covers(self, snapshot_tracks, library=None):
         from .library_artwork import cache_covers
 
-        return cache_covers(self, snapshot_tracks)
+        return cache_covers(self, snapshot_tracks, library)
 
     def prune_artwork(self, now=None):
         from .library_artwork import prune_artwork

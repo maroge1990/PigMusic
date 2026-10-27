@@ -7,7 +7,9 @@ from .image_cache import public_image
 from .media import settings as media_settings
 
 
-def cache_covers(store, snapshot_tracks):
+def cache_covers(store, snapshot_tracks, library=None):
+    # `library` is a build not yet published (Store.refresh_library).
+    library = store.library if library is None else library
     # Quality replacements can supersede every scanned track in an album.
     # Retain its display artwork without moving the old file membership.
     scanned_art = {}
@@ -20,7 +22,7 @@ def cache_covers(store, snapshot_tracks):
                 normalise(track.get("album", "Singles")),
             )
             scanned_art.setdefault(key, []).append(track)
-    for album in store.library["albums"]:
+    for album in library["albums"]:
         if not album.get("cover_sha"):
             candidates = scanned_art.get(
                 (normalise(album["artist"]), normalise(album["title"])), []
@@ -35,9 +37,9 @@ def cache_covers(store, snapshot_tracks):
                 album["cover_sha"] = next(iter(hashes))
         target = store.covers.path(album.get("cover_sha"))
         album["cover_url"] = "/api/v1/covers/" + target.name if target else None
-    albums = {a["id"]: a for a in store.library["albums"]}
+    albums = {a["id"]: a for a in library["albums"]}
     # Prefer any available own-album cover, rather than only the first album.
-    for artist in store.library["artists"]:
+    for artist in library["artists"]:
         candidates = artist["album_ids"] or [artist["cover_album_id"]]
         artist["cover_url"] = next(
             (
@@ -47,7 +49,7 @@ def cache_covers(store, snapshot_tracks):
             ),
             None,
         )
-    for album in store.library["albums"]:
+    for album in library["albums"]:
         if not album["cover_url"]:
             cached = public_image(
                 store,
@@ -61,7 +63,7 @@ def cache_covers(store, snapshot_tracks):
     config = media_settings(store)
     from .portraits import portrait_target
 
-    for artist in store.library["artists"]:
+    for artist in library["artists"]:
         if not artist["cover_url"]:
             artist["cover_url"] = next(
                 (
@@ -86,7 +88,7 @@ def cache_covers(store, snapshot_tracks):
                 "/api/v1/library-artwork/artists/" + artist["id"] + "?portraits=1"
             )
     # Optional image metadata is read from a small sidecar, never decoded here.
-    for item in [*store.library["albums"], *store.library["artists"]]:
+    for item in [*library["albums"], *library["artists"]]:
         url = item.get("cover_url", "") or ""
         if url.startswith("/api/v1/covers/"):
             sha = url.removeprefix("/api/v1/covers/").removesuffix(".jpg")

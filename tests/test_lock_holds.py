@@ -236,3 +236,105 @@ def test_an_edited_source_is_kept_beside_a_separate_valid_copy(tmp_path, monkeyp
         exporter.publish(track)
     assert source.read_bytes() == b"gnos"
     assert Exporter(store, root).records()[0].get("export_relative_path") is None
+
+
+def test_library_readers_never_wait_for_a_refresh_build(tmp_path, monkeypatch):
+    # Live 28 Oct: each rebuild held library_lock 1-2 s, about six times a
+    # minute, and household search and sync waited behind it.
+    store, _ = nas_with(tmp_path, monkeypatch, [])
+    download(store, "song")
+    building, release = threading.Event(), threading.Event()
+    build = store._build_library
+
+    def slow_build():
+        building.set()
+        release.wait(5)
+        return build()
+
+    monkeypatch.setattr(store, "_build_library", slow_build)
+    refresh = threading.Thread(target=store.refresh_library)
+    refresh.start()
+    assert building.wait(5)
+    started = time.monotonic()
+    with store.library_lock:
+        waited = time.monotonic() - started
+    release.set()
+    refresh.join(5)
+    assert waited < 0.1
+    assert "song" in {t["id"] for a in store.library["albums"] for t in a["tracks"]}
+
+
+def test_a_refresh_that_read_older_state_never_replaces_a_newer_one(
+    tmp_path, monkeypatch
+):
+    store, _ = nas_with(tmp_path, monkeypatch, [])
+    built, publish = threading.Event(), threading.Event()
+    build = store._build_library
+    calls = []
+
+    def build_once_then_wait():
+        result = build()
+        calls.append(result)
+        if len(calls) == 1:  # The older build finishes last.
+            built.set()
+            publish.wait(5)
+        return result
+
+    monkeypatch.setattr(store, "_build_library", build_once_then_wait)
+    monkeypatch.setattr(store.covers, "lock", threading.RLock())
+    older = threading.Thread(target=store.refresh_library)
+    older.start()
+    assert built.wait(5)
+    # The first build is done but unpublished; a song lands and a second,
+    # newer refresh publishes it. covers.lock is replaced above so the two
+    # builds can overlap as they would around the swap.
+    download(store, "newer")
+    store.refresh_library()
+    publish.set()
+    older.join(5)
+    ids = {t["id"] for a in store.library["albums"] for t in a["tracks"]}
+    assert "newer" in ids
+
+
+def test_an_unchanged_export_pass_does_not_rebuild_the_library(tmp_path, monkeypatch):
+    store, root = nas_with(tmp_path, monkeypatch, [])
+    download(store, "one")
+    exporter = Exporter(store, root)
+    refreshes = []
+    refresh = store.refresh_library
+    monkeypatch.setattr(
+        store, "refresh_library", lambda: refreshes.append(1) or refresh()
+    )
+    exporter.process()
+    assert refreshes == [1]  # Its new location is recorded.
+    (song,) = exporter.records()
+    settle(root / song["export_relative_path"])
+    for _ in range(3):
+        exporter.process()
+    assert refreshes == [1]
+
+
+def test_a_shared_helper_is_named_with_what_called_it(tmp_path, monkeypatch, caplog):
+    store, root = nas_with(tmp_path, monkeypatch, [])
+    download(store, "song")
+    caplog.set_level(logging.WARNING, "pig_music.timing")
+    store.library_lock.warn_after = 0
+    Exporter(store, root).process()
+    holds = [r.message for r in caplog.records if "library_lock held" in r.message]
+    assert any(
+        "store.Store.refresh_library via exporter.Exporter.process" in m for m in holds
+    ), holds
+
+
+def test_a_coordinated_method_is_named_even_from_a_worker_thread(tmp_path, caplog):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from server.store import Store
+
+    store = Store(tmp_path / "data")
+    store.lifecycle_lock.warn_after = 0
+    caplog.set_level(logging.WARNING, "pig_music.timing")
+    with ThreadPoolExecutor(1) as pool:
+        pool.submit(store.recover_requests).result()
+    holds = [r.message for r in caplog.records if "lifecycle_lock held" in r.message]
+    assert any("store.Store.recover_requests" in m for m in holds), holds

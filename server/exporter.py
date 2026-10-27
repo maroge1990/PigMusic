@@ -388,6 +388,7 @@ class Exporter:
             ).fetchone()
             if not row or json.loads(row[0]).get("sha256") != expected:
                 return
+            moved = json.loads(row[0]).get("export_relative_path") != relative
             value = {**json.loads(row[0]), "export_relative_path": relative}
             conn.execute(
                 "UPDATE acquired SET payload=? WHERE id=?",
@@ -397,6 +398,7 @@ class Exporter:
         # deleting the staging-library copy. Restart can finish this cleanup.
         if source.exists() and self.linked(source, target, expected):
             source.unlink()
+        return moved
 
     def process(self):
         # Not one lifecycle_lock hold for the whole pass: each song's
@@ -432,7 +434,8 @@ class Exporter:
                 if not self.warm(track):
                     continue
                 try:
-                    if self.publish(track) is False:
+                    published = self.publish(track)
+                    if published is False:
                         continue
                 except (OSError, ValueError, KeyError) as exc:
                     waiting.append(
@@ -446,7 +449,9 @@ class Exporter:
                     )
                     continue
                 completed += 1
-                changed = changed or not track.get("export_relative_path")
+                # Only a newly recorded location changes the library; an
+                # unchanged pass must not rebuild it (LOCK1, 28 Oct).
+                changed = changed or published is True
             if changed:
                 self.store.refresh_library()
             self.store.cleanup_replacements()
