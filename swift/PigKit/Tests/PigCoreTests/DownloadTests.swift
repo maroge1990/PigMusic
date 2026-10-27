@@ -25,6 +25,24 @@ private final class CopyProtocol: URLProtocol, @unchecked Sendable {
   }
   override func stopLoading() {}
 }
+/// Answers copies at once, except the first song, which is still being
+/// prepared on its first ask.
+private actor AheadSource: DeviceCopySource {
+  var calls: [String] = []
+  let ready: DeviceCopy
+  let preparing: DeviceCopy
+  init(ready: DeviceCopy, preparing: DeviceCopy) {
+    self.ready = ready
+    self.preparing = preparing
+  }
+  func deviceCopy(trackId: String, quality: String, create: Bool) async throws -> DeviceCopy {
+    calls.append((create ? "create " : "poll ") + trackId)
+    return trackId == "one" && create ? preparing : ready
+  }
+  func copyRequest(trackId: String, quality: String) async throws -> URLRequest {
+    URLRequest(url: URL(string: "https://server.invalid/" + trackId)!)
+  }
+}
 @Suite struct DownloadTests {
   func track() throws -> Track {
     try LibraryCodec.decoder().decode(
@@ -45,6 +63,38 @@ private final class CopyProtocol: URLProtocol, @unchecked Sendable {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [CopyProtocol.self]
     return try DownloadArchive(directory: root, configuration: config)
+  }
+  @MainActor @Test func waitingCopiesAreAskedForBeforeTheFirstIsReady() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let archive = try archive(root)
+    let songs = try ["one", "two", "three"].map { id in
+      try LibraryCodec.decoder().decode(
+        Track.self,
+        from: Data(#"{"id":"\#(id)","title":"Song","artist":"Artist","source_revision":"v1"}"#.utf8)
+      )
+    }
+    try await archive.enqueue(songs, quality: "original")
+    var preparing =
+      try JSONSerialization.jsonObject(
+        with: LibraryCodec.encoder().encode(copy())) as! [String: Any]
+    preparing["state"] = "preparing"
+    let source = AheadSource(
+      ready: try copy(),
+      preparing: try LibraryCodec.decoder().decode(
+        DeviceCopy.self, from: JSONSerialization.data(withJSONObject: preparing)))
+    let controller = DownloadController(archive: archive, source: source)
+    controller.resume()
+    for _ in 0..<100 where await archive.snapshot().contains(where: { $0.state != "ready" }) {
+      try await Task.sleep(for: .milliseconds(100))
+    }
+    let calls = await source.calls
+    let poll = try #require(calls.firstIndex(of: "poll one"))
+    // While the first copy was still being prepared, the server already had
+    // the others to convert (WATCH1).
+    #expect(calls.prefix(poll).contains("create two"))
+    #expect(calls.prefix(poll).contains("create three"))
+    #expect(await archive.snapshot().allSatisfy { $0.state == "ready" })
   }
   @Test func verifiedCopySurvivesRestartThenReconcilesOnlyAuthoritativeChanges() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

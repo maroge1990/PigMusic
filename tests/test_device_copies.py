@@ -287,3 +287,83 @@ def test_hashing_rejects_content_changed_during_read(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="source changed"):
         copies.manifest("song", "original", True)
     assert not copies.hashes
+
+
+def several_sources(tmp_path, monkeypatch, count):
+    root = tmp_path / "nas"
+    root.mkdir()
+    tracks = []
+    for index in range(count):
+        with wave.open(str(root / f"song{index}.wav"), "wb") as stream:
+            stream.setnchannels(2)
+            stream.setsampwidth(2)
+            stream.setframerate(44100)
+            stream.writeframes(bytes([index]) * 44100 * 4 * 3)
+        tracks.append(
+            {
+                "id": f"song{index}",
+                "title": f"Song {index}",
+                "artist": "Artist",
+                "relative_path": f"song{index}.wav",
+            }
+        )
+    monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(root))
+    (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": tracks}))
+    return DeviceCopies(Store(tmp_path))
+
+
+def test_two_copies_convert_at_once_and_none_twice(tmp_path, monkeypatch):
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg is required for AAC validation")
+    copies = several_sources(tmp_path, monkeypatch, 4)
+    running, peak, encoded = [0], [0], []
+    command = DeviceCopies.command
+
+    async def counted(self, *arguments):
+        if "-c:a" in arguments:  # The conversion, not its check.
+            encoded.append(arguments[-1])
+        running[0] += 1
+        peak[0] = max(peak[0], running[0])
+        try:
+            await asyncio.sleep(0.2)
+            return await command(self, *arguments)
+        finally:
+            running[0] -= 1
+
+    monkeypatch.setattr(DeviceCopies, "command", counted)
+
+    async def exercise():
+        for index in range(4):
+            copies.manifest(f"song{index}", "aac", True)
+        copies.kick()
+        await copies.worker
+        states = [copies.manifest(f"song{i}", "aac")["state"] for i in range(4)]
+        await copies.close()
+        return states
+
+    assert asyncio.run(exercise()) == ["ready"] * 4
+    assert peak[0] == 2
+    assert len(encoded) == len(set(encoded)) == 4
+
+
+@pytest.mark.parametrize("status,waits", [("downloading", False), ("validating", True)])
+def test_only_a_download_being_published_holds_copies_up(
+    tmp_path, monkeypatch, status, waits
+):
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg is required for AAC validation")
+    _, copies = audio_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(copies.store, "queue", lambda: {"items": [{"status": status}]})
+
+    async def exercise():
+        copies.manifest("song", "aac", True)
+        copies.kick()
+        try:
+            await asyncio.wait_for(asyncio.shield(copies.worker), 1.5)
+            finished = True
+        except TimeoutError:
+            finished = False
+        await copies.close()
+        return finished
+
+    assert asyncio.run(exercise()) is not waits

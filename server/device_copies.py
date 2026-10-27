@@ -1,4 +1,4 @@
-"""Single-worker AAC cache. Originals and personal authorization remain authoritative."""
+"""AAC device-copy cache. Originals and personal authorization remain authoritative."""
 
 import asyncio
 from collections import OrderedDict
@@ -30,6 +30,11 @@ def source_stamp(stat):
         stat.st_mtime_ns,
         stat.st_ctime_ns,
     )
+
+
+# Copies converted at once (WATCH1: one at a time, 9-26 s each, delivered
+# 1.2 songs a minute). Each FFmpeg AAC encode is one thread and little memory.
+WORKERS = 2
 
 
 @lru_cache(maxsize=1)
@@ -156,13 +161,20 @@ class DeviceCopies:
             return
         self.worker = asyncio.create_task(self.run())
 
-    def next_job(self):
-        with self.store.connect() as conn:
-            jobs = [
-                json.loads(raw)
-                for (raw,) in conn.execute("SELECT payload FROM device_copies")
-            ]
-        return next((j for j in jobs if j["state"] == "queued"), None)
+    def claim(self):
+        """The next queued copy, marked as preparing so no other worker takes
+        it."""
+        with self.lock, self.store.connect() as conn:
+            for (raw,) in conn.execute("SELECT payload FROM device_copies"):
+                job = json.loads(raw)
+                if job["state"] == "queued":
+                    job["state"] = "preparing"
+                    conn.execute(
+                        "UPDATE device_copies SET payload=? WHERE id=?",
+                        (json.dumps(job), job["id"]),
+                    )
+                    return job
+        return None
 
     async def command(self, *arguments):
         process = await asyncio.create_subprocess_exec(
@@ -192,24 +204,26 @@ class DeviceCopies:
         return json.loads(result.stdout).get("streams", [])
 
     async def run(self):
+        await asyncio.gather(*(self.convert() for _ in range(WORKERS)))
+
+    async def convert(self):
         while not self.stopping:
-            job = await asyncio.to_thread(self.next_job)
-            if not job:
-                return
-            # Acquisition publication has priority over optional device transcoding.
+            # Publishing a download (validating its audio, importing it) has
+            # priority; a download still transferring does not hold copies up.
             active = await asyncio.to_thread(self.store.queue)
             if any(
-                item.get("status") in {"downloading", "validating", "importing"}
+                item.get("status") in {"validating", "importing"}
                 for item in active.get("items", [])
             ):
                 await asyncio.sleep(2)
                 continue
+            job = await asyncio.to_thread(self.claim)
+            if not job:
+                return
             key = job["id"]
             temporary = self.root / (key + ".partial.m4a")
             output = self.root / (key + ".m4a")
             try:
-                job["state"] = "preparing"
-                await asyncio.to_thread(self.save, job)
                 source = Path(job["source"])
                 streams = await asyncio.to_thread(self.probe, source)
                 audio = next((s for s in streams if s.get("codec_type") == "audio"), {})

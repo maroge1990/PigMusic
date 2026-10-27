@@ -128,12 +128,31 @@ import PigDomain
           running = false
         }
       }
+      var asked: Set<String> = []
       while !Task.isCancelled, generation == stamp {
         #if os(iOS)
           if let background, background.activeCount >= 128 { break }
         #endif
         let all = await archive.snapshot()
         guard let record = all.first(where: { $0.state == "queued" }) else { break }
+        // Ask for the waiting copies now, not one after another, so the
+        // server converts the next songs while this one is prepared and
+        // transferred (WATCH1). Its own turn asks again and reports failures.
+        let ahead = all.filter {
+          $0.state == "queued" && $0.id != record.id && !asked.contains($0.id)
+        }
+        .prefix(Self.requestAhead)
+        if !ahead.isEmpty {
+          asked.formUnion(ahead.map(\.id))
+          let source = source
+          let wanted = ahead.map { ($0.id, $0.quality) }
+          Task.detached(priority: .utility) {
+            for (id, quality) in wanted {
+              guard !Task.isCancelled else { return }
+              _ = try? await source.deviceCopy(trackId: id, quality: quality, create: true)
+            }
+          }
+        }
         do {
           var manifest = try await source.deviceCopy(
             trackId: record.id, quality: record.quality, create: true)
@@ -169,6 +188,8 @@ import PigDomain
       }
     }
   }
+  /// Copies asked for ahead of their turn, at most.
+  static let requestAhead = 32
   private func foregroundTransfer(
     _ record: DownloadRecord, manifest: DeviceCopy, request: URLRequest, stamp: Int
   ) async throws {
