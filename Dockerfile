@@ -26,7 +26,7 @@ RUN node --version && python -c "import yt_dlp.version, yt_dlp_ejs; assert yt_dl
 COPY server/ ./server/
 COPY api/ ./api/
 COPY scripts/benchmark_native_sync.py scripts/benchmark_mixes.py scripts/verify_download_source.py ./scripts/
-COPY scripts/export_openapi.py ./scripts/
+COPY scripts/export_openapi.py scripts/probe_playback.py ./scripts/
 COPY scripts/prune_artwork.py scripts/verify_state_migration.py scripts/benchmark_cover_store.py scripts/benchmark_delivery.py scripts/generate_brand_tokens.py ./scripts/
 COPY docs/pig-family-brand-tokens.json ./docs/
 COPY client/src/tokens.css ./client/src/
