@@ -10,6 +10,7 @@ from pathlib import Path
 
 from starlette.responses import FileResponse
 
+from .request_timing import mark
 from .library import load_json
 from .storage import library_root
 
@@ -216,8 +217,16 @@ class DescriptorFileResponse(FileResponse):
         # The server must not send by path: the name is this process's own.
         extensions = dict(scope.get("extensions") or {})
         extensions.pop("http.response.pathsend", None)
+
+        async def timed_send(message):
+            if message["type"] == "http.response.start":
+                mark("file-response-start")
+            await send(message)
+
         try:
-            await super().__call__({**scope, "extensions": extensions}, receive, send)
+            await super().__call__(
+                {**scope, "extensions": extensions}, receive, timed_send
+            )
         finally:
             os.close(self.fd)
 

@@ -47,7 +47,7 @@ class Store:
         # Mix playback leases against mix cache cleanup only. Playback must not
         # wait for library work (syncs, scans, exports) under lifecycle_lock;
         # cleanup takes this after lifecycle_lock, never the other way round.
-        self.mix_lock = threading.RLock()
+        self.mix_lock = TimedRLock("mix_lock")
         self.library_lock = TimedRLock("library_lock")
         directory.mkdir(parents=True, exist_ok=True)
         self.cover_dir = directory / "covers"

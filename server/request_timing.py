@@ -240,7 +240,7 @@ class StallWatch:
     then every `repeat_seconds` while the stall lasts. Stacks show files,
     lines and code, never values."""
 
-    def __init__(self, stalled_seconds=1.0, repeat_seconds=5.0, check_every=0.25):
+    def __init__(self, stalled_seconds=0.5, repeat_seconds=5.0, check_every=0.05):
         self.stalled_seconds = stalled_seconds
         self.repeat_seconds = repeat_seconds
         self.check_every = check_every

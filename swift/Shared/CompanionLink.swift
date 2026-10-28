@@ -63,6 +63,10 @@ import WatchConnectivity
   }
   func transfer(_ file: URL, metadata: Data) {
     guard let session, session.activationState == .activated else { return }
+    if let envelope = try? JSONDecoder().decode(CompanionEnvelope.self, from: metadata) {
+      DiagnosticsLog.shared.record(
+        "link", "queue \(envelope.kind) transfer revision \(envelope.context.revision)")
+    }
     session.transferFile(file, metadata: ["envelope": metadata])
   }
   /// Queued transfers survive relaunches with their original file URLs. After
@@ -275,8 +279,13 @@ import WatchConnectivity
     _ session: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: (any Error)?
   ) {
     let text = error?.localizedDescription
+    let envelope = (fileTransfer.file.metadata?["envelope"] as? Data).flatMap {
+      try? JSONDecoder().decode(CompanionEnvelope.self, from: $0)
+    }
     DiagnosticsLog.shared.record(
-      "link", "file transfer finished" + (text.map { " with error: \($0)" } ?? ""))
+      "link", "file transfer finished"
+        + (envelope.map { " kind=\($0.kind) revision=\($0.context.revision)" } ?? "")
+        + (text.map { " with error: \($0)" } ?? ""))
     deliveries.begin()
     Task { @MainActor in
       defer { self.deliveries.end() }

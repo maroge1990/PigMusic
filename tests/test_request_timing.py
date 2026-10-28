@@ -73,6 +73,66 @@ def test_mix_address_names_its_phases_and_echoes_the_request_id(
         assert not [r for r in caplog.records if "sig=" in r.getMessage()]
 
 
+def test_home_mixes_names_database_filter_tracks_and_radio_phases(
+    tmp_path, monkeypatch
+):
+    from server import mixes as mix_module
+
+    monkeypatch.setattr(mix_module, "MIN_MIX", 1)
+    app, owner = protected(tmp_path, monkeypatch)
+    mixes = app.state.store.mixes
+    user, token = member(app, owner)
+    cached(mixes, track())
+    ready(mixes, user, [track()])
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token},
+    ) as client:
+        answer = client.get("/api/v1/home/mixes")
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["mixes"]
+    assert {
+        "mix-list-db",
+        "mix-list-hidden",
+        "mix-list-tracks",
+        "mix-list-radio",
+    } <= timings(answer).keys()
+
+
+def test_default_stall_watch_captures_subsecond_stalls():
+    watch = StallWatch()
+    assert watch.stalled_seconds == 0.5
+    assert watch.check_every <= 0.05
+
+
+def test_descriptor_response_marks_when_its_headers_start(tmp_path):
+    import os
+    from server.media import DescriptorFileResponse
+
+    path = tmp_path / "audio.mp3"
+    path.write_bytes(b"disposable audio")
+
+    async def scenario():
+        fd = os.open(path, os.O_RDONLY)
+        response = DescriptorFileResponse(fd, os.fstat(fd), media_type="audio/mpeg")
+        sent = []
+
+        async def send(message):
+            sent.append(message)
+
+        await RequestTiming(response)(
+            {"type": "http", "method": "GET", "path": "/test", "headers": []},
+            None,
+            send,
+        )
+        headers = dict(sent[0]["headers"])
+        assert b"file-response-start;dur=" in headers[b"server-timing"]
+        assert sent[1]["body"] == b"disposable audio"
+
+    asyncio.run(scenario())
+
+
 def test_slow_and_unanswered_requests_are_logged_with_pool_state(caplog):
     caplog.set_level(logging.INFO, "pig_music.timing")
 

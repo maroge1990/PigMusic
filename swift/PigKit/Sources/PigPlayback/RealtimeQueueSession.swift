@@ -30,6 +30,18 @@ public struct QueuePlaybackSnapshot: Sendable, Equatable {
   public var durationIsEstimate = false
   public var wantsPlayback = false
   public var error: String?
+
+  /// Changes that must reach Now Playing even while the screen is off.
+  public func differsFromPlayback(_ previous: Self) -> Bool {
+    state != previous.state || index != previous.index || occurrenceID != previous.occurrenceID
+      || duration != previous.duration || durationIsEstimate != previous.durationIsEstimate
+      || error != previous.error || wantsPlayback != previous.wantsPlayback
+  }
+
+  public func shouldPublish(over previous: Self, sceneActive: Bool) -> Bool {
+    differsFromPlayback(previous)
+      || (sceneActive && (abs(elapsed - previous.elapsed) > 2 || Int(elapsed) != Int(previous.elapsed)))
+  }
 }
 
 /// Where a seek lands, in both playback modes. An exact duration bounds it;
@@ -47,7 +59,7 @@ public enum PlaybackSeek {
   var positionFrames: Int64 { get }
   func configure(sampleRate: Double, blockFrames: Int) throws
   func schedule(_ block: PCMBlock, completion: @escaping @Sendable () -> Void) throws
-  func resume()
+  func resume() throws
   func pause()
   func stop()
 }
@@ -112,10 +124,14 @@ public enum PlaybackSeek {
       }
     }
   }
-  public func resume() { node.play() }
+  public func resume() throws {
+    if !engine.isRunning { try engine.start() }
+    node.play()
+  }
   public func pause() {
     pausedPosition = positionFrames
     node.pause()
+    engine.pause()
   }
   public func stop() {
     generation += 1
@@ -221,6 +237,9 @@ public enum PlaybackSeek {
   public func pause() {
     snapshot.wantsPlayback = false
     output.pause()
+    refreshPosition()
+    clock?.cancel()
+    clock = nil
     if ready { snapshot.state = .paused }
     publish()
   }
@@ -229,8 +248,19 @@ public enum PlaybackSeek {
       return
     }
     snapshot.wantsPlayback = true
+    startClock(generation: generation)
     if ready {
-      output.resume()
+      do { try output.resume() } catch {
+        pump?.cancel()
+        clock?.cancel()
+        clock = nil
+        output.stop()
+        snapshot.state = .failed
+        snapshot.wantsPlayback = false
+        snapshot.error = error.localizedDescription
+        publish()
+        return
+      }
       snapshot.state = .playing
     }
     publish()
@@ -344,6 +374,11 @@ public enum PlaybackSeek {
         // Audio held back while refilling after the source fell behind.
         var held: [QueuePCMBlock] = []
         var heldFrames = 0
+        // A full lookahead needs no polling. Buffer completions wake the pump;
+        // buffering the latest wake also covers completions during decoding.
+        let (consumed, wake) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        defer { wake.finish() }
+        var completions = consumed.makeAsyncIterator()
         @MainActor func send(_ block: QueuePCMBlock) throws {
           timeline.append(contentsOf: block.markers)
           let frames = Int64(block.pcm.frameCount)
@@ -353,6 +388,7 @@ public enum PlaybackSeek {
             Task { @MainActor in
               guard let self, self.generation == stamp else { return }
               self.pendingFrames = max(0, self.pendingFrames - frames)
+              wake.yield(())
             }
           }
         }
@@ -361,7 +397,7 @@ public enum PlaybackSeek {
           held = []
           heldFrames = 0
         }
-        startClock(generation: stamp)
+        if snapshot.wantsPlayback { startClock(generation: stamp) }
         while !exhausted || pendingFrames > 0 || !held.isEmpty {
           try Task.checkCancellation()
           guard generation == stamp else { throw CancellationError() }
@@ -405,16 +441,20 @@ public enum PlaybackSeek {
           if !ready {
             ready = true
             if snapshot.wantsPlayback {
-              output.resume()
+              try output.resume()
               snapshot.state = .playing
             } else {
+              output.pause()
               snapshot.state = .paused
             }
             refreshPosition()
             publish()
+            // Build the larger playing cushion immediately after the short
+            // startup cushion, before waiting for the speaker to consume it.
+            if !exhausted { continue }
           }
           if exhausted && pendingFrames == 0 && held.isEmpty { break }
-          try await Task.sleep(for: .milliseconds(20))
+          _ = await completions.next()
         }
         try Task.checkCancellation()
         guard generation == stamp else { throw CancellationError() }
@@ -444,7 +484,9 @@ public enum PlaybackSeek {
   /// Rebuild after an interrupted/stopped engine or a route configuration change.
   public func recoverOutput() {
     guard ready, !items.isEmpty, snapshot.state != .ended, snapshot.state != .failed else { return }
-    refreshPosition()
+    // A configuration change may already have reset the hardware timeline.
+    // Use the last published position (captured immediately by pause), rather
+    // than overwriting it with the stopped output's zero position.
     restart(index: snapshot.index, seconds: snapshot.elapsed, autoplay: snapshot.wantsPlayback)
   }
   private func startClock(generation stamp: Int) {

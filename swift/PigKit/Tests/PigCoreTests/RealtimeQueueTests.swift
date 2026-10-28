@@ -60,6 +60,7 @@ private actor QueueSources {
   var pending: [(Int, @Sendable () -> Void)] = []
   var playing = false
   var starts = 0
+  var resumeFails = false
   var stops = 0
   var captured: [Float] = []
   func configure(sampleRate: Double, blockFrames: Int) { positionFrames = 0 }
@@ -67,7 +68,8 @@ private actor QueueSources {
     pending.append((block.frameCount, completion))
     captured.append(contentsOf: block.channels[0])
   }
-  func resume() {
+  func resume() throws {
+    if resumeFails { throw AudioPipelineFailure.invalidConfiguration }
     playing = true
     starts += 1
   }
@@ -307,6 +309,97 @@ private func queueRoot() throws -> URL {
     session.resume()
     #expect(session.snapshot.wantsPlayback)
     #expect(output.playing)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+  @Test func screenOffPlaybackOnlyPublishesMeaningfulChanges() {
+    let previous = QueuePlaybackSnapshot(state: .playing, elapsed: 1, duration: 300)
+    var next = previous
+    next.elapsed = 120
+    #expect(!next.shouldPublish(over: previous, sceneActive: false))
+    #expect(next.shouldPublish(over: previous, sceneActive: true))
+    next.state = .paused
+    #expect(next.shouldPublish(over: previous, sceneActive: false))
+    next = previous
+    next.occurrenceID = UUID()
+    #expect(next.shouldPublish(over: previous, sceneActive: false))
+    next = previous
+    next.error = "Fixture failure"
+    #expect(next.shouldPublish(over: previous, sceneActive: false))
+  }
+  @Test @MainActor func pausedQueueStopsPublishingUntilResumedAndStillReleasesSources() async throws {
+    let root = try queueRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let sources = QueueSources(files: ["a": try queueFixture(root, id: "a", value: 0.2)])
+    let output = SilentQueueOutput()
+    let session = try RealtimeQueueSession(output: output)
+    var updates = 0
+    session.onUpdate = { _ in updates += 1 }
+    session.replace(
+      [queueTrack("a")], acquire: { try await sources.get($0) },
+      release: { await sources.release($0) })
+    try await waitQueue { session.snapshot.state == .playing }
+    session.pause()
+    let pausedUpdates = updates
+    let buffered = output.pending.count
+    try await Task.sleep(for: .milliseconds(350))
+    #expect(updates == pausedUpdates)
+    #expect(output.pending.count == buffered)
+    session.resume()
+    try await waitQueue { updates > pausedUpdates }
+    output.consume()
+    try await waitQueue { output.pending.count == buffered }
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+  @Test @MainActor func pausedRouteRecoveryIgnoresDiscardedBuffersAndKeepsPosition() async throws {
+    let root = try queueRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let sources = QueueSources(files: ["a": try queueFixture(root, id: "a", value: 0.2)])
+    let output = SilentQueueOutput()
+    let session = try RealtimeQueueSession(output: output)
+    session.replace(
+      [queueTrack("a")], acquire: { try await sources.get($0) },
+      release: { await sources.release($0) })
+    try await waitQueue { session.snapshot.state == .playing }
+    output.consume()
+    session.pause()
+    let saved = session.snapshot.elapsed
+    #expect(saved > 0)
+    let discarded = output.pending.map { $0.1 }
+    // A hardware configuration change discards the old output's buffers.
+    output.stop()
+    session.recoverOutput()
+    try await waitQueue { session.snapshot.state == .paused }
+    #expect(abs(session.snapshot.elapsed - saved) < 0.0001)
+    for completion in discarded { completion() }
+    session.resume()
+    let deadline = ContinuousClock.now + .seconds(5)
+    while session.snapshot.state != .ended {
+      guard ContinuousClock.now < deadline else { throw AudioPipelineFailure.stalled }
+      output.consume()
+      try await Task.sleep(for: .milliseconds(2))
+    }
+    #expect(session.peakScheduledFrames <= 8192)
+    #expect(abs(session.snapshot.elapsed - 1) < 0.0001)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+  @Test @MainActor func failedAudioRestartStopsPausedQueueAndReleasesSources() async throws {
+    let root = try queueRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let sources = QueueSources(files: ["a": try queueFixture(root, id: "a", value: 0.2)])
+    let output = SilentQueueOutput()
+    let session = try RealtimeQueueSession(output: output)
+    session.replace(
+      [queueTrack("a")], autoplay: false, acquire: { try await sources.get($0) },
+      release: { await sources.release($0) })
+    try await waitQueue { session.snapshot.state == .paused }
+    output.resumeFails = true
+    session.resume()
+    #expect(session.snapshot.state == .failed)
+    #expect(!session.snapshot.wantsPlayback && !output.playing)
+    #expect(session.snapshot.error != nil)
     await session.stopAndWait()
     #expect(await sources.active.isEmpty)
   }

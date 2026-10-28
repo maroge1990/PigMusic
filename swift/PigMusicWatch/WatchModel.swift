@@ -298,7 +298,15 @@ import PigPlayback
   func reload() async {
     guard let archive else { return }
     manifest = await archive.snapshot()
-    receipt = await archive.receipt()
+    let next = await archive.receipt()
+    if receipt?.context != next.context || receipt?.ready != next.ready
+      || receipt?.manifestApplied != next.manifestApplied
+    {
+      DiagnosticsLog.shared.record(
+        "sync", "archive revision \(next.context.revision): \(next.ready.count)/\(manifest.songs.count) songs ready"
+          + ", manifest applied=\(next.manifestApplied)")
+    }
+    receipt = next
     restoreCheckpoint()
     await flushListens()
     await flushRequests()
@@ -385,6 +393,7 @@ import PigPlayback
           return
         }
         try await archive.accept(file, ticket: ticket)
+        DiagnosticsLog.shared.record("sync", "audio accepted for revision \(ticket.context.revision)")
       } else {
         throw CompanionFailure.invalid
       }
@@ -549,18 +558,17 @@ import PigPlayback
       // A finished or failed queue no longer wants playback, so the next tap is Play.
       if snapshot.state == .ended || snapshot.state == .failed { self.intent.pause() }
       self.measureListen(snapshot)
+      // Compare consecutive engine reports, not a screen snapshot that may
+      // be minutes old: seeks still update system controls in the background.
+      let jumped = abs(snapshot.elapsed - self.latest.elapsed) > 2
       self.latest = snapshot
       // The engine reports ten times a second. The system interpolates Now
       // Playing time, and the screen shows whole seconds, so only real changes
       // are published, and elapsed-only ticks are skipped while the screen is off.
-      let changed =
-        snapshot.state != self.playback.state || snapshot.index != self.playback.index
-        || snapshot.occurrenceID != self.playback.occurrenceID
-        || snapshot.duration != self.playback.duration || snapshot.error != self.playback.error
-        || snapshot.wantsPlayback != self.playback.wantsPlayback
-      let jumped = abs(snapshot.elapsed - self.playback.elapsed) > 2
-      let tick = Int(snapshot.elapsed) != Int(self.playback.elapsed)
-      if changed || jumped || (tick && self.sceneActive) { self.playback = snapshot }
+      let changed = snapshot.differsFromPlayback(self.playback)
+      if jumped || snapshot.shouldPublish(over: self.playback, sceneActive: self.sceneActive) {
+        self.playback = snapshot
+      }
       if changed || jumped { self.updateNowPlaying() }
       self.checkpointIfDue(snapshot)
     }

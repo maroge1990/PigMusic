@@ -46,6 +46,17 @@ FAILURE_SECONDS = 2 * 60
 # (YouTube search took up to 15 s); a slower one counts as no match.
 SEARCH_SECONDS = {"youtube": 10}
 DEFAULT_SEARCH_SECONDS = 8
+SOURCE_FAILURE_LIMIT = 2
+SOURCE_COOLDOWN_SECONDS = 120
+
+
+async def shared_result(task, timeout=None):
+    """A caller may leave without cancelling shared work. Unlike shield in
+    Python 3.14, this does not log an already-retrieved late failure."""
+    done, _ = await asyncio.wait({task}, timeout=timeout)
+    if not done:
+        raise TimeoutError
+    return task.result()
 
 
 class RemoteAudio:
@@ -67,6 +78,58 @@ class RemoteAudio:
         self.relay_search = relay_search
         self.relayed = {}
         self.inflight = {}
+        # Event-loop owned: consecutive bounded-search failures, cooldown expiry.
+        self.source_health = {}
+
+    async def search_source(self, source, track):
+        began = time.monotonic()
+        failures, until = self.source_health.get(source, (0, 0))
+        if until > began:
+            add_phase(f"{source}-cooldown", 0)
+            raise TimeoutError("Source is cooling down.")
+        search = asyncio.ensure_future(asyncio.to_thread(self.find, source, track))
+        # A timed-out worker may still finish or raise. Always retrieve its result.
+        search.add_done_callback(lambda t: t.cancelled() or t.exception())
+        try:
+            candidate = await shared_result(
+                search,
+                SEARCH_SECONDS.get(source, DEFAULT_SEARCH_SECONDS),
+            )
+        except (TimeoutError, ProviderError) as exc:
+            self.source_failed(source, exc)
+            raise
+        except ValueError:
+            self.source_answered(source, began)
+            raise
+        else:
+            return candidate
+
+    def source_failed(self, source, exc):
+        if not isinstance(exc, TimeoutError) and not (
+            isinstance(exc, ProviderError) and exc.code == "access_required"
+        ):
+            return
+        failures, until = self.source_health.get(source, (0, 0))
+        failures += 1
+        if failures >= SOURCE_FAILURE_LIMIT:
+            now = time.monotonic()
+            if until <= now:
+                log.warning(
+                    "Remote source %s cooling down for %d s (%s)",
+                    source,
+                    SOURCE_COOLDOWN_SECONDS,
+                    "timeout" if isinstance(exc, TimeoutError) else exc.code,
+                )
+            until = now + SOURCE_COOLDOWN_SECONDS
+        self.source_health[source] = (failures, until)
+
+    def source_answered(self, source, began):
+        # An older concurrent success cannot undo a newly opened cooldown.
+        failures, until = self.source_health.get(source, (0, 0))
+        if until <= began:
+            self.source_health.pop(source, None)
+            if failures >= SOURCE_FAILURE_LIMIT:
+                log.info("Remote source %s healthy again", source)
 
     @staticmethod
     def key(track):
@@ -107,7 +170,8 @@ class RemoteAudio:
             task = asyncio.ensure_future(self.locate(client, track))
             self.inflight[name] = task
             task.add_done_callback(lambda _: self.inflight.pop(name, None))
-        return await asyncio.shield(task)
+            task.add_done_callback(lambda t: t.cancelled() or t.exception())
+        return await shared_result(task)
 
     async def locate(self, client, track):
         try:
@@ -192,18 +256,14 @@ class RemoteAudio:
             # and only it is transferred.
             searched = time.monotonic()
             searches = [
-                asyncio.ensure_future(asyncio.to_thread(self.find, source, track))
+                asyncio.ensure_future(self.search_source(source, track))
                 for source in RELAYED
             ]
             for search in searches:
                 search.add_done_callback(lambda t: t.cancelled() or t.exception())
             for source, search in zip(RELAYED, searches):
-                limit = SEARCH_SECONDS.get(source, DEFAULT_SEARCH_SECONDS)
-                left = searched + limit - time.monotonic()
                 try:
-                    candidate = await asyncio.wait_for(
-                        asyncio.shield(search), max(left, 0.01)
-                    )
+                    candidate = await shared_result(search)
                 except TimeoutError:
                     step(source, "too slow", searched)
                     uncertain = True
@@ -225,11 +285,13 @@ class RemoteAudio:
                     path = await asyncio.to_thread(
                         self.download, source, track, candidate
                     )
-                except Exception:
+                except Exception as exc:
+                    self.source_failed(source, exc)
                     step(source, "transfer failed", fetched)
                     uncertain = True
                     continue
                 step(source, "transfer", fetched)
+                self.source_answered(source, searched)
                 self.timing(track, source, began, steps)
                 return {"path": path, "source": source}
         self.timing(track, None, began, steps)

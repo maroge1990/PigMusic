@@ -61,7 +61,15 @@ import SwiftUI
         for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
       ).appendingPathComponent("WatchBridge")
       link = try CompanionLink(inbox: base.appendingPathComponent("Inbox"))
-      link?.onActivated = { [weak self] in await self?.publish(force: true) }
+      link?.onActivated = { [weak self] in
+        guard let self else { return }
+        // Reannounce the small context so a reinstalled Watch can report what
+        // it needs. Retain confirmed songs instead of forcing the manifest on
+        // every reachability change; unfinished work can retry immediately.
+        sent = [:]
+        contextSent = nil
+        await publish()
+      }
       link?.onMessage = { [weak self] data in
         if let diagnostics = CompanionDiagnostics.decode(data), diagnostics.text != nil {
           self?.received(diagnostics)

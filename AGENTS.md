@@ -54,7 +54,7 @@ Tests mark provider rate limits off by default; `@pytest.mark.real_rate_limits` 
 
 - Commit straight to `main`. **Ask before pushing:** a push to `main` publishes `ghcr.io/maroge1990/pig-music:main` and `sha-<rev>`.
 - Live releases are separate and owner-authorised: verify with `scripts/deploy_unraid.py --image <digest>`, release with `scripts/deploy_release.py` (see operations).
-- Native build number: change `CURRENT_PROJECT_VERSION` in both `swift/PigMusic.xcodeproj/project.pbxproj` and `scripts/generate_native_project.py`. Current version: 0.2.0 (10).
+- Native build number: change `CURRENT_PROJECT_VERSION` in both `swift/PigMusic.xcodeproj/project.pbxproj` and `scripts/generate_native_project.py`. Current version: 0.2.0 (11).
 - After a delivery, update the blueprint's status and roadmap. Commit messages carry the details; don't add new dated delivery docs.
 
 ## Conventions

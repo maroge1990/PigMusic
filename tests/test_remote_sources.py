@@ -644,3 +644,93 @@ def test_a_jiosaavn_outage_falls_back_to_relays_and_is_remembered_briefly(
     ((expiry, kind, _),) = resolver.misses.values()
     assert kind is TimeoutError
     assert expiry - time.monotonic() <= remote.FAILURE_SECONDS
+
+
+@pytest.mark.parametrize("failure", ["access", "timeout"])
+def test_repeated_source_failures_cool_down_without_remembering_false_misses(
+    tmp_path, monkeypatch, caplog, failure
+):
+    import time
+    from server import remote
+    from server.providers.contracts import ProviderError
+
+    monkeypatch.setattr(remote, "SEARCH_SECONDS", {"youtube": 0.01})
+    calls = []
+    restored = False
+    loop_errors = []
+
+    def find(source, track):
+        calls.append(source)
+        if source == "youtube" and not restored:
+            if failure == "timeout":
+                time.sleep(0.05)
+                raise ValueError("late no match")
+            raise ProviderError("access_required")
+        raise ValueError("No recording matched.")
+
+    resolver = RemoteAudio(lambda *_: [], directory=tmp_path / "relay")
+    monkeypatch.setattr(resolver, "find", find)
+
+    async def run():
+        nonlocal restored
+        asyncio.get_running_loop().set_exception_handler(
+            lambda loop, context: loop_errors.append(context)
+        )
+        async with httpx.AsyncClient() as client:
+            for index in range(3):
+                song = {"artist": "Fixture", "title": str(index), "album": "Fixture"}
+                with pytest.raises(TimeoutError):
+                    await resolver.shared(client, song)
+            assert calls.count("youtube") == 2
+            assert all(kind is TimeoutError for _, kind, _ in resolver.misses.values())
+            failures, _ = resolver.source_health["youtube"]
+            resolver.source_health["youtube"] = (failures, time.monotonic() - 1)
+            restored = True
+            with pytest.raises(ValueError, match="No source has"):
+                await resolver.shared(
+                    client, {"artist": "Fixture", "title": "retry", "album": "Fixture"}
+                )
+            assert calls.count("youtube") == 3
+            assert "youtube" not in resolver.source_health
+            # Let the old timed-out threads finish; their late failures are consumed.
+            await asyncio.sleep(0.08)
+
+    with caplog.at_level("INFO", logger="pig_music.remote"):
+        asyncio.run(run())
+    assert "youtube cooling down" in caplog.text
+    assert "youtube healthy again" in caplog.text
+    assert "exception was never retrieved" not in caplog.text.lower()
+    assert not loop_errors
+
+
+def test_repeated_transfer_access_failures_also_cool_down_the_source(
+    tmp_path, monkeypatch
+):
+    from server.providers.contracts import ProviderError
+
+    resolver = RemoteAudio(lambda *_: [], directory=tmp_path / "relay")
+    searched = []
+
+    def find(source, track):
+        searched.append(source)
+        if source == "youtube":
+            return {"fixture": True}
+        raise ValueError("No match")
+
+    def download(*args):
+        raise ProviderError("access_required")
+
+    monkeypatch.setattr(resolver, "find", find)
+    monkeypatch.setattr(resolver, "download", download)
+
+    async def run():
+        async with httpx.AsyncClient() as client:
+            for index in range(3):
+                with pytest.raises(TimeoutError):
+                    await resolver.shared(
+                        client,
+                        {"artist": "Fixture", "title": str(index), "album": "Fixture"},
+                    )
+        assert searched.count("youtube") == 2
+
+    asyncio.run(run())

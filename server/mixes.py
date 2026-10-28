@@ -1297,57 +1297,63 @@ class Mixes:
         return None
 
     def list(self, user):
-        with self.store.connect() as conn:
-            members = {
-                r[0]
-                for r in conn.execute(
-                    "SELECT track_id FROM library_members WHERE user_id=?", (user,)
+        with phase("mix-list-db"):
+            with self.store.connect() as conn:
+                members = {
+                    r[0]
+                    for r in conn.execute(
+                        "SELECT track_id FROM library_members WHERE user_id=?", (user,)
+                    )
+                }
+                rows = conn.execute(
+                    "SELECT id,kind,day,payload FROM mix_editions WHERE user_id=? AND active=1 ORDER BY "
+                    + KIND_ORDER,
+                    (user,),
+                ).fetchall()
+                preparing = bool(
+                    conn.execute(
+                        "SELECT 1 FROM mix_editions WHERE user_id=? AND day=? AND active=0 AND retired_at IS NULL AND json_extract(payload,'$.state')='preparing' LIMIT 1",
+                        (user, str(self.day())),
+                    ).fetchone()
                 )
-            }
-            rows = conn.execute(
-                "SELECT id,kind,day,payload FROM mix_editions WHERE user_id=? AND active=1 ORDER BY "
-                + KIND_ORDER,
-                (user,),
-            ).fetchall()
-            preparing = bool(
-                conn.execute(
-                    "SELECT 1 FROM mix_editions WHERE user_id=? AND day=? AND active=0 AND retired_at IS NULL AND json_extract(payload,'$.state')='preparing' LIMIT 1",
-                    (user, str(self.day())),
-                ).fetchone()
-            )
-        hidden = self.hidden(user)
-        result = []
-        for identity, kind, day, raw in rows:
-            if "edition:" + identity in hidden:
-                continue
-            payload = json.loads(raw)
-            if not kind.startswith("saved:") and len(payload["tracks"]) < MIN_MIX:
-                continue  # Short editions from before the minimum stay out of Home.
-            tracks = [
-                dto
-                for index, track in enumerate(payload["tracks"])
-                if song_key(track) not in hidden
-                and (dto := self.track_dto(identity, index, track, members))
-            ]
-            if tracks:
-                result.append(
-                    {
-                        "id": identity,
-                        "kind": kind,
-                        "day": day,
-                        "title": payload["title"],
-                        "reason": payload["reason"],
-                        "tracks": tracks,
-                    }
-                )
-        radio = self.radio_row(user, self.day())
-        card = None
-        if radio and json.loads(radio[1])["tracks"]:
-            payload = json.loads(radio[1])
-            card = {
-                "title": payload["title"],
-                "ready": max(0, len(payload["tracks"]) - 1 - payload.get("served", -1)),
-            }
+        with phase("mix-list-hidden"):
+            hidden = self.hidden(user)
+        with phase("mix-list-tracks"):
+            result = []
+            for identity, kind, day, raw in rows:
+                if "edition:" + identity in hidden:
+                    continue
+                payload = json.loads(raw)
+                if not kind.startswith("saved:") and len(payload["tracks"]) < MIN_MIX:
+                    continue  # Short editions from before the minimum stay out of Home.
+                tracks = [
+                    dto
+                    for index, track in enumerate(payload["tracks"])
+                    if song_key(track) not in hidden
+                    and (dto := self.track_dto(identity, index, track, members))
+                ]
+                if tracks:
+                    result.append(
+                        {
+                            "id": identity,
+                            "kind": kind,
+                            "day": day,
+                            "title": payload["title"],
+                            "reason": payload["reason"],
+                            "tracks": tracks,
+                        }
+                    )
+        with phase("mix-list-radio"):
+            radio = self.radio_row(user, self.day())
+            card = None
+            if radio and json.loads(radio[1])["tracks"]:
+                payload = json.loads(radio[1])
+                card = {
+                    "title": payload["title"],
+                    "ready": max(
+                        0, len(payload["tracks"]) - 1 - payload.get("served", -1)
+                    ),
+                }
         return {"mixes": result, "preparing": preparing, "radio": card}
 
     def track_dto(self, identity, index, track, members):
