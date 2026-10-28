@@ -295,7 +295,7 @@ def catalogue_router(
         client = http_client()
         covers = []
         try:
-            popular = await popularity.get(client, artist_id)
+            popular = await popularity.get(client, artist_id, include_albums=False)
             covers += [
                 ("release", s["release_id"]) for s in popular.get("songs", [])[:5]
             ]

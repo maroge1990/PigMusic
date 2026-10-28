@@ -3,6 +3,7 @@ import json
 import time
 
 import httpx
+import pytest
 
 from server.catalogue import Catalogue, warming
 from server.store import Store
@@ -186,3 +187,79 @@ def test_each_pass_ends_by_showing_new_portraits(tmp_path, monkeypatch):
     asyncio.run(run())
     # Called once, after the library artist was prepared.
     assert finished == [1]
+
+
+@pytest.mark.parametrize("page_size", [1, 240])
+def test_replenished_page_covers_cannot_starve_home_or_library(tmp_path, page_size):
+    w, _, _ = warmer(tmp_path)
+    w.state["running"] = True
+    fetched = 0
+    served = {}
+
+    async def artist(artist_id, full):
+        served[artist_id] = fetched
+        return []
+
+    async def cover(kind, item_id):
+        nonlocal fetched
+        fetched += 1
+        if fetched < 300:
+            w.covers([("release-group", f"next-{fetched}")])
+        await asyncio.sleep(0)  # Provider I/O lets join waiters run between jobs.
+        return True
+
+    w.warm_artist, w.cover = artist, cover
+
+    async def run():
+        w.covers([("release-group", f"initial-{i}") for i in range(page_size)])
+        w.submit(A, priority=HOME)
+        w.submit(B, priority=LIBRARY)
+        worker = asyncio.create_task(w.work())
+        try:
+            await asyncio.wait_for(w.queue.join(), 3)
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+
+    asyncio.run(run())
+    # At most three urgent batches of at most 24 covers before background work.
+    assert served[A] <= min(page_size, 24) * 3
+    assert served[B] <= min(page_size, 24) * 6
+    assert not w.cover_pending and not w.pending
+
+
+def test_background_covers_do_not_clear_the_queued_page_cover_deduplication(tmp_path):
+    w, _, _ = warmer(tmp_path)
+    w.state["running"] = True
+    home_started = False
+    covers_after_home = 0
+    duplicate_requests = []
+    item = ("release", "shared-cover")
+
+    async def artist(artist_id, full):
+        nonlocal home_started
+        if artist_id == D:
+            home_started = True
+        return []
+
+    async def cover(kind, item_id):
+        nonlocal covers_after_home
+        if home_started:
+            covers_after_home += 1
+            if covers_after_home == 2:
+                # The page batch is now being fetched after the Home job.
+                duplicate_requests.append(w.covers([item]))
+        return True
+
+    w.warm_artist, w.cover = artist, cover
+
+    async def run():
+        for artist_id in (A, B, C):
+            w.submit(artist_id, priority=SEARCH)
+        w.covers([item])
+        w.submit(D, priority=HOME, covers=[item])
+        await drain(w)
+
+    asyncio.run(run())
+    assert duplicate_requests == [0]
+    assert not w.cover_pending

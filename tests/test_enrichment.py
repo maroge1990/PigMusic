@@ -323,3 +323,158 @@ def test_popular_albums_verify_primary_type_and_exclude_live(tmp_path):
             assert [a["title"] for a in result["albums"]] == ["Studio"]
 
     asyncio.run(run())
+
+
+def test_artist_warming_fetches_songs_without_album_details_or_poisoning_full_cache(
+    tmp_path,
+):
+    from server.routes.catalogue import catalogue_router
+
+    store = Store(tmp_path)
+    save_settings(store, False, True, listenbrainz_token=TOKEN)
+    catalogue = Catalogue(store)
+    popularity = Popularity(store, catalogue)
+    requests = []
+
+    def transport(request):
+        requests.append((request.url.host, request.url.path))
+        if request.url.host == "musicbrainz.org":
+            return httpx.Response(
+                200, json={"primary-type": "Album", "title": "Studio"}
+            )
+        if "top-recordings" in request.url.path:
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "artist_mbids": [ARTIST],
+                        "recording_mbid": RELEASE,
+                        "release_mbid": RELEASE,
+                        "recording_name": "Song",
+                        "release_name": "Studio",
+                    }
+                ],
+            )
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "release_group_mbid": RELEASE,
+                    "release_group": {"type": "Album", "name": "Studio"},
+                }
+            ],
+        )
+
+    async def run():
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(transport)
+        ) as client:
+            router, *_ = catalogue_router(
+                store,
+                catalogue,
+                None,
+                popularity,
+                None,
+                None,
+                None,
+                None,
+                None,
+                lambda: "fixture",
+                lambda: client,
+            )
+            assert await router.warm_artist(ARTIST) == [("release", RELEASE)]
+            assert len(requests) == 1 and "top-recordings" in requests[0][1]
+            # A songs-only warm cache cannot hide the full page's album results.
+            full = await popularity.get(client, ARTIST)
+            assert [album["title"] for album in full["albums"]] == ["Studio"]
+            assert full["ranked_album_ids"] == [RELEASE]
+            before = list(requests)
+            assert await router.warm_artist(ARTIST) == [("release", RELEASE)]
+            assert await popularity.get(client, ARTIST) == full
+            assert requests == before
+
+    asyncio.run(run())
+
+
+def test_popularity_album_details_yield_to_cover_warming_and_foreground(
+    tmp_path, monkeypatch
+):
+    from server.catalogue import background_metadata
+
+    store = Store(tmp_path)
+    save_settings(store, False, True, listenbrainz_token=TOKEN)
+    catalogue = Catalogue(store)
+    popularity = Popularity(store, catalogue)
+    order = []
+
+    def transport(request):
+        if request.url.host == "musicbrainz.org":
+            order.append(request.url.path.rsplit("/", 1)[-1])
+            return httpx.Response(
+                200, json={"primary-type": "Album", "title": "Studio"}
+            )
+        return httpx.Response(
+            200,
+            json=(
+                []
+                if "top-recordings" in request.url.path
+                else [
+                    {
+                        "release_group_mbid": RELEASE,
+                        "release_group": {"type": "Album", "name": "Studio"},
+                    }
+                ]
+            ),
+        )
+
+    async def run():
+        started = {
+            path: asyncio.Event()
+            for path in [
+                "release-group/" + RELEASE,
+                "release/cover",
+                "artist/foreground",
+            ]
+        }
+        get = catalogue.get
+
+        async def observed(client, path, **params):
+            started[path].set()
+            return await get(client, path, **params)
+
+        monkeypatch.setattr(catalogue, "get", observed)
+        await catalogue.lock.acquire()
+        released = False
+        tasks = []
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(transport)
+            ) as client:
+
+                async def cover():
+                    token = background_metadata.set(True)
+                    try:
+                        return await catalogue.get(client, "release/cover")
+                    finally:
+                        background_metadata.reset(token)
+
+                tasks.append(asyncio.create_task(popularity.get(client, ARTIST)))
+                await asyncio.wait_for(started["release-group/" + RELEASE].wait(), 1)
+                tasks.append(asyncio.create_task(cover()))
+                await asyncio.wait_for(started["release/cover"].wait(), 1)
+                tasks.append(
+                    asyncio.create_task(catalogue.get(client, "artist/foreground"))
+                )
+                await asyncio.wait_for(started["artist/foreground"].wait(), 1)
+                catalogue.lock.release()
+                released = True
+                await asyncio.wait_for(asyncio.gather(*tasks), 2)
+        finally:
+            if not released:
+                catalogue.lock.release()
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    asyncio.run(run())
+    assert order == ["foreground", "cover", RELEASE]

@@ -1,6 +1,7 @@
 """Cached MusicBrainz browsing; queue payloads are built from server metadata."""
 
 import asyncio
+from contextlib import asynccontextmanager
 from urllib.parse import parse_qsl, urljoin, urlsplit
 from contextvars import ContextVar
 import time
@@ -89,6 +90,9 @@ def release_tracks(release):
 
 
 background_metadata = ContextVar("background_metadata", default=False)
+# Popularity's optional album details yield to ordinary cover/artist warming,
+# even when the popularity page itself was requested in the foreground.
+deferred_metadata = ContextVar("deferred_metadata", default=False)
 # Set by the server warmer: cached answers this close to expiry are renewed
 # now, so nobody ever waits on an expired cache.
 warming = ContextVar("warming", default=False)
@@ -111,38 +115,50 @@ class Catalogue:
         self.store = store
         self.lock = asyncio.Lock()
         self.last_request = 0.0
-        self.foreground_waiters = 0
+        # Foreground requests, ordinary warming, optional popularity details.
+        self.waiters = [0, 0, 0]
+
+    @asynccontextmanager
+    async def turn(self, priority):
+        self.waiters[priority] += 1
+        try:
+            while True:
+                while any(self.waiters[:priority]):
+                    await asyncio.sleep(0.05)
+                async with self.lock:
+                    # A higher-priority waiter may have arrived while this
+                    # task waited for the current provider request to finish.
+                    if any(self.waiters[:priority]):
+                        continue
+                    yield
+                    return
+        finally:
+            self.waiters[priority] -= 1
 
     async def get(self, client, path, **params):
         key = "catalogue:" + path + repr(sorted(params.items()))
         cached = self.store.read_document(key)
         if cached and still_fresh(time.time() - cached["time"], 86400):
             return cached["data"]
-        background = background_metadata.get()
-        if not background:
-            self.foreground_waiters += 1
-        try:
-            while background and self.foreground_waiters:
-                await asyncio.sleep(0.05)
-            async with self.lock:
-                cached = self.store.read_document(key)
-                if cached and still_fresh(time.time() - cached["time"], 86400):
-                    return cached["data"]
-                response = await self.fetch(
-                    client, "https://musicbrainz.org/ws/2/" + path, params
-                )
-                data = response.json()
-                import json
+        priority = (
+            2 if deferred_metadata.get() else (1 if background_metadata.get() else 0)
+        )
+        async with self.turn(priority):
+            cached = self.store.read_document(key)
+            if cached and still_fresh(time.time() - cached["time"], 86400):
+                return cached["data"]
+            response = await self.fetch(
+                client, "https://musicbrainz.org/ws/2/" + path, params
+            )
+            data = response.json()
+            import json
 
-                with self.store.connect() as conn:
-                    conn.execute(
-                        "INSERT INTO documents VALUES (?,?) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",
-                        (key, json.dumps({"time": time.time(), "data": data})),
-                    )
-                return data
-        finally:
-            if not background:
-                self.foreground_waiters -= 1
+            with self.store.connect() as conn:
+                conn.execute(
+                    "INSERT INTO documents VALUES (?,?) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",
+                    (key, json.dumps({"time": time.time(), "data": data})),
+                )
+            return data
 
     async def pace(self):
         delay = max(0, self.min_interval - (time.monotonic() - self.last_request))

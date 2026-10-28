@@ -4,7 +4,7 @@ import asyncio, hashlib, json, time
 import httpx, logging
 
 logger = logging.getLogger(__name__)
-from .catalogue import RENEW, mbid, warming
+from .catalogue import RENEW, deferred_metadata, mbid, warming
 from .media import settings
 from .releases import feature_album
 
@@ -25,7 +25,7 @@ class Popularity:
         self.artist_locks = {}
         self.last_request = 0.0
 
-    async def get(self, client, artist_id):
+    async def get(self, client, artist_id, include_albums=True):
         token = settings(self.store).get("listenbrainz_token")
         if not token:
             return {"enabled": False, "songs": [], "albums": []}
@@ -36,6 +36,13 @@ class Popularity:
             + ":"
             + artist_id
         )
+        if not include_albums:
+            # The warmer only needs song covers. Reuse a complete answer when
+            # present, but never let a songs-only cache hide the page's albums.
+            full = self.store.read_document(key)
+            if full and full.get("retry_after", 0) - margin() > time.time():
+                return full["data"]
+            key += ":songs"
         cached = self.store.read_document(key)
         if cached and cached.get("retry_after", 0) - margin() > time.time():
             return cached["data"]
@@ -52,7 +59,12 @@ class Popularity:
             try:
                 responses = []
                 failed = False
-                for kind in ("recordings", "release-groups"):
+                kinds = (
+                    ("recordings", "release-groups")
+                    if include_albums
+                    else ("recordings",)
+                )
+                for kind in kinds:
                     try:
                         async with self.lock:
                             await asyncio.sleep(
@@ -107,6 +119,8 @@ class Popularity:
                         )
                         responses.append([])
                         failed = True
+                if not include_albums:
+                    responses.append([])
                 seen = set()
                 for item in responses[0]:
                     try:
@@ -157,9 +171,13 @@ class Popularity:
                             if album_lookups >= 40:
                                 break
                             album_lookups += 1
-                            detail = await self.catalogue.get(
-                                client, "release-group/" + identity
-                            )
+                            priority_token = deferred_metadata.set(True)
+                            try:
+                                detail = await self.catalogue.get(
+                                    client, "release-group/" + identity
+                                )
+                            finally:
+                                deferred_metadata.reset(priority_token)
                             if not feature_album(detail):
                                 continue
                             group = {

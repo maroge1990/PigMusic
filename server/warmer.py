@@ -24,6 +24,9 @@ ARTIST_REUSE = 6 * 3600
 LIBRARY_COVERS = 12
 # Page covers waiting to be fetched, at most (a few artists' first screens).
 COVER_BACKLOG = 240
+PAGE_COVER_BATCH = 24
+# A browsing session cannot indefinitely postpone Home and Library preparation.
+URGENT_BATCHES = 3
 
 # Lower numbers run first.
 SEARCH, HOME, LIBRARY = 0, 1, 2
@@ -99,18 +102,22 @@ class Warmer:
         ):
             if covers:
                 self.serial += 1
-                self.queue.put_nowait((priority, self.serial, None, False, covers))
+                self.queue.put_nowait(
+                    (priority, self.serial, None, False, covers, False)
+                )
             return False
         current = self.pending.get(artist_id)
         if current is not None and current[0] <= priority and current[1] >= full:
             return False
         self.pending[artist_id] = (priority, full)
         self.serial += 1
-        self.queue.put_nowait((priority, self.serial, artist_id, full, tuple(covers)))
+        self.queue.put_nowait(
+            (priority, self.serial, artist_id, full, tuple(covers), False)
+        )
         return True
 
     def covers(self, items):
-        """Covers a page shows next, fetched ahead of the background pass.
+        """Covers a page shows next, with a bounded share ahead of the pass.
         Each is queued once while it waits, within COVER_BACKLOG, and only
         while warming runs; returns how many were queued."""
         if not self.state["running"]:
@@ -122,9 +129,27 @@ class Warmer:
         fresh = fresh[:room]
         if fresh:
             self.cover_pending.update(fresh)
-            self.serial += 1
-            self.queue.put_nowait((SEARCH, self.serial, None, False, tuple(fresh)))
+            for offset in range(0, len(fresh), PAGE_COVER_BATCH):
+                self.serial += 1
+                batch = tuple(fresh[offset : offset + PAGE_COVER_BATCH])
+                self.queue.put_nowait((SEARCH, self.serial, None, False, batch, True))
         return len(fresh)
+
+    def background_job(self):
+        """Take one waiting Home/Library job, preserving urgent job order and
+        Queue.join accounting. Only the worker removes jobs from this queue."""
+        deferred, found = [], None
+        while not self.queue.empty():
+            job = self.queue.get_nowait()
+            if job[0] >= HOME:
+                found = job
+                break
+            deferred.append(job)
+        for job in deferred:
+            # Put before task_done: join must never see a transient empty pass.
+            self.queue.put_nowait(job)
+            self.queue.task_done()
+        return found
 
     def search(self, artist_ids):
         """A search's likely next taps: essentials for two, all for the first.
@@ -138,8 +163,13 @@ class Warmer:
     async def work(self):
         background_metadata.set(True)
         warming.set(True)
+        urgent = 0
         while True:
-            priority, _, artist_id, full, covers = await self.queue.get()
+            job = self.background_job() if urgent >= URGENT_BATCHES else None
+            priority, _, artist_id, full, covers, page_covers = (
+                job or await self.queue.get()
+            )
+            urgent = urgent + 1 if priority == SEARCH else 0
             try:
                 found = []
                 if artist_id:
@@ -169,7 +199,8 @@ class Warmer:
             finally:
                 if artist_id and self.pending.get(artist_id) == (priority, full):
                     self.pending.pop(artist_id, None)
-                self.cover_pending.difference_update(covers)
+                if page_covers:
+                    self.cover_pending.difference_update(covers)
                 self.queue.task_done()
 
     async def schedule(self):
@@ -250,7 +281,9 @@ class Warmer:
             )
         if not artists and covers:
             self.serial += 1
-            self.queue.put_nowait((HOME, self.serial, None, False, tuple(covers)))
+            self.queue.put_nowait(
+                (HOME, self.serial, None, False, tuple(covers), False)
+            )
         self.prepare_albums(feed)
 
     async def album(self, group_id):
@@ -279,7 +312,7 @@ class Warmer:
             self.albums.popitem(last=False)
         if fresh:
             self.serial += 1
-            self.queue.put_nowait((HOME, self.serial, None, False, tuple(fresh)))
+            self.queue.put_nowait((HOME, self.serial, None, False, tuple(fresh), False))
         return len(fresh)
 
     def people(self):

@@ -322,7 +322,7 @@ def findings(report):
     failed = Counter(
         r["outcome"]
         for r in play["requests"]
-        if not r["outcome"].isdigit() or int(r["outcome"]) >= 500
+        if not r["outcome"].isdigit() or int(r["outcome"]) >= 400
     )
     if failed:
         kinds = ", ".join(f"{n}× {outcome}" for outcome, n in failed.most_common())

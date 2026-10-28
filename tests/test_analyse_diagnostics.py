@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from scripts import analyse_diagnostics
 
 EXPORT = """PigMusic diagnostics · 2026-10-26T04:57:31Z
@@ -108,3 +110,22 @@ def test_a_file_far_larger_than_an_export_is_not_read(tmp_path, monkeypatch):
         assert "larger than any diagnostics export" in str(exc)
     else:
         raise AssertionError("an oversized file was read")
+
+
+@pytest.mark.parametrize("status", [401, 403, 429])
+def test_client_errors_are_failed_requests_even_when_they_are_fast(status):
+    report = analyse_diagnostics.analyse(
+        "== iPhone log ==\n"
+        f"2026-10-28T10:00:00+11:00 [network] playback_url {status} in 12 ms (id 0123456789abcdef)\n"
+    )
+    assert any(f"Requests failed: 1× {status}" in item for item in report["findings"])
+    assert report["iphone"]["playback"]["requests"][0]["id"] == "0123456789abcdef"
+
+
+def test_success_and_redirect_statuses_are_not_failed_requests():
+    lines = [
+        f"2026-10-28T10:00:0{index}+11:00 [network] media {status} in 12 ms (id 0123456789abcdef)"
+        for index, status in enumerate([200, 204, 206, 301, 304])
+    ]
+    report = analyse_diagnostics.analyse("== iPhone log ==\n" + "\n".join(lines))
+    assert not any(item.startswith("Requests failed:") for item in report["findings"])

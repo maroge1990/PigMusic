@@ -285,3 +285,122 @@ def test_cover_search_uses_the_catalogue_album_title(tmp_path):
     }
     asyncio.run(Artwork(Store(tmp_path), Recording()).cover(None, album))
     assert queries[0].startswith('releasegroup:"The Best of the Radio Songs"')
+
+
+@pytest.mark.parametrize("stage", ["waiting", "active", "error"])
+def test_cancelled_or_failed_foreground_request_cannot_hold_up_warming(tmp_path, stage):
+    from server.catalogue import background_metadata
+
+    catalogue = Catalogue(Store(tmp_path))
+    catalogue.retries = 0
+    requests = []
+
+    async def run():
+        entered = asyncio.Event()
+        started = asyncio.Event()
+        blocked = asyncio.Event()
+
+        async def transport(request):
+            path = request.url.path.rsplit("/", 1)[-1]
+            requests.append(path)
+            if path == "foreground":
+                if stage == "error":
+                    return httpx.Response(503)
+                entered.set()
+                await blocked.wait()
+            return httpx.Response(200, json={"id": path})
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(transport)
+        ) as client:
+            held = stage == "waiting"
+            if held:
+                await catalogue.lock.acquire()
+
+            async def foreground():
+                started.set()
+                return await catalogue.get(client, "artist/foreground")
+
+            task = asyncio.create_task(foreground())
+            try:
+                await asyncio.wait_for(started.wait(), 1)
+                if stage == "active":
+                    await asyncio.wait_for(entered.wait(), 1)
+                if stage == "error":
+                    with pytest.raises(httpx.HTTPStatusError):
+                        await task
+                else:
+                    task.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await task
+                if held:
+                    catalogue.lock.release()
+                    held = False
+                token = background_metadata.set(True)
+                try:
+                    answer = await asyncio.wait_for(
+                        catalogue.get(client, "release/cover"), 1
+                    )
+                finally:
+                    background_metadata.reset(token)
+                assert answer == {"id": "cover"}
+            finally:
+                if held:
+                    catalogue.lock.release()
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(run())
+    assert requests[-1] == "cover"
+    assert not catalogue.lock.locked()
+
+
+def test_concurrent_priorities_share_the_same_fetched_cache_entry(tmp_path):
+    from server.catalogue import background_metadata, deferred_metadata
+
+    catalogue = Catalogue(Store(tmp_path))
+    requests = []
+
+    async def run():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def transport(request):
+            requests.append(request.url.path)
+            entered.set()
+            await release.wait()
+            return httpx.Response(200, json={"id": OLD})
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(transport)
+        ) as client:
+            first = asyncio.create_task(catalogue.get(client, "release/" + OLD))
+            tasks = [first]
+            try:
+                await asyncio.wait_for(entered.wait(), 1)
+
+                async def read(variable):
+                    token = variable.set(True)
+                    try:
+                        return await catalogue.get(client, "release/" + OLD)
+                    finally:
+                        variable.reset(token)
+
+                tasks += [
+                    asyncio.create_task(read(variable))
+                    for variable in (background_metadata, deferred_metadata)
+                ]
+                await asyncio.sleep(0)
+                release.set()
+                assert (
+                    await asyncio.wait_for(asyncio.gather(*tasks), 1)
+                    == [{"id": OLD}] * 3
+                )
+            finally:
+                release.set()
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+    asyncio.run(run())
+    assert len(requests) == 1
