@@ -1,6 +1,6 @@
 # Open review findings
 
-Unresolved medium and low review findings retained for owner prioritisation (see "Independent review" in [AGENTS.md](../AGENTS.md)); optional first-round items may also be retained when the owner defers them. The owner prioritises them; move one to the blueprint roadmap when it is scheduled, and delete it here when it is fixed.
+Unresolved medium and low review findings retained for owner prioritisation (see "Independent review" in [AGENTS.md](../AGENTS.md)); optional first-round items may also be retained when the owner defers them. The [blueprint roadmap](../blueprint.md#recommended-sequence) is the only priority/status register: PLAY4 and DIAG1 are scheduled there, and all four low notes are covered by its [review follow-ups](../blueprint.md#review-follow-ups). Keep reproduction detail here, link new findings to that plan, and delete a finding here when its verified fix lands. This file does not maintain another work order.
 
 | Found | Batch | Severity | Finding | Where |
 | --- | --- | --- | --- | --- |

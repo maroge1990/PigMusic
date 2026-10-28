@@ -3,7 +3,7 @@
 Private household music-library management in one Unraid container: shared settings, a durable download queue and an embedded Soulseek engine. Verified files are published into the existing Synology library that Plex reads. There are web, iPhone/iPad and Apple Watch clients.
 
 - **Working on the code:** [AGENTS.md](AGENTS.md) covers setup, run, test and ship.
-- **Product contract, current state, roadmap and architecture:** [blueprint.md](blueprint.md).
+- **Single work plan, current state, acceptance gates and product contract:** [blueprint.md](blueprint.md) ([recommended sequence](blueprint.md#recommended-sequence)).
 - **Deploy, release and recovery:** [docs/operations.md](docs/operations.md).
 - **Manual, browser and device verification:** [docs/testing.md](docs/testing.md).
 - **Internet access and security:** [docs/internet-access.md](docs/internet-access.md).

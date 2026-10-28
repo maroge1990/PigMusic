@@ -22,7 +22,7 @@ Cloudflare (dashboard, `markrogers.au` zone), set once — never per person:
 
 ## Unraid deployment (owner-authorised step)
 
-Not yet performed. Run only with a backup and the usual release procedure.
+The household tunnel is active; current verification and outstanding owner checks are tracked in the [blueprint](../blueprint.md#owner-inputs-and-work-that-can-proceed-alongside-fixes). The procedure below is for an owner-authorised setup/rebuild, not a pending instruction to redeploy. Use a backup and the usual release procedure.
 
 1. In Cloudflare Zero Trust → Networks → Tunnels, create a tunnel named `pig-music` and copy its token. Keep the token out of Git and chat; store it only in the Unraid container template.
 2. Add a `cloudflared` container (image `cloudflare/cloudflared`, pinned to a specific tag) on the existing `pig-music-preview` Docker network with a fixed address, for example `172.25.0.10`. Command: `tunnel --no-autoupdate run`; environment `TUNNEL_TOKEN=<token>`. No published ports.
@@ -35,7 +35,9 @@ Not yet performed. Run only with a backup and the usual release procedure.
 
 The Tailscale address keeps working for same-origin use (each address keeps its own sign-in cookie), but invite links always use the public origin.
 
-## Later, optional
+## Optional configurations
+
+Scheduling for these options lives in the [blueprint](../blueprint.md#deferred-and-optional-scope).
 
 - **Split DNS for home playback during internet outages:** resolve `music.markrogers.au` to a LAN reverse proxy inside the house (certificate via Cloudflare DNS challenge) so the same address and cookies work locally. Not needed for normal use; traffic otherwise loops through Cloudflare.
 - **Cloudflare terms:** household audio streaming through a tunnel is low volume; revisit if usage grows substantially.

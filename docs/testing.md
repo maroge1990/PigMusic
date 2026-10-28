@@ -46,7 +46,7 @@ Never trade matching or validation guarantees for throughput.
 
 ## Release acceptance checklist
 
-One pass over every item in the blueprint's **Delivered** table, on the live release (`editions-20261021-v2`) and the rebuilt iPhone app 0.2.0 (5). Report failures by number (for example `D1`) with the device, OS, connection and what happened. The IDs in brackets are the roadmap items each check accepts.
+Use this checklist to close the blueprint's [acceptance register](../blueprint.md#acceptance-register), on the server revision and native builds actually under test; record those versions in the result. Current status and sequencing live only in the [blueprint](../blueprint.md#roadmap). Report failures by number (for example `D1`) with the device, OS, connection and what happened. The IDs in brackets map checks to roadmap activities; this procedure is not a separate backlog.
 
 **A. Web, desktop browser, signed in as the owner**
 
