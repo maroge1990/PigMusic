@@ -129,3 +129,16 @@ def test_success_and_redirect_statuses_are_not_failed_requests():
     ]
     report = analyse_diagnostics.analyse("== iPhone log ==\n" + "\n".join(lines))
     assert not any(item.startswith("Requests failed:") for item in report["findings"])
+
+
+def test_exact_native_fast_401_line_is_counted_with_request_id_and_server_timing():
+    # Exact literal asserted by fastHTTPFailuresKeepRequestIDAndServerTiming.
+    line = "tracks 401 in 40 ms, server 32 ms: handler 25 (id 0123456789abcdef)"
+    report = analyse_diagnostics.analyse(
+        "== iPhone log ==\n2026-10-28T10:00:00+11:00 [network] " + line + "\n"
+    )
+    assert any("Requests failed: 1× 401" in finding for finding in report["findings"])
+    (request,) = report["iphone"]["playback"]["requests"]
+    assert request["id"] == "0123456789abcdef"
+    assert request["outcome"] == "401" and request["ms"] == 40
+    assert request["server"] == "server 32 ms: handler 25"

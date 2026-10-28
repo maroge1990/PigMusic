@@ -81,7 +81,7 @@ public actor NativeService: LibrarySource {
   static func diagnosticsLine(_ trace: RequestTrace, slow: Duration = .seconds(1)) -> String? {
     let name = trace.operation.components(separatedBy: "_api_v1").first ?? trace.operation
     let address = name == "playback_url" || name == "playback_remote"
-    guard address || trace.duration >= slow || trace.failure != nil || (trace.status ?? 0) >= 500
+    guard address || trace.duration >= slow || trace.failure != nil || (trace.status ?? 0) >= 400
     else { return nil }
     let ms = trace.duration.components.seconds * 1000
       + trace.duration.components.attoseconds / 1_000_000_000_000_000

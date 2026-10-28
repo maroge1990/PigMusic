@@ -4,7 +4,7 @@ import asyncio, hashlib, json, time
 import httpx, logging
 
 logger = logging.getLogger(__name__)
-from .catalogue import RENEW, deferred_metadata, mbid, warming
+from .catalogue import RENEW, background_metadata, deferred_metadata, mbid, warming
 from .media import settings
 from .releases import feature_album
 
@@ -171,7 +171,11 @@ class Popularity:
                             if album_lookups >= 40:
                                 break
                             album_lookups += 1
-                            priority_token = deferred_metadata.set(True)
+                            # Optional warming yields to covers. A person
+                            # opening the page retains foreground priority.
+                            priority_token = deferred_metadata.set(
+                                background_metadata.get()
+                            )
                             try:
                                 detail = await self.catalogue.get(
                                     client, "release-group/" + identity

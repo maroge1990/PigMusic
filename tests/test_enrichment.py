@@ -1,5 +1,6 @@
 import asyncio, json, io
 import httpx
+import pytest
 from PIL import Image
 from server.store import Store
 from server.media import save_settings, public_settings
@@ -396,7 +397,7 @@ def test_artist_warming_fetches_songs_without_album_details_or_poisoning_full_ca
     asyncio.run(run())
 
 
-def test_popularity_album_details_yield_to_cover_warming_and_foreground(
+def test_background_popularity_album_details_yield_to_cover_warming_and_foreground(
     tmp_path, monkeypatch
 ):
     from server.catalogue import background_metadata
@@ -458,7 +459,14 @@ def test_popularity_album_details_yield_to_cover_warming_and_foreground(
                     finally:
                         background_metadata.reset(token)
 
-                tasks.append(asyncio.create_task(popularity.get(client, ARTIST)))
+                async def background_popularity():
+                    token = background_metadata.set(True)
+                    try:
+                        return await popularity.get(client, ARTIST)
+                    finally:
+                        background_metadata.reset(token)
+
+                tasks.append(asyncio.create_task(background_popularity()))
                 await asyncio.wait_for(started["release-group/" + RELEASE].wait(), 1)
                 tasks.append(asyncio.create_task(cover()))
                 await asyncio.wait_for(started["release/cover"].wait(), 1)
@@ -478,3 +486,83 @@ def test_popularity_album_details_yield_to_cover_warming_and_foreground(
 
     asyncio.run(run())
     assert order == ["foreground", "cover", RELEASE]
+
+
+@pytest.mark.parametrize("interval", [0, 1.05])
+def test_foreground_popularity_finishes_during_continuous_warming(tmp_path, interval):
+    from server.catalogue import background_metadata
+
+    store = Store(tmp_path)
+    save_settings(store, False, True, listenbrainz_token=TOKEN)
+    catalogue = Catalogue(store)
+    catalogue.min_interval = interval
+    popularity = Popularity(store, catalogue)
+    warming_requests = []
+
+    async def run():
+        entered = asyncio.Event()
+        stop = asyncio.Event()
+
+        async def transport(request):
+            if request.url.host == "musicbrainz.org":
+                if "/release/warm-" in request.url.path:
+                    warming_requests.append(request.url.path)
+                    entered.set()
+                await asyncio.sleep(0.05)
+                return httpx.Response(
+                    200, json={"primary-type": "Album", "title": "Studio"}
+                )
+            return httpx.Response(
+                200,
+                json=(
+                    []
+                    if "top-recordings" in request.url.path
+                    else [
+                        {
+                            "release_group_mbid": RELEASE,
+                            "release_group": {"type": "Album", "name": "Studio"},
+                        }
+                    ]
+                ),
+            )
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(transport)
+        ) as client:
+
+            async def warm():
+                token = background_metadata.set(True)
+                try:
+                    index = 0
+                    while not stop.is_set():
+                        # Unique uncached requests, as in a cold warming pass.
+                        await catalogue.get(client, f"release/warm-{index}")
+                        index += 1
+                finally:
+                    background_metadata.reset(token)
+
+            warming_task = asyncio.create_task(warm())
+            page = None
+            try:
+                await asyncio.wait_for(entered.wait(), 1)
+                page = asyncio.create_task(popularity.get(client, ARTIST))
+                done, _ = await asyncio.wait({page}, timeout=2.8)
+                assert (
+                    page in done
+                ), "foreground popularity starved behind continuous warming"
+                assert [album["title"] for album in page.result()["albums"]] == [
+                    "Studio"
+                ]
+                assert not stop.is_set() and not warming_task.done()
+                assert len(warming_requests) <= 2
+            finally:
+                stop.set()
+                for task in (warming_task, page):
+                    if task is not None:
+                        task.cancel()
+                await asyncio.gather(
+                    *[task for task in (warming_task, page) if task is not None],
+                    return_exceptions=True,
+                )
+
+    asyncio.run(run())

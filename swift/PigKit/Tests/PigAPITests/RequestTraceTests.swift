@@ -69,3 +69,22 @@ private let address = "playback_url_api_v1_playback__track_id__url_post"
   let id = ServerTiming.newRequestID()
   #expect(id.count == 16 && id.allSatisfy(\.isHexDigit))
 }
+
+
+@Test(arguments: [401, 403, 429, 404])
+func fastHTTPFailuresKeepRequestIDAndServerTiming(_ status: Int) throws {
+  let trace = RequestTrace(
+    operation: "tracks_api_v1_library_tracks_get", requestID: "0123456789abcdef", status: status,
+    duration: .milliseconds(40), serverTiming: "app;dur=32.4, handler;dur=25.3", failure: nil)
+  let line = try #require(NativeService.diagnosticsLine(trace))
+  #expect(line == "tracks \(status) in 40 ms, server 32 ms: handler 25 (id 0123456789abcdef)")
+  #expect(DiagnosticsLog.redact(line) == line)
+}
+
+@Test(arguments: [200, 206, 304])
+func fastOrdinarySuccessesAndRedirectsStayUnlogged(_ status: Int) {
+  let trace = RequestTrace(
+    operation: "tracks_api_v1_library_tracks_get", requestID: "0123456789abcdef", status: status,
+    duration: .milliseconds(40), serverTiming: "app;dur=32.4, handler;dur=25.3", failure: nil)
+  #expect(NativeService.diagnosticsLine(trace) == nil)
+}
