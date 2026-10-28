@@ -78,13 +78,17 @@ class RemoteAudio:
         self.relay_search = relay_search
         self.relayed = {}
         self.inflight = {}
-        # Event-loop owned: consecutive bounded-search failures, cooldown expiry.
+        # Event-loop owned: {(source, operation): (failure streak, cooldown expiry)}.
+        # A successful search proves nothing about transfer access, and a
+        # successful transfer must not reset another search's newer failures.
         self.source_health = {}
 
     async def search_source(self, source, track):
         began = time.monotonic()
-        failures, until = self.source_health.get(source, (0, 0))
-        if until > began:
+        if any(
+            self.source_health.get((source, operation), (0, 0))[1] > began
+            for operation in ("search", "transfer")
+        ):
             add_phase(f"{source}-cooldown", 0)
             raise TimeoutError("Source is cooling down.")
         search = asyncio.ensure_future(asyncio.to_thread(self.find, source, track))
@@ -96,40 +100,44 @@ class RemoteAudio:
                 SEARCH_SECONDS.get(source, DEFAULT_SEARCH_SECONDS),
             )
         except (TimeoutError, ProviderError) as exc:
-            self.source_failed(source, exc)
+            self.source_failed(source, "search", exc)
             raise
         except ValueError:
-            self.source_answered(source, began)
+            self.source_answered(source, "search", began)
             raise
         else:
+            self.source_answered(source, "search", began)
             return candidate
 
-    def source_failed(self, source, exc):
+    def source_failed(self, source, operation, exc):
         if not isinstance(exc, TimeoutError) and not (
             isinstance(exc, ProviderError) and exc.code == "access_required"
         ):
             return
-        failures, until = self.source_health.get(source, (0, 0))
+        key = (source, operation)
+        failures, until = self.source_health.get(key, (0, 0))
         failures += 1
         if failures >= SOURCE_FAILURE_LIMIT:
             now = time.monotonic()
             if until <= now:
                 log.warning(
-                    "Remote source %s cooling down for %d s (%s)",
+                    "Remote source %s cooling down for %d s (%s %s)",
                     source,
                     SOURCE_COOLDOWN_SECONDS,
+                    operation,
                     "timeout" if isinstance(exc, TimeoutError) else exc.code,
                 )
             until = now + SOURCE_COOLDOWN_SECONDS
-        self.source_health[source] = (failures, until)
+        self.source_health[key] = (failures, until)
 
-    def source_answered(self, source, began):
+    def source_answered(self, source, operation, began):
         # An older concurrent success cannot undo a newly opened cooldown.
-        failures, until = self.source_health.get(source, (0, 0))
+        key = (source, operation)
+        failures, until = self.source_health.get(key, (0, 0))
         if until <= began:
-            self.source_health.pop(source, None)
+            self.source_health.pop(key, None)
             if failures >= SOURCE_FAILURE_LIMIT:
-                log.info("Remote source %s healthy again", source)
+                log.info("Remote source %s healthy again (%s)", source, operation)
 
     @staticmethod
     def key(track):
@@ -286,12 +294,12 @@ class RemoteAudio:
                         self.download, source, track, candidate
                     )
                 except Exception as exc:
-                    self.source_failed(source, exc)
+                    self.source_failed(source, "transfer", exc)
                     step(source, "transfer failed", fetched)
                     uncertain = True
                     continue
                 step(source, "transfer", fetched)
-                self.source_answered(source, searched)
+                self.source_answered(source, "transfer", fetched)
                 self.timing(track, source, began, steps)
                 return {"path": path, "source": source}
         self.timing(track, None, began, steps)

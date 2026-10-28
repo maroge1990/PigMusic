@@ -683,15 +683,18 @@ def test_repeated_source_failures_cool_down_without_remembering_false_misses(
                     await resolver.shared(client, song)
             assert calls.count("youtube") == 2
             assert all(kind is TimeoutError for _, kind, _ in resolver.misses.values())
-            failures, _ = resolver.source_health["youtube"]
-            resolver.source_health["youtube"] = (failures, time.monotonic() - 1)
+            failures, _ = resolver.source_health[("youtube", "search")]
+            resolver.source_health[("youtube", "search")] = (
+                failures,
+                time.monotonic() - 1,
+            )
             restored = True
             with pytest.raises(ValueError, match="No source has"):
                 await resolver.shared(
                     client, {"artist": "Fixture", "title": "retry", "album": "Fixture"}
                 )
             assert calls.count("youtube") == 3
-            assert "youtube" not in resolver.source_health
+            assert ("youtube", "search") not in resolver.source_health
             # Let the old timed-out threads finish; their late failures are consumed.
             await asyncio.sleep(0.08)
 
@@ -732,5 +735,99 @@ def test_repeated_transfer_access_failures_also_cool_down_the_source(
                         {"artist": "Fixture", "title": str(index), "album": "Fixture"},
                     )
         assert searched.count("youtube") == 2
+
+    asyncio.run(run())
+
+
+def test_successful_fallback_searches_break_the_timeout_streak(tmp_path, monkeypatch):
+    """A fifth song only YouTube has stays playable after separated timeouts."""
+    resolver = RemoteAudio(lambda *_: [], directory=tmp_path / "relay")
+    searched = []
+    fallback_finished = asyncio.Event()
+    original_search = resolver.search_source
+    audio = tmp_path / "disposable.mp3"
+    audio.write_bytes(b"mock transfer")
+
+    def find(source, track):
+        index = int(track["title"])
+        searched.append((source, index))
+        if source == "youtube":
+            if index in (0, 3):
+                raise TimeoutError("fixture source timeout")
+            return {"fixture": True}
+        if source == "zvu4no" and index < 4:
+            return {"fixture": True}
+        raise ValueError("No recording matched.")
+
+    async def observed_search(source, track):
+        try:
+            return await original_search(source, track)
+        finally:
+            if source == "youtube":
+                fallback_finished.set()
+
+    monkeypatch.setattr(resolver, "find", find)
+    monkeypatch.setattr(resolver, "search_source", observed_search)
+    monkeypatch.setattr(resolver, "download", lambda *args: audio)
+
+    async def run():
+        async with httpx.AsyncClient() as client:
+            for index in range(5):
+                fallback_finished.clear()
+                found = await resolver.shared(
+                    client,
+                    {"artist": "Fixture", "title": str(index), "album": "Fixture"},
+                )
+                assert found["source"] == ("youtube" if index == 4 else "zvu4no")
+                # The lower-priority result must be handled before the next song.
+                await asyncio.wait_for(fallback_finished.wait(), 1)
+        assert [index for source, index in searched if source == "youtube"] == list(
+            range(5)
+        )
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("late_outcome", ["candidate", "no match"])
+def test_old_search_success_cannot_clear_a_newer_cooldown(monkeypatch, late_outcome):
+    import threading
+
+    resolver = RemoteAudio()
+    release = threading.Event()
+    calls = []
+
+    async def run():
+        entered = asyncio.Event()
+        loop = asyncio.get_running_loop()
+
+        def find(source, track):
+            calls.append(track["title"])
+            if track["title"] == "old":
+                loop.call_soon_threadsafe(entered.set)
+                assert release.wait(3), "fixture search was not released"
+                if late_outcome == "candidate":
+                    return {"fixture": True}
+                raise ValueError("No recording matched.")
+            raise TimeoutError("fixture source timeout")
+
+        monkeypatch.setattr(resolver, "find", find)
+        old = asyncio.create_task(resolver.search_source("youtube", {"title": "old"}))
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            for title in ("new-one", "new-two"):
+                with pytest.raises(TimeoutError):
+                    await resolver.search_source("youtube", {"title": title})
+            release.set()
+            if late_outcome == "candidate":
+                assert await old == {"fixture": True}
+            else:
+                with pytest.raises(ValueError, match="No recording matched"):
+                    await old
+            with pytest.raises(TimeoutError, match="cooling down"):
+                await resolver.search_source("youtube", {"title": "blocked"})
+            assert "blocked" not in calls
+        finally:
+            release.set()
+            await asyncio.gather(old, return_exceptions=True)
 
     asyncio.run(run())
