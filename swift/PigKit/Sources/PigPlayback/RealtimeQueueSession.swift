@@ -101,8 +101,9 @@ public enum PlaybackSeek {
     }
     engine.connect(node, to: engine.mainMixerNode, format: format)
     connected = true
+    // Preparing a paused queue must not restart audio after its owner has
+    // released the session in the background. resume() starts the engine.
     engine.prepare()
-    try engine.start()
   }
   public func schedule(_ block: PCMBlock, completion: @escaping @Sendable () -> Void) throws {
     if scheduledFrames == completedFrames, node.isPlaying {

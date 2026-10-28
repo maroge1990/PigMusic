@@ -31,7 +31,7 @@ import UIKit
         .onChange(of: phase, initial: true) { _, value in
           if value == .active { DiagnosticsLog.shared.foreground() }
           if value == .background { DiagnosticsLog.shared.background() }
-          Task { await model.sceneActive(value == .active) }
+          Task { await model.sceneActive(value == .active, background: value == .background) }
         }
     }
   }

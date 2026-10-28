@@ -133,7 +133,7 @@ import PigSync
   @ObservationIgnored private var usingEngine = false
   @ObservationIgnored private var observations: [AnyCancellable] = []
   private var intent = PlaybackIntent()
-  @ObservationIgnored private var clock: Task<Void, Never>?
+  @ObservationIgnored private let clock = PlaybackProgressClock()
   @ObservationIgnored private var preparation: Task<Void, Never>?
   @ObservationIgnored private var resolve: (@Sendable (Track) async throws -> URL)?
   @ObservationIgnored private var generation = 0
@@ -201,7 +201,7 @@ import PigSync
       NotificationCenter.default.publisher(for: AVAudioSession.mediaServicesWereResetNotification)
         .receive(on: DispatchQueue.main).sink { [weak self] _ in
           DiagnosticsLog.shared.record("audio", "media services reset")
-          Task { @MainActor in self?.sessionActive = false }
+          Task { @MainActor in self?.releaseSession() }
         })
     observations.append(
       NotificationCenter.default.publisher(for: .AVAudioEngineConfigurationChange).receive(
@@ -319,7 +319,7 @@ import PigSync
     }
     preparation?.cancel()
     engine?.stop()
-    clock?.cancel()
+    clock.stop()
     player.pause()
     player.replaceCurrentItem(with: nil)
     generation += 1
@@ -363,6 +363,7 @@ import PigSync
     }
     checkpoint(force: true)
     refreshArtwork()
+    releaseIdleSession()
   }
   /// Starts a restored queue's current song, playing it or ready to.
   private func beginDeferred(autoplay: Bool) {
@@ -388,18 +389,19 @@ import PigSync
       prepareStreaming()
       return
     }
-    // Activation finishes long before the first song is prepared.
-    if intent.canPlay { activateForPlayback() }
     let addressed = addressed
     let start = queueStart.take(for: queue.current)
     engine.replace(
       queue.items, startingAt: queue.index, startSeconds: start, autoplay: intent.canPlay,
       crossfade: crossfadeEnabled, repeatMode: repeatMode,
-      acquire: { item in
+      acquire: { [weak self] item in
+        guard let self else { throw CancellationError() }
+        // Acquisition precedes output configuration: a pending session release
+        // must finish before this queue can start its audio engine.
+        try await self.activate()
         let began = ContinuousClock.now
         let url = try await resolve(item.track)
         addressed.insert(item.id)
-        // Downloaded songs play from their own file, whatever their size.
         if url.isFileURL { return try await repository.leaseLocal(url) }
         DiagnosticsLog.shared.record(
           "playback", "address in \(Self.milliseconds(since: began)) ms")
@@ -455,6 +457,7 @@ import PigSync
     checkpoint()
     refreshArtwork()
     publishNowPlaying()
+    releaseIdleSession()
   }
   /// Songs passed over in a row while streaming because they were unavailable.
   @ObservationIgnored private var unavailableRun = 0
@@ -462,7 +465,7 @@ import PigSync
     generation += 1
     let stamp = generation
     preparation?.cancel()
-    clock?.cancel()
+    clock.stop()
     player.pause()
     player.replaceCurrentItem(with: nil)
     playing = false
@@ -512,78 +515,88 @@ import PigSync
         self.error = error.userMessage
         preparing = false
         intent.pause()
-      }
-    }
-  }
-  /// Activating the audio session can block for a long time, so it never runs
-  /// on the main thread (Xcode warns about UI unresponsiveness), and it is
-  /// skipped while the session is already active.
-  @ObservationIgnored private var sessionActive = false
-  private func activate() async throws {
-    guard !sessionActive else { return }
-    try await Self.activateSession()
-    sessionActive = true
-  }
-  /// One serial queue for every activation and deactivation, so a quick Stop
-  /// then Play can never finish in the wrong order and leave the session off.
-  nonisolated private static let sessionQueue = DispatchQueue(
-    label: "au.com.pig.music.audio-session", qos: .userInitiated)
-  nonisolated private static func activateSession() async throws {
-    try await withCheckedThrowingContinuation {
-      (continuation: CheckedContinuation<Void, any Error>) in
-      sessionQueue.async {
-        do {
-          let session = AVAudioSession.sharedInstance()
-          try session.setCategory(.playback, mode: .default, policy: .longFormAudio)
-          try session.setActive(true)
-          continuation.resume()
-        } catch { continuation.resume(throwing: error) }
-      }
-    }
-  }
-  /// Starts activation for a play request, reporting a failure.
-  private func activateForPlayback() {
-    guard !sessionActive else { return }
-    let stamp = generation
-    Task {
-      do { try await activate() } catch {
-        guard generation == stamp else { return }
-        self.error = error.userMessage
-        intent.pause()
         suspend()
       }
     }
   }
-  private func startClock() {
-    clock?.cancel()
-    clock = Task { [weak self] in
-      while !Task.isCancelled {
-        guard let self else { return }
-        let time = player.currentTime().seconds
-        elapsed = time.isFinite ? time : 0
-        // A VBR MP3 without a length header makes AVPlayer guess, often
-        // double. The song's known length wins unless the two agree.
-        let end = player.currentItem?.duration.seconds ?? 0
-        let known = queue.current?.track.duration ?? 0
-        if end.isFinite, end > 0, known <= 0 || abs(end - known) <= max(5, known * 0.05) {
-          duration = end
-        } else if known > 0 {
-          duration = known
-        }
-        playing = player.timeControlStatus == .playing
-        if playing { reportStart("stream") }
-        preparing = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
-        if let failed = player.currentItem?.error {
-          error = failed.userMessage
-          playing = false
-          intent.pause()
-        }
-        measureListen()
-        checkpoint()
-        publishNowPlaying()
-        do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+  @ObservationIgnored private let audioSession = PlaybackAudioSession(
+    apply: PlayerController.configureAudioSession)
+  @ObservationIgnored private var backgrounded = false
+
+  /// Inactive (Control Centre, transitions) is not the same as backgrounded.
+  func sceneBackground(_ background: Bool) {
+    backgrounded = background
+    releaseIdleSession()
+  }
+  private func releaseIdleSession() {
+    guard backgrounded, !intent.canPlay, !playing else { return }
+    releaseSession()
+  }
+  private func releaseSession() {
+    guard let release = audioSession.deactivate() else { return }
+    Task {
+      do { try await release.value } catch {
+        DiagnosticsLog.shared.record("audio", "session release failed: \(error.userMessage)")
       }
     }
+  }
+  nonisolated private static func configureAudioSession(_ active: Bool) throws {
+    let session = AVAudioSession.sharedInstance()
+    if active {
+      try session.setCategory(.playback, mode: .default, policy: .longFormAudio)
+      try session.setActive(true)
+    } else {
+      try session.setActive(false, options: .notifyOthersOnDeactivation)
+    }
+  }
+  private func activate() async throws {
+    try Task.checkCancellation()
+    let stamp = generation
+    while generation == stamp, intent.canPlay {
+      try Task.checkCancellation()
+      do {
+        try await audioSession.activate()
+        return
+      } catch is CancellationError {
+        // Pause/background can supersede an activation already in the OS.
+        // A new Play may have arrived meanwhile; only that current intent
+        // can request activation again. A cancelled preparation never does.
+        try Task.checkCancellation()
+      }
+    }
+  }
+  private func startClock() {
+    guard intent.canPlay, player.currentItem != nil else {
+      clock.stop()
+      return
+    }
+    clock.start { [weak self] in self?.updateStreamingProgress() }
+  }
+  private func updateStreamingProgress() {
+    let time = player.currentTime().seconds
+    elapsed = time.isFinite ? time : 0
+    // A VBR MP3 without a length header makes AVPlayer guess, often double.
+    let end = player.currentItem?.duration.seconds ?? 0
+    let known = queue.current?.track.duration ?? 0
+    if end.isFinite, end > 0, known <= 0 || abs(end - known) <= max(5, known * 0.05) {
+      duration = end
+    } else if known > 0 {
+      duration = known
+    }
+    playing = player.timeControlStatus == .playing
+    if playing { reportStart("stream") }
+    preparing = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+    if let failed = player.currentItem?.error {
+      error = failed.userMessage
+      preparing = false
+      intent.pause()
+      suspend()
+      checkpoint(force: true)
+      return
+    }
+    measureListen()
+    checkpoint()
+    publishNowPlaying()
   }
   /// Set when seamless playback could not start this queue; it then streams.
   @ObservationIgnored private var streamingFallback = false
@@ -630,21 +643,22 @@ import PigSync
     if began, disconnected {
       // The headphones went away: no end follows, so this is a pause the
       // person can undo with Play, not something to wait out.
-      sessionActive = false
       pause()
+      releaseSession()
       return
     }
     if began {
       // The system deactivates the session during an interruption.
-      sessionActive = false
       intent.beginInterruption()
       suspend()
+      releaseSession()
     } else {
       intent.endInterruption(shouldResume: shouldResume)
       guard intent.canPlay else { return }
       let stamp = generation
       Task {
-        do { try await activate() } catch {
+        do { try await activate() } catch is CancellationError { return } catch {
+          guard generation == stamp, intent.canPlay else { return }
           self.error = error.userMessage
           return
         }
@@ -654,6 +668,7 @@ import PigSync
           engine?.resume()
         } else {
           player.play()
+          startClock()
         }
       }
     }
@@ -677,12 +692,18 @@ import PigSync
       else { return }
       do {
         if intent.canPlay { try await activate() }
+        try Task.checkCancellation()
+        guard generation == stamp, usingEngine, !intent.interrupted else { return }
         engine?.recoverOutput()
-      } catch { self.error = error.userMessage }
+      } catch is CancellationError {} catch {
+        guard generation == stamp else { return }
+        self.error = error.userMessage
+      }
     }
   }
   func toggle() { intent.wantsPlayback ? pause() : resume() }
   func resume() {
+    guard queue.current != nil else { return }
     // Play is the person's choice: it ends an interruption iOS never ended.
     intent.choosePlay()
     if queueStart.waiting { return beginDeferred(autoplay: true) }
@@ -697,14 +718,20 @@ import PigSync
     if !usingEngine, atEnd { seek(0) }
     guard intent.canPlay else { return }
     let start = { [self] in
-      if usingEngine { engine?.resume() } else if player.currentItem != nil { player.play() }
+      if usingEngine {
+        engine?.resume()
+      } else if player.currentItem != nil {
+        player.play()
+        startClock()
+      }
       publishNowPlaying()
     }
     // Usually already active: resume at once, without a main-thread wait.
-    if sessionActive { return start() }
+    if audioSession.isActive { return start() }
     let stamp = generation
     Task {
-      do { try await activate() } catch {
+      do { try await activate() } catch is CancellationError { return } catch {
+        guard generation == stamp, intent.canPlay else { return }
         self.error = error.userMessage
         return
       }
@@ -713,9 +740,17 @@ import PigSync
     }
   }
   private func suspend() {
-    if usingEngine { engine?.pause() } else { player.pause() }
+    clock.stop()
+    if usingEngine {
+      engine?.pause()
+    } else {
+      player.pause()
+      let time = player.currentTime().seconds
+      if time.isFinite { elapsed = time }
+    }
     playing = false
     publishNowPlaying()
+    releaseIdleSession()
   }
   func pause() {
     measureListen()
@@ -820,7 +855,7 @@ import PigSync
     generation += 1
     queueStart.reset()
     preparation?.cancel()
-    clock?.cancel()
+    clock.stop()
     routeRecovery?.cancel()
     slowStart?.cancel()
     engine?.stop()
@@ -841,11 +876,7 @@ import PigSync
     durationIsEstimate = false
     error = nil
     MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-    sessionActive = false
-    // Deactivation can block too: let other apps resume without stalling the UI.
-    Self.sessionQueue.async {
-      try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-    }
+    releaseSession()
   }
   private func refreshArtwork() {
     guard let occurrence = queue.current, artworkOccurrence != occurrence.id else { return }

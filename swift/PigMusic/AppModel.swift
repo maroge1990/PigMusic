@@ -113,8 +113,9 @@ enum PlayOrigin: Hashable {
   }
   /// When the app last stopped being active.
   @ObservationIgnored private var inactiveSince: ContinuousClock.Instant?
-  func sceneActive(_ active: Bool) async {
+  func sceneActive(_ active: Bool, background: Bool = false) async {
     activeScene = active
+    player.sceneBackground(background)
     liveTask?.cancel()
     liveTask = nil
     if !active, inactiveSince == nil { inactiveSince = .now }
