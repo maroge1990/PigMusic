@@ -136,18 +136,31 @@ private final class AudioSessionProbe: @unchecked Sendable {
     #expect(!session.isActive)
   }
 
-  @Test func pausedProgressDoesNoPeriodicWorkAndResumeStartsOneClock() async throws {
+  @Test(.timeLimit(.minutes(1)))
+  func pausedProgressDoesNoPeriodicWorkAndResumeStartsOneClock() async throws {
     let clock = PlaybackProgressClock(interval: .milliseconds(5))
+    defer { clock.stop() }
+    let (events, continuation) = AsyncStream<Int>.makeStream()
+    defer { continuation.finish() }
+    var iterator = events.makeAsyncIterator()
     var ticks = 0
-    clock.start { ticks += 1 }
-    #expect(await eventually { ticks >= 2 })
+    let tick = {
+      ticks += 1
+      continuation.yield(ticks)
+    }
+    // Other suites can occupy the main actor for seconds on CI. Await actual
+    // progress instead of imposing a three-second scheduler-latency limit.
+    clock.start { tick() }
+    while let count = await iterator.next(), count < 2 {}
+    #expect(ticks >= 2)
     clock.stop()
     let paused = ticks
     try await Task.sleep(for: .milliseconds(40))
     #expect(ticks == paused)
     #expect(!clock.isRunning)
-    clock.start { ticks += 1 }
-    #expect(await eventually { ticks > paused })
+    clock.start { tick() }
+    while let count = await iterator.next(), count <= paused {}
+    #expect(ticks > paused)
     clock.stop()
     let stopped = ticks
     try await Task.sleep(for: .milliseconds(40))
