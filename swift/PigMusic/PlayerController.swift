@@ -849,6 +849,8 @@ import PigSync
     } else {
       player.seek(to: CMTime(seconds: position, preferredTimescale: 600))
       elapsed = position
+      checkpoint(force: true)
+      publishNowPlaying()
     }
   }
   func stop() {
