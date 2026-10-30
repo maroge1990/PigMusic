@@ -7,8 +7,11 @@ from http.server import ThreadingHTTPServer
 import httpx
 import pytest
 
-from scripts import fake_services
 from server import test_services
+
+# The container image's suite mounts only tests/; the rig scripts are checked
+# wherever the checkout is whole (the server-side switch is tested in both).
+fake_services = pytest.importorskip("scripts.fake_services")
 from server.media import save_settings
 from server.popularity import Popularity
 from server.store import Store
@@ -24,11 +27,6 @@ def fake():
     fake_services.STATS.clear()
     yield "http://127.0.0.1:%d" % server.server_address[1]
     server.shutdown()
-
-
-def test_the_switch_is_off_unless_the_rig_sets_it(monkeypatch):
-    monkeypatch.delenv("PIG_MUSIC_TEST_SERVICES", raising=False)
-    assert test_services.transport() is None
 
 
 def test_the_rig_never_reaches_a_real_provider(fake):
@@ -113,33 +111,3 @@ def test_the_rig_runs_only_an_exact_image_digest():
     ):
         with pytest.raises(SystemExit):
             test_rig.up_commands(image)
-
-
-def test_provider_credentials_never_reach_the_fake_and_only_the_rig_is_accepted():
-    """Codex round 2: the switch forwarded the ListenBrainz token and Fanart
-    key to whatever address it named; a mistaken setting would leak them."""
-    seen = []
-
-    class Inner(httpx.AsyncBaseTransport):
-        async def handle_async_request(self, request):
-            seen.append(request)
-            return httpx.Response(200, json={})
-
-    async def run():
-        transport = test_services.FakeServices(
-            "http://pig-music-test-fake:8790", inner=Inner()
-        )
-        async with httpx.AsyncClient(transport=transport) as client:
-            await client.get(
-                "https://api.listenbrainz.org/1/x",
-                headers={"Authorization": "Token secret", "api-key": "secret"},
-                cookies={"session": "secret"},
-            )
-
-    asyncio.run(run())
-    assert "secret" not in str(seen[0].headers) and seen[0].url.host == (
-        "pig-music-test-fake"
-    )
-    for wrong in ("https://example.com", "http://198.51.100.10:8790", "file:///x"):
-        with pytest.raises(ValueError):
-            test_services.FakeServices(wrong)
