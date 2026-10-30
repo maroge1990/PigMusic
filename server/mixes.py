@@ -1265,10 +1265,13 @@ class Mixes:
                 return match["id"]
             except FileNotFoundError:
                 pass
+        now = time.time()
         with self.store.connect() as conn:
+            # Same editions as entry(playback=True) still plays, including one
+            # retired in the last 6 h without a lease (#24).
             rows = conn.execute(
-                "SELECT id,payload FROM mix_editions WHERE user_id=? AND id!=? AND (active=1 OR lease_until>? OR (kind='radio' AND retired_at IS NULL)) ORDER BY active DESC,id",
-                (user, track_id.split(":")[1], time.time()),
+                "SELECT id,payload FROM mix_editions WHERE user_id=? AND id!=? AND (active=1 OR lease_until>? OR retired_at>? OR (kind='radio' AND retired_at IS NULL)) ORDER BY active DESC,id",
+                (user, track_id.split(":")[1], now, now - 6 * 3600),
             ).fetchall()
         for identity, raw in rows:
             for index, item in enumerate(json.loads(raw).get("tracks") or []):

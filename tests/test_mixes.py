@@ -434,6 +434,41 @@ def test_a_rotated_mix_song_stands_in_from_any_edition_or_todays_radio(
     assert leases[song_key(on_radio)] > time.time() + 5 * 3600
 
 
+def test_a_rotated_song_stands_in_from_an_edition_retired_minutes_ago(
+    tmp_path, monkeypatch
+):
+    """#24: the only compatible copy is in an edition retired a minute ago
+    with no lease, which entry(playback=True) still plays; the stand-in
+    search skipped it."""
+    app, owner = protected(tmp_path, monkeypatch)
+    mixes = app.state.store.mixes
+    user, _ = member(app, owner)
+    original = track(7, album="First", musicbrainz_release_id="release-c")
+    reissue = track(7, album="Best Of", musicbrainz_release_id="release-d")
+    for song in (original, reissue):
+        cached(mixes, song)
+    old = ready(mixes, user, [original], day=mixes.day() - timedelta(days=2))
+    recent = ready(mixes, user, [reissue], day=mixes.day() - timedelta(days=1))
+    with mixes.store.connect() as conn:
+        conn.execute(
+            "UPDATE mix_editions SET active=0,retired_at=?,lease_until=? WHERE id=?",
+            (time.time() - 10 * 3600, time.time() - 4 * 3600, old),
+        )
+        conn.execute(
+            "UPDATE mix_editions SET active=0,retired_at=?,lease_until=0 WHERE id=?",
+            (time.time() - 60, recent),
+        )
+    assert mixes.stand_in(user, f"mix:{old}:0") == f"mix:{recent}:0"
+    # Once that edition has been retired over 6 h (and the lease playing it
+    # just now gave it has run out), it no longer stands in.
+    with mixes.store.connect() as conn:
+        conn.execute(
+            "UPDATE mix_editions SET retired_at=?,lease_until=0 WHERE id=?",
+            (time.time() - 7 * 3600, recent),
+        )
+    assert mixes.stand_in(user, f"mix:{old}:0") is None
+
+
 def test_tag_candidates_accept_the_providers_list_response(tmp_path, monkeypatch):
     app, _ = protected(tmp_path, monkeypatch)
     home = HomeDiscovery(app.state.store, None)
