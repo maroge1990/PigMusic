@@ -72,6 +72,10 @@ def decade_theme(tracks, day):
     )
 
 
+# A played edition's 6 h lease is renewed only when this much has run down.
+LEASE_RENEW_AFTER = 300
+
+
 class TrackKeys:
     """`song_key` once per track for one planning pass. The pass works on a
     stable snapshot, so a track object keeps its key; the object itself is
@@ -1228,25 +1232,29 @@ class Mixes:
         with phase("mix-lock"):
             self.store.mix_lock.acquire()
         try:
-            with self.store.connect() as conn:
-                with phase("mix-lease"):
+            with phase("mix-lease"):
+                with self.store.connect() as conn:
                     until = time.time() + 6 * 3600
-                    conn.execute(
-                        "UPDATE mix_editions SET lease_until=? WHERE id=?",
-                        (until, identity),
-                    )
-                    payload = json.loads(
+                    leased, raw = conn.execute(
+                        "SELECT lease_until,payload FROM mix_editions WHERE id=?",
+                        (identity,),
+                    ).fetchone()
+                    # Renewing writes a row per entry: at most every 5 minutes.
+                    if leased < until - LEASE_RENEW_AFTER:
                         conn.execute(
-                            "SELECT payload FROM mix_editions WHERE id=?", (identity,)
-                        ).fetchone()[0]
-                    )
-                    for item in payload["tracks"]:
-                        conn.execute(
-                            "UPDATE mix_audio SET lease_until=MAX(lease_until,?) WHERE key=?",
-                            (until, song_key(item)),
+                            "UPDATE mix_editions SET lease_until=? WHERE id=?",
+                            (until, identity),
                         )
-                with phase("mix-file"):
-                    return self.cache.available(track)
+                        for item in json.loads(raw)["tracks"]:
+                            conn.execute(
+                                "UPDATE mix_audio SET lease_until=MAX(lease_until,?) WHERE key=?",
+                                (until, song_key(item)),
+                            )
+            # The leases are committed first: checking the file can wait on the
+            # NAS, and must not hold the database's write lock meanwhile (#67).
+            # mix_lock still keeps cleanup from removing it in between.
+            with phase("mix-file"):
+                return self.cache.available(track)
         finally:
             self.store.mix_lock.release()
 

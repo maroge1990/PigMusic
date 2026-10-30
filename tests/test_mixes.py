@@ -469,6 +469,49 @@ def test_a_rotated_song_stands_in_from_an_edition_retired_minutes_ago(
     assert mixes.stand_in(user, f"mix:{old}:0") is None
 
 
+def test_mix_playback_checks_its_file_without_holding_the_write_lock(
+    tmp_path, monkeypatch
+):
+    """#67: playback renewed the edition's leases and then checked the file on
+    the NAS inside the same write transaction, so a slow NAS kept every other
+    writer (sign-ins, the queue, history) waiting for up to 10 s."""
+    import sqlite3
+
+    app, owner = protected(tmp_path, monkeypatch)
+    mixes = app.state.store.mixes
+    user, _ = member(app, owner)
+    song = track(8)
+    cached(mixes, song).write_bytes(b"mix audio")
+    edition = ready(mixes, user, [song])
+    available, writes = mixes.cache.available, []
+
+    def slow_nas(item):
+        # Another writer arrives while the NAS is being asked.
+        with sqlite3.connect(mixes.store.database, timeout=0.2) as conn:
+            conn.execute(
+                "INSERT INTO documents VALUES ('probe', '{}') ON CONFLICT(name) DO NOTHING"
+            )
+        writes.append(True)
+        return available(item)
+
+    monkeypatch.setattr(mixes.cache, "available", slow_nas)
+    assert mixes.playback(user, f"mix:{edition}:0").read_bytes() == b"mix audio"
+    assert writes == [True]
+    # A second play within minutes doesn't rewrite every entry's lease.
+    with mixes.store.connect() as conn:
+        leased = conn.execute(
+            "SELECT lease_until FROM mix_editions WHERE id=?", (edition,)
+        ).fetchone()[0]
+    mixes.playback(user, f"mix:{edition}:0")
+    with mixes.store.connect() as conn:
+        assert (
+            conn.execute(
+                "SELECT lease_until FROM mix_editions WHERE id=?", (edition,)
+            ).fetchone()[0]
+            == leased
+        )
+
+
 def test_tag_candidates_accept_the_providers_list_response(tmp_path, monkeypatch):
     app, _ = protected(tmp_path, monkeypatch)
     home = HomeDiscovery(app.state.store, None)
