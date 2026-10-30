@@ -32,3 +32,29 @@ def test_local_network_description_survives_regeneration():
     # One source only: the hand-written Info.plist does not repeat it.
     assert "NSLocalNetworkUsageDescription" not in info
     assert info["UIBackgroundModes"] == ["audio"]
+
+
+@pytest.mark.skipif(
+    not GENERATOR.exists(), reason="native project sources are not in this image"
+)
+def test_both_apps_are_ready_for_app_store_upload():
+    """TestFlight: each app bundles Apple's privacy manifest and declares
+    standard encryption only, in the project and its generator alike."""
+    project = (ROOT / "swift/PigMusic.xcodeproj/project.pbxproj").read_text()
+    generator = GENERATOR.read_text()
+    for app in ("PigMusic", "PigMusicWatch"):
+        manifest = ROOT / f"swift/{app}/PrivacyInfo.xcprivacy"
+        info = plistlib.loads(manifest.read_bytes())
+        assert info["NSPrivacyTracking"] is False
+        reasons = {
+            entry["NSPrivacyAccessedAPIType"]
+            for entry in info["NSPrivacyAccessedAPITypes"]
+        }
+        assert reasons >= {
+            "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPICategoryDiskSpace",
+        }
+        path = f"{app}/PrivacyInfo.xcprivacy"
+        assert f"{path} in Resources */," in project and path in generator
+    assert project.count("INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;") == 4
+    assert generator.count('"INFOPLIST_KEY_ITSAppUsesNonExemptEncryption": "NO"') == 2

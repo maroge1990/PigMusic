@@ -159,9 +159,19 @@ def generate():
         path="PigMusic/LaunchScreen.storyboard",
         sourceTree="<group>",
     )
-    files.extend([icon, launch])
+    # Apple's privacy manifest: why the app reads settings, file dates, free
+    # space and time since start-up (required for App Store uploads).
+    privacy = add(
+        "phone-privacy",
+        "PBXFileReference",
+        lastKnownFileType="text.xml",
+        path="PigMusic/PrivacyInfo.xcprivacy",
+        sourceTree="<group>",
+    )
+    files.extend([icon, launch, privacy])
     icon_build = add("phone-icon-build", "PBXBuildFile", fileRef=icon)
     launch_build = add("launch-screen-build", "PBXBuildFile", fileRef=launch)
+    privacy_build = add("phone-privacy-build", "PBXBuildFile", fileRef=privacy)
     tone = add(
         "demo-tone",
         "PBXFileReference",
@@ -218,7 +228,7 @@ def generate():
             "resources",
             "PBXResourcesBuildPhase",
             buildActionMask="2147483647",
-            files=[asset_build, tone_build, icon_build, launch_build],
+            files=[asset_build, tone_build, icon_build, launch_build, privacy_build],
             runOnlyForDeploymentPostprocessing="0",
         ),
         add(
@@ -249,13 +259,24 @@ def generate():
         path="PigMusicWatch/Assets.xcassets",
         sourceTree="<group>",
     )
+    watch_privacy = add(
+        "watch-privacy",
+        "PBXFileReference",
+        lastKnownFileType="text.xml",
+        path="PigMusicWatch/PrivacyInfo.xcprivacy",
+        sourceTree="<group>",
+    )
     objects[main]["children"].insert(0, watch_assets)
+    objects[main]["children"].insert(1, watch_privacy)
     watch_phases = [
         add(
             "watch-resources",
             "PBXResourcesBuildPhase",
             buildActionMask="2147483647",
-            files=[add("watch-assets-build", "PBXBuildFile", fileRef=watch_assets)],
+            files=[
+                add("watch-assets-build", "PBXBuildFile", fileRef=watch_assets),
+                add("watch-privacy-build", "PBXBuildFile", fileRef=watch_privacy),
+            ],
             runOnlyForDeploymentPostprocessing="0",
         ),
         add(
@@ -328,6 +349,8 @@ def generate():
             "CODE_SIGN_STYLE": "Automatic",
             "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
             "INFOPLIST_KEY_CFBundleDisplayName": "PigMusic",
+            # HTTPS only: no export-compliance question on each upload.
+            "INFOPLIST_KEY_ITSAppUsesNonExemptEncryption": "NO",
             "INFOPLIST_KEY_UILaunchStoryboardName": "LaunchScreen",
             "INFOPLIST_KEY_UIApplicationSceneManifest_Generation": "YES",
             "INFOPLIST_KEY_UISupportedInterfaceOrientations": "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight",
@@ -349,6 +372,8 @@ def generate():
             "SKIP_INSTALL": "YES",
             "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
             "INFOPLIST_KEY_CFBundleDisplayName": "PigMusic",
+            # HTTPS only: no export-compliance question on each upload.
+            "INFOPLIST_KEY_ITSAppUsesNonExemptEncryption": "NO",
         }
         watch_configs.append(
             add(

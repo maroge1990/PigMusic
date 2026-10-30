@@ -37,6 +37,8 @@
 		A6D6A2FEBBEA04D45E3494CF /* PigBrand in Frameworks */ = {isa = PBXBuildFile; productRef = 90CF9202AB0387BFEAA0985A /* PigBrand */; };
 		A91AF8A9E5CDFE9BE2FDFF2B /* PigDomain in Frameworks */ = {isa = PBXBuildFile; productRef = 86D83E4BA85444945E94FF6A /* PigDomain */; };
 		AFA2AB66D46E78616729EC2C /* Shared/CompanionLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEE8C1DD6D13E0EB78367D33 /* Shared/CompanionLink.swift */; };
+		D64ACCE486DE2469A86AE800 /* PigMusic/PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B77A72EA6C35E467BCA978A1 /* PigMusic/PrivacyInfo.xcprivacy */; };
+		FF1DFCCB401CF221D6DCA47A /* PigMusicWatch/PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E70CE52AA692E1014D7168F1 /* PigMusicWatch/PrivacyInfo.xcprivacy */; };
 		B743BAC4D5DEB613165A7900 /* PigMusic/LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 03914DE00F5E94D49B8B2742 /* PigMusic/LaunchScreen.storyboard */; };
 		BE72C9BC9BD8F3DE9036F45C /* PigMusic/PigMusicApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B55320C4781861FEF2E3685 /* PigMusic/PigMusicApp.swift */; };
 		C9C20F582E2CCB86CA52997E /* PigCompanion in Frameworks */ = {isa = PBXBuildFile; productRef = 9E1A2128B253CCCADB1A8AF8 /* PigCompanion */; };
@@ -71,6 +73,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		B77A72EA6C35E467BCA978A1 /* PigMusic/PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PigMusic/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		E70CE52AA692E1014D7168F1 /* PigMusicWatch/PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PigMusicWatch/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		03914DE00F5E94D49B8B2742 /* PigMusic/LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = PigMusic/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		2826DC5ECF3BB7F4B4281097 /* PigMusicWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = PigMusicWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4C44087358A3231D30F36264 /* PigMusic/LibraryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PigMusic/LibraryViews.swift; sourceTree = "<group>"; };
@@ -141,6 +145,7 @@
 			isa = PBXGroup;
 			children = (
 				C2FB097E236039F7D274127D /* PigMusicWatch/Assets.xcassets */,
+				E70CE52AA692E1014D7168F1 /* PigMusicWatch/PrivacyInfo.xcprivacy */,
 				5EC6983193E63DD298E3DD93 /* PigMusic/AccountToolsViews.swift */,
 				D22B132149A025610642FD1F /* PigMusic/AppModel.swift */,
 				9C762E1BA7F63AB9EA81B229 /* PigMusic/ArtistAcquisitionView.swift */,
@@ -162,6 +167,7 @@
 				8BF729FFE074CAEE622C0292 /* PigMusic/Assets.xcassets */,
 				C2B2032B9CC90C24C7DD6942 /* PigMusic/AppIcon.icon */,
 				03914DE00F5E94D49B8B2742 /* PigMusic/LaunchScreen.storyboard */,
+				B77A72EA6C35E467BCA978A1 /* PigMusic/PrivacyInfo.xcprivacy */,
 				4D44330F571F678E16E5976D /* PigMusic/demo-tone.m4a */,
 				0A3E27B8CA818264D75C8D81 /* Products */,
 			);
@@ -262,6 +268,7 @@
 				8D66645EFDD2E71EAF743FA0 /* PigMusic/demo-tone.m4a in Resources */,
 				10247F114F8C00BC1DB9EAFE /* PigMusic/AppIcon.icon in Resources */,
 				B743BAC4D5DEB613165A7900 /* PigMusic/LaunchScreen.storyboard in Resources */,
+				D64ACCE486DE2469A86AE800 /* PigMusic/PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -270,6 +277,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				5AC7CEC940EE750CF1AFAE6D /* PigMusicWatch/Assets.xcassets in Resources */,
+				FF1DFCCB401CF221D6DCA47A /* PigMusicWatch/PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -441,6 +449,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PigMusicWatch/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = PigMusic;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				MARKETING_VERSION = 0.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = au.com.pig.music.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -462,6 +471,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PigMusic/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = PigMusic;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "PigMusic connects to your private music server to browse and play your library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
@@ -487,6 +497,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PigMusicWatch/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = PigMusic;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				MARKETING_VERSION = 0.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = au.com.pig.music.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -508,6 +519,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PigMusic/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = PigMusic;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "PigMusic connects to your private music server to browse and play your library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
