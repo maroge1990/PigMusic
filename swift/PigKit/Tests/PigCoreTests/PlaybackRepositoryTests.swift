@@ -41,6 +41,31 @@ struct PlaybackRepositoryTests {
     #expect(try Data(contentsOf: input) == Data(repeating: 7, count: 12))
   }
 
+  @Test func forgettingChangedSongsKeepsEveryOtherCachedSource() async throws {
+    // #76: one changed song used to reset every cached source and stop playback.
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let input = root.appendingPathComponent("input.wav")
+    try Data(repeating: 7, count: 12).write(to: input)
+    let repository = PlaybackSourceRepository(
+      preparer: try AudioSourcePreparer(root: root, maximumFileBytes: 20, maximumTotalBytes: 1000))
+    let changed = try await repository.acquireLocal(
+      Track(id: "changed", title: "Changed", artist: "Fixture"), file: input)
+    await repository.release(changed)
+    let playing = try await repository.acquireLocal(
+      Track(id: "playing", title: "Playing", artist: "Fixture"), file: input)
+    let other = try await repository.acquireLocal(
+      Track(id: "other", title: "Other", artist: "Fixture"), file: input)
+    await repository.release(other)
+    await repository.forget(ids: ["changed", "playing"])
+    #expect(Set(await repository.savedRevisions().keys) == ["playing", "other"])
+    #expect(!FileManager.default.fileExists(atPath: changed.file.path))
+    #expect(FileManager.default.fileExists(atPath: playing.file.path))
+    await repository.release(playing)
+    await repository.reset()
+  }
+
   @Test func householdAndRemoteSourcesAreNotCheckedAgainstPersonalLibrary() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

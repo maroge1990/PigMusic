@@ -40,3 +40,16 @@ def test_a_route_change_while_paused_rebuilds_nothing_until_play():
     assert re.search(
         r"if outputOwed \{\s*outputOwed = false\s*engine\?\.recoverOutput\(\)", resume
     )
+
+
+def test_a_changed_song_stops_playback_only_when_it_is_queued():
+    """#76 (D-56): any changed cached or downloaded song stopped playback and
+    emptied the queue, even when it wasn't playing or queued."""
+    player = (APP / "PlayerController.swift").read_text()
+    invalidate = body(player, "func invalidateSources(changed: Set<String>)")
+    queued = invalidate.index("queue.items.contains(where: { changed.contains")
+    assert queued < invalidate.index("stop()")
+    assert "forget(ids: changed)" in invalidate
+    model = (APP / "AppModel.swift").read_text()
+    assert "invalidateSources()" not in model
+    assert "invalidateSources(changed: changed)" in model

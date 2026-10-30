@@ -468,28 +468,28 @@ enum PlayOrigin: Hashable {
       let known =
         try await store?.sourceRevisions(ids: Set(revisions.keys).union(records.map(\.id))) ?? [:]
       guard generation == stamp else { return }
-      var invalid = revisions.contains { id, revision in
-        guard let current = known[id] else { return true }
-        return current != revision
-      }
+      // Songs the server changed or removed since their audio was cached.
+      var changed = Set(
+        revisions.filter { id, revision in known[id].map { $0 != revision } ?? true }.keys)
+      var invalid = false
       if let downloads {
         var allowed: [String: String?] = [:]
         for record in records {
           if let current = known[record.id] {
             allowed.updateValue(current, forKey: record.id)
             if record.state == "ready" && record.track.sourceRevision != current {
-              invalid = true
+              changed.insert(record.id)
             }
           } else if record.state == "ready" {
-            invalid = true
+            changed.insert(record.id)
           }
         }
-        if invalid { await player.invalidateSources() }
+        if !changed.isEmpty { invalid = await player.invalidateSources(changed: changed) }
         await downloads.reconcile(allowed)
         guard generation == stamp else { return }
         downloads.resume(automatic: true)
-      } else if invalid {
-        await player.invalidateSources()
+      } else if !changed.isEmpty {
+        invalid = await player.invalidateSources(changed: changed)
       }
       guard generation == stamp else { return }
       await adoptServerPreferences(service, generation: stamp)
@@ -509,7 +509,8 @@ enum PlayOrigin: Hashable {
       DiagnosticsLog.shared.record(
         "sync",
         "refreshed library in \(Int((ContinuousClock.now - began) / .milliseconds(1))) ms"
-          + (invalid ? "; cached playback invalidated" : ""))
+          + (changed.isEmpty
+            ? "" : "; \(changed.count) changed songs" + (invalid ? ", playback stopped" : "")))
       message =
         invalid ? "Playback stopped because the server changed or removed cached music." : nil
     } catch NativeFailure.authentication {

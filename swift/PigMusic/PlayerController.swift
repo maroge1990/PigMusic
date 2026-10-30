@@ -303,12 +303,21 @@ import PigSync
   /// Fresh connections for the songs fetched next (see `RenewableSession`).
   func renewConnections() { preparer?.renewConnections() }
   func cachedRevisions() async -> [String: String?] { await repository?.savedRevisions() ?? [:] }
-  func invalidateSources() async {
+  /// The server changed or removed these songs. Playback stops only when one
+  /// is in the queue; otherwise just their cached audio goes (#76, D-56).
+  /// Returns whether playback stopped.
+  @discardableResult
+  func invalidateSources(changed: Set<String>) async -> Bool {
+    guard queue.items.contains(where: { changed.contains($0.track.id) }) else {
+      await repository?.forget(ids: changed)
+      return false
+    }
     stop()
     let old = repository
     let cleanup = engine?.stop()
     await cleanup?.value
     await old?.reset()
+    return true
   }
 
   func play(
