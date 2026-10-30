@@ -478,7 +478,6 @@ struct MiniPlayer: View {
   }
   private var status: String {
     if player.error != nil { return "Playback problem · tap for options" }
-    if player.preparing { return "Preparing audio…" }
     return player.queue.current?.track.artist ?? ""
   }
 }
@@ -501,7 +500,8 @@ struct NowPlayingView: View {
           titles
           progress
           transport
-          if player.preparing { ProgressView("Preparing audio…").font(PigType.footnote) }
+          // No status words in normal use (#60): a spinner while preparing.
+          if player.preparing { ProgressView().controlSize(.small) }
           options
           if let error = player.error { failure(error) }
           upNext
