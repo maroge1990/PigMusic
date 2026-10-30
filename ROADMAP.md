@@ -29,7 +29,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 - **Household details** live only in the gitignored `.private/` (D-45).
 - **Waiting on Mark:** the server/web checks for the 31 Oct and 1 Nov releases and device checks for builds 13/14;
   #17's device numbers; the recommended choices
-  used for #69, #72 and the #62 reading; whether the web Library loses its shuffle button too (#61); #76, #77; the
+  used for #69, #72 and the #62 reading; whether the web Library loses its shuffle button too (#61); the
   [`owner`](https://github.com/maroge1990/PigMusic/issues?q=is%3Aopen+label%3Aowner) items; the Cloudflare
   cache-bypass and IPv6 rate-limit confirmations (sign-in advisories).
 
@@ -41,7 +41,7 @@ Reliability first (D-47). In order:
    quiet idle-CPU re-measure (#63) and the loaded 30-minute window for #16/#20
 2. **Device checks** — install build 14 (Mark's Mac password, or TestFlight later); Mark's checks and battery runs
    (#18, #19; #64, #65, #70, #71, #60–#62)
-3. **iPhone/Watch playback** — #78 (route change while paused), #76 and #77 (recommended choices, Mark to confirm),
+3. **iPhone/Watch playback** — #78 (route change while paused), #76 (D-56) and #77 (D-57),
    native build 15
 4. **T3 test rig** (#15), approved in D-53
 5. **Efficiency leftovers** (D-54) — #42, #43, #44 if the re-measure shows they matter
