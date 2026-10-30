@@ -117,3 +117,7 @@ The rules these decisions produce, as they stand today, are in [PRODUCT.md](PROD
 **D-54 (31 Oct 2026)** — Server efficiency and device battery life are the current focus. Work that cuts idle or background load (on the server, iPhone and Watch) goes ahead of new features, starting with the overnight mix searching (#90). Reason: Mark saw the server searching for mix songs most of the night and wants that kind of hidden cost found and removed.
 
 **D-55 (31 Oct 2026)** — Signing out of the web app while the server can't be reached clears that device at once and says so; PigMusic ends the session on the server the next time it opens and reaches it, ending only that session (by its id), never a newer sign-in. Until then the device stays signed out (#80). Reason: a device is never left signed in when its person meant to sign out.
+
+**D-56 (31 Oct 2026)** — On the iPhone, a downloaded or cached song that changes (removed, retagged, replaced) stops playback only when that song is playing or in the queue; anything else keeps playing undisturbed (#76). Reason: a change made on the web to music nobody is listening to must not interrupt someone else.
+
+**D-57 (31 Oct 2026)** — The phone prepares Watch copies only up to the Watch's own reported storage budget, checking each song's size before sending, instead of its own larger figure (#77). Reason: songs beyond the Watch's budget waited forever and the phone re-checked every 2 seconds, a battery cost (D-54).
