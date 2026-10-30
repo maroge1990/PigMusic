@@ -3,6 +3,7 @@ import json
 from fastapi.testclient import TestClient
 
 from server.catalogue import Catalogue
+from server.media import save_settings
 from server.playlists import Playlists
 from server.remote import RemoteAudio
 from test_personal_libraries import household
@@ -171,9 +172,9 @@ def test_cloud_playlist_remote_metadata_does_not_download(tmp_path, monkeypatch)
         assert response.json()["url"].endswith("/song.mp3")
         assert calls[0]["album"] == "Remote album"
         assert store.queue()["items"] == []
-        (tmp_path / "media-settings.json").write_text(
-            json.dumps({"remote_playback": False})
-        )
+        # Saved as the app saves it: overwriting the file in place raced start-up
+        # recovery, which read it half-written (CI run 41036269583).
+        save_settings(store, portraits=True, remote_playback=False)
         assert client.post("/api/v1/remote-playback", json=track).status_code == 409
 
 
