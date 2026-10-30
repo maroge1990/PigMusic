@@ -477,8 +477,8 @@ def test_published_songs_are_rechecked_hourly_not_every_pass(tmp_path, monkeypat
     download(store, "four", album="Album four")
     exporter.process()
     assert checked == ["four"]
-    # The hourly full check verifies every published song again and reports
-    # one whose NAS copy went missing until the next full check.
+    # The hourly full check verifies every published song again; one whose
+    # NAS copy went missing is then retried and reported every pass.
     published = {t["id"]: t["export_relative_path"] for t in exporter.records()}
     (root / published["two"]).unlink()
     exporter.verified_at -= 3601
@@ -487,7 +487,35 @@ def test_published_songs_are_rechecked_hourly_not_every_pass(tmp_path, monkeypat
     assert sorted(checked) == ["four", "one", "three", "two"]
     checked.clear()
     exporter.process()
-    assert checked == []
+    assert checked == ["two"]
     status = store.read_document("library-export-status")
     assert status["status"] == "partial" and status["files"] == 3
     assert [r["id"] for r in status["needs_review"]] == ["two"]
+
+
+def test_a_failed_cleanup_after_publishing_is_retried_every_pass(tmp_path, monkeypatch):
+    """Codex round 1 on 45d0f3b: publish() records the NAS path before
+    removing the download. If that removal fails, the song must be retried
+    (and reported) on the next passes, not skipped until the hourly check."""
+    store, root = nas_with(tmp_path, monkeypatch, [])
+    download(store, "song")
+    exporter = Exporter(store, root)
+    source, _, _ = exporter.paths(exporter.records()[0])
+    unlink = Path.unlink
+
+    def refuse(self, *args, **kwargs):
+        if self == source:
+            raise PermissionError("busy")
+        return unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", refuse)
+    for _ in range(2):
+        exporter.process()
+        status = store.read_document("library-export-status")
+        assert status["status"] == "partial", status
+        assert [r["id"] for r in status["needs_review"]] == ["song"]
+    assert exporter.records()[0].get("export_relative_path") and source.is_file()
+    monkeypatch.setattr(Path, "unlink", unlink)
+    exporter.process()  # Recovered on the next ordinary pass.
+    assert store.read_document("library-export-status")["status"] == "completed"
+    assert not source.exists()

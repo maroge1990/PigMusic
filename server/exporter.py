@@ -95,11 +95,12 @@ class Exporter:
         # deleting the source needs a hard link or a read made just now.
         self.digests = {}
         self.pass_id = 0
-        # When the last full check ran, with which config, and the published
-        # songs it left waiting (reported until the next full check).
+        # When the last full check ran and with which config; and the songs
+        # the last pass left waiting, which every pass retries (and reports)
+        # until they succeed, published or not.
         self.verified_at = None
         self.verified_config = None
-        self.verified_waiting = []
+        self.retry = set()
 
     def digest(self, path, this_pass=False):
         key = os.fspath(path)
@@ -449,11 +450,12 @@ class Exporter:
             # checks at ~30% of a core for 205 songs, forever (#63, #74).
             work = records
             if not full:
-                work = [t for t in records if not t.get("export_relative_path")]
-                published = {t["id"] for t in records} - {t["id"] for t in work}
-                still = [w for w in self.verified_waiting if w["id"] in published]
-                waiting.extend(still)
-                completed = len(published) - len(still)
+                work = [
+                    t
+                    for t in records
+                    if not t.get("export_relative_path") or t["id"] in self.retry
+                ]
+                completed = len(records) - len(work)
             for track in work:
                 # One song that needs a decision (or whose file is refused)
                 # waits on its own; the rest still publish.
@@ -478,9 +480,8 @@ class Exporter:
                 # Only a newly recorded location changes the library; an
                 # unchanged pass must not rebuild it (LOCK1, 28 Oct).
                 changed = changed or published is True
+            self.retry = {w["id"] for w in waiting}
             if full:
-                published = {t["id"] for t in records if t.get("export_relative_path")}
-                self.verified_waiting = [w for w in waiting if w["id"] in published]
                 self.verified_at, self.verified_config = now, config
             if changed:
                 self.store.refresh_library()
