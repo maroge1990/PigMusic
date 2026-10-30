@@ -273,6 +273,42 @@ def test_quality_and_source_address_checks(tmp_path, audio):
         worker.validate(audio, job, "mp3_320")
 
 
+def test_validation_accepts_what_selection_accepted_unless_an_edition_was_asked(
+    tmp_path, audio
+):
+    """#69: selection treats remaster words as edition noise and "feat."
+    credits as the lead artist, but validation demanded the exact tags, so
+    "Song - 2004 Remaster" failed after the whole transfer. A request for a
+    particular edition stays exact; live, remix and demo stay distinct."""
+    store = Store(tmp_path / "data")
+    job = queued(store)
+    worker = Downloader(store)
+
+    def tagged(**tags):
+        worker.tag(audio, {**job, **tags}, "fixture")
+        return audio
+
+    for tags in (
+        {"title": job["title"] + " - 2004 Remaster"},
+        {"title": job["title"] + " (Remastered 2011)"},
+        {"artist": job["artist"] + " feat. Guest"},
+    ):
+        worker.validate(tagged(**tags), job, "mp3_320")
+    for tags in (
+        {"title": job["title"] + " (Live)"},
+        {"title": job["title"] + " - Demo"},
+        {"title": "Another Song"},
+        {"artist": "Someone Else"},
+    ):
+        with pytest.raises(ValueError, match="does not match"):
+            worker.validate(tagged(**tags), job, "mp3_320")
+    edition = {**job, "explicit_edition": True}
+    with pytest.raises(ValueError, match="does not match"):
+        worker.validate(
+            tagged(title=job["title"] + " - 2004 Remaster"), edition, "mp3_320"
+        )
+
+
 def test_publication_journal_recovers_rename_before_database_commit(tmp_path, audio):
     store = Store(tmp_path / "data")
     job = queued(store)

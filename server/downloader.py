@@ -402,13 +402,23 @@ class Downloader:
                 f"Downloaded content is not readable {expected_codec.upper()} for this quality profile"
             )
         validate_streams(path, check)
-        for key in ("artist", "title"):
-            if probe.get(key) and folded(probe[key]) != folded(target[key]):
+        # A request for a particular edition must match its tags exactly. Any
+        # other request accepts what source selection accepted (#69): the same
+        # lead artist ("feat." credits aside) and edition-free title, so a
+        # "2004 Remaster" tag passes while live, remix or demo stays distinct.
+        explicit = target.get("explicit_edition")
+        same = {
+            "artist": folded if explicit else primary_artist,
+            "title": folded if explicit else title_key,
+        }
+        for key, identity in same.items():
+            if probe.get(key) and identity(probe[key]) != identity(target[key]):
                 raise ValueError(
                     "Embedded recording metadata does not match the request"
                 )
+        versions = VERSION_WORDS if explicit else VERSION_WORDS - EDITION_WORDS
         expected_versions = (
-            set(folded(target["title"] + " " + target["album"]).split()) & VERSION_WORDS
+            set(folded(target["title"] + " " + target["album"]).split()) & versions
         )
         actual_versions = (
             set(
@@ -416,7 +426,7 @@ class Downloader:
                     (probe.get("title") or "") + " " + (probe.get("album") or "")
                 ).split()
             )
-            & VERSION_WORDS
+            & versions
         )
         if actual_versions and actual_versions != expected_versions:
             raise ValueError("Embedded recording version does not match the request")
