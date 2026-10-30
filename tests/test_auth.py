@@ -284,12 +284,36 @@ def test_ipv6_addresses_count_per_64_and_ipv4_per_address(fixture):
 
 
 @pytest.mark.parametrize(
-    "password", ["short", "password1234", "123456789012", "x" * 257]
+    "password",
+    [
+        "short",
+        "password1234",
+        "123456789012",
+        "x" * 257,
+        # From the common-password lists, in any case.
+        "q1w2e3r4t5y6",
+        "1QAZ2WSX3EDC",
+        "qwertyuiop[]",
+        "justinbieber",
+        # A short run repeated.
+        "abcabcabcabc",
+        "12121212121212",
+        "ZZZZZZZZZZZZZ",
+    ],
 )
 def test_weak_or_unbounded_password_rejected(fixture, password):
     auth, _, _ = fixture
     with pytest.raises(AuthError, match="password_not_accepted"):
         auth.create_owner("another", password)
+
+
+def test_ordinary_passphrases_are_accepted():
+    from server.auth import COMMON_PASSWORDS, validate_password
+
+    assert len(COMMON_PASSWORDS) > 1000
+    assert all(12 <= len(p) and p == p.casefold() for p in COMMON_PASSWORDS)
+    for password in [PASSWORD, "abcd1abcd2abcd3", "correct horse battery"]:
+        validate_password(password, "mark")
 
 
 def app_for(auth, origin=None):

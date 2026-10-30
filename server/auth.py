@@ -11,6 +11,7 @@ import re
 import secrets
 import time
 import uuid
+from pathlib import Path
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
@@ -23,19 +24,14 @@ ACCOUNT_FREE_FAILURES = 5
 ACCOUNT_MAX_DELAY = 60
 ACCOUNT_ALERT_FAILURES = 10
 COOKIE = "__Host-pig_session"
+# Refused for new passwords, without regard to case (see the file's header).
 COMMON_PASSWORDS = frozenset(
-    {
-        "password1234",
-        "123456789012",
-        "qwerty123456",
-        "passwordpassword",
-        "letmeinletmein",
-        "iloveyou12345",
-        "abcdefghijkl",
-        "111111111111",
-        "1234567890123",
-        "12345678901234",
-    }
+    line
+    for line in Path(__file__)
+    .with_name("common-passwords.txt")
+    .read_text(encoding="utf-8")
+    .splitlines()
+    if line and not line.startswith("#")
 )
 HASHER = PasswordHasher()  # Argon2id library defaults (64MiB, three iterations).
 DUMMY_HASH = HASHER.hash(secrets.token_urlsafe(32))
@@ -117,12 +113,20 @@ def username(value):
     return value
 
 
+def repetitive(value):
+    """A short run of characters repeated, such as "abcabcabcabc"."""
+    return any(
+        (value[:size] * len(value))[: len(value)] == value for size in range(1, 5)
+    )
+
+
 def validate_password(value, name):
     if (
         not isinstance(value, str)
         or not 12 <= len(value) <= 256
         or value.casefold() in COMMON_PASSWORDS
         or value.casefold() == name.casefold()
+        or repetitive(value.casefold())
     ):
         raise AuthError("password_not_accepted", 422)
 
