@@ -9,11 +9,13 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 - **Live:** server `3aaaa51` and native **0.2.0 (12)** (owner-reported). Build-12 live checks on 29 Oct failed the
   event-loop (#16) and export-lock (#17) gates; cold popularity is slow (#21); device battery gates are open (#18, #19).
-- **Local, not pushed:** `14a36dc`, `cc37394`, `73f9ca1`, `d093295`, `7c9f33f`, `ca6b1c8` and the documentation
-  reset. The server commits fix the event-loop blocks found live and by audit, and give sign-in checks reserved
-  threads; each fix has a regression that fails on the old code, and each batch had two Codex rounds. Not yet live (#20).
-- **Project reset in progress** (playbook steps 0–7): steps 1–3 done; documents migrated into this structure and the
-  old ones archived; whole-product audit (step 5) and Mark's roadmap choices (step 6) are next.
+- **Local, not pushed:** server fixes `cc37394`, `73f9ca1`, `d093295`, `7c9f33f` (event-loop blocks found live and by
+  audit; reserved sign-in threads; each with a regression that fails on the old code and two Codex rounds), the
+  documentation reset `6d4ebd3`, and the household-details clean-up `4f666f3`, `c8eead2` (two Codex rounds, approved),
+  plus notes `14a36dc`, `ca6b1c8`. Not yet live (#20).
+- **Household details** (addresses, host names, domain, edge rules) live only in the gitignored `.private/` (D-45).
+- **Project reset** (playbook steps 0–7): steps 1–4 done; whole-product audit (step 5) and Mark's roadmap choices
+  (step 6) are next. New features stay frozen until step 6.
 - **Waiting on Mark:** the export-lock device check (#17), device evidence for battery (#18, #19), the items labelled
   [`owner`](https://github.com/maroge1990/PigMusic/issues?q=is%3Aopen+label%3Aowner).
 
