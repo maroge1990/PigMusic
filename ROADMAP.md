@@ -35,14 +35,15 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 Reliability first (D-47). In order:
 
-1. **Live gates** — the loaded 30-minute window for #16/#20; quiet idle-CPU re-measure on `15566c4` (#63); the
-   engine heap crash (#89)
-2. **Device checks** — install build 14 (Mark's Mac password, or TestFlight later); Mark's checks and battery runs
+1. **Live gates** — the loaded 30-minute window for #16/#20; quiet idle-CPU re-measure on `15566c4` (#63)
+2. **Overnight mix searching** (#90, with the engine heap crash #89) — efficiency and battery are the focus (Mark,
+   31 Oct): stop re-searching songs that can't be found
+3. **Device checks** — install build 14 (Mark's Mac password, or TestFlight later); Mark's checks and battery runs
    (#18, #19; #64, #65, #70, #71, #60–#62)
-3. **Withdrawn designs** — #68 (hide only the retired file, by hash), #74 part 2 (Tidy must not read a stale library),
+4. **Withdrawn designs** — #68 (hide only the retired file, by hash), #74 part 2 (Tidy must not read a stale library),
    #80 part 2 (deferred sign-out must not touch a new session)
-4. **iPhone/Watch playback** — #78 (route change while paused), #76 and #77 (recommended choices, Mark to confirm)
-5. **T3 test rig** (#15), approved in D-53
+5. **iPhone/Watch playback** — #78 (route change while paused), #76 and #77 (recommended choices, Mark to confirm)
+6. **T3 test rig** (#15), approved in D-53
 
 ## Next (P1/P2)
 
