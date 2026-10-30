@@ -36,5 +36,7 @@ ENV PIG_MUSIC_DATA=/data
 # Shown to signed-in apps so a phone can tell which server build it talks to.
 ENV PIG_MUSIC_REVISION=$VCS_REF PIG_MUSIC_VERSION=$VERSION
 EXPOSE 8765
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health')"
+# Every 2 minutes: each check starts a process in the container, about 0.9
+# CPU-s with Docker's exec, which was 3% of a core at 30 s while idle (#63).
+HEALTHCHECK --interval=120s --timeout=5s --start-period=20s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health')"
 CMD ["python", "-m", "server.runtime"]
