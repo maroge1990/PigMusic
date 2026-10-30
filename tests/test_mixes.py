@@ -1347,8 +1347,12 @@ def test_each_radio_start_opens_somewhere_new(tmp_path, monkeypatch):
         assert not openings or position != openings[-1]
         openings.append(position)
     assert len(set(openings)) > 3
+    # Pages follow on from the opening (a fixed one: the last possible opening
+    # has no page after it).
+    monkeypatch.setattr(mix_module, "radio_opening", lambda count, previous: 5)
+    first = mixes.radio_next(user)["tracks"]
     following = mixes.radio_next(user, first[-1].id)["tracks"]
-    assert following[0].id == f"mix:{edition}:{position + RADIO_PAGE}"
+    assert following[0].id == f"mix:{edition}:{5 + RADIO_PAGE}"
     assert {radio_opening(0), radio_opening(5)} == {0}
 
 
