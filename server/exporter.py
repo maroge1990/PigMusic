@@ -438,6 +438,8 @@ class Exporter:
             completed = 0
             changed = False
             waiting = []
+            # Songs whose file was written moments ago: tried again next pass.
+            unsettled = set()
             records = self.records()
             now = time.monotonic()
             full = (
@@ -460,6 +462,7 @@ class Exporter:
                 # One song that needs a decision (or whose file is refused)
                 # waits on its own; the rest still publish.
                 if not self.warm(track):
+                    unsettled.add(track.get("id"))
                     continue
                 try:
                     published = self.publish(track)
@@ -480,12 +483,15 @@ class Exporter:
                 # Only a newly recorded location changes the library; an
                 # unchanged pass must not rebuild it (LOCK1, 28 Oct).
                 changed = changed or published is True
-            self.retry = {w["id"] for w in waiting}
+            # A published song left unsettled must stay in the retry set too,
+            # or ordinary passes skip it until the hourly check (#88).
+            self.retry = {w["id"] for w in waiting} | unsettled
             if full:
                 self.verified_at, self.verified_config = now, config
             if changed:
                 self.store.refresh_library()
             self.store.cleanup_replacements()
+            pending = {"pending": len(unsettled)} if unsettled else {}
             if waiting:
                 count = len(waiting)
                 self.report(
@@ -493,9 +499,10 @@ class Exporter:
                     files=completed,
                     error=f"{count} song{'s' if count > 1 else ''} need review: {waiting[0]['error']}",
                     needs_review=waiting[:50],
+                    **pending,
                 )
             else:
-                self.report(status="completed", files=completed)
+                self.report(status="completed", files=completed, **pending)
         except (OSError, ValueError, KeyError) as exc:
             self.report(status="deferred", error=str(exc)[:180])
         finally:

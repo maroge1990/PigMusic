@@ -516,6 +516,17 @@ def test_a_failed_cleanup_after_publishing_is_retried_every_pass(tmp_path, monke
         assert [r["id"] for r in status["needs_review"]] == ["song"]
     assert exporter.records()[0].get("export_relative_path") and source.is_file()
     monkeypatch.setattr(Path, "unlink", unlink)
+    # The download is touched: one pass finds it unsettled and must keep it
+    # for the next pass, reported as pending (#88).
+    import server.exporter
+
+    real = server.exporter.settled
+    monkeypatch.setattr(server.exporter, "settled", lambda *args: False)
+    exporter.process()
+    status = store.read_document("library-export-status")
+    assert status["pending"] == 1 and source.is_file(), status
+    monkeypatch.setattr(server.exporter, "settled", real)
     exporter.process()  # Recovered on the next ordinary pass.
-    assert store.read_document("library-export-status")["status"] == "completed"
+    status = store.read_document("library-export-status")
+    assert status["status"] == "completed" and "pending" not in status, status
     assert not source.exists()
