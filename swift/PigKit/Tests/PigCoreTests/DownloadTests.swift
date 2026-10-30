@@ -185,6 +185,17 @@ private actor Flag {
     }
     #expect(!(await source.calls.isEmpty))
   }
+  /// Codex round 1 on 7946403: older builds saved paused=1 on sign-out and on
+  /// every internal stop and cleared it on their next restart. Internal
+  /// restarts no longer clear a Pause, so only the person's own Pause survives
+  /// an upgrade; otherwise Watch copies (which have no Resume) stay queued.
+  @Test func onlyThePersonsSavedPauseSurvivesAnUpgrade() {
+    #expect(!PersistedPause.restored(1))
+    #expect(!PersistedPause.restored(nil))
+    #expect(!PersistedPause.restored(0))
+    #expect(PersistedPause.restored(PersistedPause.saved(true)))
+    #expect(!PersistedPause.restored(PersistedPause.saved(false)))
+  }
   @MainActor @Test func pausingStopsTheCopiesAskedForAhead() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }

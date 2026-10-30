@@ -297,3 +297,14 @@ import PigDomain
     progress = [:]
   }
 }
+
+/// The pause flag the background transport saves (D-51). 2 is the person's
+/// Pause. Builds before 13 saved 1 for every stop, internal ones included
+/// (signing out, removing a song), and cleared it on their next restart;
+/// since internal restarts no longer clear a Pause, a saved 1 is ignored
+/// (Codex round 1 on 7946403: Watch copies stayed queued after an upgrade).
+public enum PersistedPause {
+  public static let person: Int64 = 2
+  public static func restored(_ saved: Int64?) -> Bool { saved == person }
+  public static func saved(_ paused: Bool) -> Int64 { paused ? person : 0 }
+}

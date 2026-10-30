@@ -104,7 +104,7 @@
           from: Data(contentsOf: directory.appendingPathComponent("options.json")))) ?? [:]
       budgetBytes = options["budget"] ?? (5 * 1024 * 1024 * 1024)
       allowsCellular = options["cellular"] == 1
-      userPaused = options["paused"] == 1
+      userPaused = PersistedPause.restored(options["paused"])
       super.init()
       let configuration = URLSessionConfiguration.background(withIdentifier: identifier)
       configuration.httpShouldSetCookies = false
@@ -135,7 +135,7 @@
     }
     private func persistOptions() throws {
       try JSONEncoder().encode([
-        "budget": budgetBytes, "cellular": allowsCellular ? 1 : 0, "paused": userPaused ? 1 : 0,
+        "budget": budgetBytes, "cellular": allowsCellular ? 1 : 0, "paused": PersistedPause.saved(userPaused),
       ]).write(
         to: directory.appendingPathComponent("options.json"), options: .atomic)
     }
