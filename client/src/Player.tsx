@@ -35,6 +35,7 @@ import {
   songBody,
   type Song,
 } from "./songs";
+import { startFailure } from "./playStart";
 
 type Playing = Song & {
   url?: string;
@@ -469,9 +470,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       (repeat === "all" && queue.current.length > 0));
   useEffect(() => {
     if (!song?.url) return;
-    void audio.current
-      ?.play()
-      .catch(() => setError("Tap Play to start audio on this device."));
+    const request = serial.current;
+    void audio.current?.play().catch((e) => {
+      const message = startFailure(e, request !== serial.current);
+      if (message) setError(message);
+    });
     if ("mediaSession" in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: song.title,

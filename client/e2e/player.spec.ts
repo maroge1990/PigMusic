@@ -85,3 +85,62 @@ test("the mini player shows the artist, not a status, while a song loads", async
   // A real problem still gets a short message.
   await expect(mini).toContainText("File unavailable");
 });
+
+/** A tenth of a second of silence, so the audio element loads without error. */
+function silence() {
+  const samples = 800;
+  const wav = new Uint8Array(44 + samples).fill(128);
+  const view = new DataView(wav.buffer);
+  const text = (at: number, value: string) =>
+    [...value].forEach((c, i) => view.setUint8(at + i, c.charCodeAt(0)));
+  text(0, "RIFF");
+  view.setUint32(4, 36 + samples, true);
+  text(8, "WAVEfmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 8000, true);
+  view.setUint32(28, 8000, true);
+  view.setUint16(32, 1, true);
+  view.setUint16(34, 8, true);
+  text(36, "data");
+  view.setUint32(40, samples, true);
+  return "data:audio/wav;base64," + Buffer.from(wav).toString("base64");
+}
+
+test("a skipped song's late start failure doesn't cover the next song", async ({
+  page,
+}) => {
+  // The browser refuses the first song's play() only after the skip.
+  await page.addInitScript(() => {
+    let calls = 0;
+    HTMLMediaElement.prototype.play = function () {
+      calls += 1;
+      if (calls > 1) return Promise.resolve();
+      return new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new DOMException("blocked", "NotAllowedError")),
+          600,
+        ),
+      );
+    };
+  });
+  const url = silence();
+  await mockApi(page, {
+    answers: {
+      "/v1/playback/t1/url": (route) =>
+        route.fulfill({ json: { url, expires_in: 60 } }),
+      "/v1/playback/t2/url": (route) =>
+        route.fulfill({ json: { url, expires_in: 60 } }),
+    },
+  });
+  await page.goto(`/#/library/album/${album.id}`);
+  await page.getByText("Von dutch").first().click();
+  const mini = page.locator(".mini-player");
+  await expect(mini).toContainText("Von dutch");
+  await mini.getByRole("button", { name: "Next song" }).click();
+  await expect(mini).toContainText("360");
+  await page.waitForTimeout(1000);
+  await expect(mini).not.toContainText("Tap Play");
+  await expect(mini).toContainText("Charli xcx");
+});
