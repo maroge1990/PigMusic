@@ -27,11 +27,27 @@ HOSTS = frozenset(
 )
 
 
+# Provider credentials never leave for the fake (Codex round 2): it needs none.
+SECRETS = ("authorization", "api-key", "x-api-key", "cookie")
+
+
+def rig_endpoint(base):
+    """Only the rig's own fake (a pig-music-test-* container) or this
+    machine: a mistaken setting elsewhere refuses to start."""
+    url = httpx.URL(base)
+    host = url.host or ""
+    if url.scheme not in ("http", "https") or not (
+        host.startswith("pig-music-test-") or host in ("127.0.0.1", "localhost")
+    ):
+        raise ValueError("PIG_MUSIC_TEST_SERVICES must name the T3 rig's fake")
+    return url
+
+
 class FakeServices(httpx.AsyncBaseTransport):
     """Rewrites https://<host>/<path> to <base>/<host>/<path>."""
 
     def __init__(self, base, inner=None):
-        self.base = httpx.URL(base)
+        self.base = rig_endpoint(base)
         self.inner = inner or httpx.AsyncHTTPTransport()
 
     async def handle_async_request(self, request):
@@ -45,6 +61,8 @@ class FakeServices(httpx.AsyncBaseTransport):
             query=request.url.query,
         )
         request.headers["host"] = self.base.netloc.decode()
+        for name in SECRETS:
+            request.headers.pop(name, None)
         return await self.inner.handle_async_request(request)
 
     async def aclose(self):

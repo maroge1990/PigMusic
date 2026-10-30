@@ -113,3 +113,33 @@ def test_the_rig_runs_only_an_exact_image_digest():
     ):
         with pytest.raises(SystemExit):
             test_rig.up_commands(image)
+
+
+def test_provider_credentials_never_reach_the_fake_and_only_the_rig_is_accepted():
+    """Codex round 2: the switch forwarded the ListenBrainz token and Fanart
+    key to whatever address it named; a mistaken setting would leak them."""
+    seen = []
+
+    class Inner(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            seen.append(request)
+            return httpx.Response(200, json={})
+
+    async def run():
+        transport = test_services.FakeServices(
+            "http://pig-music-test-fake:8790", inner=Inner()
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            await client.get(
+                "https://api.listenbrainz.org/1/x",
+                headers={"Authorization": "Token secret", "api-key": "secret"},
+                cookies={"session": "secret"},
+            )
+
+    asyncio.run(run())
+    assert "secret" not in str(seen[0].headers) and seen[0].url.host == (
+        "pig-music-test-fake"
+    )
+    for wrong in ("https://example.com", "http://192.168.1.10:8790", "file:///x"):
+        with pytest.raises(ValueError):
+            test_services.FakeServices(wrong)
