@@ -126,7 +126,11 @@ export function AdminPeople() {
             {p.role !== "owner" && (
               <>
                 <button
+                  aria-label={`Reset password for ${p.display_name}`}
                   onClick={() =>
+                    confirm(
+                      `Reset ${p.display_name}'s password? They are signed out everywhere at once and need the new invite link to choose a password.`,
+                    ) &&
                     void action(
                       async () =>
                         setInvite({
@@ -143,7 +147,13 @@ export function AdminPeople() {
                   Reset password
                 </button>
                 <button
+                  aria-label={`${p.disabled ? "Enable" : "Disable"} ${p.display_name}`}
                   onClick={() =>
+                    // Disabling signs them out everywhere: ask first (#72).
+                    (p.disabled ||
+                      confirm(
+                        `Disable ${p.display_name}'s account? They are signed out everywhere and can't sign in until you enable it again.`,
+                      )) &&
                     void action(
                       () =>
                         api(`/v1/people/${p.id}/disabled`, {

@@ -599,3 +599,57 @@ test("the owner approves or rejects uploads credited only by the uploader", asyn
     0,
   );
 });
+
+test("Reset password and Disable ask first, naming the person", async ({
+  page,
+}) => {
+  const calls: string[] = [];
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/people": (route) =>
+        route.fulfill({
+          json: {
+            people: [
+              { id: "o", display_name: "Pat", role: "owner", disabled: 0 },
+              { id: "s", display_name: "Sam", role: "member", disabled: 0 },
+            ],
+          },
+        }),
+      "/v1/people/activity": (route) =>
+        route.fulfill({ json: { events: [], warnings: [] } }),
+      "/v1/admin/unassigned": (route) =>
+        route.fulfill({ json: { albums: [], next_offset: null } }),
+      "/v1/people/s/setup-code": (route) => {
+        calls.push("reset");
+        return route.fulfill({
+          json: { code: "c", user_id: "s", expires_at: 0, invite_url: null },
+        });
+      },
+      "/v1/people/s/disabled": (route) => {
+        calls.push("disable");
+        return route.fulfill({ json: { disabled: true } });
+      },
+    },
+  });
+  const asked: string[] = [];
+  let answer = false;
+  page.on("dialog", (dialog) => {
+    asked.push(dialog.message());
+    void (answer ? dialog.accept() : dialog.dismiss());
+  });
+  await page.goto("/#/admin/people");
+  const reset = page.getByRole("button", { name: "Reset password for Sam" });
+  const disable = page.getByRole("button", { name: "Disable Sam" });
+  await reset.click();
+  await disable.click();
+  await expect.poll(() => asked.length).toBe(2);
+  expect(asked[0]).toContain("Reset Sam's password?");
+  expect(asked[1]).toContain("Disable Sam's account?");
+  expect(calls).toEqual([]);
+  answer = true;
+  await reset.click();
+  await expect.poll(() => calls).toEqual(["reset"]);
+  await disable.click();
+  await expect.poll(() => calls).toEqual(["reset", "disable"]);
+});
