@@ -358,3 +358,37 @@ def test_a_cancelled_home_feed_write_never_overwrites_a_newer_answer(
     )
     assert not failed
     assert cached == result
+
+
+def test_mix_planning_reads_artist_identities_and_the_day_off_the_loop(
+    tmp_path, monkeypatch
+):
+    """#42: planning a person's mixes read the mix day's settings and every
+    library artist's cached identity from SQLite on the event loop."""
+    from test_security import protected
+
+    app, _ = protected(tmp_path, monkeypatch)
+    mixes = app.state.store.mixes
+    store = mixes.store
+    artists = [{"id": "a%d" % n, "name": "Artist %d" % n} for n in range(3)]
+    for artist in artists:
+        store.write_document(
+            "library-artist:" + artist["id"], {"id": ARTIST, "name": artist["name"]}
+        )
+    slow_documents(store, monkeypatch)
+
+    class NoRecordings:
+        async def get(self, http, path, **params):
+            return {"recordings": []}
+
+    monkeypatch.setattr(mixes.home, "catalogue", NoRecordings())
+
+    async def run():
+        async with client(lambda r: httpx.Response(200, json={})) as http:
+            return await longest_stall(
+                lambda: mixes.releases(http, {"artists": artists})
+            )
+
+    stall, result = asyncio.run(run())
+    assert result == []
+    assert stall < 0.2, stall

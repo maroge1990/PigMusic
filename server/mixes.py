@@ -14,7 +14,7 @@ import httpx
 from zoneinfo import ZoneInfo
 
 from .paths import versioned
-from .artist_identity import cached_identity
+from .artist_identity import cached_identities
 from .catalogue import background_metadata, credit
 from .home import release_choice
 from .matching import compatible, recording_kind
@@ -303,6 +303,9 @@ class Mixes:
 
     async def candidates(self, client, projection):
         """Use public artist/tag seeds only; personal listening never leaves PigMusic."""
+        # The mix day reads settings from SQLite, so it is found off the loop (#42).
+        mix_day = projection.get("mix_day") or str(await asyncio.to_thread(self.day))
+        projection = {**projection, "mix_day": mix_day}
         seeds = await self.home.seeds(client, projection, {"unavailable": False})
         records = []
         for identity, name in seeds[:SEEDS]:
@@ -349,9 +352,7 @@ class Mixes:
                 genres.items(), key=lambda item: (-item[1], item[0])
             )[:3]
         ]
-        ordinal = date.fromisoformat(
-            projection.get("mix_day") or str(self.day())
-        ).toordinal()
+        ordinal = date.fromisoformat(mix_day).toordinal()
         genre = labels[themes[ordinal % len(themes)]] if themes else None
         if genre:
             data, _ = await self.home.feed(
@@ -368,9 +369,7 @@ class Mixes:
                 for r in data.get("recordings", [])[:GENRE_SONGS]
                 if isinstance(r, dict)
             )
-        decade = decade_theme(
-            projection.get("tracks", []), projection.get("mix_day") or self.day()
-        )
+        decade = decade_theme(projection.get("tracks", []), mix_day)
         if decade:
             data, _ = await self.home.feed(
                 client,
@@ -464,19 +463,23 @@ class Mixes:
                 unique[key]["decade"] = track["decade"]
         return list(unique.values()), genre
 
+    def release_artists(self, projection):
+        """The mix day and the library artists already resolved to MusicBrainz,
+        read in one SQLite query on a worker thread (#42)."""
+        day = date.fromisoformat(str(projection.get("mix_day") or self.day()))
+        artists = [
+            a for a in projection.get("artists", []) if not a.get("compilation_only")
+        ]
+        known = cached_identities(self.store, artists)
+        return day, [(a, known[a["id"]]) for a in artists if known[a["id"]]]
+
     async def releases(self, client, projection):
         """Recent recordings by library artists already resolved to MusicBrainz.
 
         One search per artist; ten artists rotate daily so the whole library
         is covered over time without new identity lookups.
         """
-        day = date.fromisoformat(str(projection.get("mix_day") or self.day()))
-        artists = [
-            (a, known)
-            for a in projection.get("artists", [])
-            if not a.get("compilation_only")
-            and (known := cached_identity(self.store, a))
-        ]
+        day, artists = await asyncio.to_thread(self.release_artists, projection)
         if not artists:
             return []
         offset = day.toordinal() % len(artists)
@@ -675,7 +678,7 @@ class Mixes:
                 conn.execute("UPDATE mix_editions SET active=1 WHERE id=?", (identity,))
 
     async def prepare_pass(self, client):
-        today = self.day()
+        today = await asyncio.to_thread(self.day)
         await asyncio.to_thread(self.activate, today)
         await asyncio.to_thread(self.forget_unfound)
         # Reclaim retired audio before checking capacity for new editions.
