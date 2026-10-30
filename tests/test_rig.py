@@ -60,3 +60,41 @@ def test_popularity_runs_end_to_end_against_the_fake(tmp_path, fake):
 
     result = asyncio.run(run())
     assert len(result["songs"]) == 20 and len(result["albums"]) == 10
+
+
+def test_every_rig_command_keeps_to_its_own_containers_and_limits():
+    """D-53: pig-music-test-* only, the app capped at 2 CPUs and 2 GB,
+    --restart no, data under its own appdata folder; never the production
+    container, its appdata or the NAS."""
+    from scripts import test_rig
+
+    image = "ghcr.io/maroge1990/pig-music@sha256:" + "0" * 64
+    commands = (
+        test_rig.up_commands(image)
+        + [test_rig.run_command("check", "code")]
+        + test_rig.reset_commands()
+    )
+    runs = [c for c in commands if c.startswith("docker run -d")]
+    assert len(runs) == 2 and all("--restart no" in c for c in runs)
+    # No internet for the rig, and only an image with the switch (31 Oct: an
+    # image without it reached the real metadata services).
+    assert any(
+        c.startswith("docker network create --internal pig-music-test")
+        for c in commands
+    )
+    probe = commands.index(
+        next(c for c in commands if "import server.test_services" in c)
+    )
+    assert probe < commands.index(runs[0])
+    app = next(c for c in runs if "--name pig-music-test-app" in c)
+    assert "--cpus 2 " in app and "--memory 2g " in app
+    assert "-p " not in app and "--publish" not in app
+    for command in commands:
+        assert "pig-music-preview" not in command  # production appdata
+        assert "/mnt/user/" not in command.replace(test_rig.ROOT, "")
+        for name in ("--name ", "docker rm -f "):
+            if name in command:
+                assert command.split(name, 1)[1].startswith("pig-music-test-")
+        if command.startswith("docker exec "):
+            assert " pig-music-test-app python " in command
+    assert " PigMusic" not in " ".join(commands)

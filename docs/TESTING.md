@@ -14,7 +14,7 @@ Commands for the automated suites are in [AGENTS.md](../AGENTS.md#test-cheapest-
 | T4 Deployed, read-only | Health, version, logs and live playback diagnostics through a dedicated test member | Claude | Diagnosing a live report |
 | T5 Owner devices | Physical iPhone, iPad and Watch; the release acceptance checklist; native device acceptance; deploy | Mark | Release acceptance and anything no other tier can settle |
 
-- **T3 does not exist yet.** It needs a staging PigMusic container on Unraid with a disposable library and fake MusicBrainz, ListenBrainz and download sources. Building it is the first P1 issue. Until it exists, every handoff lists which T3 checks could not run.
+- **T3 runs on the Unraid rig** (see T3 below); fake download sources are not built yet, so checks that need a real transfer still fall to T5.
 - **Machines:** the development Mac has 8 GB of memory and cannot run the iOS simulator. Native screen checks are therefore T5, and native playback is covered by PigKit harness runs (T2 locally, T4 against the live server).
 - **Claude's default is to test, not to ask.** T1 to T4 touch no household data and change nothing on the live server, so Claude runs them without asking. Anything that changes production (a release, a template, a setting, the household library) needs Mark's yes; see [Releasing](OPERATIONS.md#releasing).
 - **Status words:** *Implemented* (code done) → *Locally verified* (T1 to T3 pass, evidence linked) → *Verified* (Mark's T5 report). Only Mark writes *Verified*. An implemented change stays open until its acceptance gate passes.
@@ -79,7 +79,23 @@ For event-loop blocking (#16) and lock-hold (#17) windows, exclude only the firs
 
 ## T3: End to end
 
-T3 runs a staging PigMusic test container on Unraid with a disposable library and fake external services (MusicBrainz, ListenBrainz and the download sources), driven by Claude, with the browser pane for the web app. **It does not exist yet; building it is the first P1 issue.** Until then, handoffs list which T3 checks could not run, and the browser checks below run against a local server with disposable fixtures.
+T3 runs a staging PigMusic on Unraid (D-53) with a disposable generated library and fake metadata services, driven by `scripts/test_rig.py` (#15):
+
+```sh
+.venv/bin/python -m scripts.test_rig up [--image ghcr.io/maroge1990/pig-music@sha256:…]
+.venv/bin/python -m scripts.test_rig check     # owner, 60 generated songs, scan, Home mixes
+.venv/bin/python -m scripts.test_rig artist    # a cold artist page: seconds, songs, albums, fake requests (#21)
+.venv/bin/python -m scripts.test_rig mixes     # Home mixes p50/p95 over a minute (#22)
+.venv/bin/python -m scripts.test_rig status | down | reset
+```
+
+- **What runs:** `pig-music-test-app` (2 CPUs, 2 GB) and `pig-music-test-fake` (`scripts/fake_services.py`), both `--restart no`, on an internal Docker network with no internet access, with data only under `appdata/pig-music-test`. Nothing is published to the LAN; `scripts/rig_driver.py` runs inside the app container against 127.0.0.1.
+- **Fakes:** `PIG_MUSIC_TEST_SERVICES` (`server/test_services.py`) sends the server's MusicBrainz, ListenBrainz, Cover Art Archive, Apple chart and artist-image requests to the fake and refuses every other host. The fake answers deterministically; `POST /_control` sets `delay`, `fail` and `albums`, and `GET /_stats` counts requests.
+- **Not faked yet:** download sources. The engine runs without connecting, so every search finds nothing (the overnight "unfindable" case); song requests through a fake source are the next step.
+- **Image:** `up` refuses an image without `server/test_services.py`. Avoid running scenarios around a scheduled release (00:05–01:00 Melbourne) so live measurements stay clean.
+- The rig never touches the production container, its appdata, its image tag or the NAS; `status` reads production read-only.
+
+The browser checks below still run against a local server with disposable fixtures.
 
 The iOS simulator cannot run on the 8 GB development Mac, so native screens are checked on devices (T5) and native playback through PigKit harness runs.
 
