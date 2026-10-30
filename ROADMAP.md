@@ -5,31 +5,40 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 30 Oct 2026.*
+*Overwritten at the end of every session. 30 Oct 2026 (evening).*
 
-- **Live:** server `3aaaa51` and native **0.2.0 (12)** (owner-reported). Build-12 live checks on 29 Oct failed the
-  event-loop (#16) and export-lock (#17) gates; cold popularity is slow (#21); device battery gates are open (#18, #19).
-- **Local, not pushed:** server fixes `cc37394`, `73f9ca1`, `d093295`, `7c9f33f` (event-loop blocks found live and by
-  audit; reserved sign-in threads; each with a regression that fails on the old code and two Codex rounds), the
-  documentation reset `6d4ebd3`, and the household-details clean-up `4f666f3`, `c8eead2` (two Codex rounds, approved),
-  plus notes `14a36dc`, `ca6b1c8`. Not yet live (#20).
-- **Household details** (addresses, host names, domain, edge rules) live only in the gitignored `.private/` (D-45).
-- **Project reset done** (30 Oct): review and fixes, documentation structure, issues #15–#86 (Mark's own requests
-  #53–#63), whole-product audit (findings #64–#86 plus five private security drafts), and Mark's top five below.
-  The feature freeze ends; new requests become issues first.
-- **Waiting on Mark:** the export-lock device check (#17), device evidence for battery (#18, #19), the items labelled
-  [`owner`](https://github.com/maroge1990/PigMusic/issues?q=is%3Aopen+label%3Aowner).
+- **Live:** server `1bc2039` (released 30 Oct as `reset-20261030-v2`, previous kept as `PigMusic-before-reset-20261030-v2`):
+  the 30 Oct event-loop fixes, web listening history (#66), sign-in hardening, release-tooling fixes. The live
+  container's template had drifted (br0 network and memory/CPU limits lost on 25 Oct); both restored before the
+  release. iPhone: **0.2.0 (12)** installed from the Mac on 30 Oct.
+- **Pushed, not yet released:** the idle-CPU batch (`45d0f3b`, `c4a7887`, `a4bf992`, `bc20fc2`) and the Watch
+  delivery batch (native **build 13**: `b1a5649`, `8d9e5b6`, `f356ea3`, `7946403`, `4e0cc3c`). Both passed two Codex
+  rounds; build 13 is not on Mark's devices yet (signing needs his Mac password in a terminal, or TestFlight).
+- **Live gates:** #20/#16 idle 30-minute window met (0 stalls, 0 lock holds); the *loaded* window still waits for real
+  use. Idle CPU before the idle-CPU batch: 31% of one core (27.5% export pass, 3.1% health check), posted on #63;
+  re-measure after its release.
+- **Ways of working:** area batches with one Codex pair per batch, Claude pushes after two rounds, releases need
+  Mark's go-ahead (D-50). New decisions today: D-48 (household-song listens), D-49 (per-account sign-in delay),
+  D-50, D-51 (Watch copies prepared only in the foreground).
+- **Household details** live only in the gitignored `.private/` (D-45).
+- **Waiting on Mark:** go-ahead to release the pushed batches; installing build 13 (or choosing TestFlight, which
+  needs a paid Apple Developer account); device evidence for #17, #18, #19; the items labelled
+  [`owner`](https://github.com/maroge1990/PigMusic/issues?q=is%3Aopen+label%3Aowner); confirming the Cloudflare
+  cache bypass and IPv6 rate limit (sign-in advisories).
 
 ## Now
 
-Chosen by Mark on 30 Oct (D-47), reliability first, in this order:
+Chosen by Mark on 30 Oct (D-47), reliability first. Done today: items 3 and 4 are live; 2 and 5 are pushed.
 
-1. **Release the 30 Oct server fixes** — #20, confirming #16 live (and #17's evidence once Mark's device check is in)
-2. **Watch delivery and battery** — #64, #70, #71, #65 (most likely closes #19; then #18 evidence)
-3. **Web listening history stops** — #66
-4. **Sign-in hardening** — the two internet-facing draft security advisories (sign-in throttling and the cookie on
-   cacheable artwork); tracked privately, not as public issues
-5. **Constant server CPU while idle** — #63, with #74 and #79
+1. **Release and live gates** — release the pushed batches (#20); take a loaded 30-minute window for #16; re-measure
+   idle CPU (#63)
+2. **Watch delivery and battery, device checks** — build 13 on phone and Watch, then Mark's battery runs (#19, #18;
+   #64, #70, #71, #65 are fixed in it)
+3. **Sign-in hardening leftovers** — the warning not renewed during multi-day guessing (Codex round 2), IPv6 address
+   grouping, a longer rejected-password list, bounding the hashing queue; tracked in the private advisory
+4. **Idle CPU leftovers** — #74 parts 2–3 (publication refresh under the lifecycle lock, stuck replacement cleanup),
+   the preloader's per-item settings stat, #88
+5. **Findings from today's reviews** — #87 (release check tmpfs size), #88
 
 ## Next (P1/P2)
 
