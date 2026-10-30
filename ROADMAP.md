@@ -16,7 +16,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   - Withdrawn designs rebuilt: #68 (only the retired file itself is hidden, by hash, while its replacement plays),
     #74 part 2 (publication rebuilds outside the lock; locked operations catch the library up first), #80 part 2
     (offline web sign-out ends that one session by id later; /me returns `session_id`). #80's round-2 high finding
-    was fixed without a third review (two-round limit).
+    was fixed without a third review (two-round limit); behaviour confirmed by Mark (D-55).
 - **iPhone/Watch:** native **0.2.0 (13)** on Mark's iPhone (free signing, reinstall before 6 Nov). Build **14** (#60,
   #61, #62) is pushed, not installed: signing needs Mark's Mac password.
 - **Live gates:** #20/#16 idle windows met; the loaded window waits for real use. Idle CPU on `e1557ec`: 11.5% of a
@@ -25,10 +25,10 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 - **Flaky timing tests:** `test_mix_responsiveness` (0.503 s vs 0.5 s) once in CI; the diagnostics stall test and the
   radio-opening test were fixed.
 - **Ways of working:** area batches, two Codex rounds, Claude pushes (D-50); Claude may release when it helps testing,
-  under D-52; efficiency and battery first (D-54); the Unraid test copy is approved (D-53, #15).
+  under D-52; efficiency and battery first (D-54); offline web sign-out (D-55); the Unraid test copy is approved (D-53, #15).
 - **Household details** live only in the gitignored `.private/` (D-45).
 - **Waiting on Mark:** the server/web checks for the 31 Oct and 1 Nov releases and device checks for builds 13/14;
-  confirming #80 part 2's behaviour (clear this device and say so); #17's device numbers; the recommended choices
+  #17's device numbers; the recommended choices
   used for #69, #72 and the #62 reading; whether the web Library loses its shuffle button too (#61); #76, #77; the
   [`owner`](https://github.com/maroge1990/PigMusic/issues?q=is%3Aopen+label%3Aowner) items; the Cloudflare
   cache-bypass and IPv6 rate-limit confirmations (sign-in advisories).
