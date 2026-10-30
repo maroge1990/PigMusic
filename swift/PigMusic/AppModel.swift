@@ -1095,15 +1095,6 @@ enum PlayOrigin: Hashable {
       // Durable events remain queued until the next confirmed connection.
     }
   }
-  func shuffleLibrary() async {
-    guard let store else { return }
-    let stamp = generation
-    do {
-      let tracks = try await store.tracks(limit: max(songCount, 1))
-      guard generation == stamp else { return }
-      play(tracks.shuffled())
-    } catch { message = error.userMessage }
-  }
   /// Songs in the queue that came from the person's radio, by `mix:` id.
   var radioIDs: Set<String> = []
   @ObservationIgnored private var radioLoading = false

@@ -63,9 +63,6 @@ struct LibraryView: View {
               }
             }
           }
-          RoundIcon(label: "Shuffle all songs", systemImage: "shuffle") {
-            Task { await model.shuffleLibrary() }
-          }.disabled(model.songCount == 0)
         }
         content
         if model.songCount == 0 {
