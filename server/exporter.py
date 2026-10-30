@@ -24,6 +24,10 @@ from .storage import library_root
 
 
 # "CD 01", "Disc 2", "Disk02": one disc of an album kept in its own folder.
+# A published song's NAS copy was verified and its download removed when it
+# was published, so later passes leave it alone; a full check of every
+# published song (and any cleanup a restart interrupted) runs this often.
+VERIFY_PUBLISHED_EVERY = 3600
 DISC_FOLDER = re.compile(r"(?:cd|dis[ck])[ _-]*0*(\d+)", re.IGNORECASE)
 
 
@@ -91,6 +95,11 @@ class Exporter:
         # deleting the source needs a hard link or a read made just now.
         self.digests = {}
         self.pass_id = 0
+        # When the last full check ran, with which config, and the published
+        # songs it left waiting (reported until the next full check).
+        self.verified_at = None
+        self.verified_config = None
+        self.verified_waiting = []
 
     def digest(self, path, this_pass=False):
         key = os.fspath(path)
@@ -428,7 +437,24 @@ class Exporter:
             completed = 0
             changed = False
             waiting = []
-            for track in self.records():
+            records = self.records()
+            now = time.monotonic()
+            full = (
+                self.verified_at is None
+                or now - self.verified_at >= VERIFY_PUBLISHED_EVERY
+                or config != self.verified_config
+            )
+            # Between full checks only songs not yet published are visited:
+            # re-verifying every published song each pass cost 35-40 s of NAS
+            # checks at ~30% of a core for 205 songs, forever (#63, #74).
+            work = records
+            if not full:
+                work = [t for t in records if not t.get("export_relative_path")]
+                published = {t["id"] for t in records} - {t["id"] for t in work}
+                still = [w for w in self.verified_waiting if w["id"] in published]
+                waiting.extend(still)
+                completed = len(published) - len(still)
+            for track in work:
                 # One song that needs a decision (or whose file is refused)
                 # waits on its own; the rest still publish.
                 if not self.warm(track):
@@ -452,6 +478,10 @@ class Exporter:
                 # Only a newly recorded location changes the library; an
                 # unchanged pass must not rebuild it (LOCK1, 28 Oct).
                 changed = changed or published is True
+            if full:
+                published = {t["id"] for t in records if t.get("export_relative_path")}
+                self.verified_waiting = [w for w in waiting if w["id"] in published]
+                self.verified_at, self.verified_config = now, config
             if changed:
                 self.store.refresh_library()
             self.store.cleanup_replacements()

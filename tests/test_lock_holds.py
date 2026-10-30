@@ -84,6 +84,8 @@ def test_a_changed_published_song_is_read_again_and_refused(tmp_path, monkeypatc
     exporter.process()  # Written moments ago: checked on the next pass.
     assert store.read_document("library-export-status")["status"] == "completed"
     settle(target)
+    # Published songs are read again at the hourly full check (#63, #74).
+    exporter.verified_at -= 3601
     exporter.process()
     status = store.read_document("library-export-status")
     assert status["status"] == "partial"

@@ -448,3 +448,46 @@ def test_export_plan_lists_a_song_needing_a_decision_beside_the_rest(
     assert "destination decision" in served["stuck"]["error"]
     assert served["other"]["exported"] is True
     assert response.json()["status"]["status"] == "partial"
+
+
+def test_published_songs_are_rechecked_hourly_not_every_pass(tmp_path, monkeypatch):
+    """#63/#74: every 15 s the pass re-verified every published song (about
+    ten NAS checks, a lock and a database connection each): 35-40 s of work
+    at ~30% of a core for 205 songs live, forever, with nothing changing."""
+    store, root = nas_with(tmp_path, monkeypatch, [])
+    for name in ("one", "two", "three"):
+        download(store, name, album=f"Album {name}")
+    exporter = Exporter(store, root)
+    checked = []
+    publish = exporter.publish
+    monkeypatch.setattr(
+        exporter, "publish", lambda track: checked.append(track["id"]) or publish(track)
+    )
+    exporter.process()
+    assert sorted(checked) == ["one", "three", "two"]
+    status = store.read_document("library-export-status")
+    assert status["status"] == "completed" and status["files"] == 3
+    # Next pass: nothing changed, so no published song is touched again...
+    checked.clear()
+    exporter.process()
+    assert checked == []
+    status = store.read_document("library-export-status")
+    assert status["status"] == "completed" and status["files"] == 3
+    # ...but a new download is published at once.
+    download(store, "four", album="Album four")
+    exporter.process()
+    assert checked == ["four"]
+    # The hourly full check verifies every published song again and reports
+    # one whose NAS copy went missing until the next full check.
+    published = {t["id"]: t["export_relative_path"] for t in exporter.records()}
+    (root / published["two"]).unlink()
+    exporter.verified_at -= 3601
+    checked.clear()
+    exporter.process()
+    assert sorted(checked) == ["four", "one", "three", "two"]
+    checked.clear()
+    exporter.process()
+    assert checked == []
+    status = store.read_document("library-export-status")
+    assert status["status"] == "partial" and status["files"] == 3
+    assert [r["id"] for r in status["needs_review"]] == ["two"]
