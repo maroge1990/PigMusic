@@ -351,12 +351,13 @@ class Release:
             flags["template"] = True
             self.remote("docker start PigMusic >/dev/null")
             self.wait_ready()
-            self.state(original)
             health = self.private("/api/health")
             assert health["https"] is True and health["storage_available"]
             assert self.private("/api/v1/setup/owner") == {"setup_required": False}
             assert self.http.get("/api/v1/admin/library").status_code in {401, 403}
             self.verify_container(live, candidate)
+            # Downloads resume only once every check has passed (#75).
+            self.state(original)
             print("Release is live:", self.version, "; backup:", self.backup)
             print("Rollback container:", self.previous, flush=True)
         except Exception:
@@ -412,8 +413,17 @@ class Release:
         if flags["stopped"]:
             self.remote("docker start PigMusic >/dev/null")
             self.wait_ready()
-        if flags["paused"]:
+        # Once the new image has run, downloads stay paused until the owner
+        # has confirmed the library and state (docs/OPERATIONS.md, #75). If it
+        # never ran, the old container and its data are untouched: resume.
+        if flags["paused"] and not flags["created"]:
             self.state(original)
+        elif flags["paused"]:
+            print(
+                "Downloads stay paused; resume them in Admin once the library "
+                "and state are confirmed.",
+                flush=True,
+            )
 
 
 def retention(unraid, keep):

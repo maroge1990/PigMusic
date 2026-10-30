@@ -216,7 +216,50 @@ def test_failure_after_create_restores_data_container_and_settings():
     restored = index(commands, "data.failed-test-release-v1")
     renamed = index(commands, "docker rename PigMusic-before-test-release-v1 PigMusic")
     assert failed < restored < renamed
+    # The new image ran, so downloads stay paused after the rollback (#75).
+    assert unraid.settings == {**SETTINGS, "enabled": False}
+
+
+def test_downloads_resume_only_after_every_final_check():
+    """#75: the release re-enabled downloads before its final checks, so a
+    failing check rolled back state the new image might already have
+    changed with downloads running."""
+
+    class Recorded(FakeUnraid):
+        def __init__(self, late_failure=False):
+            super().__init__()
+            self.late_failure, self.sent = late_failure, []
+
+        def run(self, command, payload=None):
+            if payload and command.startswith("docker exec -i PigMusic"):
+                self.sent.append((len(self.commands), json.loads(payload)))
+            if (
+                self.late_failure
+                and self.running == "sha256:new"
+                and "curl" in command
+                and "/api/v1/setup/owner" in command
+            ):
+                self.commands.append(command)
+                return json.dumps({"setup_required": True})
+            return super().run(command, payload)
+
+    unraid = Recorded()
+    run = release(unraid)
+    run.apply(*run.preflight())
+    resumed = [at for at, value in unraid.sent if value["enabled"]]
+    owner_checks = [
+        i
+        for i, c in enumerate(unraid.commands)
+        if "curl" in c and "/api/v1/setup/owner" in c
+    ]
+    assert resumed and resumed[-1] > owner_checks[-1]
     assert unraid.settings == SETTINGS
+    unraid = Recorded(late_failure=True)
+    run = release(unraid)
+    with pytest.raises(AssertionError):
+        run.apply(*run.preflight())
+    assert not [value for _, value in unraid.sent if value["enabled"]]
+    assert unraid.settings == {**SETTINGS, "enabled": False}
 
 
 def test_retention_reports_without_deleting():
