@@ -53,6 +53,14 @@ Tiers and who runs what: [docs/TESTING.md](docs/TESTING.md). Every functional ch
 
 Tests mark provider rate limits off by default; `@pytest.mark.real_rate_limits` (see `tests/test_rate_limits.py`) keeps them.
 
+## Work in batches
+
+Batch by area (D-50): group the open issues that touch the same code and risk (say, the idle-CPU loops #63/#74/#79, or the Watch delivery issues) and carry them as one batch. The fixed costs are paid once per batch: two Codex rounds, one push, one CI build. Live releases bundle a few batches.
+- Inside a batch each fix stays its own commit (one logical change, `Refs #n`) with its own test that fails on the old code. Run the targeted tests per fix and the full gates once before the batch's first Codex round and again before the push.
+- Keep a batch to one platform where possible: a Swift change adds Mac runs, and a mixed diff gives Codex more to misread.
+- Don't batch unrelated areas to save time, and keep a fix whose live effect must be confirmed (for example the event-loop gates in #16) in a release where it can be told apart.
+- Name the batch, its issues and its first commit in the Codex focus; `--base` is the commit before the batch.
+
 ## Independent review
 
 Once your checks pass, get an adversarial review by a different agent before pushing any change that either:
@@ -74,7 +82,7 @@ Stopping rule, so review doesn't loop: at most two Codex rounds per batch of wor
 
 ## Ship
 
-- Commit straight to `main`, one logical change per commit, writing `Refs #n` (never `Fixes`/`Closes`: an issue is closed only after Mark confirms the fix was checked). **Ask before pushing:** a push to `main` publishes `ghcr.io/maroge1990/pig-music:main` and `sha-<rev>`.
+- Commit straight to `main`, one logical change per commit, writing `Refs #n` (never `Fixes`/`Closes`: an issue is closed only after Mark confirms the fix was checked). A push to `main` publishes `ghcr.io/maroge1990/pig-music:main` and `sha-<rev>`: push a batch once it has passed its two Codex rounds with no high finding left (D-50); otherwise ask Mark first.
 - Live releases are separate and owner-authorised: verify with `scripts/deploy_unraid.py --image <digest>`, release with `scripts/deploy_release.py` (see [operations](docs/OPERATIONS.md)). Both read household values from `.private/household.env`.
 - Native build number: change `CURRENT_PROJECT_VERSION` in both `swift/PigMusic.xcodeproj/project.pbxproj` and `scripts/generate_native_project.py`. Current version: 0.2.0 (12).
 - After a delivery, overwrite ROADMAP.md's current state and comment on the issue. Record Mark's decisions in docs/DECISIONS.md. Don't add dated delivery docs.

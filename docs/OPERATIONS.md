@@ -110,7 +110,7 @@ Unraid pulls with a GitHub credential that has `read:packages`, entered through 
 ## Releasing
 
 Who may do what:
-- Commit to `main`; **ask before every push**, because a push publishes images.
+- Commit to `main`. A push publishes images: Claude pushes a batch only after its two Codex rounds leave no high finding, and asks Mark otherwise (D-50).
 - Verification and release are separately owner-authorised; file-move work needs the appropriate backup. No issue or task grants standing deploy permission.
 
 Each release has two steps:
