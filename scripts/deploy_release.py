@@ -21,14 +21,18 @@ import httpx
 
 ROOT = "/mnt/user/appdata/pig-music-preview"
 TEMPLATE = "/boot/config/plugins/dockerMan/templates-user/my-PigMusic.xml"
-# Reserved example values for imports and the recorded-fake tests. main()
-# replaces them with the real household values (scripts/household.py).
-ORIGIN = "https://pigmusic.example-tailnet.ts.net:10000"
-TAILNET_ADDRESS = "100.64.0.1"
-SERVER_NAME = "Example"
+# Reserved example values, used only when a test passes them explicitly. A
+# Release built without a config loads the real household values
+# (scripts/household.py) and fails before any remote command if one is missing.
+EXAMPLE = {
+    "origin": "https://pigmusic.example-tailnet.ts.net:10000",
+    "tailnet_address": "100.64.0.1",
+    "server_name": "Example",
+    "lan_url": "http://10.0.0.3:8765",
+    "networks": {"br0": ("10.0.0.3", "-1"), "pig-music-preview": ("172.25.0.2", "0")},
+}
 # The live container must keep a memory limit; release gates still test under 1 GiB.
 MEMORY_LIMITS = range(1 << 30, (8 << 30) + 1)
-NETWORKS = {"br0": ("10.0.0.3", "-1"), "pig-music-preview": ("172.25.0.2", "0")}
 ACTIVE = ("searching", "downloading", "validating", "importing")
 IMAGE = re.compile(r"ghcr.io/maroge1990/pig-music@sha256:[0-9a-f]{64}")
 DATABASE = "/data/pig-music.sqlite3"
@@ -71,12 +75,15 @@ def household(key):
 
 
 def load_household():
-    """Point the release at the live household instead of the example values."""
-    global ORIGIN, TAILNET_ADDRESS, SERVER_NAME
-    ORIGIN = household("PIG_MUSIC_TAILNET_ORIGIN")
-    TAILNET_ADDRESS = household("PIG_MUSIC_TAILNET_ADDRESS")
-    SERVER_NAME = household("PIG_MUSIC_UNRAID_NAME")
-    NETWORKS["br0"] = (household("PIG_MUSIC_LAN_ADDRESS"), NETWORKS["br0"][1])
+    """The live household's release values; raises if any is missing."""
+    lan = household("PIG_MUSIC_LAN_ADDRESS")
+    return {
+        "origin": household("PIG_MUSIC_TAILNET_ORIGIN"),
+        "tailnet_address": household("PIG_MUSIC_TAILNET_ADDRESS"),
+        "server_name": household("PIG_MUSIC_UNRAID_NAME"),
+        "lan_url": household("PIG_MUSIC_LAN_URL"),
+        "networks": {"br0": (lan, "-1"), "pig-music-preview": ("172.25.0.2", "0")},
+    }
 
 
 class Unraid:
@@ -101,16 +108,22 @@ class Unraid:
 
 
 class Release:
-    def __init__(self, unraid, image, revision, version, http=None, sleep=time.sleep):
+    def __init__(
+        self, unraid, image, revision, version, http=None, sleep=time.sleep, config=None
+    ):
         self.unraid, self.image, self.revision, self.version = (
             unraid,
             image,
             revision,
             version,
         )
-        self.http = http or httpx.Client(
-            base_url=household("PIG_MUSIC_LAN_URL"), timeout=20
-        )
+        # Fail closed: every method uses these, never module-level examples.
+        config = config or load_household()
+        self.origin = config["origin"]
+        self.tailnet_address = config["tailnet_address"]
+        self.server_name = config["server_name"]
+        self.networks = config["networks"]
+        self.http = http or httpx.Client(base_url=config["lan_url"], timeout=20)
         self.sleep = sleep
         self.backup = f"{ROOT}/backups/pre-{version}"
         self.previous = f"PigMusic-before-{version}"
@@ -134,15 +147,15 @@ class Release:
         )
 
     def private(self, path):
-        origin = urlsplit(ORIGIN)
+        origin = urlsplit(self.origin)
         return json.loads(
             self.remote(
                 "curl --max-time 15 --fail --silent --show-error --resolve "
                 + shlex.quote(
-                    f"{origin.hostname}:{origin.port or 443}:{TAILNET_ADDRESS}"
+                    f"{origin.hostname}:{origin.port or 443}:{self.tailnet_address}"
                 )
                 + " "
-                + shlex.quote(ORIGIN + path)
+                + shlex.quote(self.origin + path)
             )
         )
 
@@ -166,7 +179,7 @@ class Release:
         assert live["HostConfig"]["Memory"] in MEMORY_LIMITS
         assert live["Config"]["User"] == "99:100"
         networks = live["NetworkSettings"]["Networks"]
-        for network, (address, _) in NETWORKS.items():
+        for network, (address, _) in self.networks.items():
             assert networks[network]["IPAddress"] == address
         self.remote(
             "test ! -e "
@@ -273,7 +286,7 @@ class Release:
             )
             generator = (
                 '$docroot="/usr/local/emhttp"; $var=["timeZone"=>"Australia/Melbourne","NAME"=>'
-                + json.dumps(SERVER_NAME)
+                + json.dumps(self.server_name)
                 + "]; "
                 '$subnet=["pig-music-preview"=>"172.25.0.0/16"]; $driver=["pig-music-preview"=>"bridge"]; '
                 'require "/usr/local/emhttp/plugins/dynamix.docker.manager/include/Helpers.php"; '
@@ -288,7 +301,8 @@ class Release:
             self.remote(
                 "set -e\n"
                 + "\n".join(
-                    f"docker network disconnect {n} {self.previous}" for n in NETWORKS
+                    f"docker network disconnect {n} {self.previous}"
+                    for n in self.networks
                 )
             )
             self.remote(command)
@@ -321,7 +335,7 @@ class Release:
             (m["Source"], m["Destination"], m["RW"]) for m in c["Mounts"]
         }
         assert mounts(after) == mounts(live)
-        for network, (address, _) in NETWORKS.items():
+        for network, (address, _) in self.networks.items():
             assert after["NetworkSettings"]["Networks"][network]["IPAddress"] == address
 
     def rollback(self, flags, original):
@@ -331,7 +345,7 @@ class Release:
             )
             if flags["created"] or present == "present":
                 self.remote("docker stop --timeout 30 PigMusic >/dev/null 2>&1 || true")
-                for network in NETWORKS:
+                for network in self.networks:
                     self.remote(
                         f"docker network disconnect {network} PigMusic >/dev/null 2>&1 || true"
                     )
@@ -350,7 +364,7 @@ class Release:
         if flags["renamed"]:
             self.remote("docker rename " + self.previous + " PigMusic")
             current = self.inspect("PigMusic")["NetworkSettings"]["Networks"]
-            for network, (address, priority) in NETWORKS.items():
+            for network, (address, priority) in self.networks.items():
                 if network not in current:
                     self.remote(
                         f"docker network connect --ip {address} --gw-priority {priority} {network} PigMusic"
@@ -411,7 +425,6 @@ def main():
         not in evidence
     ):
         parser.error("Exact-image Unraid acceptance has not completed")
-    load_household()
     release = Release(unraid, args.image, args.revision, args.version)
     live, candidate, original = release.preflight()
     print("Preflight passed: exact image, native manager, owner ready, no transfers.")

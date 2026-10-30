@@ -37,7 +37,7 @@ def container(image):
         "NetworkSettings": {
             "Networks": {
                 name: {"IPAddress": address}
-                for name, (address, _) in deploy.NETWORKS.items()
+                for name, (address, _) in deploy.EXAMPLE["networks"].items()
             }
         },
     }
@@ -117,6 +117,7 @@ def release(unraid):
         "test-release-v1",
         http=FakeHTTP(),
         sleep=lambda _: None,
+        config=deploy.EXAMPLE,
     )
 
 
@@ -224,3 +225,19 @@ def test_state_snippet_reads_and_pauses_downloads_in_sqlite(tmp_path):
 
 def test_baseline_snippet_compiles():
     compile(deploy.BASELINE, "baseline", "exec")
+
+
+def test_a_release_without_household_values_fails_before_any_remote_command(
+    tmp_path, monkeypatch
+):
+    """Codex round 1 on 4f666f3: a Release built outside main() used the
+    example network values, so a direct rollback reconnected br0 to them."""
+    from scripts import household
+
+    monkeypatch.setattr(household, "FILE", tmp_path / "missing.env")
+    for key in household.read(SOURCE / ".env.example"):
+        monkeypatch.delenv(key, raising=False)
+    unraid = FakeUnraid()
+    with pytest.raises(household.HouseholdError):
+        deploy.Release(unraid, IMAGE, REVISION, "v1", http=FakeHTTP())
+    assert unraid.commands == []
