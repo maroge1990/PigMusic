@@ -84,7 +84,7 @@ Stopping rule, so review doesn't loop: at most two Codex rounds per batch of wor
 
 - Commit straight to `main`, one logical change per commit, writing `Refs #n` (never `Fixes`/`Closes`: an issue is closed only after Mark confirms the fix was checked). A push to `main` publishes `ghcr.io/maroge1990/pig-music:main` and `sha-<rev>`: push a batch once it has passed its two Codex rounds with no high finding left (D-50); otherwise ask Mark first.
 - Live releases are separate and owner-authorised: verify with `scripts/deploy_unraid.py --image <digest>`, release with `scripts/deploy_release.py` (see [operations](docs/OPERATIONS.md)). Both read household values from `.private/household.env`.
-- Native build number: change `CURRENT_PROJECT_VERSION` in both `swift/PigMusic.xcodeproj/project.pbxproj` and `scripts/generate_native_project.py`. Current version: 0.2.0 (12).
+- Native build number: change `CURRENT_PROJECT_VERSION` in both `swift/PigMusic.xcodeproj/project.pbxproj` and `scripts/generate_native_project.py`. Current version: 0.2.0 (13).
 - After a delivery, overwrite ROADMAP.md's current state and comment on the issue. Record Mark's decisions in docs/DECISIONS.md. Don't add dated delivery docs.
 
 ## Conventions
