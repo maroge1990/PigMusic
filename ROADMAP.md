@@ -17,8 +17,10 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
     #74 part 2 (publication rebuilds outside the lock; locked operations catch the library up first), #80 part 2
     (offline web sign-out ends that one session by id later; /me returns `session_id`). #80's round-2 high finding
     was fixed without a third review (two-round limit); behaviour confirmed by Mark (D-55).
-- **iPhone/Watch:** native **0.2.0 (13)** on Mark's iPhone (free signing, reinstall before 6 Nov). Build **14** (#60,
-  #61, #62) is pushed, not installed: signing needs Mark's Mac password.
+- **iPhone/Watch:** native **0.2.0 (13)** on Mark's iPhone (free signing, reinstall before 6 Nov). Build **15** is
+  pushed (31 Oct, two Codex rounds): build 14's screen fixes (#60, #61, #62) plus #78 (no rebuild on a route change
+  while paused), #76 (a changed song stops playback only when queued, D-56), #77 (Watch copies fit the Watch's
+  budget, D-57). Not installed: signing needs Mark's Mac password.
 - **Live gates:** #20/#16 idle windows met; the loaded window waits for real use. Idle CPU on `e1557ec`: 11.5% of a
   core; on `15566c4` the server never went quiet overnight (mix searching ran past 07:30), so the re-measure (#63)
   waits for #90 to be live. After the 1 Nov release, compare that night's searches with ~700 / ~7 h (#90).
@@ -39,12 +41,10 @@ Reliability first (D-47). In order:
 
 1. **Release and live gates** — the 1 Nov release; then that night's search count (#90), the engine log (#89), the
    quiet idle-CPU re-measure (#63) and the loaded 30-minute window for #16/#20
-2. **Device checks** — install build 14 (Mark's Mac password, or TestFlight later); Mark's checks and battery runs
-   (#18, #19; #64, #65, #70, #71, #60–#62)
-3. **iPhone/Watch playback** — #78 (route change while paused), #76 (D-56) and #77 (D-57),
-   native build 15
-4. **T3 test rig** (#15), approved in D-53
-5. **Efficiency leftovers** (D-54) — #42, #43, #44 if the re-measure shows they matter
+2. **Device checks** — install build 15 (Mark's Mac password, or TestFlight later); Mark's checks and battery runs
+   (#18, #19; #64, #65, #70, #71, #60–#62, #76–#78)
+3. **T3 test rig** (#15), approved in D-53
+4. **Efficiency leftovers** (D-54) — #42, #43, #44 if the re-measure shows they matter
 
 ## Next (P1/P2)
 
