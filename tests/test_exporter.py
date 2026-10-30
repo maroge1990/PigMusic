@@ -248,6 +248,7 @@ def test_only_the_retired_file_itself_is_hidden(tmp_path, monkeypatch):
         "id": "scanned-copy",
         "relative_path": old["export_relative_path"],
     }
+    source.write_bytes(b"new source")  # The replacement, not yet exported.
     replacement = {k: v for k, v in track.items() if k != "export_relative_path"}
     with store.connect() as conn:
         conn.execute(
@@ -267,6 +268,16 @@ def test_only_the_retired_file_itself_is_hidden(tmp_path, monkeypatch):
     assert "scanned-copy" in store.index.by_id
     # The retired content shows again once no replacement is in the library.
     (root / old["export_relative_path"]).write_bytes(retired)
+    store.refresh_library()
+    assert "scanned-copy" not in store.index.by_id
+    # Or once the replacement's file is missing: the old copy still plays
+    # (Codex round 1).
+    playing = store.directory / "downloads" / "library" / track["relative_path"]
+    kept = playing.read_bytes()
+    playing.unlink()
+    store.refresh_library()
+    assert "scanned-copy" in store.index.by_id
+    playing.write_bytes(kept)
     store.refresh_library()
     assert "scanned-copy" not in store.index.by_id
     with store.connect() as conn:

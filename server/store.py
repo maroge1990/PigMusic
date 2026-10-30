@@ -639,22 +639,28 @@ class Store:
         self.cleanup_attempts[request_id] = (state, now)
         return True
 
-    @staticmethod
-    def retired_files(rows, current):
+    def retired_files(self, rows, current):
         """Old NAS files a quality replacement is retiring, by path: the old
-        version's recorded content, while its replacement is still in the
-        library (#68)."""
+        version's recorded content, while its replacement is in the library
+        and its file is there to play (#68)."""
+        from .media import track_file
+
         retired = {}
         for track_id, raw in rows:
             old, now = json.loads(raw), current.get(track_id)
             path = old.get("export_relative_path") or old.get("nas_relative_path")
             if (
-                path
-                and now
-                and old.get("sha256")
-                and now.get("export_relative_path") != path
+                not path
+                or not now
+                or not old.get("sha256")
+                or now.get("export_relative_path") == path
             ):
-                retired[path] = old["sha256"]
+                continue
+            try:
+                track_file(self, track_id)
+            except (FileNotFoundError, OSError, ValueError):
+                continue  # The old copy is still the one that plays.
+            retired[path] = old["sha256"]
         return retired
 
     def retired_copy(self, track, retired):
