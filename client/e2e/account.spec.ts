@@ -116,8 +116,12 @@ test("signing out with the server unreachable clears this device and finishes la
   await other.goto("/#/home");
   // The first tab reopens: it ends only the old session, by its id.
   await page.reload();
-  await expect
-    .poll(() => requests)
-    .toEqual(["POST /v1/auth/logout", "DELETE /v1/me/sessions/session-1"]);
+  // Either tab may finish it (ending an ended session is harmless), but only
+  // ever by that session's id, never through logout and its cookie.
+  await expect.poll(() => requests.length).toBeGreaterThan(1);
+  expect(requests[0]).toBe("POST /v1/auth/logout");
+  expect(new Set(requests.slice(1))).toEqual(
+    new Set(["DELETE /v1/me/sessions/session-1"]),
+  );
   await expect(page.getByLabel("Username")).toHaveCount(0);
 });
