@@ -676,3 +676,34 @@ def test_songs_only_and_full_requests_share_one_recordings_fetch(tmp_path):
             assert sum("top-recordings" in r for r in requests) == 1
 
     asyncio.run(run())
+
+
+def test_a_failed_songs_lookup_never_becomes_a_day_long_full_answer(tmp_path):
+    """#44 (Codex round 1): a full answer reused a songs-only answer whose
+    recordings lookup had failed, saving no songs for a day."""
+    store = Store(tmp_path)
+    save_settings(store, True, True, listenbrainz_token=TOKEN)
+    requests = []
+    working = listenbrainz(requests)
+    outage = [True]
+
+    def transport(request):
+        if outage[0] and "top-recordings" in request.url.path:
+            requests.append(request.url.path)
+            return httpx.Response(503)
+        return working(request)
+
+    provider = Popularity(store)
+
+    async def run():
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(transport)
+        ) as client:
+            assert (await provider.get(client, ARTIST, include_albums=False))[
+                "songs"
+            ] == []
+            outage[0] = False
+            full = await provider.get(client, ARTIST)
+            assert [s["title"] for s in full["songs"]] == ["Song"]
+
+    asyncio.run(run())

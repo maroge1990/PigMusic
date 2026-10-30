@@ -102,7 +102,9 @@ class Popularity:
             songs = None
             if include_albums:
                 cached = await asyncio.to_thread(self.store.read_document, songs_key)
-                if usable(cached):
+                # Only songs that were fetched: a failed lookup's empty list
+                # must not become part of a day-long full answer (Codex round 1).
+                if usable(cached) and cached.get("failed") is False:
                     songs = cached["data"]["songs"]
             started = time.monotonic()
             waiting = not (warming.get() or background_metadata.get() or complete)
@@ -279,11 +281,16 @@ class Popularity:
                 logger.warning("Popularity parsing failed (%s)", type(error).__name__)
                 # Unavailable or invalid credentials never add an empty/error panel.
                 result = {"enabled": True, "songs": [], "albums": []}
-                ttl, partial = 60, False
+                ttl, partial, failed = 60, False, True
             await settled(
                 self.store.write_document,
                 key,
-                {"retry_after": time.time() + ttl, "data": result, "partial": partial},
+                {
+                    "retry_after": time.time() + ttl,
+                    "data": result,
+                    "partial": partial,
+                    "failed": failed,
+                },
             )
             if partial:
                 self.complete_later(client, artist_id)
