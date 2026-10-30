@@ -160,10 +160,11 @@ public actor PlaybackSourceRepository {
   /// are fetched fresh next time. A source something still plays is kept; the
   /// player stops only when a changed song is in its queue (#76).
   public func forget(ids: Set<String>) async {
-    for (key, entry) in entries where ids.contains(key.id) && entry.references == 0 {
-      entries.removeValue(forKey: key)
-      await preparer.release(entry.source)
-    }
+    // Chosen and removed before the first await: a song leased while sources
+    // are released below is no longer in reach (Codex round 1).
+    let gone = entries.filter { ids.contains($0.key.id) && $0.value.references == 0 }
+    for key in gone.keys { entries.removeValue(forKey: key) }
+    for entry in gone.values { await preparer.release(entry.source) }
   }
   /// Owner must stop and await decoders before clearing account/library access.
   public func reset() async {

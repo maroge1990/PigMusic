@@ -61,3 +61,14 @@ def test_watch_copies_fit_the_watch_budget():
     phone = (APP / "WatchPhoneController.swift").read_text()
     assert "2 * 1024 * 1024 * 1024" not in phone
     assert "receipt?.budgetBytes ?? Self.watchDefaultBudget" in phone
+
+
+def test_forgetting_changed_sources_removes_them_before_any_suspension():
+    """#76 (Codex round 1): releasing one source suspends the repository
+    actor; a song leased meanwhile must not be released by the same pass."""
+    repository = (
+        ROOT / "swift/PigKit/Sources/PigPlayback/PlaybackSourceRepository.swift"
+    ).read_text()
+    forget = body(repository, "public func forget(ids: Set<String>)")
+    assert not re.search(r"for [^{]* in entries[^{]*\{[^}]*await", forget)
+    assert "await preparer.release" in forget
