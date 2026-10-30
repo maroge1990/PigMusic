@@ -18,13 +18,21 @@ import httpx
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", default="http://192.168.1.203:8765")
+    parser.add_argument(
+        "--url", help="Server URL (default: PIG_MUSIC_LAN_URL from household)"
+    )
     parser.add_argument("--artist", default="3e241a6f0ea7ef0dd71d085f")
     parser.add_argument("--samples", type=int, default=30)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if args.samples < 30:
         parser.error("Use at least thirty samples for p95")
+    if not args.url:
+        try:
+            from scripts import household
+        except ImportError:
+            import household
+        args.url = household.get("PIG_MUSIC_LAN_URL")
     results = []
     token = os.environ.get("PIG_MUSIC_BENCHMARK_TOKEN")
     headers = {"Authorization": "Bearer " + token} if token else {}

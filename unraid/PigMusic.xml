@@ -1,4 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
+<!-- Reference copy. Releases recreate PigMusic from the live template on the host (my-PigMusic.xml), not this file. tailnet-host.invalid and CONTAINER-BR0-IP stand in for PIG_MUSIC_TAILNET_ORIGIN and PIG_MUSIC_LAN_ADDRESS from .private/household.env (see .env.example). -->
 <Container version="2">
   <Name>PigMusic</Name>
   <Repository>ghcr.io/maroge1990/pig-music:sha-131e464fedd428e61f73ce241d3cc55bffec2ab1</Repository>
@@ -12,10 +13,10 @@
   <Project>https://github.com/maroge1990/Pig-Music</Project>
   <Overview>PigMusic: your music library, playlists and downloads. Uses the existing NAS music share and appdata. Private HTTPS remains available through the existing Tailscale service. The live account release is pinned to its verified source commit. On the account release, first open shows administrator setup; retrieve its one-time installation code from PigMusic Logs and choose your password in the private HTTPS WebUI. Advanced parameters preserve both network addresses.</Overview>
   <Category>MediaApp:Music MediaServer:Music</Category>
-  <WebUI>https://passyflix.tail6d1471.ts.net:10000/</WebUI>
+  <WebUI>https://tailnet-host.invalid:10000/</WebUI>
   <TemplateURL />
   <Icon>file:///boot/config/plugins/dockerMan/assets/pig-music.png</Icon>
-  <ExtraParams>--restart unless-stopped --user 99:100 --cpus 2 --memory 4g --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp:rw,noexec,nosuid,size=64m --network=name=pig-music-preview,ip=172.25.0.2,gw-priority=0 --network=name=br0,ip=192.168.1.203,gw-priority=-1</ExtraParams>
+  <ExtraParams>--restart unless-stopped --user 99:100 --cpus 2 --memory 4g --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp:rw,noexec,nosuid,size=64m --network=name=pig-music-preview,ip=172.25.0.2,gw-priority=0 --network=name=br0,ip=CONTAINER-BR0-IP,gw-priority=-1</ExtraParams>
   <PostArgs />
   <CPUset />
   <Requires>Existing mounted NAS share /mnt/remotes/SERVER01_Audio; existing pig-music-preview and br0 networks.</Requires>
@@ -24,7 +25,7 @@
   <Config Name="Music Library" Target="/library" Default="/mnt/remotes/SERVER01_Audio" Mode="rw" Description="Existing mounted NAS music share." Type="Path" Display="always" Required="true" Mask="false">/mnt/remotes/SERVER01_Audio</Config>
   <Config Name="Data Directory" Target="PIG_MUSIC_DATA" Default="/data" Mode="" Description="Container state directory." Type="Variable" Display="always" Required="true" Mask="false">/data</Config>
   <Config Name="Download Workspace" Target="PIG_MUSIC_DOWNLOAD_ROOT" Default="/library/.pig-music-work" Mode="" Description="Recoverable download workspace on the music share." Type="Variable" Display="always" Required="true" Mask="false">/library/.pig-music-work</Config>
-  <Config Name="Private HTTPS Origin" Target="PIG_MUSIC_PUBLIC_ORIGIN" Default="https://passyflix.tail6d1471.ts.net:10000" Mode="" Description="Existing private Tailscale HTTPS origin." Type="Variable" Display="always" Required="true" Mask="false">https://passyflix.tail6d1471.ts.net:10000</Config>
+  <Config Name="Private HTTPS Origin" Target="PIG_MUSIC_PUBLIC_ORIGIN" Default="https://tailnet-host.invalid:10000" Mode="" Description="Existing private Tailscale HTTPS origin." Type="Variable" Display="always" Required="true" Mask="false">https://tailnet-host.invalid:10000</Config>
   <Config Name="Trusted Proxy" Target="PIG_MUSIC_TRUSTED_PROXIES" Default="127.0.0.1,172.25.0.1" Mode="" Description="Only the existing local HTTPS proxy." Type="Variable" Display="always" Required="true" Mask="false">127.0.0.1,172.25.0.1</Config>
   <Config Name="Disable Bytecode" Target="PYTHONDONTWRITEBYTECODE" Default="1" Mode="" Description="Required by the read-only root." Type="Variable" Display="always" Required="true" Mask="false">1</Config>
 </Container>

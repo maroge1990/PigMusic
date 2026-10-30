@@ -40,7 +40,7 @@ def schema():
     value["paths"] = {
         p: v for p, v in value["paths"].items() if p.startswith("/api/v1/")
     }
-    value["servers"] = [{"url": "https://passyflix.tail6d1471.ts.net:10000"}]
+    value["servers"] = [{"url": "https://music.example.com"}]
     for path, operations in value["paths"].items():
         for method, operation in operations.items():
             if not isinstance(operation, dict) or "responses" not in operation:

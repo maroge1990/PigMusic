@@ -16,3 +16,4 @@ swift/PigKit/*
 !swift/PigKit/Sources/
 .github
 *.patch
+.private

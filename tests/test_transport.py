@@ -52,7 +52,7 @@ def test_https_origin_and_health_preserve_lan_transition(tmp_path, monkeypatch):
         assert client.get("/api/health").json()["https"] is True
 
 
-@pytest.mark.parametrize("value", ["*", "0.0.0.0/0", "192.168.1.0/24", "localhost", ""])
+@pytest.mark.parametrize("value", ["*", "0.0.0.0/0", "10.0.0.0/24", "localhost", ""])
 def test_proxy_trust_rejects_wildcard_and_broad_networks(monkeypatch, value):
     monkeypatch.setenv("PIG_MUSIC_TRUSTED_PROXIES", value)
     with pytest.raises(ValueError):
@@ -60,8 +60,8 @@ def test_proxy_trust_rejects_wildcard_and_broad_networks(monkeypatch, value):
 
 
 def test_proxy_trust_accepts_exact_private_proxy(monkeypatch):
-    monkeypatch.setenv("PIG_MUSIC_TRUSTED_PROXIES", "127.0.0.1,192.168.1.235")
-    assert proxy_trust() == "127.0.0.1,192.168.1.235"
+    monkeypatch.setenv("PIG_MUSIC_TRUSTED_PROXIES", "127.0.0.1,10.0.0.2")
+    assert proxy_trust() == "127.0.0.1,10.0.0.2"
 
 
 def test_trusted_tunnel_proxy_reveals_the_visitor_not_a_spoofed_forwarded_address(

@@ -15,17 +15,20 @@ import re
 import shlex
 import subprocess
 import time
+from urllib.parse import urlsplit
 
 import httpx
 
 ROOT = "/mnt/user/appdata/pig-music-preview"
 TEMPLATE = "/boot/config/plugins/dockerMan/templates-user/my-PigMusic.xml"
-ORIGIN = "https://passyflix.tail6d1471.ts.net:10000"
-TAILNET_ADDRESS = "100.99.233.14"
-LAN = "http://192.168.1.203:8765"
+# Reserved example values for imports and the recorded-fake tests. main()
+# replaces them with the real household values (scripts/household.py).
+ORIGIN = "https://pigmusic.example-tailnet.ts.net:10000"
+TAILNET_ADDRESS = "100.64.0.1"
+SERVER_NAME = "Example"
 # The live container must keep a memory limit; release gates still test under 1 GiB.
 MEMORY_LIMITS = range(1 << 30, (8 << 30) + 1)
-NETWORKS = {"br0": ("192.168.1.203", "-1"), "pig-music-preview": ("172.25.0.2", "0")}
+NETWORKS = {"br0": ("10.0.0.3", "-1"), "pig-music-preview": ("172.25.0.2", "0")}
 ACTIVE = ("searching", "downloading", "validating", "importing")
 IMAGE = re.compile(r"ghcr.io/maroge1990/pig-music@sha256:[0-9a-f]{64}")
 DATABASE = "/data/pig-music.sqlite3"
@@ -58,6 +61,24 @@ BASELINE = (
 )
 
 
+def household(key):
+    """A real household value; imported lazily so tests need no .private/."""
+    try:
+        from scripts import household as values
+    except ImportError:
+        import household as values
+    return values.get(key)
+
+
+def load_household():
+    """Point the release at the live household instead of the example values."""
+    global ORIGIN, TAILNET_ADDRESS, SERVER_NAME
+    ORIGIN = household("PIG_MUSIC_TAILNET_ORIGIN")
+    TAILNET_ADDRESS = household("PIG_MUSIC_TAILNET_ADDRESS")
+    SERVER_NAME = household("PIG_MUSIC_UNRAID_NAME")
+    NETWORKS["br0"] = (household("PIG_MUSIC_LAN_ADDRESS"), NETWORKS["br0"][1])
+
+
 class Unraid:
     """Thin SSH runner; tests substitute a recording fake."""
 
@@ -70,7 +91,7 @@ class Unraid:
             "BatchMode=yes",
             "-o",
             "IdentitiesOnly=yes",
-            "root@192.168.1.235",
+            household("PIG_MUSIC_UNRAID_SSH"),
         ]
 
     def run(self, command, payload=None):
@@ -87,7 +108,9 @@ class Release:
             revision,
             version,
         )
-        self.http = http or httpx.Client(base_url=LAN, timeout=20)
+        self.http = http or httpx.Client(
+            base_url=household("PIG_MUSIC_LAN_URL"), timeout=20
+        )
         self.sleep = sleep
         self.backup = f"{ROOT}/backups/pre-{version}"
         self.previous = f"PigMusic-before-{version}"
@@ -111,10 +134,14 @@ class Release:
         )
 
     def private(self, path):
+        origin = urlsplit(ORIGIN)
         return json.loads(
             self.remote(
                 "curl --max-time 15 --fail --silent --show-error --resolve "
-                f"passyflix.tail6d1471.ts.net:10000:{TAILNET_ADDRESS} "
+                + shlex.quote(
+                    f"{origin.hostname}:{origin.port or 443}:{TAILNET_ADDRESS}"
+                )
+                + " "
                 + shlex.quote(ORIGIN + path)
             )
         )
@@ -245,7 +272,9 @@ class Release:
                 + ")===false) exit(1);"
             )
             generator = (
-                '$docroot="/usr/local/emhttp"; $var=["timeZone"=>"Australia/Melbourne","NAME"=>"Passyflix"]; '
+                '$docroot="/usr/local/emhttp"; $var=["timeZone"=>"Australia/Melbourne","NAME"=>'
+                + json.dumps(SERVER_NAME)
+                + "]; "
                 '$subnet=["pig-music-preview"=>"172.25.0.0/16"]; $driver=["pig-music-preview"=>"bridge"]; '
                 'require "/usr/local/emhttp/plugins/dynamix.docker.manager/include/Helpers.php"; '
                 "echo json_encode(xmlToCommand(file_get_contents("
@@ -382,6 +411,7 @@ def main():
         not in evidence
     ):
         parser.error("Exact-image Unraid acceptance has not completed")
+    load_household()
     release = Release(unraid, args.image, args.revision, args.version)
     live, candidate, original = release.preflight()
     print("Preflight passed: exact image, native manager, owner ready, no transfers.")

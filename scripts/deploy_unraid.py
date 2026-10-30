@@ -12,11 +12,22 @@ import subprocess
 import tarfile
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 
 ROOT = Path(__file__).resolve().parent.parent
 REMOTE = "/mnt/user/appdata/pig-music-preview"
+PLACEHOLDER = re.compile(r"\$\{(PIG_MUSIC_[A-Z_]+)(?::\?[^}]*)?\}")
+
+
+def household(key):
+    """A real household value (scripts/household.py), read only when needed."""
+    try:
+        from scripts import household as values
+    except ImportError:
+        import household as values
+    return values.get(key)
 
 
 def bundle(target):
@@ -34,7 +45,6 @@ def bundle(target):
                 "requirements.lock.txt",
                 "pyproject.toml",
                 "README.md",
-                "blueprint.md",
             )
         ]
         for folder in (
@@ -66,11 +76,15 @@ def bundle(target):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default="root@192.168.1.235")
+    parser.add_argument(
+        "--host", help="SSH target (default: PIG_MUSIC_UNRAID_SSH from household)"
+    )
     parser.add_argument(
         "--key", type=Path, default=Path.home() / ".ssh/pig_music_unraid"
     )
-    parser.add_argument("--url", default="http://192.168.1.203:8765")
+    parser.add_argument(
+        "--url", help="LAN URL for --deploy (default: PIG_MUSIC_LAN_URL from household)"
+    )
     parser.add_argument(
         "--version",
         required=True,
@@ -92,7 +106,7 @@ def main():
         contract = json.loads((ROOT / "api/openapi.v1.json").read_text())
         if "/api/v1/auth/device" in contract.get("paths", {}):
             parser.error(
-                "This account release needs the native Docker Manager fresh-state cutover. Use candidate verification without --deploy, then deploy_first_run_unraid.py for the first-run WebUI; the legacy Compose cutover cannot safely accept it."
+                "This account release needs the native Docker Manager fresh-state cutover. Use candidate verification without --deploy, then deploy_release.py; the legacy Compose cutover cannot safely accept it."
             )
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{3,70}", args.version):
         parser.error("Use a lowercase version suffix")
@@ -118,6 +132,18 @@ def main():
             "Registry verification requires a clean tracked source tree at the image commit"
         )
     stage = REMOTE + "/releases/" + args.version
+    args.host = args.host or household("PIG_MUSIC_UNRAID_SSH")
+    if args.deploy:
+        # Resolve every live value before anything changes on the host.
+        args.url = args.url or household("PIG_MUSIC_LAN_URL")
+        lan_address = household("PIG_MUSIC_LAN_ADDRESS")
+        compose_values = {
+            key: household(key)
+            for key in PLACEHOLDER.findall(
+                (ROOT / "compose.unraid-preview.yaml").read_text()
+            )
+        }
+    tailnet = urlsplit(household("PIG_MUSIC_TAILNET_ORIGIN"))
     ssh = ["ssh", "-i", str(args.key), "-o", "BatchMode=yes", args.host]
 
     def remote(command):
@@ -136,7 +162,7 @@ def main():
     )
     prior_proxy = (
         serve.get("Web", {})
-        .get("passyflix.tail6d1471.ts.net:10000", {})
+        .get(f"{tailnet.hostname}:{tailnet.port or 443}", {})
         .get("Handlers", {})
         .get("/", {})
         .get("Proxy")
@@ -318,6 +344,7 @@ def main():
             # The reviewed compose keeps all existing resource/network protections.
             compose = (ROOT / "compose.unraid-preview.yaml").read_text()
             compose = re.sub(r"image: pig-music:[^\s]+", "image: " + image, compose)
+            compose = PLACEHOLDER.sub(lambda m: compose_values[m.group(1)], compose)
             local = output / (args.version + "-compose.yaml")
             local.write_text(compose)
             subprocess.run(
@@ -379,7 +406,9 @@ def main():
                     + shlex.quote(backup + "/compose.yaml")
                     + " "
                     + REMOTE
-                    + "/compose.yaml; docker network connect --ip 192.168.1.203 --gw-priority -1 br0 pig-music-preview; docker start pig-music-preview; else docker start pig-music-preview; fi"
+                    + "/compose.yaml; docker network connect --ip "
+                    + shlex.quote(lan_address)
+                    + " --gw-priority -1 br0 pig-music-preview; docker start pig-music-preview; else docker start pig-music-preview; fi"
                 )
             else:
                 remote("docker start pig-music-preview")

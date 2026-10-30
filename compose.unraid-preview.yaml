@@ -1,4 +1,7 @@
 # Direct SMB transfers and publication, with Soulseek embedded in the same container.
+# HISTORICAL (Compose is retired on the live host). Household addresses are
+# ${PIG_MUSIC_...} placeholders: deploy_unraid.py fills them from
+# scripts/household.py (.private/household.env); see .env.example.
 services:
   pig-music:
     image: pig-music:cleanup-20261006-v3
@@ -8,16 +11,16 @@ services:
     cpus: 2
     mem_limit: 4g
     labels:
-      net.unraid.docker.webui: "http://192.168.1.203:8765"
+      net.unraid.docker.webui: "${PIG_MUSIC_LAN_URL:?Set PIG_MUSIC_LAN_URL}"
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     ports:
-      - "192.168.1.235:8765:8765"
+      - "${PIG_MUSIC_UNRAID_ADDRESS:?Set PIG_MUSIC_UNRAID_ADDRESS}:8765:8765"
     environment:
-      PIG_MUSIC_PUBLIC_ORIGIN: https://passyflix.tail6d1471.ts.net:10000
+      PIG_MUSIC_PUBLIC_ORIGIN: ${PIG_MUSIC_TAILNET_ORIGIN:?Set PIG_MUSIC_TAILNET_ORIGIN}
       PIG_MUSIC_TRUSTED_PROXIES: 127.0.0.1,172.25.0.1
       PIG_MUSIC_DATA: /data
       PIG_MUSIC_DOWNLOAD_ROOT: /library/.pig-music-work
@@ -29,7 +32,7 @@ services:
       preview:
         gw_priority: 0
       lan:
-        ipv4_address: 192.168.1.203
+        ipv4_address: ${PIG_MUSIC_LAN_ADDRESS:?Set PIG_MUSIC_LAN_ADDRESS}
         gw_priority: -1
 networks:
   preview:

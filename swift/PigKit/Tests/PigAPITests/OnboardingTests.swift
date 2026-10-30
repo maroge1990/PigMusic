@@ -40,9 +40,9 @@ private actor FakeTransport: ClientTransport {
 }
 
 final class OnboardingTests: XCTestCase {
-    private let origin = URL(string: "https://music.markrogers.au")!
+    private let origin = URL(string: "https://music.example.com")!
     private let user = #"{"id":"u1","username":"alex","display_name":"Alex","role":"member"}"#
-    private func invite() throws -> Invite { try Invite.parse("https://music.markrogers.au/#/join?code=K7M2ABCDEFGHJKLM") }
+    private func invite() throws -> Invite { try Invite.parse("https://music.example.com/#/join?code=K7M2ABCDEFGHJKLM") }
     private func session() -> String { #"{"user":\#(user),"token":"device-token-1","expires_at":1893456000}"# }
     private func body(_ json: String) throws -> [String: Any] {
         try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
@@ -135,7 +135,7 @@ final class OnboardingTests: XCTestCase {
         let transport = FakeTransport([(200, session())])
         let store = MemoryStore()
         let saved = try await Onboarding(transport: transport, tokens: { _ in store })
-            .signIn(server: URL(string: "https://music.markrogers.au/")!, username: "alex", password: "pw", deviceName: "Phone")
+            .signIn(server: URL(string: "https://music.example.com/")!, username: "alex", password: "pw", deviceName: "Phone")
         XCTAssertEqual(saved.origin, origin)
         let signInToken = await store.read()
         XCTAssertEqual(signInToken, "device-token-1")
@@ -203,9 +203,9 @@ final class SavedServerTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         XCTAssertNil(SavedServer.load(from: defaults))
-        let saved = SavedServer(origin: URL(string: "https://passyflix.tail6d1471.ts.net:10000")!, username: "alex", displayName: "Alex")
-        XCTAssertEqual(saved.tokenAccount, "https://passyflix.tail6d1471.ts.net:10000")
-        XCTAssertEqual(saved.host, "passyflix.tail6d1471.ts.net")
+        let saved = SavedServer(origin: URL(string: "https://pigmusic.example-tailnet.ts.net:10000")!, username: "alex", displayName: "Alex")
+        XCTAssertEqual(saved.tokenAccount, "https://pigmusic.example-tailnet.ts.net:10000")
+        XCTAssertEqual(saved.host, "pigmusic.example-tailnet.ts.net")
         try saved.save(to: defaults)
         XCTAssertEqual(SavedServer.load(from: defaults), saved)
         let store = MemoryStore()
