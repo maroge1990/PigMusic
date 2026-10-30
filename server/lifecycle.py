@@ -89,11 +89,16 @@ def coordinated(method):
     def run(self, *args, **kwargs):
         store = self.store if hasattr(self, "store") else self
         lock = store.lifecycle_lock
+        # A download's library rebuild runs after its publication releases
+        # the lock; whoever takes the lock in between rebuilds first (#74).
+        catch_up = getattr(store, "catch_up", lambda: None)
         if not isinstance(lock, TimedRLock):
             with lock:
+                catch_up()
                 return method(self, *args, **kwargs)
         lock.acquire(label=label)
         try:
+            catch_up()
             return method(self, *args, **kwargs)
         finally:
             lock.release()

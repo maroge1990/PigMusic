@@ -1,5 +1,6 @@
 import hashlib, json
 from server.store import Store
+from server.lifecycle import coordinated
 
 
 def test_clear_queue_invalidates_claim_and_preserves_music_and_playlists(tmp_path):
@@ -78,3 +79,77 @@ def test_clear_finished_keeps_unfinished_requests(tmp_path):
     assert [i["title"] for i in left] == [
         t["title"] for t in songs if t["title"] != first["title"]
     ]
+
+
+def titles(store):
+    return [t["title"] for t in store.index.by_id.values()]
+
+
+def published(tmp_path, monkeypatch):
+    """A store with one claimed download ready to publish."""
+    monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(tmp_path / "nas"))
+    store = Store(tmp_path / "data")
+    song = {
+        "id": "wanted",
+        "title": "Song",
+        "duration": 200,
+        "artist": "Artist",
+        "album": "Album",
+        "album_artist": "Artist",
+        "year": "2020",
+        "disc_number": 1,
+        "track_number": 1,
+        "status": "missing",
+    }
+    store.save_download_settings({"enabled": True, "sources": ["freemp3cloud"]})
+    store.submit_catalogue([song])
+    job = store.claim_request()
+    store.request_state(job["id"], "validating", _claim_token=job["claim_token"])
+    stage = store.directory / "downloads" / "staging"
+    stage.mkdir(parents=True)
+    source = stage / "song.mp3"
+    source.write_bytes(b"validated")
+    target = store.directory / "downloads" / "library" / "song.mp3"
+    probe = {"codec": "mp3", "bitrate_kbps": 320, "duration": 200}
+    sha = hashlib.sha256(b"validated").hexdigest()
+    return store, (job, source, target, probe, sha)
+
+
+def test_a_download_rebuilds_the_library_outside_the_lifecycle_lock(
+    tmp_path, monkeypatch
+):
+    """#74 (2): each download's publication rebuilt the whole library (1-2 s
+    live) while holding the lifecycle lock, stalling Tidy, scans, exports
+    and every other locked operation behind it."""
+    store, request = published(tmp_path, monkeypatch)
+    rebuilt = store.refresh_library
+    held = []
+
+    def refresh():
+        held.append(store.lifecycle_lock.owned())
+        rebuilt()
+
+    monkeypatch.setattr(store, "refresh_library", refresh)
+    store.publish_request(*request)
+    assert held == [False]
+    assert "Song" in titles(store)
+
+
+def test_a_locked_operation_never_decides_on_a_library_behind_a_download(
+    tmp_path, monkeypatch
+):
+    """#74 (2), Codex 30 Oct: with the rebuild outside the lock, Tidy (or any
+    destructive operation) could take the lock between the publication's
+    commit and its rebuild and compare against the old library. Taking the
+    lock now rebuilds first."""
+    store, request = published(tmp_path, monkeypatch)
+    store.commit_request(*request)  # Committed; its rebuild has not run.
+    assert "Song" not in titles(store)
+    seen = []
+
+    @coordinated
+    def destructive(owner):
+        seen.extend(titles(owner))
+
+    destructive(store)
+    assert "Song" in seen

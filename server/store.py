@@ -50,6 +50,9 @@ class Store:
         self.mix_lock = TimedRLock("mix_lock")
         # Replacement cleanup rows last hashed, with their files' state then.
         self.cleanup_attempts = {}
+        # Download publications committed, and the latest the library build
+        # includes (#74): see catch_up.
+        self.published = self.projected = 0
         self.retired_digests = {}
         self.library_lock = TimedRLock("library_lock")
         directory.mkdir(parents=True, exist_ok=True)
@@ -76,10 +79,20 @@ class Store:
         edition anchors the previous one saved; it is also the lock a scan
         already holds when it refreshes, so the order is always covers.lock,
         then library_lock."""
+        wanted = self.published
         with self.covers.lock:
             built = self._build_library()
             with self.library_lock:
                 self._publish_library(built)
+                self.projected = max(self.projected, wanted)
+
+    def catch_up(self):
+        """Rebuild the library first when a download's publication is newer
+        than it. Every lifecycle-locked operation does this on entry
+        (lifecycle.coordinated), so none decides on a library that is behind
+        a publication whose rebuild runs outside the lock (#74)."""
+        if self.projected < self.published:
+            self.refresh_library()
 
     def _build_library(self):
         snapshot = load_json(self.directory / "library-snapshot.json")
@@ -326,8 +339,16 @@ class Store:
                 _claim_token=claim_token,
             )
 
-    @coordinated
     def publish_request(self, job, source, target, probe, sha):
+        # The library rebuild (1-2 s on a large library) and the replacement
+        # cleanup each run outside this publication's hold on the lifecycle
+        # lock (#74); catch_up covers the gap.
+        if self.commit_request(job, source, target, probe, sha):
+            self.refresh_library()
+            self.cleanup_replacements()
+
+    @coordinated
+    def commit_request(self, job, source, target, probe, sha):
         target = target.resolve()
         root = library_root(self).resolve()
         if not target.resolve().is_relative_to(root):
@@ -456,8 +477,8 @@ class Store:
                 (job["id"],),
             )
         journal.unlink(missing_ok=True)
-        self.refresh_library()
-        self.cleanup_replacements()
+        self.published += 1
+        return True
 
     def defer_request(self, job, seconds, attempts):
         """Put a claimed request back in the queue, not to be claimed again
