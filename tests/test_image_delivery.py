@@ -104,7 +104,7 @@ def test_hash_variants_and_alias_cache_policy(tmp_path):
         base = "/api/v1/covers/" + sha + ".jpg"
         original = client.get(base)
         assert (
-            original.headers["cache-control"] == "public, max-age=31536000, immutable"
+            original.headers["cache-control"] == "private, max-age=31536000, immutable"
         )
         result = client.get(base + "?w=128")
         assert result.headers["content-type"] == "image/webp"
@@ -122,7 +122,7 @@ def test_hash_variants_and_alias_cache_policy(tmp_path):
         alias = tmp_path / "covers" / "legacy.jpg"
         alias.write_bytes(original.content)
         result = client.get("/api/v1/covers/legacy.jpg", follow_redirects=False)
-        assert result.headers["cache-control"] == "no-cache"
+        assert result.headers["cache-control"] == "private, no-cache"
         assert result.headers["location"].startswith("/api/v1/covers/")
         (tmp_path / "covers" / "escape.jpg").symlink_to(
             tmp_path / "library-snapshot.json"

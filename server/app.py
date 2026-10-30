@@ -302,8 +302,6 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                     status_code=403,
                 )
         response = await call_next(request)
-        if getattr(request.state, "refresh_cookie", None):
-            set_cookie(response, request.state.refresh_cookie)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
         response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
@@ -325,6 +323,16 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             304,
         }:
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        if getattr(request.state, "refresh_cookie", None):
+            # A renewed sign-in cookie must never reach a shared cache (audit
+            # S1): a response it rides on is private, or made uncacheable.
+            directives = {
+                d.strip().split("=")[0].lower()
+                for d in response.headers.get("Cache-Control", "").split(",")
+            }
+            if not directives & {"private", "no-store"}:
+                response.headers["Cache-Control"] = "private, no-store"
+            set_cookie(response, request.state.refresh_cookie)
         return response
 
     # Added last, so it is outermost: its times include the middleware above.
@@ -736,7 +744,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             suffix = f"?w={w}&soft={int(soft)}" if w else ""
             return RedirectResponse(
                 "/api/v1/covers/" + target.name + suffix,
-                headers={"Cache-Control": "no-cache"},
+                headers={"Cache-Control": "private, no-cache"},
             )
 
     def image_config():

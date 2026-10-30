@@ -18,7 +18,7 @@ def artwork_router(store, image_slots, enrichment, image_response):
         if filename != sha + ".jpg" or not store.covers.path(sha):
             raise HTTPException(404, "Artwork not found.")
         headers = {
-            "Cache-Control": "public, max-age=31536000, immutable",
+            "Cache-Control": "private, max-age=31536000, immutable",
             "ETag": f'"{sha}-metadata-v1"',
         }
         if any(
@@ -60,7 +60,10 @@ def artwork_router(store, image_slots, enrichment, image_response):
             async with image_slots:
                 target = await asyncio.to_thread(variant, target, w, soft)
         etag = '"' + filename[:-4] + (f"-v1-{w}-{int(soft)}" if w else "") + '"'
-        headers = {"Cache-Control": "public, max-age=31536000, immutable", "ETag": etag}
+        headers = {
+            "Cache-Control": "private, max-age=31536000, immutable",
+            "ETag": etag,
+        }
         if any(
             value.strip().removeprefix("W/") in {etag, "*"}
             for value in request.headers.get("if-none-match", "").split(",")

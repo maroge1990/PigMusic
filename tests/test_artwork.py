@@ -137,7 +137,7 @@ def test_library_artist_and_album_share_persistent_display_only_cover(tmp_path):
         assert (
             result.status_code == 200 and result.headers["content-type"] == "image/jpeg"
         )
-        assert result.headers["cache-control"] == "public, max-age=31536000, immutable"
+        assert result.headers["cache-control"] == "private, max-age=31536000, immutable"
         with Image.open(io.BytesIO(result.content)) as image:
             assert image.size == (800, 600)
         assert client.get(library["albums"][0]["cover_url"]).content == result.content

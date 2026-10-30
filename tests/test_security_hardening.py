@@ -146,3 +146,42 @@ def test_disable_immediately_revokes_devices_and_setup_codes(tmp_path, monkeypat
     auth.disable(owner, pending["user_id"], False)
     with pytest.raises(AuthError):
         auth.activate(pending["code"], PASSWORD, "fixture")
+
+
+def test_a_renewed_sign_in_cookie_never_rides_a_shared_cacheable_response(
+    tmp_path, monkeypatch
+):
+    """Audit S1: a web session over an hour old renews its cookie on the next
+    request; artwork was `public` for a year, so a shared cache could have
+    stored that cookie and served it to someone else."""
+    import io
+
+    from PIL import Image
+
+    app, _, _ = fixture(tmp_path, monkeypatch)
+    stream = io.BytesIO()
+    Image.new("RGB", (64, 64), "purple").save(stream, "PNG")
+    cover = "/api/v1/covers/" + app.state.store.covers.save(stream.getvalue()) + ".jpg"
+
+    def age_sessions():
+        with app.state.store.connect() as conn:
+            conn.execute("UPDATE sessions SET last_seen_at=last_seen_at-7200")
+
+    with TestClient(app, base_url="https://private.ts.net") as client:
+        signed_in = client.post(
+            "/api/v1/auth/login",
+            json={"username": "mark", "password": PASSWORD},
+            headers={"X-Pig-Request": "1"},
+        )
+        assert signed_in.status_code == 200
+        for path in (cover, cover + "?w=128", cover + "/metadata"):
+            age_sessions()
+            response = client.get(path)
+            assert response.status_code == 200, (path, response.text)
+            directives = {
+                d.strip().split("=")[0]
+                for d in response.headers["cache-control"].split(",")
+            }
+            assert "public" not in directives, (path, directives)
+            assert directives & {"private", "no-store"}, (path, directives)
+            assert "set-cookie" in response.headers, path
