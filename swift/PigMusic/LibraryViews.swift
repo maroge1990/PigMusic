@@ -497,8 +497,11 @@ struct NowPlayingView: View {
           titles
           progress
           transport
-          // No status words in normal use (#60): a spinner while preparing.
-          if player.preparing { ProgressView().controlSize(.small) }
+          // No status words in normal use (#60): a spinner while preparing,
+          // described to VoiceOver only.
+          if player.preparing {
+            ProgressView().controlSize(.small).accessibilityLabel("Preparing audio")
+          }
           options
           if let error = player.error { failure(error) }
           upNext

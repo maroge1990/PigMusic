@@ -11,7 +11,12 @@ def test_no_preparing_audio_text_during_normal_playback():
     """#60: no text in the mini or full-screen player during normal use;
     only a problem gets words."""
     for source in APP.glob("*.swift"):
-        assert "Preparing audio" not in source.read_text(), source.name
+        text = source.read_text()
+        for shown in ('ProgressView("Preparing audio', 'return "Preparing audio'):
+            assert shown not in text, source.name
+        # VoiceOver still hears what the silent spinner means.
+        if "player.preparing" in text:
+            assert '.accessibilityLabel("Preparing audio")' in text, source.name
 
 
 def test_the_library_section_tabs_have_no_shuffle_button():
