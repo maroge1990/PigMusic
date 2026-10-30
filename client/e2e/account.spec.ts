@@ -65,3 +65,58 @@ test("Your devices names each session and can sign out the others", async ({
     page.getByRole("button", { name: "Sign out other devices" }),
   ).toHaveCount(0);
 });
+
+test("signing out with the server unreachable clears this device and finishes later without touching a newer sign-in (#80)", async ({
+  context,
+}) => {
+  let online = false;
+  let person: string | null = "pat";
+  const requests: string[] = [];
+  const answers = {
+    "/v1/me": (route: import("@playwright/test").Route) =>
+      person
+        ? route.fulfill({
+            json: {
+              id: person,
+              username: person,
+              display_name: person,
+              role: "member",
+            },
+          })
+        : route.fulfill({
+            status: 401,
+            json: {
+              detail: "Please sign in to continue.",
+              code: "authentication_required",
+            },
+          }),
+    "/v1/auth/logout": (route: import("@playwright/test").Route) => {
+      requests.push("POST /v1/auth/logout");
+      return online ? route.fulfill({ json: {} }) : route.abort("failed");
+    },
+    "/v1/me/sessions/session-1": (route: import("@playwright/test").Route) => {
+      requests.push(`${route.request().method()} /v1/me/sessions/session-1`);
+      return online
+        ? route.fulfill({ json: { revoked: true } })
+        : route.abort("failed");
+    },
+  };
+  await mockApi(context, { answers });
+  const page = await context.newPage();
+  await page.goto("/#/account");
+  await page.getByRole("button", { name: "Sign out of PigMusic" }).click();
+  // Cleared at once, and told why the server still has to finish it.
+  await expect(page.getByText(/Signed out on this device/)).toBeVisible();
+  await expect(page.getByLabel("Username")).toBeVisible();
+  // Another tab signs in again before the server is back (a newer session).
+  online = true;
+  person = "pat";
+  const other = await context.newPage();
+  await other.goto("/#/home");
+  // The first tab reopens: it ends only the old session, by its id.
+  await page.reload();
+  await expect
+    .poll(() => requests)
+    .toEqual(["POST /v1/auth/logout", "DELETE /v1/me/sessions/session-1"]);
+  await expect(page.getByLabel("Username")).toHaveCount(0);
+});

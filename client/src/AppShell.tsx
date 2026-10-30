@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
   House,
@@ -9,6 +9,12 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { api, ApiError, clearSessionReads } from "./api";
+import {
+  currentSession,
+  finishSignOut,
+  OFFLINE_SIGN_OUT,
+  signOutSession,
+} from "./signOut";
 import { PersonalLibrary } from "./PersonalLibrary";
 import { AccountSettings } from "./AccountSettings";
 import { Home } from "./Home";
@@ -52,6 +58,8 @@ const sections: { id: Section; label: string; icon: LucideIcon }[] = [
 
 export function AppShell() {
   const [user, setUser] = useState<Person | null>(null);
+  // This tab's session id, to end it later if signing out happens offline.
+  const session = useRef<string | null>(null);
   const [ready, setReady] = useState(false);
   const [firstRun, setFirstRun] = useState(false);
   const [error, setError] = useState("");
@@ -165,8 +173,14 @@ export function AppShell() {
         setError("");
         return;
       }
+      if (!(await finishSignOut(api))) {
+        setUser(null);
+        setError(OFFLINE_SIGN_OUT);
+        return;
+      }
       setUser(await api<Person>("/v1/me"));
       setError("");
+      void currentSession(api).then((id) => (session.current = id));
     } catch (e) {
       setUser(null);
       if ((e as ApiError).code === "setup_required")
@@ -202,7 +216,10 @@ export function AppShell() {
   }, [user, route]);
 
   async function signOut() {
-    await api("/v1/auth/logout", { method: "POST" });
+    // The server may be unreachable: this device is cleared anyway (#80).
+    if (!(await signOutSession(api, session.current)))
+      setError(OFFLINE_SIGN_OUT);
+    session.current = null;
     clearSessionReads();
     window.dispatchEvent(new Event("music-signed-out"));
     setUser(null);
