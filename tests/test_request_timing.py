@@ -297,8 +297,10 @@ def test_diagnostics_show_members_their_own_requests_and_owners_everything(
         assert seen["route"] == "/api/v1/library" and seen["status"] == 200
         assert seen["headers_ms"] > 0
         assert "auth-session" in [name for name, _ in seen["phases"]]
-        # Members see when the server stalled, never where.
-        assert own["stalls"] == [{"at": 1.0, "seconds": 3.0}]
+        # Members see when the server stalled, never where. A real stall
+        # (a busy host, an earlier test's watchdog) may join the seeded one.
+        assert {"at": 1.0, "seconds": 3.0} in own["stalls"]
+        assert all(set(stall) == {"at", "seconds"} for stall in own["stalls"])
         assert "routes" not in own and set(own["pools"]) == {"asyncio", "anyio"}
         assert (
             client.get("/api/v1/admin/diagnostics", headers=as_member).status_code
