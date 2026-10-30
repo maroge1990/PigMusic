@@ -5,50 +5,50 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 30 Oct 2026 (evening).*
+*Overwritten at the end of every session. 30 Oct 2026 (late evening).*
 
 - **Live:** server `e1557ec` (released 30 Oct 10:22 UTC as `reset-20261030-v3`; rollback container
-  `PigMusic-before-reset-20261030-v3`): the 30 Oct event-loop fixes, web listening history (#66), sign-in hardening,
-  the Watch delivery batch's server side, the idle-CPU batch (export pass, health check, artwork rebuilds) and the
-  release-tooling fixes. The live template had drifted (br0 and limits lost on 25 Oct); restored before release.
-  iPhone/Watch: native **0.2.0 (13)** installed on Mark's iPhone on 30 Oct (Watch delivery batch: #64, #70, #71, #65).
-- **Pushed, not released:** nothing.
-- **Live gates:** #20/#16 idle 30-minute window met on `1bc2039` (0 stalls, 0 lock holds); a loaded window and the
-  idle-CPU re-measure on `e1557ec` are being taken (baseline before: 31% of one core, on #63).
-- **Ways of working:** area batches with one Codex pair per batch, Claude pushes after two rounds, releases need
-  Mark's go-ahead (D-50). New decisions today: D-48 (household-song listens), D-49 (per-account sign-in delay),
-  D-50, D-51 (Watch copies prepared only in the foreground).
+  `PigMusic-before-reset-20261030-v3`). iPhone/Watch: native **0.2.0 (13)** on Mark's iPhone (free signing,
+  reinstall before 6 Nov).
+- **Pushed, not yet released** (each batch passed two Codex rounds; withdrawn changes are noted on their issues):
+  - Sign-in leftovers (private advisory): warning renewed daily and read apart from the feed, IPv6 counted per /64,
+    ~1,400 common passwords refused, bounded hashing queue, People pages off the event loop (#16).
+  - Idle CPU and lock leftovers: #88, #74 part 3, the preloader's settings reads (#63), #87. #74 part 2 withdrawn.
+  - Web fixes: #60 (web), #80 part 1, #72, #73. #80 part 2 (offline sign-out) withdrawn.
+  - Server reliability: #75, #24, #67, #26, #58, #69. #68 withdrawn.
+  - iPhone screens, native **build 14**: #60, #61, #62 (not installed: signing needs Mark's Mac password).
+- **Live gates:** #20/#16 idle windows met on `1bc2039` and `e1557ec` (0 stalls, 0 lock holds); the loaded window
+  waits for real use. Idle CPU on `e1557ec`: 11.5% of a core (was 31.3%), on #63.
+- **Ways of working:** area batches, two Codex rounds, Claude pushes (D-50); Claude may release when it helps testing,
+  under D-52; the Unraid test copy is approved (D-53, #15).
 - **Household details** live only in the gitignored `.private/` (D-45).
-- **Waiting on Mark:** build-13 device checks (#64, #65, #70, #71, battery #18, #19) and #17 evidence; reinstalling
-  build 13 before 6 Nov (free-account signing) or choosing TestFlight (paid Apple Developer account); the items labelled
-  [`owner`](https://github.com/maroge1990/PigMusic/issues?q=is%3Aopen+label%3Aowner); confirming the Cloudflare
-  cache bypass and IPv6 rate limit (sign-in advisories).
+- **Waiting on Mark:** device checks for builds 13/14 (#18, #19, #64, #65, #70, #71, #60–#62); #17's device numbers;
+  confirming the recommended choices used for #69, #72 and the #62 reading; whether the web Library loses its shuffle
+  button too (#61); the decisions in #76, #77, #80 part 2; the [`owner`](https://github.com/maroge1990/PigMusic/issues?q=is%3Aopen+label%3Aowner)
+  items; the Cloudflare cache-bypass and IPv6 rate-limit confirmations (sign-in advisories).
 
 ## Now
 
-Chosen by Mark on 30 Oct (D-47), reliability first. Done today: all five are live; what remains is below.
+Reliability first (D-47). In order:
 
-1. **Live gates** — a loaded 30-minute window for #16/#20; the idle-CPU re-measure on #63
-2. **Watch delivery and battery, device checks** — build 13 is installed; Mark's checks and battery runs (#19, #18;
-   #64, #70, #71, #65 are fixed in it)
-3. **Sign-in hardening leftovers** — the warning not renewed during multi-day guessing (Codex round 2), IPv6 address
-   grouping, a longer rejected-password list, bounding the hashing queue; tracked in the private advisory
-4. **Idle CPU leftovers** — #74 parts 2–3 (publication refresh under the lifecycle lock, stuck replacement cleanup),
-   the preloader's per-item settings stat, #88
-5. **Findings from today's reviews** — #87 (release check tmpfs size), #88
+1. **Release and live gates** — release the pushed batches under D-52; the loaded 30-minute window for #16/#20; idle
+   CPU re-measure (#63)
+2. **Device checks** — install build 14 (Mark's Mac password, or TestFlight later); Mark's checks and battery runs
+   (#18, #19; #64, #65, #70, #71, #60–#62)
+3. **Withdrawn designs** — #68 (hide only the retired file, by hash), #74 part 2 (Tidy must not read a stale library),
+   #80 part 2 (deferred sign-out must not touch a new session)
+4. **iPhone/Watch playback** — #78 (route change while paused), #76 and #77 (recommended choices, Mark to confirm)
+5. **T3 test rig** (#15), approved in D-53
 
 ## Next (P1/P2)
 
-- Reliability: #17 export lock · #67 mix playback lock · #68 replacement duplicate · #69 remaster validation ·
-  #75 release script ordering · #76 queue cleared by a changed download · #77 Watch budget · #78 paused route change ·
-  #73 live updates reconnect · #21 cold popularity · #22 Home mixes latency · #24 stand-ins · #25 harness attribution ·
-  #26 session renewal
-- Mark's requests: #60 no "Preparing audio…" text · #61 Library shuffle icon · #62 album tile layout ·
-  #58 radio opening song · #59 album songs delay · #53 iOS search · #54 song search speed · #55 more popular songs ·
+Pushed fixes stay open until Mark confirms them; the lists below are what is not yet built.
+
+- Reliability: #17 export lock (needs Mark's device numbers) · #21 cold popularity · #22 Home mixes latency ·
+  #25 harness attribution
+- Mark's requests: #59 album songs delay · #53 iOS search · #54 song search speed · #55 more popular songs ·
   #56 tap-to-play mixes
-- Product and admin: #72 People confirmations · #80 web player and sign-out · #23 progressive relay · #27 recovery
-  decisions · #39 internet access checks
-- Test rig: #15 (moves to Now when the first five are done)
+- Product and admin: #23 progressive relay · #27 recovery decisions · #39 internet access checks
 - Device acceptance (Mark, T5): #28 sync · #29 Watch delivery · #30 week without crashes · #31 artwork · #32 playback ·
   #33 mixes · #34 sources · #35 screens · #36 release checklist · #37 editions
 
