@@ -2,11 +2,11 @@ name: Container checks and registry releases
 
 on:
   pull_request:
-    paths: ['api/**', 'swift/PigKit/Sources/PigBrand/**', 'server/**', 'client/**', 'tests/**', 'scripts/**', 'Dockerfile', '.dockerignore', 'requirements*.txt', 'compose*.yaml', 'docs/operations.md', '.github/workflows/container.yml']
+    paths: ['api/**', 'swift/PigKit/Sources/PigBrand/**', 'server/**', 'client/**', 'tests/**', 'scripts/**', 'Dockerfile', '.dockerignore', 'requirements*.txt', 'compose*.yaml', 'docs/OPERATIONS.md', '.github/workflows/container.yml']
   push:
     branches: [main, 'feature/**']
     tags: ['v*']
-    paths: ['api/**', 'swift/PigKit/Sources/PigBrand/**', 'server/**', 'client/**', 'tests/**', 'scripts/**', 'Dockerfile', '.dockerignore', 'requirements*.txt', 'compose*.yaml', 'docs/operations.md', '.github/workflows/container.yml']
+    paths: ['api/**', 'swift/PigKit/Sources/PigBrand/**', 'server/**', 'client/**', 'tests/**', 'scripts/**', 'Dockerfile', '.dockerignore', 'requirements*.txt', 'compose*.yaml', 'docs/OPERATIONS.md', '.github/workflows/container.yml']
   workflow_dispatch:
 
 permissions:
