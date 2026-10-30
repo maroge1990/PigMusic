@@ -32,6 +32,7 @@ from .request_timing import (
     watch_event_loop,
 )
 from .transport import public_origin
+from . import test_services
 from .enrichment import Enrichment
 from .image_cache import public_image
 from .routes.artwork import artwork_router
@@ -160,6 +161,8 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             )
         async with httpx.AsyncClient(
             timeout=12,
+            # None outside the T3 rig (#15): requests go to the real services.
+            transport=test_services.transport(),
             headers={
                 "User-Agent": "PigMusic/0.1 (private household prototype)",
                 "Accept": "application/json",
