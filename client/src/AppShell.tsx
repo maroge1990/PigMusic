@@ -355,11 +355,15 @@ const initials = (name: string) =>
     .map((w) => w[0].toUpperCase())
     .join("");
 
+const RECONNECT_FIRST = 3000;
+const RECONNECT_MAX = 300000;
+
 /** One change feed for every section: library revisions, download progress
  * and, for an owner on the Admin section, Admin state (`music-admin-state`;
  * the server computes it only for those streams). While the feed is
  * disconnected, one slow poll stands in for it, and only while the page is
- * visible (`music-admin-poll` asks Admin to fetch). */
+ * visible (`music-admin-poll` asks Admin to fetch); a stream the browser gave
+ * up on is reopened with backoff. */
 function useServerEvents(active: boolean, admin: boolean) {
   useEffect(() => {
     if (!active) return;
@@ -370,22 +374,6 @@ function useServerEvents(active: boolean, admin: boolean) {
     };
     const requests = () =>
       window.dispatchEvent(new Event("music-requests-changed"));
-    const events = new EventSource(
-      admin ? "/api/v1/events?admin=true" : "/api/v1/events",
-    );
-    events.addEventListener("revision", changed);
-    events.addEventListener("queue", requests);
-    events.addEventListener("revoked", () =>
-      window.dispatchEvent(new Event("music-auth-required")),
-    );
-    events.addEventListener("admin", (event) => {
-      try {
-        const detail: unknown = JSON.parse((event as MessageEvent).data);
-        window.dispatchEvent(new CustomEvent("music-admin-state", { detail }));
-      } catch {
-        /* a malformed message waits for the next one */
-      }
-    });
     let fallback: ReturnType<typeof setInterval> | undefined;
     const poll = () => {
       if (document.hidden) return;
@@ -396,16 +384,52 @@ function useServerEvents(active: boolean, admin: boolean) {
     const visible = () => {
       if (fallback) poll();
     };
-    events.onerror = () => {
-      fallback ||= setInterval(poll, 15000);
+    let events: EventSource;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let delay = RECONNECT_FIRST;
+    const connect = () => {
+      events = new EventSource(
+        admin ? "/api/v1/events?admin=true" : "/api/v1/events",
+      );
+      events.addEventListener("revision", changed);
+      events.addEventListener("queue", requests);
+      events.addEventListener("revoked", () =>
+        window.dispatchEvent(new Event("music-auth-required")),
+      );
+      events.addEventListener("admin", (event) => {
+        try {
+          const detail: unknown = JSON.parse((event as MessageEvent).data);
+          window.dispatchEvent(
+            new CustomEvent("music-admin-state", { detail }),
+          );
+        } catch {
+          /* a malformed message waits for the next one */
+        }
+      });
+      events.onerror = () => {
+        fallback ||= setInterval(poll, 15000);
+        // Browsers retry a dropped stream themselves but give up for good
+        // after an error response (a 502 during a release, a 429 at the
+        // stream cap): open a new one with backoff (#73).
+        if (events.readyState === EventSource.CLOSED && !retry) {
+          retry = setTimeout(() => {
+            retry = undefined;
+            connect();
+          }, delay);
+          delay = Math.min(delay * 2, RECONNECT_MAX);
+        }
+      };
+      events.onopen = () => {
+        clearInterval(fallback);
+        fallback = undefined;
+        delay = RECONNECT_FIRST;
+      };
     };
-    events.onopen = () => {
-      clearInterval(fallback);
-      fallback = undefined;
-    };
+    connect();
     document.addEventListener("visibilitychange", visible);
     return () => {
       events.close();
+      clearTimeout(retry);
       clearInterval(fallback);
       document.removeEventListener("visibilitychange", visible);
     };

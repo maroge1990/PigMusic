@@ -42,3 +42,25 @@ test("the page never scrolls sideways", async ({ page }) => {
     expect(overflow, route).toBeLessThanOrEqual(1);
   }
 });
+
+test("live updates reconnect after the stream gets an error response", async ({
+  page,
+}) => {
+  let opened = 0;
+  await mockApi(page, {
+    answers: {
+      "/v1/events": (route) => {
+        opened += 1;
+        if (opened === 1)
+          return route.fulfill({ status: 502, body: "Bad gateway" });
+        return route.fulfill({
+          contentType: "text/event-stream",
+          body: "retry: 600000\n: ok\n\n",
+        });
+      },
+    },
+  });
+  await page.goto("/#/home");
+  // Browsers never retry a 502 themselves (#73); the app opens a new stream.
+  await expect.poll(() => opened, { timeout: 10000 }).toBeGreaterThan(1);
+});
