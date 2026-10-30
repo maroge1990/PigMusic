@@ -17,7 +17,7 @@ from .paths import versioned
 from .artist_identity import cached_identity
 from .catalogue import background_metadata, credit
 from .home import release_choice
-from .matching import compatible
+from .matching import compatible, recording_kind
 from .media import chart_region, settings, track_file
 from .mix_cache import MixCache, MixDownloader, song_key
 from .playlists import Playlists
@@ -97,11 +97,14 @@ LEASE_RENEW_AFTER = 300
 
 def unfound_name(track):
     """A song's no-match record, for one set of matching rules: a request for
-    a particular edition, or with ISRCs, rejects candidates another accepts."""
+    a particular edition, length, kind of recording or ISRCs rejects
+    candidates another accepts."""
     rules = [
         song_key(track),
         bool(track.get("explicit_edition")),
         track.get("isrcs") or track.get("isrc"),
+        track.get("duration"),
+        sorted(recording_kind(track)),
     ]
     return "mix-unfound:" + hashlib.sha256(json.dumps(rules).encode()).hexdigest()
 

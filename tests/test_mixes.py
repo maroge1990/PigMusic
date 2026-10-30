@@ -353,20 +353,28 @@ def test_a_song_no_source_has_is_not_searched_again_by_any_mix_or_person(
     assert len(calls) == searches + 1
 
 
+@pytest.mark.parametrize(
+    "strict,ordinary",
+    [
+        (track(9, explicit_edition=True), track(9)),
+        (track(9, duration=200), track(9, duration=210)),
+        (track(9, recording_kind=["live"]), track(9)),
+        (track(9, isrc="GBAAA0000001"), track(9)),
+    ],
+)
 def test_a_miss_for_one_edition_does_not_stop_an_ordinary_request(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, strict, ordinary
 ):
-    """#90 (Codex round 1): a request for a particular edition rejects
-    candidates an ordinary request accepts, so its miss must not stop the
-    ordinary request from searching."""
+    """#90 (Codex rounds 1 and 2): a request for a particular edition,
+    length, kind of recording or ISRC rejects candidates another request for
+    the same song accepts, so its miss must not stop that one searching."""
     app, owner = protected(tmp_path, monkeypatch)
     mixes = app.state.store.mixes
     mixes.store.save_download_settings({"enabled": True, "sources": ["freemp3cloud"]})
-    strict, ordinary = track(9, explicit_edition=True), track(9)
     calls = []
 
     def fetch(downloader, song):
-        calls.append(bool(song.get("explicit_edition")))
+        calls.append(song)
         downloader.result = "failed"
         downloader.error = "youtube: no candidate passed recording/version matching"
         return False
@@ -378,7 +386,7 @@ def test_a_miss_for_one_edition_does_not_stop_an_ordinary_request(
     assert mixes.unfound(strict) and mixes.unfound(ordinary) is None
     identity = mixes.stage(owner, "daily", mixes.day(), "Daily", "Reason", [ordinary])
     rounds(mixes, owner, identity)
-    assert calls == [False]
+    assert calls == [ordinary]
 
 
 def test_a_deferred_round_does_not_search_failed_songs_again(tmp_path, monkeypatch):
