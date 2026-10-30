@@ -142,6 +142,10 @@ import PigSync
   @ObservationIgnored private var artworkOccurrence: UUID?
   @ObservationIgnored private var currentArtwork: MPMediaItemArtwork?
   @ObservationIgnored private var routeRecovery: Task<Void, Never>?
+  /// The output route changed while paused: rebuild the output when the person
+  /// plays again, not now (#78). A paused engine never runs, so while paused a
+  /// rebuild would re-fetch and decode the song for nothing.
+  @ObservationIgnored private var outputOwed = false
 
   init(defaults: UserDefaults = .standard) {
     self.defaults = defaults
@@ -323,6 +327,7 @@ import PigSync
     player.pause()
     player.replaceCurrentItem(with: nil)
     generation += 1
+    outputOwed = false
     if autoplay {
       // Music the person chose plays even if iOS left an interruption open;
       // a restart of the same queue keeps waiting for it.
@@ -690,6 +695,12 @@ import PigSync
       guard generation == stamp, usingEngine, !intent.interrupted,
         engineOutput?.requiresRecovery == true
       else { return }
+      guard intent.wantsPlayback else {
+        outputOwed = true
+        DiagnosticsLog.shared.record("audio", "route change while paused: output rebuilt on play")
+        return
+      }
+      outputOwed = false
       do {
         if intent.canPlay { try await activate() }
         try Task.checkCancellation()
@@ -719,6 +730,10 @@ import PigSync
     guard intent.canPlay else { return }
     let start = { [self] in
       if usingEngine {
+        if outputOwed {
+          outputOwed = false
+          engine?.recoverOutput()
+        }
         engine?.resume()
       } else if player.currentItem != nil {
         player.play()
@@ -855,6 +870,7 @@ import PigSync
   }
   func stop() {
     generation += 1
+    outputOwed = false
     queueStart.reset()
     preparation?.cancel()
     clock.stop()
