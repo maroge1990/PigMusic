@@ -205,12 +205,22 @@ public actor CompanionArchive {
     else { return nil }
     return url(song.checksum)
   }
+  /// The same rule as `localFile` for every song at once: one folder listing
+  /// instead of a manifest search and a file check per song (#71).
   public func receipt() -> CompanionReceipt {
     var ready: [String: String] = [:]
     var sizes: [String: Int64] = [:]
-    for song in manifest.songs where localFile(id: song.id) != nil {
-      ready[song.id] = song.checksum
-      sizes[song.checksum] = song.bytes
+    if let account = context.account, manifest.context.account == account,
+      appliedRevision == manifest.context.revision
+    {
+      let stored = storedSizes()
+      for song in manifest.songs
+      where !removed.contains(song.id) && Self.validChecksum(song.checksum)
+        && stored[song.checksum] == song.bytes
+      {
+        ready[song.id] = song.checksum
+        sizes[song.checksum] = song.bytes
+      }
     }
     return CompanionReceipt(
       context: context, ready: ready, usedBytes: sizes.values.reduce(0, +),
@@ -236,6 +246,18 @@ public actor CompanionArchive {
     return manifest.songs.first(where: {
       $0.id == ticket.songId && $0.checksum == ticket.checksum
     })
+  }
+  private func storedSizes() -> [String: Int64] {
+    let files =
+      (try? FileManager.default.contentsOfDirectory(
+        at: directory, includingPropertiesForKeys: [.fileSizeKey])) ?? []
+    var sizes: [String: Int64] = [:]
+    for file in files where file.pathExtension == "m4a" {
+      if let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+        sizes[file.deletingPathExtension().lastPathComponent] = Int64(size)
+      }
+    }
+    return sizes
   }
   /// Called after the delegate synchronously takes ownership of the temporary file.
   public func accept(_ file: URL, ticket: CompanionFile) throws {

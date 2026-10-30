@@ -331,4 +331,37 @@ struct CompanionArchiveTests {
       CompanionManifest(context: CompanionContext(revision: 4, account: "one"), songs: []))
     #expect(await archive.arrival(of: addedTicket) == .stale)
   }
+  /// #71: the Watch asks for its receipt two or three times per received file
+  /// and on every activation. It searched the manifest and stat'ed a file per
+  /// song (about 90 ms at 1,000 songs on a Mac, slower on a Watch).
+  @Test func receiptForAFullLibraryIsQuick() async throws {
+    let root = try folder()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let music = root.appendingPathComponent("Music")
+    let archive = try CompanionArchive(directory: music)
+    let context = CompanionContext(revision: 1, account: "one")
+    try await archive.apply(context)  // A new account starts from an empty folder.
+    var songs: [CompanionSong] = []
+    for index in 0..<1000 {
+      let bytes = Data("song \(index)".utf8)
+      let item = song("s\(index)", bytes: bytes)
+      // Stored as the archive stores accepted audio: <checksum>.m4a.
+      try bytes.write(to: music.appendingPathComponent(item.checksum + ".m4a"))
+      songs.append(item)
+    }
+    try await archive.apply(CompanionManifest(context: context, songs: songs))
+    try await archive.removeLocal(id: "s0")
+    var fastest = Duration.seconds(10)
+    var receipt = await archive.receipt()
+    for _ in 0..<5 {
+      let clock = ContinuousClock()
+      let started = clock.now
+      receipt = await archive.receipt()
+      fastest = min(fastest, clock.now - started)
+    }
+    #expect(receipt.ready.count == 999 && receipt.ready["s0"] == nil)
+    #expect(receipt.usedBytes == songs.dropFirst().map(\.bytes).reduce(0, +))
+    // The old per-song search took 175-200 ms here on the 8 GB Mac.
+    #expect(fastest < .milliseconds(100), "receipt took \(fastest)")
+  }
 }
