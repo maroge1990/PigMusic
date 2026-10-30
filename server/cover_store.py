@@ -296,5 +296,6 @@ class CoverStore:
                         and path.stat().st_mtime < now - WEEK
                     ):
                         path.unlink()
-                        self.presentation_cache.pop(sha, None)
+                        with self.presentation_lock:
+                            self.presentation_cache.pop(sha, None)
         return removed

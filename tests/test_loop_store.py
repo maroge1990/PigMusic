@@ -3,6 +3,7 @@ hold up the event loop while SQLite or the cover store waits."""
 
 import asyncio
 import io
+import os
 import sqlite3
 import threading
 import time
@@ -246,3 +247,111 @@ def test_resolving_a_new_artist_reads_and_saves_its_identity_off_the_loop(
     assert identity["id"] == ARTIST
     assert cached_identity(store, artist)["id"] == ARTIST
     assert stall < 0.2, stall
+
+
+def test_pruning_metadata_while_the_presentation_cache_evicts(tmp_path):
+    """Codex round 2: prune removed cache entries without presentation_lock,
+    so an eviction's chosen key could vanish before its pop (KeyError)."""
+    store = Store(tmp_path)
+    covers = store.covers
+    image = io.BytesIO()
+    Image.new("RGB", (8, 8), (10, 200, 10)).save(image, "JPEG")
+    sha = covers.save(image.getvalue())
+    stale = "a" * 64
+    metadata = covers.directory / "metadata" / (stale + "-v1.json")
+    metadata.write_text("{}")
+    old = time.time() - 30 * 86400
+    os.utime(metadata, (old, old))
+
+    class Racing(dict):
+        armed = True
+
+        def __iter__(self):
+            first = next(super().__iter__())
+            if self.armed:
+                self.armed = False
+                # Prune runs between choosing the eviction key and popping it.
+                self.pruning = threading.Thread(target=covers.prune, args=(set(),))
+                self.pruning.start()
+                self.pruning.join(0.3)
+            return iter([first])
+
+    cache = Racing({stale: {"sha": stale}})
+    cache.update({"%064x" % n: {} for n in range(1, 8192)})
+    covers.presentation_cache = cache
+    assert covers.presentation(sha)["sha"] == sha
+    cache.pruning.join(5)
+    assert not metadata.exists()
+    assert stale not in cache and sha in cache
+
+
+def cancelled_mid_write(store, monkeypatch, call):
+    """Cancel one call while its cache write is in progress, then make a second
+    call. Return (second call's result, the value the cache ends with)."""
+    write = store.write_document
+    entered, release = threading.Event(), threading.Event()
+    finished = []
+
+    def write_document(key, value):
+        if not entered.is_set():
+            entered.set()
+            release.wait(5)
+        write(key, value)
+        finished.append(value)
+
+    monkeypatch.setattr(store, "write_document", write_document)
+
+    async def run():
+        first = asyncio.create_task(call())
+        while not entered.is_set():
+            await asyncio.sleep(0.01)
+        first.cancel()
+        second = asyncio.create_task(call())
+        await asyncio.sleep(0.3)
+        release.set()
+        result = await asyncio.wait_for(second, 5)
+        try:
+            await first
+        except asyncio.CancelledError:
+            pass
+        return result
+
+    result = asyncio.run(run())
+    return result, finished[-1]["data"]
+
+
+def generations():
+    count = [0]
+
+    def handler(request):
+        count[0] += 1
+        return httpx.Response(200, json={"generation": count[0]})
+
+    return handler
+
+
+def test_a_cancelled_catalogue_write_never_overwrites_a_newer_answer(
+    tmp_path, monkeypatch
+):
+    """Codex round 2: cancellation released Catalogue.turn before the write."""
+    store = Store(tmp_path)
+    catalogue = Catalogue(store)
+    catalogue.min_interval = 0
+    http = httpx.AsyncClient(transport=httpx.MockTransport(generations()))
+    result, cached = cancelled_mid_write(
+        store, monkeypatch, lambda: catalogue.get(http, "artist/" + ARTIST)
+    )
+    assert cached == result
+
+
+def test_a_cancelled_home_feed_write_never_overwrites_a_newer_answer(
+    tmp_path, monkeypatch
+):
+    store = Store(tmp_path)
+    home = HomeDiscovery(store, None)
+    http = httpx.AsyncClient(transport=httpx.MockTransport(generations()))
+    (result, failed), cached = cancelled_mid_write(
+        store, monkeypatch, lambda: home.feed(http, "lb-radio/artist/" + ARTIST)
+    )
+    assert not failed
+    assert cached == result

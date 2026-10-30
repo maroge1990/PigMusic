@@ -9,7 +9,7 @@ from datetime import date
 import httpx
 from .artist_identity import Ambiguous, cached_identities, resolve_artist
 from .artwork import quoted
-from .catalogue import background_metadata, mbid, credit, warming
+from .catalogue import background_metadata, mbid, credit, settled, warming
 from .library import normalise
 from .media import chart_region, settings
 from .releases import feature_album
@@ -152,7 +152,7 @@ class HomeDiscovery:
                     data = {"recordings": data}
                 if not isinstance(data, dict):
                     raise ValueError("Invalid feed")
-                await asyncio.to_thread(
+                await settled(
                     self.store.write_document,
                     key,
                     {"until": time.time() + 3600, "data": data},
@@ -161,7 +161,7 @@ class HomeDiscovery:
             except (httpx.HTTPError, ValueError):
                 # A short retry window avoids hammering an unavailable service.
                 data = cached.get("data", {}) if cached else {}
-                await asyncio.to_thread(
+                await settled(
                     self.store.write_document,
                     key,
                     {"until": time.time() + 60, "data": data, "failed": True},

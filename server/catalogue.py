@@ -103,6 +103,22 @@ def still_fresh(age, lifetime, margin=RENEW):
     return age < lifetime - (margin if warming.get() else 0)
 
 
+async def settled(function, *args):
+    """Run a blocking call (a cache write) in a thread. A caller cancelled
+    meanwhile still waits for it to finish, so the lock that caller holds
+    covers the write and a newer answer cannot be overwritten by it."""
+    task = asyncio.ensure_future(asyncio.to_thread(function, *args))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        while not task.done():
+            try:
+                await asyncio.wait({task})
+            except asyncio.CancelledError:
+                pass
+        raise
+
+
 class Catalogue:
     # MusicBrainz allows one request per second per client.
     min_interval = 1.05
@@ -152,7 +168,7 @@ class Catalogue:
                 client, "https://musicbrainz.org/ws/2/" + path, params
             )
             data = response.json()
-            await asyncio.to_thread(
+            await settled(
                 self.store.write_document, key, {"time": time.time(), "data": data}
             )
             return data

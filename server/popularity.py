@@ -4,7 +4,14 @@ import asyncio, hashlib, json, time
 import httpx, logging
 
 logger = logging.getLogger(__name__)
-from .catalogue import RENEW, background_metadata, deferred_metadata, mbid, warming
+from .catalogue import (
+    RENEW,
+    background_metadata,
+    deferred_metadata,
+    mbid,
+    settled,
+    warming,
+)
 from .media import settings
 from .releases import feature_album
 
@@ -211,7 +218,7 @@ class Popularity:
                 # Unavailable or invalid credentials never add an empty/error panel.
                 result = {"enabled": True, "songs": [], "albums": []}
                 ttl = 60
-            await asyncio.to_thread(
+            await settled(
                 self.store.write_document,
                 key,
                 {"retry_after": time.time() + ttl, "data": result},
