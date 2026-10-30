@@ -1324,6 +1324,34 @@ def test_recent_releases_come_from_resolved_library_artists(tmp_path, monkeypatc
     assert asyncio.run(mixes.releases(None, {"artists": [], "mix_day": str(day)})) == []
 
 
+def test_each_radio_start_opens_somewhere_new(tmp_path, monkeypatch):
+    """#58: every start of the radio played the same opening song. A fresh
+    start now opens at a random entry with a full page after it, never where
+    the last start opened; its pages follow on from there."""
+    from server.mixes import RADIO_PAGE, radio_opening
+
+    app, owner = protected(tmp_path, monkeypatch)
+    mixes = app.state.store.mixes
+    user, _ = member(app, owner)
+    today = mixes.day()
+    edition = mixes.radio_edition(user, today)
+    songs = [track(n, artist=f"Artist {n}") for n in range(30)]
+    for song in songs:
+        cached(mixes, song, now=time.time())
+    mixes.radio_update(edition, lambda p: p.update(tracks=songs))
+    openings = []
+    for _ in range(12):
+        first = mixes.radio_next(user)["tracks"]
+        position = int(first[0].id.rsplit(":", 1)[1])
+        assert len(first) == RADIO_PAGE and position <= 30 - RADIO_PAGE
+        assert not openings or position != openings[-1]
+        openings.append(position)
+    assert len(set(openings)) > 3
+    following = mixes.radio_next(user, first[-1].id)["tracks"]
+    assert following[0].id == f"mix:{edition}:{position + RADIO_PAGE}"
+    assert {radio_opening(0), radio_opening(5)} == {0}
+
+
 def test_radio_appends_stable_entries_pages_and_learns_from_skips(
     tmp_path, monkeypatch
 ):
@@ -1349,6 +1377,8 @@ def test_radio_appends_stable_entries_pages_and_learns_from_skips(
     edition = mixes.radio_row(user, today)[0]
     payload = json.loads(mixes.radio_row(user, today)[1])
     assert len(payload["tracks"]) == 20 and not payload["queue"]
+    # This test pages from the first entry; fresh starts are random (#58).
+    monkeypatch.setattr("server.mixes.radio_opening", lambda count, previous: 0)
     assert sum(t.get("bucket") == "related" for t in payload["tracks"]) == 10
     # Radio is never promoted to an ordinary Home mix, but has its own card.
     mixes.activate(today)

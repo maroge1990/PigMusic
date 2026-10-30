@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 import hashlib
 import json
 import logging
+import random
 import threading
 import time
 import uuid
@@ -70,6 +71,13 @@ def decade_theme(tracks, day):
         if eligible
         else None
     )
+
+
+def radio_opening(count, previous=None):
+    """Where a fresh radio start begins (#58): anywhere a full page still
+    follows, and not where the last start began when there is a choice."""
+    choices = [i for i in range(max(1, count - RADIO_PAGE + 1)) if i != previous] or [0]
+    return random.choice(choices)
 
 
 # A played edition's 6 h lease is renewed only when this much has run down.
@@ -1590,6 +1598,12 @@ class Mixes:
             }
         hidden = self.hidden(user)
         payload = self.radio_update(identity, lambda p: None)
+        opened = {}
+        if not after:
+            # A new listen opens somewhere unpredictable, like a radio (#58);
+            # its pages then follow on with `after`, so the queue is stable.
+            start = radio_opening(len(payload["tracks"]), payload.get("opened"))
+            opened = {"opened": start}
         tracks, last = [], start - 1
         for index in range(max(0, start), len(payload["tracks"])):
             if len(tracks) >= RADIO_PAGE:
@@ -1602,7 +1616,8 @@ class Mixes:
             if dto:
                 tracks.append(dto)
         payload = self.radio_update(
-            identity, lambda p: p.update(served=max(p.get("served", -1), last))
+            identity,
+            lambda p: p.update(served=max(p.get("served", -1), last), **opened),
         )
         return {
             "id": identity,
