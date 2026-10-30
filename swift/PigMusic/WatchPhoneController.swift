@@ -8,6 +8,8 @@ import PigDownloads
 import SwiftUI
 
 @MainActor @Observable final class WatchPhoneController {
+  /// The Watch's budget until it reports its own (CompanionArchive's default).
+  static let watchDefaultBudget: Int64 = 1024 * 1024 * 1024
   var link: CompanionLink?
   var downloads: DownloadController?
   var receipt: CompanionReceipt?
@@ -104,7 +106,7 @@ import SwiftUI
             receipt = confirmed
             confirmedAt = Date()
             saveReceipt()
-            downloads?.budgetBytes = max(2 * 1024 * 1024 * 1024, confirmed.budgetBytes)
+            downloads?.budgetBytes = confirmed.budgetBytes
             await publish()
           }
         } else if let command = try? JSONDecoder().decode(CompanionCommand.self, from: data) {
@@ -145,7 +147,9 @@ import SwiftUI
     downloads = DownloadController(archive: archive, source: service) { [weak self] error in
       self?.message = error.userMessage
     }
-    downloads?.budgetBytes = max(2 * 1024 * 1024 * 1024, receipt?.budgetBytes ?? 0)
+    // The Watch's own budget (its default until it reports one): copies beyond
+    // it would wait for the Watch for good (#77, D-57).
+    downloads?.budgetBytes = receipt?.budgetBytes ?? Self.watchDefaultBudget
     try downloads?.enableBackground(
       identifier: identifier,
       directory: directory.appendingPathComponent("WatchBackgroundTransfers"))
@@ -175,7 +179,7 @@ import SwiftUI
       {
         receipt = saved.receipt
         confirmedAt = saved.at
-        downloads?.budgetBytes = max(2 * 1024 * 1024 * 1024, saved.receipt.budgetBytes)
+        downloads?.budgetBytes = saved.receipt.budgetBytes
       }
     }
     startPolling()
@@ -597,7 +601,8 @@ import SwiftUI
     var remaining = receipt.budgetBytes - receipt.usedBytes
     for song in songs where receipt.ready[song.id] != song.checksum {
       guard song.bytes <= remaining else {
-        message = "Watch storage budget is full. Remove Watch songs before adding more."
+        let full = "Watch storage budget is full. Remove Watch songs before adding more."
+        if message != full { message = full }
         continue
       }
       remaining -= song.bytes

@@ -53,3 +53,11 @@ def test_a_changed_song_stops_playback_only_when_it_is_queued():
     model = (APP / "AppModel.swift").read_text()
     assert "invalidateSources()" not in model
     assert "invalidateSources(changed: changed)" in model
+
+
+def test_watch_copies_fit_the_watch_budget():
+    """#77 (D-57): the phone prepared at least 2 GB of Watch copies while the
+    Watch keeps 1 GB, so the rest waited for the Watch for good."""
+    phone = (APP / "WatchPhoneController.swift").read_text()
+    assert "2 * 1024 * 1024 * 1024" not in phone
+    assert "receipt?.budgetBytes ?? Self.watchDefaultBudget" in phone
