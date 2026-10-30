@@ -1,6 +1,9 @@
 """Default-deny API guard and session-bound, revocable playback URLs."""
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import contextvars
+import functools
 import hashlib
 import hmac
 import os
@@ -26,6 +29,20 @@ PUBLIC = frozenset(
         ("POST", "/api/v1/setup/owner"),
     }
 )
+# Session checks run on a few threads of their own, so library, NAS and
+# artwork work filling the shared default pool can never make every request
+# wait to sign in (28 Oct live: 1.8 s in auth-ready with that pool 10/10 busy).
+# Checks that read library files stay on the shared pool, so a slow NAS cannot
+# fill these threads either.
+SESSION_THREADS = ThreadPoolExecutor(max_workers=4, thread_name_prefix="pig-session")
+
+
+async def session_thread(function, *args):
+    """`asyncio.to_thread`, on the reserved session threads."""
+    call = functools.partial(contextvars.copy_context().run, function, *args)
+    return await asyncio.get_running_loop().run_in_executor(SESSION_THREADS, call)
+
+
 PERSONAL_ACCOUNT_PREFIXES = ("/api/v1/me", "/api/v1/auth/logout")
 # Paths an audio element may open with a signed, expiring query instead of a session.
 SIGNED_PREFIXES = ("/api/v1/playback/files/", "/api/v1/remote-playback/streams/")
@@ -85,7 +102,7 @@ class Security:
         }:
             return None
         with phase("auth-ready"):
-            ready = await asyncio.to_thread(self.auth.ready)
+            ready = await session_thread(self.auth.ready)
         if not ready:
             raise HTTPException(503, "setup_required")
         if (request.method, request.url.path) in PUBLIC:
@@ -105,12 +122,12 @@ class Security:
                 and any(key in request.query_params for key in ("exp", "sid", "sig"))
             ):
                 with phase("auth-link"):
-                    person, session = await asyncio.to_thread(
+                    person, session = await session_thread(
                         self.verify_url, request.url.path, dict(request.query_params)
                     )
             else:
                 with phase("auth-session"):
-                    person, session = await asyncio.to_thread(
+                    person, session = await session_thread(
                         self.auth.authenticate, token, kind
                     )
         except AuthError as exc:
