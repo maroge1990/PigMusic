@@ -65,6 +65,10 @@ export async function finishSignOut(
       return false;
   }
   try {
+    // Another tab may have signed out offline again while this request ran:
+    // clear only what was ended, then deal with the newer one (Codex round 2).
+    if (storage.getItem(PENDING) !== pending)
+      return finishSignOut(call, storage);
     storage.removeItem(PENDING);
   } catch {
     // Nothing to forget.

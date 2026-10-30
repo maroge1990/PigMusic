@@ -90,3 +90,26 @@ test("a sign-in as someone else ends the pending sign-out (Codex round 1)", asyn
   );
   assert.equal(storage.items.size, 0);
 });
+
+test("an older tab's late retry never clears a newer offline sign-out (Codex round 2)", async () => {
+  const storage = memory();
+  storage.setItem("pig-music-pending-sign-out", "session-a");
+  let release;
+  const pending = new Promise((resolve) => (release = resolve));
+  const calls = [];
+  const call = async (path) => {
+    calls.push(path);
+    if (path.endsWith("session-a")) await pending;
+    else throw unreachable;
+  };
+  const finishing = finishSignOut(call, storage);
+  // Meanwhile another tab, on newer session B, signs out offline.
+  storage.setItem("pig-music-pending-sign-out", "session-b");
+  release();
+  assert.equal(await finishing, false);
+  assert.equal(storage.getItem("pig-music-pending-sign-out"), "session-b");
+  assert.deepEqual(calls, [
+    "/v1/me/sessions/session-a",
+    "/v1/me/sessions/session-b",
+  ]);
+});
