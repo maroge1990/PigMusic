@@ -48,6 +48,8 @@ class Store:
         # wait for library work (syncs, scans, exports) under lifecycle_lock;
         # cleanup takes this after lifecycle_lock, never the other way round.
         self.mix_lock = TimedRLock("mix_lock")
+        # Replacement cleanup rows last hashed, with their files' state then.
+        self.cleanup_attempts = {}
         self.library_lock = TimedRLock("library_lock")
         directory.mkdir(parents=True, exist_ok=True)
         self.cover_dir = directory / "covers"
@@ -591,6 +593,25 @@ class Store:
         self.refresh_library()
         self.cleanup_replacements()
 
+    def cleanup_due(self, request_id, payloads, *paths):
+        """Whether a replacement cleanup row must hash its files again: only
+        when a file or the row changed, or an hour passed since its last try.
+        A row that can't finish otherwise re-hashed NAS files under the
+        lifecycle lock on every export pass, forever (#74)."""
+        state = [payloads]
+        for path in paths:
+            try:
+                info = os.stat(path)
+                state.append((info.st_ino, info.st_size, info.st_mtime_ns))
+            except OSError:
+                state.append(None)
+        now = time.monotonic()
+        last = self.cleanup_attempts.get(request_id)
+        if last and last[0] == state and now - last[1] < 3600:
+            return False
+        self.cleanup_attempts[request_id] = (state, now)
+        return True
+
     @coordinated
     def cleanup_replacements(self):
         root = library_root(self).resolve()
@@ -625,15 +646,18 @@ class Store:
                         continue
                     original = contained(nas, old_path)
                     replacement = contained(nas, current["export_relative_path"])
-                    if (
-                        original == replacement
-                        or not replacement.is_file()
-                        or digest(replacement) != current["sha256"]
-                    ):
-                        continue
                     trash = contained(
                         nas, ".pig-music-trash/" + request_id + "/" + old_path
                     )
+                    if (
+                        original == replacement
+                        or not replacement.is_file()
+                        or not self.cleanup_due(
+                            request_id, (raw, row[0]), original, replacement, trash
+                        )
+                        or digest(replacement) != current["sha256"]
+                    ):
+                        continue
                     if original.exists():
                         if digest(original) != old["sha256"]:
                             continue
@@ -663,6 +687,7 @@ class Store:
                             "DELETE FROM quality_cleanup WHERE request_id=?",
                             (request_id,),
                         )
+                    self.cleanup_attempts.pop(request_id, None)
                     continue
                 original = (root / old["relative_path"]).resolve()
                 replacement = (root / current["relative_path"]).resolve()
@@ -672,7 +697,9 @@ class Store:
                     or original == replacement
                 ):
                     continue
-                if not replacement.is_file():
+                if not replacement.is_file() or not self.cleanup_due(
+                    request_id, (raw, row[0]), original, replacement
+                ):
                     continue
                 with replacement.open("rb") as stream:
                     if (
@@ -692,6 +719,7 @@ class Store:
                     conn.execute(
                         "DELETE FROM quality_cleanup WHERE request_id=?", (request_id,)
                     )
+                self.cleanup_attempts.pop(request_id, None)
             except (OSError, KeyError, ValueError):
                 continue  # Retry at startup or the next scheduler scan.
 

@@ -175,6 +175,61 @@ def test_nas_quality_replacement_waits_for_export_then_moves_old_file_to_recover
     assert track_file(store, track["id"]).read_bytes() == b"new source"
 
 
+def test_a_stuck_replacement_cleanup_is_not_rehashed_every_pass(tmp_path, monkeypatch):
+    """#74 (3): a cleanup row that can't finish (the old NAS file no longer
+    matches its recorded hash) re-hashed NAS files under the lifecycle lock
+    on every export pass. It is hashed again only when a file changes or an
+    hour has passed."""
+    import server.exporter
+
+    root = tmp_path / "nas"
+    root.mkdir()
+    monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(root))
+    store = Store(tmp_path / "data")
+    track, source = acquired(store)
+    exporter = Exporter(store, root)
+    exporter.publish(track)
+    old = exporter.records()[0]
+    original = root / old["export_relative_path"]
+    source.write_bytes(b"new source")
+    replacement = {**track, "sha256": hashlib.sha256(b"new source").hexdigest()}
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE acquired SET payload=? WHERE id=?",
+            (json.dumps(replacement), track["id"]),
+        )
+        conn.execute(
+            "INSERT INTO quality_cleanup VALUES (?,?,?)",
+            ("quality-request", track["id"], json.dumps(old)),
+        )
+    exporter.publish(replacement)
+    original.write_bytes(b"edited elsewhere")
+    reads, real = [], server.exporter.digest
+
+    def read(path):
+        assert store.lifecycle_lock.owned()  # Cleanup deletes files: locked.
+        reads.append(path)
+        return real(path)
+
+    monkeypatch.setattr(server.exporter, "digest", read)
+    store.cleanup_replacements()
+    assert reads and original.exists()
+    reads.clear()
+    for _ in range(3):
+        store.cleanup_replacements()
+    assert reads == []
+    # An hour later it is tried again, once.
+    for key, (state, at) in list(store.cleanup_attempts.items()):
+        store.cleanup_attempts[key] = (state, at - 3601)
+    store.cleanup_replacements()
+    store.cleanup_replacements()
+    assert len(reads) == 2  # Replacement and original, one attempt.
+    # Once the file matches again, the cleanup finishes.
+    original.write_bytes(b"validated")
+    store.cleanup_replacements()
+    assert not original.exists() and "quality-request" not in store.cleanup_attempts
+
+
 def test_existing_library_original_is_retained_until_requested_replacement_is_published(
     tmp_path, monkeypatch
 ):
