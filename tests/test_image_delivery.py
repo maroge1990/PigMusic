@@ -3,6 +3,7 @@ import io
 import json
 import threading
 import time
+import traceback
 
 import httpx
 from fastapi.testclient import TestClient
@@ -72,7 +73,7 @@ def test_cold_images_release_http_connections_while_provider_is_blocked(tmp_path
 def test_queue_bounds_deduplication_backoff_and_shutdown():
     async def run():
         changes = []
-        work = Enrichment(lambda: changes.append(True), capacity=2)
+        work = Enrichment(lambda library: changes.append(library), capacity=2)
         gate = asyncio.Event()
 
         async def operation():
@@ -283,3 +284,45 @@ def test_corrupt_legacy_provider_cache_does_not_block_library_startup(tmp_path):
         "/api/v1/library-artwork/"
     )
     assert cached.read_bytes() == b"corrupt cached picture"
+
+
+def test_only_library_artwork_rebuilds_the_library(tmp_path):
+    """#79: every finished artwork job (catalogue covers, backgrounds, logos,
+    catalogue artists, cover metadata) rebuilt the whole library (1-2 s,
+    holding the cover lock), though only library covers and portraits are
+    part of it. The others only bump the artwork revision."""
+    seed(tmp_path, 1)
+    app = create_app(tmp_path)
+    with TestClient(app) as client:
+        store, work = app.state.store, app.state.enrichment
+        rebuilds = []
+        refresh = store.refresh_library
+
+        def counted():
+            # Only rebuilds an artwork job asks for; start-up recovery also
+            # refreshes the library in the background.
+            if any(f.name == "images_changed" for f in traceback.extract_stack()):
+                rebuilds.append(True)
+            return refresh()
+
+        store.refresh_library = counted
+        before = client.get("/api/v1/admin/queue").json()["artwork_revision"]
+
+        async def found():
+            return True
+
+        assert work.submit("background:artist", found)
+        assert work.submit("logo:artist", found)
+        assert work.submit("metadata:cover", found)
+        client.portal.call(work.queue.join)
+        assert rebuilds == []
+        assert (
+            client.get("/api/v1/admin/queue").json()["artwork_revision"] == before + 3
+        )
+        assert work.submit("library:albums:one", found, library=True)
+        client.portal.call(work.queue.join)
+        assert rebuilds == [True]
+        assert (
+            client.get("/api/v1/admin/queue").json()["artwork_revision"] == before + 4
+        )
+        client.portal.call(app.state.http.aclose)

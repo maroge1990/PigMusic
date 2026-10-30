@@ -115,10 +115,13 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     preload_stopping = asyncio.Event()
     image_revision = 0
 
-    def images_changed():
+    def images_changed(library=True):
+        """Every new image bumps the revision clients refetch artwork by; only
+        a library cover or portrait rebuilds the library (1-2 s, #79)."""
         nonlocal image_revision
         image_revision += 1
-        store.refresh_library()
+        if library:
+            store.refresh_library()
 
     enrichment = Enrichment(images_changed)
     image_slots = asyncio.Semaphore(2)
@@ -809,7 +812,9 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                     # Album art fetched lazily under its own alias.
                     target = artwork.target(store.albums_by_id[item["cover_album_id"]])
         enrichment.submit(
-            library_image_key(kind, item), lambda: enrich_library(kind, item)
+            library_image_key(kind, item),
+            lambda: enrich_library(kind, item),
+            library=True,
         )
         return await image_response(target, w)
 
@@ -1079,6 +1084,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                     if enrichment.submit(
                         library_image_key(kind, item),
                         lambda kind=kind, item=item: enrich_library(kind, item),
+                        library=True,
                     ):
                         seen.add(signature)
                     break

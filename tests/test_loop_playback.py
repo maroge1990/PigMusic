@@ -169,7 +169,7 @@ def test_saved_catalogue_song_resolves_its_file_off_the_loop(tmp_path, monkeypat
 def test_artist_artwork_finds_its_portrait_off_the_loop(tmp_path, monkeypatch):
     library(tmp_path)
     # No provider traffic: this test is only about the request itself.
-    monkeypatch.setattr(Enrichment, "submit", lambda self, key, factory: None)
+    monkeypatch.setattr(Enrichment, "submit", lambda self, key, factory, **_: None)
     app, _ = protected(tmp_path, monkeypatch)
     started = slowed(monkeypatch, app_module, "portrait_target")
     with owner_client(app) as client:
