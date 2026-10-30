@@ -3,6 +3,7 @@ import { api } from "./api";
 import { formatDateTime } from "./format";
 import type { Person } from "./AppShell";
 import { InvitePanel, type Invite } from "./InvitePanel";
+import { guessedAccounts, type Activity } from "./accountAlerts";
 
 type InboxAlbum = {
   id: string;
@@ -10,7 +11,6 @@ type InboxAlbum = {
   artist: string;
   tracks: { id: string }[];
 };
-type Activity = { at: number; display_name?: string; event: string };
 
 function json(body: unknown) {
   return {
@@ -67,9 +67,16 @@ export function AdminPeople() {
   const [invite, setInvite] = useState<{ invite: Invite; name: string } | null>(
     null,
   );
+  const guessed = guessedAccounts(events);
   return (
     <>
       {notices}
+      {guessed.length > 0 && (
+        <p className="error-banner" role="alert">
+          Someone has been trying wrong passwords for {guessed.join(", ")} this
+          week. PigMusic is slowing their attempts down; nobody is locked out.
+        </p>
+      )}
       <section className="account-section">
         <h2>People</h2>
         <form

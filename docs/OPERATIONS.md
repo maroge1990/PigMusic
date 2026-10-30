@@ -41,7 +41,7 @@ PigMusic is reachable from the internet at `<public-origin>` through a Cloudflar
 
 ### Protections in front of the login page
 
-Already in the app: Argon2id hashes, per-name and per-IP failure lockouts, default-deny routes, `__Host-` secure/strict cookies, CSRF header and same-origin write checks, HSTS and CSP. Behind the tunnel, Uvicorn takes the visitor address that cloudflared appends to `X-Forwarded-For` only when the immediate peer is a configured trusted proxy (`tests/test_transport.py` covers a spoofed header), so login lockouts remain per visitor.
+Already in the app: Argon2id hashes, per-name and per-IP failure lockouts, a growing per-account sign-in delay with an owner warning on People (no hard lockout; the account's recent addresses skip it; D-49), default-deny routes, `__Host-` secure/strict cookies, CSRF header and same-origin write checks, HSTS and CSP. Behind the tunnel, Uvicorn takes the visitor address that cloudflared appends to `X-Forwarded-For` only when the immediate peer is a configured trusted proxy (`tests/test_transport.py` covers a spoofed header), so login lockouts remain per visitor.
 
 Cloudflare (dashboard, the household zone) is set once, never per person: a country block rule (remove or widen it before travelling), a rate-limiting rule that blocks bursts of sign-in and setup `POST` requests per IP, a cache rule that bypasses the edge cache for the API so signed media URLs and personal responses are never stored there, and Bot Fight Mode left off for the hostname because it challenges the native app's API calls. The exact rules are in `.private/operations-private.md`.
 
@@ -55,7 +55,7 @@ This procedure is for an owner-authorised setup or rebuild, not a pending instru
 4. Update the PigMusic container:
    - `PIG_MUSIC_PUBLIC_ORIGIN=<public-origin>` (invite links now use this host).
    - `PIG_MUSIC_TRUSTED_PROXIES=127.0.0.1,172.25.0.1,172.25.0.10` (keep the Tailscale gateway; add cloudflared's fixed address exactly, never a range).
-5. Verify from a phone on cellular with Wi-Fi off: `<public-origin>/api/health` reports `"https": true`; sign in; create an invite and complete it on the second phone; play a saved song; confirm repeated wrong passwords lock out only the device that made them (lockouts are per username and address, so a stranger guessing `mark` cannot lock the owner out elsewhere).
+5. Verify from a phone on cellular with Wi-Fi off: `<public-origin>/api/health` reports `"https": true`; sign in; create an invite and complete it on the second phone; play a saved song; confirm repeated wrong passwords lock out only the device that made them (lockouts are per username and address, so a stranger guessing `mark` cannot lock the owner out elsewhere); after 10 wrong passwords in a day, People on the web shows a warning, and a device that signed in to that account in the last 30 days still signs in at once.
 6. Rollback: delete the public hostname in the tunnel (or stop cloudflared) and restore the previous `PIG_MUSIC_PUBLIC_ORIGIN`/`PIG_MUSIC_TRUSTED_PROXIES`. Tailscale access is unaffected throughout.
 
 The Tailscale address keeps working for same-origin use (each address keeps its own sign-in cookie), but invite links always use the public origin.

@@ -15,6 +15,12 @@ from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 
 DAY = 86400
+# Wrong passwords for one account from any address (D-49): after this many in
+# a day its sign-ins wait a growing delay, and at the alert count the owner is
+# told. Never a hard lockout, and the account's recent addresses don't wait.
+ACCOUNT_FREE_FAILURES = 5
+ACCOUNT_MAX_DELAY = 60
+ACCOUNT_ALERT_FAILURES = 10
 COOKIE = "__Host-pig_session"
 COMMON_PASSWORDS = frozenset(
     {
@@ -193,6 +199,54 @@ class Auth:
     def name_key(self, name):
         return "name:" + digest(name.strip().casefold())
 
+    def account_key(self, name):
+        return "account:" + digest(name.strip().casefold())
+
+    def known_key(self, name, ip):
+        """An address that signed in to this account in the last 30 days."""
+        return "known:" + digest(name.strip().casefold()) + ":" + digest(ip)
+
+    def slowed(self, name, ip):
+        """Whether this sign-in must wait out the account's delay (D-49)."""
+        with self.store.connect() as conn:
+            if conn.execute(
+                "SELECT 1 FROM login_attempts WHERE key=?", (self.known_key(name, ip),)
+            ).fetchone():
+                return False
+            return bool(
+                conn.execute(
+                    "SELECT 1 FROM login_attempts WHERE key=? AND locked_until>?",
+                    (self.account_key(name), self.now()),
+                ).fetchone()
+            )
+
+    def account_failure(self, conn, name, now):
+        """Count a checked wrong password against the account and grow its
+        delay; alert the owner once a day when an account is being guessed."""
+        key = self.account_key(name)
+        found = conn.execute(
+            "SELECT failures,window_started,lockouts,locked_until,updated_at FROM login_attempts WHERE key=?",
+            (key,),
+        ).fetchone()
+        failures, started, alerted, until, updated = found or (0, now, 0, 0, now)
+        if now - updated >= DAY:
+            failures, started, alerted = 0, now, 0
+        failures += 1
+        if failures >= ACCOUNT_FREE_FAILURES:
+            delay = 2 ** min(failures - ACCOUNT_FREE_FAILURES, 16)
+            until = now + min(delay, ACCOUNT_MAX_DELAY)
+        if failures >= ACCOUNT_ALERT_FAILURES and not alerted:
+            person = conn.execute(
+                "SELECT id FROM users WHERE username=? COLLATE NOCASE", (name.strip(),)
+            ).fetchone()
+            if person:
+                self.event(conn, "sign_in_slowed", "", person[0])
+            alerted = 1
+        conn.execute(
+            "INSERT OR REPLACE INTO login_attempts VALUES (?,?,?,?,?,?)",
+            (key, failures, started, alerted, until, now),
+        )
+
     def locked(self, name, ip):
         with self.store.connect() as conn:
             return any(
@@ -203,10 +257,12 @@ class Auth:
                 for key in self.keys(name, ip)
             )
 
-    def failure(self, name, ip, event="login_failed"):
+    def failure(self, name, ip, event="login_failed", account=False):
         now = self.now()
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if account:
+                self.account_failure(conn, name, now)
             for key in self.keys(name, ip):
                 found = conn.execute(
                     "SELECT failures,window_started,lockouts,locked_until,updated_at FROM login_attempts WHERE key=?",
@@ -249,9 +305,11 @@ class Auth:
         ):
             raise AuthError("invalid_device", 422)
         if not isinstance(password, str) or len(password) > 256 or len(name) > 64:
-            self.failure(name[:64], ip)
+            self.failure(name[:64], ip, account=True)
             raise AuthError("invalid_credentials")
-        if self.locked(name, ip):
+        if self.locked(name, ip) or self.slowed(name, ip):
+            # Refused unchecked: counts for this address, not the account, so
+            # waiting attempts never stretch the account's delay.
             self.failure(name, ip)
             raise AuthError("invalid_credentials")
         with self.store.connect() as conn:
@@ -275,7 +333,7 @@ class Auth:
         except (VerificationError, InvalidHashError):
             verified = False
         if not verified:
-            self.failure(name, ip)
+            self.failure(name, ip, account=True)
             raise AuthError("invalid_credentials")
         now = self.now()
         token = secrets.token_urlsafe(32)
@@ -309,6 +367,10 @@ class Auth:
             )
             conn.execute(
                 "DELETE FROM login_attempts WHERE key=?", (self.keys(name, ip)[0],)
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO login_attempts VALUES (?,0,?,0,0,?)",
+                (self.known_key(name, ip), now, now),
             )
             self.event(conn, "login", ip, person["id"])
         return {"token": token, "user": public_user(person), "expires_at": expires}
@@ -434,8 +496,8 @@ class Auth:
                 (now, person[0]),
             )
             conn.execute(
-                "DELETE FROM login_attempts WHERE key LIKE ?",
-                (self.name_key(name) + ":%",),
+                "DELETE FROM login_attempts WHERE key LIKE ? OR key=?",
+                (self.name_key(name) + ":%", self.account_key(name)),
             )
             self.event(conn, "password_reset", "", person[0])
 

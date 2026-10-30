@@ -131,6 +131,8 @@ def test_password_change_keeps_current_and_revokes_others(fixture):
 
 def test_login_limits_unknown_user_same_errors_and_exponential_lock(fixture):
     auth, _, clock = fixture
+    # The owner's usual address, which the account-wide slow-down skips (D-49).
+    assert token(auth, ip="another-ip")
     for cycle, seconds in enumerate([60, 120, 240]):
         for _ in range(5):
             with pytest.raises(AuthError, match="invalid_credentials"):
@@ -154,6 +156,66 @@ def test_login_limits_unknown_user_same_errors_and_exponential_lock(fixture):
             token(auth, name="missing-user", ip="unknown-ip")
     with pytest.raises(AuthError, match="invalid_credentials"):
         token(auth, name="another-missing", ip="unknown-ip")
+
+
+def account_delay(auth, clock, name="mark"):
+    with auth.store.connect() as conn:
+        found = conn.execute(
+            "SELECT locked_until FROM login_attempts WHERE key=?",
+            (auth.account_key(name),),
+        ).fetchone()
+    return max(0, found[0] - clock[0]) if found else 0
+
+
+def test_guessing_one_account_from_many_addresses_slows_down_and_alerts(fixture):
+    """D-49: wrong passwords for one account, from any address, slow its
+    sign-ins by a growing delay (no hard lockout) and alert the owner once a
+    day; the owner's recent addresses skip the delay."""
+    auth, owner, clock = fixture
+    assert token(auth, ip="home")
+    addresses = iter(f"guesser-{i}" for i in range(1000))
+
+    def guess():
+        with pytest.raises(AuthError, match="invalid_credentials"):
+            token(auth, password="wrong fixture", ip=next(addresses))
+
+    for _ in range(4):
+        guess()
+    assert account_delay(auth, clock) == 0
+    delays = []
+    for _ in range(9):
+        guess()
+        delays.append(account_delay(auth, clock))
+        # Too soon: refused unchecked, without stretching the delay.
+        before = account_delay(auth, clock)
+        with pytest.raises(AuthError, match="invalid_credentials"):
+            token(auth, ip="cafe")
+        assert account_delay(auth, clock) == before
+        assert token(auth, ip="home")  # The owner's own address never waits.
+        clock[0] += delays[-1]
+    assert delays == [1, 2, 4, 8, 16, 32, 60, 60, 60]
+    assert token(auth, ip="cafe")  # Once the delay passes, nobody is locked out.
+    with auth.store.connect() as conn:
+        alerts = conn.execute(
+            "SELECT user_id FROM auth_events WHERE event='sign_in_slowed'"
+        ).fetchall()
+    assert [tuple(a) for a in alerts] == [(owner,)]
+    clock[0] += DAY
+    guess()
+    assert account_delay(auth, clock) == 0  # A quiet day starts afresh.
+
+
+def test_guessing_an_unknown_name_slows_it_without_an_alert(fixture):
+    auth, _, clock = fixture
+    for i in range(12):
+        with pytest.raises(AuthError, match="invalid_credentials"):
+            token(auth, name="nobody", password="wrong fixture", ip=f"a{i}")
+        clock[0] += 60
+    assert account_delay(auth, clock, "nobody") == 0
+    with auth.store.connect() as conn:
+        assert not conn.execute(
+            "SELECT 1 FROM auth_events WHERE event='sign_in_slowed'"
+        ).fetchone()
 
 
 @pytest.mark.parametrize(
