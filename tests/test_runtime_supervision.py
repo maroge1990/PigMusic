@@ -56,3 +56,21 @@ def test_engine_crash_restarts_with_backoff_while_server_keeps_running(
     # Each restart waits longer than the last, up to the limit.
     assert gaps == sorted(gaps)
     assert gaps[1] > gaps[0]
+
+
+def test_the_engine_heap_has_room_for_a_burst_of_search_replies(tmp_path, monkeypatch):
+    """#89: with a 256 MB .NET heap the engine aborted on OutOfMemory while
+    decompressing many search replies at once (the container had 3 GB free)."""
+    launched = {}
+
+    def popen(command, env, **kwargs):
+        launched.update(env)
+        kwargs["stdout"].close()
+        return "engine"
+
+    monkeypatch.setattr(runtime.subprocess, "Popen", popen)
+    monkeypatch.delenv("PIG_MUSIC_DOWNLOAD_ROOT", raising=False)
+    monkeypatch.setenv("PIG_MUSIC_EMBEDDED_ENGINE", "true")
+    process, log = runtime.start_engine(tmp_path)
+    assert process == "engine"
+    assert int(launched["DOTNET_GCHeapHardLimit"], 16) >= 512 * 1024 * 1024

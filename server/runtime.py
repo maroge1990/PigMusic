@@ -15,6 +15,7 @@ from .storage import require_library_mount
 ENGINE_BACKOFF_START = 5
 ENGINE_BACKOFF_LIMIT = 300
 ENGINE_HEALTHY_SECONDS = 600
+ENGINE_HEAP_MB = 512
 
 
 def start_engine(root):
@@ -64,7 +65,9 @@ def start_engine(root):
                 ),
                 DOTNET_BUNDLE_EXTRACT_BASE_DIR=str(engine / "bundle"),
                 DOTNET_EnableDiagnostics="0",
-                DOTNET_GCHeapHardLimit="0x10000000",
+                # 512 MB: a burst of compressed search replies ran a 256 MB
+                # heap out of memory and aborted the engine (#89).
+                DOTNET_GCHeapHardLimit=hex(ENGINE_HEAP_MB * 1024 * 1024),
                 SLSKD_UMASK="077",
             )
             command = [
