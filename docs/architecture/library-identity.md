@@ -34,6 +34,7 @@ One compatibility policy, `matching.compatible` (`server/matching.py`), serves l
 - **Refreshes run one at a time and never overwrite anchors.** Two overlapping builds could both read the edition anchors before either saved them, so the later one overwrote an anchor the first had published and an album's ID could move to another edition. Each build must read the anchors the previous one saved. (`dc669b8`)
 - **The order is always `covers.lock`, then `library_lock`.** A separate refresh lock deadlocked against a scan, which holds `covers.lock` through its refresh while another refresh waited for it with `lifecycle_lock` held. `covers.lock`, held from build to swap, now serialises refreshes; readers take only `library_lock`, held just for the swap. Do not add a second refresh lock. (`672354f`)
 - The exporter rebuilds the library only when it recorded a new location. (`9e75f44`)
+- A finished artwork job rebuilds the library only when the image is part of it (a library album's cover or a library artist's portrait); backgrounds, logos, catalogue artwork and cover metadata only bump the artwork revision. (`a4bf992`)
 
 ## Artist identity from collaborative credits
 

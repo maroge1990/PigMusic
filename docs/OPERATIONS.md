@@ -140,6 +140,8 @@ Each release has two steps:
 
    Any failure restores the complete stopped appdata, template, container and networks.
 
+Unraid's Docker › Edit › Apply can rewrite the live template: on 25 Oct it dropped the `br0` network and the `--cpus 2 --memory 4g` limits from ExtraParams, and the next update ran without them. After any Edit › Apply on PigMusic, compare the live template's ExtraParams with `unraid/PigMusic.xml` before the next release; the release preflight refuses a container without both networks or a 1–8 GiB memory limit.
+
 `deploy_release.py --retention 2` lists backups and containers older than the two newest releases. It always keeps `pre-first-run-20261007-v1` and legacy manager material, and it **never deletes**. Remove listed items by hand once the owner agrees.
 
 Historical tools, kept for migration history only: `deploy_unraid.py --deploy` (the old Compose path, which refuses account releases), `package_unraid_preview.py`, `unraid_preview_smoke.py` and `export_library_snapshot.py`. `deploy_unraid.py --deploy` still calls the unversioned `/api/...` routes retired in U01-4, so it fails against current images and must be migrated and re-reviewed before any reuse. `deploy_first_run_unraid.py` and `adopt_unraid_template.py` were removed on 30 Oct 2026 (they held household values and nothing used them); they remain in Git history.

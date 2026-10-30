@@ -24,9 +24,11 @@ Each lesson cites the commit that introduced it; read the commit message for the
 - Reconnects retain confirmations instead of forcing manifests. (`facecf2`)
 - The phone keeps the Watch's last receipt and restores it on launch when it matches the current library context, so a relaunch does not count every Watch song as still to send. (`7b7bb3e`)
 - Each inbox file is delivered once at a time; a file already taken is ignored. (`8bfaaef`)
+- A reconnect (the Watch app coming to the foreground) forgets only the manifest and context marks. Songs already handed to WatchConnectivity keep theirs until the Watch's receipt confirms them or ten minutes pass (`CompanionSendLog`); clearing them resent every unconfirmed song on each reachability change. (`f356ea3`)
 
 ## Transfers
 
+- The phone announces a new library version before the songs already on their way and sends its manifest after them. The Watch stores a song its committed library lists even while a newer version is staged, and keeps one it doesn't list in the inbox until the announced manifest arrives (`CompanionArchive.arrival`: accept / wait / stale); judging them stale deleted them, and the same songs crossed again and again. (`b1a5649`)
 - In-flight songs are kept across library versions for the same account (the Watch accepts earlier tickets for songs it still lists); only superseded manifests and songs that left are cancelled. Songs are de-duplicated by song and checksum, not by version. While a batch is preparing, a new version goes out at most every 45 s (removals and Retry go at once). Old manifest files are kept a few versions longer than their transfers. Before this, every finished song made a new version that cancelled and re-queued every transfer. (`8708c8c`)
 - WatchConnectivity keeps outstanding file transfers across launches with their original URLs. After an app update moves the data container they fail, so cancel queued transfers whose file can no longer be read; otherwise the phone skips those songs forever. (`3e6ef94`)
 - WatchConnectivity reply handlers must not inherit main-actor isolation; that trapped at runtime. (`5925486`)
@@ -42,5 +44,7 @@ Each lesson cites the commit that introduced it; read the commit message for the
 ## Battery and main-thread work
 
 - The paused Watch stops its engine and clock, preserves its recovery position, and suppresses elapsed-only background updates. (`facecf2`)
+- Copy preparation runs only while the app is in the foreground (D-51); a transfer already handed to the system may finish. Internal restarts (removals, releases, adding songs, the cellular setting, the Watch's reconcile and Retry) never undo the person's Pause or that suspension, and only the person's Pause is saved (as 2: older builds saved 1 for every stop and it is ignored). (`7946403`, `4e0cc3c`)
+- The Watch's readiness receipt checks every song with one folder listing; a manifest search and a file check per song took about 190 ms at 1,000 songs. (`8d9e5b6`)
 - Diagnostics logging must not run on the main thread: the caller only takes the time, and formatting, redaction and appending happen on the log's queue, with the file written at most every half second and at once in the background. (`fea759f`)
 - Route and engine-configuration changes are debounced and rebuild output only when the engine actually stopped; a media-services reset keeps the queue and position; Play never rebuilds a running engine. The Watch queue and position are restored paused after a relaunch, with audio prepared on the first Play. (`f5c63df`)
