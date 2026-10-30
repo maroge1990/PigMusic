@@ -43,9 +43,8 @@ import SwiftUI
   /// instead of checking every file again (RV23).
   @ObservationIgnored private var readyCache:
     (key: [String], archive: Int, songs: [CompanionSong], files: [String: URL])?
-  /// When each manifest ("manifest:<revision>") or song ("audio:<id>:<checksum>")
-  /// was last handed to WatchConnectivity, so nothing is queued twice.
-  @ObservationIgnored private var sent: [String: Date] = [:]
+  /// When each manifest or song was last handed to WatchConnectivity.
+  @ObservationIgnored private var sent = CompanionSendLog()
   @ObservationIgnored private var lastAdvance = Date.distantPast
   /// The context last handed to WatchConnectivity, which keeps delivering it.
   @ObservationIgnored private var contextSent: CompanionContext?
@@ -64,9 +63,9 @@ import SwiftUI
       link?.onActivated = { [weak self] in
         guard let self else { return }
         // Reannounce the small context so a reinstalled Watch can report what
-        // it needs. Retain confirmed songs instead of forcing the manifest on
-        // every reachability change; unfinished work can retry immediately.
-        sent = [:]
+        // it needs. Songs already handed over keep their marks (#70): they are
+        // confirmed by the next receipt or retried after ten minutes.
+        sent.forgetManifests()
         contextSent = nil
         await publish()
       }
@@ -85,7 +84,7 @@ import SwiftUI
           peerRevision = max(peerRevision, acknowledgement.context.revision)
           if verified, context.revision < peerRevision {
             link?.cancelTransfers()
-            sent = [:]
+            sent.reset()
             published = nil
             receipt = nil
             advance(account: namespace)
@@ -214,7 +213,7 @@ import SwiftUI
   func confirmAccount() {
     if context.account != namespace || context.revision < peerRevision {
       link?.cancelTransfers()
-      sent = [:]
+      sent.reset()
       advance(account: namespace)
       try? link?.publish(context)
     }
@@ -434,7 +433,7 @@ import SwiftUI
     subscriptionsURL = nil
     if let receiptURL { try? FileManager.default.removeItem(at: receiptURL) }
     receiptURL = nil
-    sent = [:]
+    sent.reset()
     link?.cancelTransfers()
     advance(account: nil)
     try? link?.publish(context)
@@ -450,7 +449,7 @@ import SwiftUI
       if context.account == nil { try? link?.publish(context) }
       return
     }
-    if force { sent = [:] }
+    if force { sent.reset() }
     publishing = true
     defer { publishing = false }
     let stamp = generation
@@ -521,10 +520,10 @@ import SwiftUI
           guard let file = envelope.file else { return false }
           return !keep.contains("\(file.songId):\(file.checksum)")
         }
-        sent = sent.filter { key, _ in !key.hasPrefix("manifest:") }
+        sent.forgetManifests()
       } else {
         link?.cancelTransfers()
-        sent = [:]
+        sent.reset()
       }
       advance(account: namespace)
       lastAdvance = Date()
@@ -561,9 +560,7 @@ import SwiftUI
     let outstanding = (link?.outstanding ?? []).compactMap {
       try? JSONDecoder().decode(CompanionEnvelope.self, from: $0)
     }
-    func due(_ key: String) -> Bool {
-      sent[key].map { Date().timeIntervalSince($0) > 600 } ?? true
-    }
+    func due(_ key: String) -> Bool { sent.due(key) }
     if force || receipt?.context != context || receipt?.manifestApplied != true {
       let metadata = CompanionEnvelope(kind: "manifest", context: context)
       let key = "manifest:\(context.revision)"
@@ -571,7 +568,7 @@ import SwiftUI
         !outstanding.contains(where: { $0.kind == "manifest" && $0.context == context })
       {
         link?.transfer(manifestURL, metadata: data)
-        sent[key] = Date()
+        sent.mark(key)
       }
     }
     // Manifest files stay a few versions longer than their transfers, so a
@@ -605,7 +602,7 @@ import SwiftUI
       let envelope = CompanionEnvelope(kind: "audio", context: context, file: ticket)
       if let data = try? JSONEncoder().encode(envelope) {
         link?.transfer(file, metadata: data)
-        sent["audio:" + identity] = Date()
+        sent.mark("audio:" + identity)
       }
     }
   }
