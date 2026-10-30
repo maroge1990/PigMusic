@@ -15,6 +15,8 @@ from server.lifecycle import TimedRLock
 from test_exporter import acquired, download, nas_with
 from test_downloader import audio  # noqa: F401  Shared real MP3 fixture.
 
+pytestmark = pytest.mark.loop_timing
+
 
 def settle(*paths):
     """Make files look written a minute ago, as published songs are."""

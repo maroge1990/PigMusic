@@ -1,3 +1,5 @@
+import gc
+
 import pytest
 
 from server.catalogue import Catalogue
@@ -8,6 +10,18 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "real_rate_limits: keep the production provider request spacing"
     )
+    config.addinivalue_line(
+        "markers", "loop_timing: measures event-loop stalls against a short limit"
+    )
+
+
+@pytest.fixture(autouse=True)
+def collect_before_loop_timing(request):
+    # By mid-suite a full collection takes ~0.4 s locally and over 0.5 s on CI
+    # runners, enough to fail a 0.2 s stall limit at random (CI run
+    # 41014086837). Collect first so the pause can't land in the measurement.
+    if request.node.get_closest_marker("loop_timing"):
+        gc.collect()
 
 
 @pytest.fixture(autouse=True)

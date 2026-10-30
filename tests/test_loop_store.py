@@ -9,6 +9,7 @@ import threading
 import time
 
 import httpx
+import pytest
 from PIL import Image
 
 from server.catalogue import Catalogue
@@ -16,6 +17,8 @@ from server.home import HomeDiscovery
 from server.media import save_settings
 from server.popularity import Popularity
 from server.store import Store
+
+pytestmark = pytest.mark.loop_timing
 
 ARTIST = "70248960-cb53-4ea4-943a-edb18f7d336f"
 TOKEN = "00000000-0000-4000-8000-000000000000"

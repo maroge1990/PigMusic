@@ -6,11 +6,14 @@ import threading
 import time
 
 from fastapi.testclient import TestClient
+import pytest
 
 from server.app import create_app
 from server.downloader import Downloader
 from server.user_library import initialise_owner
 from test_security import PASSWORD, protected
+
+pytestmark = pytest.mark.loop_timing
 
 
 def library(tmp_path):

@@ -21,6 +21,8 @@ from test_mixes import cached, member, ready, track
 from test_native_sync import fixture
 from test_security import PASSWORD, protected
 
+pytestmark = pytest.mark.loop_timing
+
 RELEASE = "11111111-1111-1111-1111-111111111111"
 RECORDING = "22222222-2222-2222-2222-222222222222"
 

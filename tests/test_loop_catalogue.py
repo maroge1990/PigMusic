@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 
 import httpx
+import pytest
 
 from server.home import HomeDiscovery
 from server.media import save_settings
@@ -24,6 +25,8 @@ from test_loop_store import (
     slow_documents,
 )
 from test_native_sync import fixture
+
+pytestmark = pytest.mark.loop_timing
 
 FANART = "f" * 32
 
