@@ -2,6 +2,7 @@
 
 import json
 import importlib.util
+import sys
 
 import pytest
 
@@ -232,7 +233,17 @@ def test_a_release_without_household_values_fails_before_any_remote_command(
 ):
     """Codex round 1 on 4f666f3: a Release built outside main() used the
     example network values, so a direct rollback reconnected br0 to them."""
-    from scripts import household
+    try:
+        from scripts import household
+    except ImportError:
+        # The image's scripts package has no household.py: load the checkout's
+        # copy under the name deploy.household() falls back to.
+        spec = importlib.util.spec_from_file_location(
+            "household", SOURCE / "scripts/household.py"
+        )
+        household = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(household)
+        monkeypatch.setitem(sys.modules, "household", household)
 
     monkeypatch.setattr(household, "FILE", tmp_path / "missing.env")
     for key in household.read(SOURCE / ".env.example"):
