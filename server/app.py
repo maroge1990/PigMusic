@@ -1066,14 +1066,12 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         # One new/changed local item per pass. No periodic discography walk.
         seen = set()
         while not preload_stopping.is_set():
+            # Once per pass, not per item: each read stats the settings file
+            # on the event loop, for every album and artist every 15 s (#63).
+            media = json.dumps(public_settings(store), sort_keys=True)
             for kind in ("albums", "artists"):
                 for item in list(store.library[kind]):
-                    signature = (
-                        kind,
-                        item["id"],
-                        item.get("cover_url"),
-                        json.dumps(public_settings(store), sort_keys=True),
-                    )
+                    signature = (kind, item["id"], item.get("cover_url"), media)
                     if signature in seen:
                         continue
                     if not (item.get("cover_url") or "").startswith(
