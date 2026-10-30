@@ -28,6 +28,8 @@ import SwiftUI
   @ObservationIgnored private let defaults: UserDefaults
   @ObservationIgnored private var namespace: String?
   @ObservationIgnored private var verified = false
+  /// Whether the app is in the foreground: copies are prepared only then (D-51).
+  @ObservationIgnored private var foreground = true
   @ObservationIgnored private var poll: Task<Void, Never>?
   @ObservationIgnored private var published: CompanionManifest?
   @ObservationIgnored private var manifestURL: URL?
@@ -198,6 +200,7 @@ import SwiftUI
     }
   }
   func resume() {
+    foreground = true
     link?.refreshState()
     // Watch AAC preparation restarts only after the library was reconciled.
     if verified { downloads?.resumePreparation() }
@@ -207,7 +210,7 @@ import SwiftUI
   func retry() async {
     message = nil
     link?.reconnect()
-    if verified { downloads?.resume() }
+    if verified { downloads?.resume(automatic: true) }
     await publish(force: true)
   }
   func confirmAccount() {
@@ -229,7 +232,9 @@ import SwiftUI
     verified = true
     await followPlaylists()
     guard generation == stamp else { return }
-    downloads.resume()
+    // A reconcile that finishes after the phone was locked must not restart
+    // preparation (#65); returning to the foreground does that.
+    if foreground { downloads.resumePreparation() }
     await publish()
   }
   var supported: Bool { link?.supported == true }
@@ -412,6 +417,7 @@ import SwiftUI
   /// The app left the foreground: stop polling and server-side preparation, but
   /// leave the system's background downloads and Watch transfers running.
   func suspend() async {
+    foreground = false
     poll?.cancel()
     poll = nil
     await downloads?.suspendPreparation()

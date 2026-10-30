@@ -53,10 +53,10 @@ import PigDomain
       }
     }
     public func setCellular(_ enabled: Bool) async {
-      await pause()
+      await interrupt()
       allowsCellular = enabled
       background?.allowsCellular = enabled
-      resume()
+      resume(automatic: true)
     }
   #endif
   public let archive: DownloadArchive
@@ -82,7 +82,7 @@ import PigDomain
   ) async throws {
     try await archive.enqueue(tracks, quality: quality, origin: origin)
     await reload()
-    resume()
+    resume(automatic: true)
   }
   /// Removes an album's or playlist's claim on these songs; files still needed
   /// by another album or playlist stay on the device.
@@ -95,24 +95,27 @@ import PigDomain
       await reload()
       return
     }
-    await pause()
+    await interrupt()
     #if os(iOS)
       await background?.reconcile(Set(records.map(\.id)).subtracting(leaving))
     #endif
     try? await archive.release(ids: ids, origin: origin)
     await reload()
     for id in leaving { progress[id] = nil }
-    resume()
+    resume(automatic: true)
   }
   public func clearFinished(ids: Set<String>? = nil) async {
     try? await archive.clearFinished(ids: ids)
     await reload()
   }
+  /// `resume()` is the person's Resume: it clears their Pause. `automatic: true`
+  /// is every internal restart. Neither lifts the suspension while the app is in
+  /// the background or before the owner allows preparation: copies are prepared
+  /// only in the foreground, while transfers already running may finish (D-51).
   public func resume(automatic: Bool = false) {
     guard !automatic || !userPaused else { return }
     if !automatic {
       userPaused = false
-      preparationAllowed = true
       #if os(iOS)
         background?.userPaused = false
       #endif
@@ -225,7 +228,7 @@ import PigDomain
     }
   }
   public func remove(id: String) async {
-    await pause()
+    await interrupt()
     #if os(iOS)
       let retained = Set(records.map(\.id)).subtracting([id])
       await background?.reconcile(retained)
@@ -233,7 +236,7 @@ import PigDomain
     try? await archive.remove(id: id)
     await reload()
     progress[id] = nil
-    resume()
+    resume(automatic: true)
   }
   /// Preparation pauses with the scene, while OS-managed transfers continue.
   public func suspendPreparation() async {
@@ -258,11 +261,16 @@ import PigDomain
     if ahead == preparing { ahead = nil }
     running = false
   }
+  /// The person's Pause; it lasts until their Resume.
   public func pause() async {
     userPaused = true
     #if os(iOS)
       background?.userPaused = true
     #endif
+    await interrupt()
+  }
+  /// Stops work for an internal change without recording a Pause (#65).
+  private func interrupt() async {
     await stopWorker()
     #if os(iOS)
       await background?.pause()
@@ -280,7 +288,7 @@ import PigDomain
     await reload()
   }
   public func clear() async {
-    await pause()
+    await interrupt()
     #if os(iOS)
       await background?.clear()
     #endif

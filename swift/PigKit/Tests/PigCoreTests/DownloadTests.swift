@@ -143,6 +143,48 @@ private actor Flag {
     #expect(calls.prefix(poll).contains("create three"))
     #expect(await archive.snapshot().allSatisfy { $0.state == "ready" })
   }
+  /// #65 (D-51): internal restarts (removing or releasing a song, adding songs,
+  /// the cellular setting) used the person's Resume, which cleared both their
+  /// Pause and the background suspension: pausing and then removing one song
+  /// resumed every download, and a refresh finishing while the phone was
+  /// locked restarted preparation, polling the server every two seconds.
+  @MainActor @Test func internalRestartsKeepThePersonsPauseAndTheBackgroundSuspension()
+    async throws
+  {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let archive = try archive(root)
+    let songs = try ["one", "two", "three", "four"].map { id in
+      try LibraryCodec.decoder().decode(
+        Track.self,
+        from: Data(
+          #"{"id":"\#(id)","title":"Song","artist":"Artist","source_revision":"v1"}"#.utf8))
+    }
+    try await archive.enqueue(Array(songs.prefix(2)), quality: "original")
+    let source = AheadSource(ready: try copy(), preparing: try copy())
+    let controller = DownloadController(archive: archive, source: source)
+    await controller.reload()
+    await controller.pause()
+    await controller.remove(id: "one")
+    try await controller.enqueue([songs[2]])
+    await controller.release(ids: ["two"], origin: .direct)
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(await source.calls.isEmpty, "paused downloads restarted")
+    #expect(!controller.running)
+    // Locked phone: the scene suspended preparation, and the person's Resume
+    // has not been pressed since; an internal restart must not lift it.
+    await controller.suspendPreparation()
+    controller.resume()  // The person's Resume clears their Pause...
+    try await controller.enqueue([songs[3]])
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(await source.calls.isEmpty, "preparation ran while suspended")
+    // ...and copies start when the app is in the foreground again.
+    controller.resumePreparation()
+    for _ in 0..<100 where await source.calls.isEmpty {
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    #expect(!(await source.calls.isEmpty))
+  }
   @MainActor @Test func pausingStopsTheCopiesAskedForAhead() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
