@@ -184,15 +184,15 @@ class HomeDiscovery:
         """
         region = chart_region(settings(self.store))
         key = "home-chart:v1:" + region
-        cached = self.store.read_document(key)
+        # SQLite can wait on another writer, so the chart is read off the loop.
+        cached = await asyncio.to_thread(self.store.read_document, key)
         if cached and cached.get("until", 0) - renew_margin() > time.time():
             return cached["data"]
         task = self.build_chart(client, region)
         if warming.get():
             await task
-            return self.store.read_document(key).get("data") or self.chart(
-                region, state="unavailable"
-            )
+            built = await asyncio.to_thread(self.store.read_document, key)
+            return built.get("data") or self.chart(region, state="unavailable")
         if cached and cached.get("data"):
             return cached["data"]
         return self.chart(region, state="preparing")
@@ -221,11 +221,16 @@ class HomeDiscovery:
     async def run_chart(self, client, region):
         background_metadata.set(True)
         key = "home-chart:v1:" + region
-        previous = self.store.read_document(key)
+        # The chart cache is used off the loop. A cancelled build still waits
+        # for its write, so self.building covers it and a newer build's chart
+        # cannot be overwritten by this one.
+        previous = await asyncio.to_thread(self.store.read_document, key)
         try:
             feed = await self.match_chart(client, region)
-            self.store.write_document(
-                key, {"until": time.time() + CHART_TTL, "data": feed}
+            await settled(
+                self.store.write_document,
+                key,
+                {"until": time.time() + CHART_TTL, "data": feed},
             )
         except asyncio.CancelledError:
             raise
@@ -234,8 +239,10 @@ class HomeDiscovery:
             data = (previous or {}).get("data") or self.chart(
                 region, state="unavailable"
             )
-            self.store.write_document(
-                key, {"until": time.time() + 60, "data": data, "failed": True}
+            await settled(
+                self.store.write_document,
+                key,
+                {"until": time.time() + 60, "data": data, "failed": True},
             )
 
     async def apple_chart(self, client, region, kind):
@@ -307,14 +314,19 @@ class HomeDiscovery:
 
     async def match_entry(self, client, kind, entry):
         key = "home-chart-match:v1:" + kind + ":" + str(entry["id"])
-        cached = self.store.read_document(key)
+        # One read and write per chart entry: SQLite can wait, so off the loop.
+        cached = await asyncio.to_thread(self.store.read_document, key)
         if cached and cached.get("until", 0) > time.time():
             return cached.get("item")
         title, artist = clean_title(entry["name"]), entry["artistName"]
         item = await self.match_titles(client, kind, title, artist)
         if item is None and first_artist(artist) != artist:
             item = await self.match_titles(client, kind, title, first_artist(artist))
-        self.store.write_document(key, {"until": time.time() + MATCH_TTL, "item": item})
+        await asyncio.to_thread(
+            self.store.write_document,
+            key,
+            {"until": time.time() + MATCH_TTL, "item": item},
+        )
         return item
 
     async def match_titles(self, client, kind, title, artist):

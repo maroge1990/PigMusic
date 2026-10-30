@@ -290,7 +290,10 @@ def discover_router(store, catalogue, popularity=None, warmer=None, http_client=
         if found.get("id") != chosen or not found.get("name"):
             raise HTTPException(400, "invalid_catalogue_id")
         identity = {"id": chosen, "name": artist["name"]}
-        store.write_document("library-artist:" + artist_id, identity)
+        # SQLite can wait on another writer, so the link is saved off the loop.
+        await asyncio.to_thread(
+            store.write_document, "library-artist:" + artist_id, identity
+        )
         return identity
 
     def editions_query(group_id, offset):

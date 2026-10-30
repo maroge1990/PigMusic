@@ -1,6 +1,6 @@
 """Artist artwork aliases, owner acquisition, quality and media settings routes."""
 
-import json
+import asyncio
 import time
 from pathlib import Path
 import httpx
@@ -68,18 +68,26 @@ def catalogue_router(
             raise HTTPException(
                 502, "The catalogue is unavailable. Try again shortly."
             ) from exc
-        # Search supplies the identity portrait requests read.
+        # Search supplies the identity portrait requests read. SQLite can wait
+        # on another writer, so the cache is checked and filled off the loop.
+        await asyncio.to_thread(remember_identity, identity)
+        return identity
+
+    def remember_identity(identity):
         key = "catalogue:artist/" + identity["id"] + "[]"
         if not store.read_document(key):
-            with store.connect() as conn:
-                conn.execute(
-                    "INSERT INTO documents VALUES (?,?) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",
-                    (
-                        key,
-                        json.dumps({"time": time.time(), "data": identity}),
-                    ),
-                )
-        return identity
+            store.write_document(key, {"time": time.time(), "data": identity})
+
+    async def library_identity_document(artist_id):
+        # SQLite can wait on another writer, so the identity is read off the loop.
+        return await asyncio.to_thread(
+            store.read_document, "library-artist:" + artist_id
+        )
+
+    async def cached_artist_image(cache_key):
+        # SQLite can wait on another writer, so the cache is read off the loop.
+        cached = await asyncio.to_thread(store.read_document, cache_key)
+        return cached.get("file", "")
 
     class ArtistRequest(BaseModel):
         kinds: list[str] = Field(default=["album"], max_length=3)
@@ -128,7 +136,7 @@ def catalogue_router(
         config = public_settings(store)
         if not config["fanart_configured"] or not config["portraits"]:
             raise HTTPException(404, "Artwork unavailable.")
-        identity = store.read_document("library-artist:" + artist_id)
+        identity = await library_identity_document(artist_id)
         target = background_target(store, identity["id"]) if identity else None
         if not target or not target.is_file():
             enrichment.submit(
@@ -172,7 +180,7 @@ def catalogue_router(
             raise HTTPException(404, "Artist not found.")
         if not logos_enabled():
             raise HTTPException(404, "Artwork unavailable.")
-        identity = store.read_document("library-artist:" + artist_id)
+        identity = await library_identity_document(artist_id)
         target = logo_target(store, identity["id"]) if identity else None
         if not target or not target.is_file():
             enrichment.submit(
@@ -187,7 +195,9 @@ def catalogue_router(
                 http_client(), identity.get("name", ""), artist_id
             )
             if target:
-                store.write_document(cache_key, {"file": target.name})
+                await asyncio.to_thread(
+                    store.write_document, cache_key, {"file": target.name}
+                )
                 return target
         data = await metadata(
             "release", artist=artist_id, inc="release-groups", limit=50
@@ -208,7 +218,9 @@ def catalogue_router(
                 http_client(), "release", valid_id(releases[0]["id"])
             )
             if target:
-                store.write_document(cache_key, {"file": target.name})
+                await asyncio.to_thread(
+                    store.write_document, cache_key, {"file": target.name}
+                )
                 return target
         return None
 
@@ -218,7 +230,7 @@ def catalogue_router(
     async def artist_artwork(artist_id: str, w: int = 0):
         artist_id = valid_id(artist_id)
         cache_key = "catalogue-artist-image:" + artist_id + ":" + image_config()
-        cached = store.read_document(cache_key).get("file", "")
+        cached = await cached_artist_image(cache_key)
         target = (
             store.cover_dir / cached if cached and Path(cached).name == cached else None
         )
@@ -303,7 +315,7 @@ def catalogue_router(
             pass
         if public_settings(store)["portraits"]:
             cache_key = "catalogue-artist-image:" + artist_id + ":" + image_config()
-            cached = store.read_document(cache_key).get("file", "")
+            cached = await cached_artist_image(cache_key)
             if not cached or not (store.cover_dir / Path(cached).name).is_file():
                 try:
                     await enrich_catalogue_artist(artist_id, cache_key)

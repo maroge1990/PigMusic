@@ -608,8 +608,7 @@ def personal_router(store, artist_jobs, recovery):
             request.state.session["public_id"],
         )
 
-    @router.get("/play-events")
-    async def history(request: Request):
+    def recent_plays(user_id):
         from ..auth import records
 
         with store.connect() as conn:
@@ -617,10 +616,15 @@ def personal_router(store, artist_jobs, recovery):
                 "events": records(
                     conn.execute(
                         "SELECT event_id,track_id,played_at,seconds FROM play_events WHERE user_id=? ORDER BY played_at DESC LIMIT 200",
-                        (identity(request),),
+                        (user_id,),
                     )
                 )
             }
+
+    @router.get("/play-events")
+    async def history(request: Request):
+        # SQLite can wait on another writer, so the query runs off the loop.
+        return await asyncio.to_thread(recent_plays, identity(request))
 
     @router.post("/mutations", response_model=NativeMutationReceipt)
     async def native_mutation(body: NativeMutationInput, request: Request):
@@ -664,26 +668,32 @@ def personal_router(store, artist_jobs, recovery):
             "capabilities": SERVER_CAPABILITIES,
         }
 
-    @router.get("/preferences", response_model=Preferences)
-    async def preferences(request: Request):
+    def read_preferences(user_id):
         import json
 
         with store.connect() as conn:
             row = conn.execute(
-                "SELECT payload FROM user_preferences WHERE user_id=?",
-                (identity(request),),
+                "SELECT payload FROM user_preferences WHERE user_id=?", (user_id,)
             ).fetchone()
         return json.loads(row[0]) if row else Preferences().model_dump()
 
-    @router.put("/preferences", response_model=Preferences)
-    async def save_preferences(body: Preferences, request: Request):
+    def write_preferences(user_id, value):
         import json
 
         with store.connect() as conn:
             conn.execute(
                 "INSERT INTO user_preferences VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET payload=excluded.payload",
-                (identity(request), json.dumps(body.model_dump())),
+                (user_id, json.dumps(value)),
             )
+
+    # SQLite can wait on another writer, so preferences are used off the loop.
+    @router.get("/preferences", response_model=Preferences)
+    async def preferences(request: Request):
+        return await asyncio.to_thread(read_preferences, identity(request))
+
+    @router.put("/preferences", response_model=Preferences)
+    async def save_preferences(body: Preferences, request: Request):
+        await asyncio.to_thread(write_preferences, identity(request), body.model_dump())
         return body
 
     return router

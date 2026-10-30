@@ -72,17 +72,22 @@ def native_router(store, auth, health_snapshot=None, admin_snapshot=None):
 
         owner = admin and request.state.user.get("role") == "owner" and admin_snapshot
 
+        def session_valid():
+            with store.connect() as conn:
+                return conn.execute(
+                    "SELECT 1 FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.public_id=? AND s.revoked_at IS NULL AND s.expires_at>? AND u.disabled=0",
+                    (key, auth.now()),
+                ).fetchone()
+
         async def stream():
             previous = {}
             heartbeat = time.monotonic()
             try:
                 while not await request.is_disconnected():
                     # Revoked sessions cannot keep receiving events indefinitely.
-                    with store.connect() as conn:
-                        valid = conn.execute(
-                            "SELECT 1 FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.public_id=? AND s.revoked_at IS NULL AND s.expires_at>? AND u.disabled=0",
-                            (key, auth.now()),
-                        ).fetchone()
+                    # Every open stream checks every 2 s, and a busy writer can
+                    # hold SQLite for seconds: check off the loop (LOOP1).
+                    valid = await asyncio.to_thread(session_valid)
                     if not valid:
                         yield "event: revoked\ndata: {}\n\n"
                         return

@@ -1753,7 +1753,9 @@ class Mixes:
         identity = await asyncio.to_thread(self.queue_saved, user, track)
         if not identity:
             return None
-        song = self.entry(user, identity)
+        # SQLite reads (the entry, then the mix settings for today's date) wait
+        # behind any writer: never on the loop (LOOP1).
+        song = await asyncio.to_thread(self.entry, user, identity)
         try:
             await asyncio.to_thread(self.cache.available, song)
         except FileNotFoundError:
@@ -1771,9 +1773,8 @@ class Mixes:
                 raise ValueError(
                     "This saved mix song is waiting for a download. Check that downloads are enabled and cache space is available, then try again."
                 )
-        await asyncio.to_thread(
-            self.publish, identity.split(":")[1], [song], self.day()
-        )
+        day = await asyncio.to_thread(self.day)
+        await asyncio.to_thread(self.publish, identity.split(":")[1], [song], day)
         return identity
 
     def saved_failure(self, identity, song, result, error):

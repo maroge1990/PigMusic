@@ -764,6 +764,14 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                 return target
         return await artwork.artist(app.state.http, item)
 
+    def artist_portrait(item_id, name):
+        """The artist's fetched portrait when portraits are on and it exists."""
+        identity = store.read_document("library-artist:" + item_id)
+        portrait = portrait_target(store, name, identity.get("id"))
+        if public_settings(store)["portraits"] and portrait.is_file():
+            return portrait
+        return None
+
     @app.get("/api/v1/library-artwork/{kind}/{item_id}")
     async def library_artwork(kind: str, item_id: str, request: Request, w: int = 0):
         if kind not in {"albums", "artists"}:
@@ -783,10 +791,8 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                 raise HTTPException(404, "Library item not found.")
         target = artwork.target(item) if kind == "albums" else None
         if kind == "artists":
-            identity = store.read_document("library-artist:" + item_id)
-            portrait = portrait_target(store, item["name"], identity.get("id"))
-            if public_settings(store)["portraits"] and portrait.is_file():
-                target = portrait
+            # SQLite, settings and a cover-store stat: off the loop (LOOP1).
+            target = await asyncio.to_thread(artist_portrait, item_id, item["name"])
             if not target:
                 fallback = item.get("fallback_cover_url") or item.get("cover_url") or ""
                 if fallback.startswith("/api/v1/covers/"):
@@ -1204,7 +1210,8 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         if track is None:
             raise HTTPException(404, "Song not found in this release.")
         if track.get("saved_id"):
-            return playback_saved(track["saved_id"])
+            # SQLite plus a NAS resolve and stat: off the loop (LOOP1).
+            return await asyncio.to_thread(playback_saved, track["saved_id"])
         return await remote_playback(track, request)
 
     from .routes.personal import TrackInput
