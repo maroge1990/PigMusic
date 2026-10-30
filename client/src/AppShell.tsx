@@ -10,9 +10,9 @@ import {
 } from "lucide-react";
 import { api, ApiError, clearSessionReads } from "./api";
 import {
-  currentSession,
   finishSignOut,
   OFFLINE_SIGN_OUT,
+  signedInAgain,
   signOutSession,
 } from "./signOut";
 import { PersonalLibrary } from "./PersonalLibrary";
@@ -178,9 +178,10 @@ export function AppShell() {
         setError(OFFLINE_SIGN_OUT);
         return;
       }
-      setUser(await api<Person>("/v1/me"));
+      const me = await api<Person & { session_id?: string }>("/v1/me");
+      session.current = me.session_id ?? null;
+      setUser(me);
       setError("");
-      void currentSession(api).then((id) => (session.current = id));
     } catch (e) {
       setUser(null);
       if ((e as ApiError).code === "setup_required")
@@ -247,6 +248,7 @@ export function AppShell() {
       <SignIn
         key={invites}
         signedIn={() => {
+          signedInAgain();
           setHint(installHintPending());
           void refresh();
         }}

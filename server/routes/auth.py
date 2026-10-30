@@ -15,6 +15,7 @@ from ..api_models import (
     ActivationDTO,
     DeviceSessionDTO,
     InviteDTO,
+    MeDTO,
     UserDTO,
     SessionsDTO,
     RevokedDTO,
@@ -222,9 +223,9 @@ def auth_router(auth: Auth, security=None, origin: str | None = None):
             )
         }
 
-    @router.get("/me", response_model=UserDTO)
+    @router.get("/me", response_model=MeDTO)
     async def me(result=Depends(current)):
-        return result[0]
+        return {**result[0], "session_id": result[1]["public_id"]}
 
     @router.get("/me/sessions", response_model=SessionsDTO)
     async def sessions(result=Depends(current)):

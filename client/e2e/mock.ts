@@ -61,10 +61,7 @@ export async function mockApi(
         username: "pat",
         display_name: "Pat",
         role: options.role ?? "member",
-      });
-    if (path === "/v1/me/sessions")
-      return json(route, {
-        sessions: [{ id: "session-1", current: true, device_name: "Browser" }],
+        session_id: "session-1",
       });
     if (path === "/v1/preferences")
       return json(route, {

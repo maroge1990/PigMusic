@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { signOutSession, finishSignOut, currentSession } = await import(
+const { signOutSession, finishSignOut, signedInAgain } = await import(
   "../src/signOut.ts"
 );
 
@@ -61,18 +61,32 @@ test("the pending sign-out waits while the server is still unreachable", async (
   assert.equal(storage.items.size, 0);
 });
 
-test("the current session is the one the server marks current", async () => {
-  const call = async () => ({
-    sessions: [
-      { id: "other", current: false },
-      { id: "mine", current: true },
-    ],
+test("a sign-out whose session was never known stays signed out until a fresh sign-in (Codex round 1)", async () => {
+  const storage = memory();
+  const calls = [];
+  const call = async (path) => {
+    calls.push(path);
+    throw unreachable;
+  };
+  assert.equal(await signOutSession(call, null, storage), false);
+  // Reopened with the server back: the old cookie must not sign back in.
+  assert.equal(await finishSignOut(async () => {}, storage), false);
+  signedInAgain(storage);
+  assert.equal(await finishSignOut(async () => {}, storage), true);
+  assert.deepEqual(calls, ["/v1/auth/logout"]);
+});
+
+test("a sign-in as someone else ends the pending sign-out (Codex round 1)", async () => {
+  const storage = memory();
+  storage.setItem("pig-music-pending-sign-out", "session-1");
+  const notTheirs = Object.assign(new Error("Not found"), {
+    code: "session_not_found",
   });
-  assert.equal(await currentSession(call), "mine");
   assert.equal(
-    await currentSession(async () => {
-      throw unreachable;
-    }),
-    null,
+    await finishSignOut(async () => {
+      throw notTheirs;
+    }, storage),
+    true,
   );
+  assert.equal(storage.items.size, 0);
 });

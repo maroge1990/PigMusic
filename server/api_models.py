@@ -210,6 +210,13 @@ class UserDTO(BaseModel):
     role: Literal["owner", "member"]
 
 
+class MeDTO(UserDTO):
+    """The signed-in person and the public id of the session asking, so a
+    web client can end exactly this session later (#80)."""
+
+    session_id: str
+
+
 class DeviceSessionDTO(BaseModel):
     user: UserDTO
     token: str

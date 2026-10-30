@@ -567,6 +567,11 @@ def test_devices_are_named_marked_current_and_others_can_be_signed_out(fixture):
         assert names["Chrome on Mac"]["platform"] == "web"
         assert sum(s["current"] for s in sessions) == 1
         assert all(s["last_seen_at"] for s in sessions)
+        # /me names the session asking, so the web app can end exactly this
+        # one later after an offline sign-out (#80).
+        assert client.get("/api/v1/me").json()["session_id"] == (
+            names["Chrome on Mac"]["id"]
+        )
         # The full agent string is not kept.
         assert "AppleWebKit" not in str(sessions)
         assert client.delete("/api/v1/me/sessions").json() == {"revoked": 2}

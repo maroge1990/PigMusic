@@ -81,6 +81,7 @@ test("signing out with the server unreachable clears this device and finishes la
               username: person,
               display_name: person,
               role: "member",
+              session_id: "session-1",
             },
           })
         : route.fulfill({

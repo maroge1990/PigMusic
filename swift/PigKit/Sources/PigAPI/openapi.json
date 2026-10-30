@@ -1869,6 +1869,44 @@
         "title": "LookupSong",
         "type": "object"
       },
+      "MeDTO": {
+        "description": "The signed-in person and the public id of the session asking, so a\nweb client can end exactly this session later (#80).",
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "display_name",
+          "role",
+          "session_id"
+        ],
+        "title": "MeDTO",
+        "type": "object"
+      },
       "MediaSettings": {
         "properties": {
           "chart_region": {
@@ -16941,7 +16979,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserDTO"
+                  "$ref": "#/components/schemas/MeDTO"
                 }
               }
             },
