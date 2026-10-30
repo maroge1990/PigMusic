@@ -5,34 +5,38 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 30 Oct 2026 (late evening).*
+*Overwritten at the end of every session. 31 Oct 2026 (early morning, Melbourne).*
 
-- **Live:** server `e1557ec` (released 30 Oct 10:22 UTC as `reset-20261030-v3`; rollback container
-  `PigMusic-before-reset-20261030-v3`). iPhone/Watch: native **0.2.0 (13)** on Mark's iPhone (free signing,
-  reinstall before 6 Nov).
-- **Pushed, not yet released** (each batch passed two Codex rounds; withdrawn changes are noted on their issues):
-  - Sign-in leftovers (private advisory): warning renewed daily and read apart from the feed, IPv6 counted per /64,
-    ~1,400 common passwords refused, bounded hashing queue, People pages off the event loop (#16).
-  - Idle CPU and lock leftovers: #88, #74 part 3, the preloader's settings reads (#63), #87. #74 part 2 withdrawn.
-  - Web fixes: #60 (web), #80 part 1, #72, #73. #80 part 2 (offline sign-out) withdrawn.
-  - Server reliability: #75, #24, #67, #26, #58, #69. #68 withdrawn.
-  - iPhone screens, native **build 14**: #60, #61, #62 (not installed: signing needs Mark's Mac password).
-- **Live gates:** #20/#16 idle windows met on `1bc2039` and `e1557ec` (0 stalls, 0 lock holds); the loaded window
-  waits for real use. Idle CPU on `e1557ec`: 11.5% of a core (was 31.3%), on #63.
+- **Live:** server `15566c4` (released 30 Oct 13:53 UTC as `reset-20261031-v2` under D-52; rollback container
+  `PigMusic-before-reset-20261031-v2`). It carries every batch pushed on 30 Oct: sign-in leftovers (private
+  advisory), idle CPU and lock leftovers (#88, #74 part 3, #63 preloader, #87), web fixes (#60, #80 part 1, #72, #73)
+  and server reliability (#75, #24, #67, #26, #58, #69). Two test-only fixes went first: the native screen checks skip
+  in the image (f23b2cf) and a diagnostics test tolerates a real stall (15566c4).
+- **iPhone/Watch:** native **0.2.0 (13)** on Mark's iPhone (free signing, reinstall before 6 Nov). Build **14** (#60,
+  #61, #62) is pushed, not installed: signing needs Mark's Mac password.
+- **Withdrawn after high Codex findings** (designs on the issues): #68, #74 part 2, #80 part 2.
+- **Live gates:** #20/#16 idle windows met on `1bc2039` and `e1557ec`; the loaded window waits for real use. Idle CPU
+  on `e1557ec`: 11.5% of a core (was 31.3%); on `15566c4` the first window fell in the midnight mix searches (30%,
+  not idle), so the quiet re-measure is still owed on #63.
+- **New finding:** the download engine aborted once on a burst of search replies (256 MB .NET heap cap), restarted
+  itself (#89).
+- **Flaky timing tests:** `test_mix_responsiveness` (0.503 s vs 0.5 s) and the diagnostics stall test both tripped on
+  a busy host; leftover watchdogs from earlier tests are the likely shared cause.
 - **Ways of working:** area batches, two Codex rounds, Claude pushes (D-50); Claude may release when it helps testing,
   under D-52; the Unraid test copy is approved (D-53, #15).
 - **Household details** live only in the gitignored `.private/` (D-45).
-- **Waiting on Mark:** device checks for builds 13/14 (#18, #19, #64, #65, #70, #71, #60–#62); #17's device numbers;
-  confirming the recommended choices used for #69, #72 and the #62 reading; whether the web Library loses its shuffle
-  button too (#61); the decisions in #76, #77, #80 part 2; the [`owner`](https://github.com/maroge1990/PigMusic/issues?q=is%3Aopen+label%3Aowner)
-  items; the Cloudflare cache-bypass and IPv6 rate-limit confirmations (sign-in advisories).
+- **Waiting on Mark:** device checks for builds 13/14 (#18, #19, #64, #65, #70, #71, #60–#62) and the server/web
+  checks for the 31 Oct release; #17's device numbers; confirming the recommended choices used for #69, #72 and the
+  #62 reading; whether the web Library loses its shuffle button too (#61); the decisions in #76, #77, #80 part 2; the
+  [`owner`](https://github.com/maroge1990/PigMusic/issues?q=is%3Aopen+label%3Aowner) items; the Cloudflare
+  cache-bypass and IPv6 rate-limit confirmations (sign-in advisories).
 
 ## Now
 
 Reliability first (D-47). In order:
 
-1. **Release and live gates** — release the pushed batches under D-52; the loaded 30-minute window for #16/#20; idle
-   CPU re-measure (#63)
+1. **Live gates** — the loaded 30-minute window for #16/#20; quiet idle-CPU re-measure on `15566c4` (#63); the
+   engine heap crash (#89)
 2. **Device checks** — install build 14 (Mark's Mac password, or TestFlight later); Mark's checks and battery runs
    (#18, #19; #64, #65, #70, #71, #60–#62)
 3. **Withdrawn designs** — #68 (hide only the retired file, by hash), #74 part 2 (Tidy must not read a stale library),
