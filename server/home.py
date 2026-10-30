@@ -7,7 +7,7 @@ import re
 import time
 from datetime import date
 import httpx
-from .artist_identity import Ambiguous, cached_identity, resolve_artist
+from .artist_identity import Ambiguous, cached_identities, resolve_artist
 from .artwork import quoted
 from .catalogue import background_metadata, mbid, credit, warming
 from .library import normalise
@@ -118,11 +118,12 @@ class HomeDiscovery:
 
     async def feed(self, client, path, **params):
         key = "home-feed:v1:" + path + repr(sorted(params.items()))
-        cached = self.store.read_document(key)
+        # SQLite can wait on another writer, so the cache is used off the loop.
+        cached = await asyncio.to_thread(self.store.read_document, key)
         if cached and cached.get("until", 0) - renew_margin() > time.time():
             return cached["data"], cached.get("failed", False)
         async with self.locks.setdefault(key, asyncio.Lock()):
-            cached = self.store.read_document(key)
+            cached = await asyncio.to_thread(self.store.read_document, key)
             if cached and cached.get("until", 0) - renew_margin() > time.time():
                 return cached["data"], cached.get("failed", False)
             try:
@@ -151,15 +152,19 @@ class HomeDiscovery:
                     data = {"recordings": data}
                 if not isinstance(data, dict):
                     raise ValueError("Invalid feed")
-                self.store.write_document(
-                    key, {"until": time.time() + 3600, "data": data}
+                await asyncio.to_thread(
+                    self.store.write_document,
+                    key,
+                    {"until": time.time() + 3600, "data": data},
                 )
                 return data, False
             except (httpx.HTTPError, ValueError):
                 # A short retry window avoids hammering an unavailable service.
                 data = cached.get("data", {}) if cached else {}
-                self.store.write_document(
-                    key, {"until": time.time() + 60, "data": data, "failed": True}
+                await asyncio.to_thread(
+                    self.store.write_document,
+                    key,
+                    {"until": time.time() + 60, "data": data, "failed": True},
                 )
                 return data, True
 
@@ -370,11 +375,13 @@ class HomeDiscovery:
         seeds = await self.seeds(client, projection, result)
         owned = {a["name"].casefold() for a in projection["artists"]}
         # Identities already known for any library artist are never recommended.
-        owned_ids = {
-            known["id"]
-            for artist in projection["artists"]
-            if (known := cached_identity(self.store, artist))
-        } | {identity for identity, _ in seeds}
+        # One read for the whole library, off the loop: SQLite can wait.
+        known = await asyncio.to_thread(
+            cached_identities, self.store, projection["artists"]
+        )
+        owned_ids = {value["id"] for value in known.values() if value} | {
+            identity for identity, _ in seeds
+        }
         candidates = []
         for identity, name in seeds:
             feed, failed = await self.feed(
@@ -489,10 +496,11 @@ class HomeDiscovery:
         offset = date.today().toordinal() % len(pool)
         albums = {a["id"]: a for a in projection.get("albums", [])}
         seeds, fresh = [], 0
+        cached = await asyncio.to_thread(cached_identities, self.store, pool)
         for artist in pool[offset:] + pool[:offset]:
             if len(seeds) >= SEED_LIMIT:
                 break
-            known = cached_identity(self.store, artist)
+            known = cached[artist["id"]]
             if known is None:
                 if fresh >= NEW_RESOLUTIONS:
                     continue

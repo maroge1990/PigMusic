@@ -1,5 +1,7 @@
 """One resolver maps a library artist to its MusicBrainz artist, or asks for a choice."""
 
+import asyncio
+
 from .artwork import quoted
 from .catalogue import mbid
 from .library import normalise
@@ -55,7 +57,8 @@ async def resolve_artist(store, catalogue, client, artist, albums):
 
     Provider failures (httpx errors) propagate to the caller.
     """
-    known = cached_identity(store, artist)
+    # SQLite can wait on another writer, so the cache is used off the loop.
+    known = await asyncio.to_thread(cached_identity, store, artist)
     if known:
         return known
     wanted = normalise(artist["name"])
@@ -185,5 +188,7 @@ async def resolve_artist(store, catalogue, client, artist, albums):
     stored = dict(identity)
     if normalise(identity["name"]) != wanted:
         stored["credit"] = artist["name"]
-    store.write_document("library-artist:" + artist["id"], stored)
+    await asyncio.to_thread(
+        store.write_document, "library-artist:" + artist["id"], stored
+    )
     return identity

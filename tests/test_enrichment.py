@@ -444,6 +444,17 @@ def test_background_popularity_album_details_yield_to_cover_warming_and_foregrou
             return await get(client, path, **params)
 
         monkeypatch.setattr(catalogue, "get", observed)
+
+        async def queued(path, priority):
+            # The cache is read off the loop first, so a started call joins
+            # its priority's waiters a moment later.
+            await asyncio.wait_for(started[path].wait(), 1)
+            for _ in range(100):
+                if catalogue.waiters[priority]:
+                    return
+                await asyncio.sleep(0.01)
+            raise AssertionError(path + " never waited for its turn")
+
         await catalogue.lock.acquire()
         released = False
         tasks = []
@@ -467,13 +478,13 @@ def test_background_popularity_album_details_yield_to_cover_warming_and_foregrou
                         background_metadata.reset(token)
 
                 tasks.append(asyncio.create_task(background_popularity()))
-                await asyncio.wait_for(started["release-group/" + RELEASE].wait(), 1)
+                await queued("release-group/" + RELEASE, 2)
                 tasks.append(asyncio.create_task(cover()))
-                await asyncio.wait_for(started["release/cover"].wait(), 1)
+                await queued("release/cover", 1)
                 tasks.append(
                     asyncio.create_task(catalogue.get(client, "artist/foreground"))
                 )
-                await asyncio.wait_for(started["artist/foreground"].wait(), 1)
+                await queued("artist/foreground", 0)
                 catalogue.lock.release()
                 released = True
                 await asyncio.wait_for(asyncio.gather(*tasks), 2)

@@ -39,15 +39,16 @@ class Popularity:
         if not include_albums:
             # The warmer only needs song covers. Reuse a complete answer when
             # present, but never let a songs-only cache hide the page's albums.
-            full = self.store.read_document(key)
+            full = await asyncio.to_thread(self.store.read_document, key)
             if full and full.get("retry_after", 0) - margin() > time.time():
                 return full["data"]
             key += ":songs"
-        cached = self.store.read_document(key)
+        # SQLite can wait on another writer, so the cache is used off the loop.
+        cached = await asyncio.to_thread(self.store.read_document, key)
         if cached and cached.get("retry_after", 0) - margin() > time.time():
             return cached["data"]
         async with self.artist_locks.setdefault(key, asyncio.Lock()):
-            cached = self.store.read_document(key)
+            cached = await asyncio.to_thread(self.store.read_document, key)
             if cached and cached.get("retry_after", 0) - margin() > time.time():
                 return cached["data"]
             result = {
@@ -210,12 +211,9 @@ class Popularity:
                 # Unavailable or invalid credentials never add an empty/error panel.
                 result = {"enabled": True, "songs": [], "albums": []}
                 ttl = 60
-            with self.store.connect() as conn:
-                conn.execute(
-                    "INSERT INTO documents VALUES (?,?) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",
-                    (
-                        key,
-                        json.dumps({"retry_after": time.time() + ttl, "data": result}),
-                    ),
-                )
+            await asyncio.to_thread(
+                self.store.write_document,
+                key,
+                {"retry_after": time.time() + ttl, "data": result},
+            )
             return result

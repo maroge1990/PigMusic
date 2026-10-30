@@ -43,6 +43,9 @@ class CoverStore:
         self.directory.mkdir(parents=True, exist_ok=True)
         # Scanner writes and pruning share this lock for the entire scan.
         self.lock = threading.RLock()
+        # Guards only the in-memory cache, so a presentation read never waits
+        # for a scan, refresh or prune holding `lock` (LOOP1, 29 Oct).
+        self.presentation_lock = threading.Lock()
         self.presentation_cache = {}
 
     def path(self, sha):
@@ -109,7 +112,7 @@ class CoverStore:
                 return None
         except (OSError, ValueError, TypeError):
             return None
-        with self.lock:
+        with self.presentation_lock:
             if len(self.presentation_cache) >= 8192:
                 self.presentation_cache.pop(next(iter(self.presentation_cache)))
             self.presentation_cache[sha] = value

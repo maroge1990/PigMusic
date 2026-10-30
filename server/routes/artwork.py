@@ -44,7 +44,8 @@ def artwork_router(store, image_slots, enrichment, image_response):
             raise HTTPException(404, "Artwork not found.")
 
         async def backfill_metadata():
-            if store.covers.presentation(filename[:-4]):
+            # Even a cached-metadata check reads appdata files off the loop.
+            if await asyncio.to_thread(store.covers.presentation, filename[:-4]):
                 return None
             return await asyncio.to_thread(store.covers.metadata, filename[:-4])
 

@@ -137,27 +137,24 @@ class Catalogue:
 
     async def get(self, client, path, **params):
         key = "catalogue:" + path + repr(sorted(params.items()))
-        cached = self.store.read_document(key)
+        # SQLite can wait on another writer, so the cache is used off the loop.
+        cached = await asyncio.to_thread(self.store.read_document, key)
         if cached and still_fresh(time.time() - cached["time"], 86400):
             return cached["data"]
         priority = (
             2 if deferred_metadata.get() else (1 if background_metadata.get() else 0)
         )
         async with self.turn(priority):
-            cached = self.store.read_document(key)
+            cached = await asyncio.to_thread(self.store.read_document, key)
             if cached and still_fresh(time.time() - cached["time"], 86400):
                 return cached["data"]
             response = await self.fetch(
                 client, "https://musicbrainz.org/ws/2/" + path, params
             )
             data = response.json()
-            import json
-
-            with self.store.connect() as conn:
-                conn.execute(
-                    "INSERT INTO documents VALUES (?,?) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",
-                    (key, json.dumps({"time": time.time(), "data": data})),
-                )
+            await asyncio.to_thread(
+                self.store.write_document, key, {"time": time.time(), "data": data}
+            )
             return data
 
     async def pace(self):
