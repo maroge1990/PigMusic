@@ -100,6 +100,10 @@ def auth_router(auth: Auth, security=None, origin: str | None = None):
         pool, never the reserved session threads (Codex round 1 on 6f00ce2)."""
         return await call(asyncio.to_thread, function, *args, **kwargs)
 
+    async def read(function, *args):
+        """Owner pages' reads: the shared pool, never the event loop."""
+        return await call(asyncio.to_thread, function, *args)
+
     def require_https(request: Request):
         if request.url.scheme != "https":
             raise HTTPException(400, "https_required")
@@ -253,16 +257,7 @@ def auth_router(auth: Auth, security=None, origin: str | None = None):
 
     @router.get("/people")
     async def people(result=Depends(owner)):
-        from ..auth import records
-
-        with auth.store.connect() as conn:
-            return {
-                "people": records(
-                    conn.execute(
-                        "SELECT id,username,display_name,role,disabled FROM users ORDER BY created_at"
-                    )
-                )
-            }
+        return {"people": await read(auth.people)}
 
     @router.post("/people", response_model=InviteDTO)
     async def add(body: Person, result=Depends(owner)):
@@ -282,15 +277,6 @@ def auth_router(auth: Auth, security=None, origin: str | None = None):
 
     @router.get("/people/activity")
     async def activity(result=Depends(owner)):
-        from ..auth import records
-
-        with auth.store.connect() as conn:
-            return {
-                "events": records(
-                    conn.execute(
-                        "SELECT a.at,a.user_id,a.event,u.display_name FROM auth_events a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.id DESC LIMIT 200"
-                    )
-                )
-            }
+        return {"events": await read(auth.activity)}
 
     return router

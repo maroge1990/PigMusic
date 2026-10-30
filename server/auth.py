@@ -420,6 +420,22 @@ class Auth:
                 )
             )
 
+    def people(self):
+        with self.store.connect() as conn:
+            return records(
+                conn.execute(
+                    "SELECT id,username,display_name,role,disabled FROM users ORDER BY created_at"
+                )
+            )
+
+    def activity(self):
+        with self.store.connect() as conn:
+            return records(
+                conn.execute(
+                    "SELECT a.at,a.user_id,a.event,u.display_name FROM auth_events a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.id DESC LIMIT 200"
+                )
+            )
+
     def revoke(self, identity, public_id):
         with self.store.connect() as conn:
             result = conn.execute(

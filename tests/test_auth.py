@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 
@@ -273,6 +274,28 @@ def test_invites_carry_the_code_in_the_link_fragment_and_activation_returns_the_
             json={"username": "alex", "display_name": "Alex"},
         ).json()
         assert unconfigured["invite_url"] is None and unconfigured["code"]
+
+
+def test_people_pages_read_the_database_off_the_event_loop(fixture, monkeypatch):
+    auth, owner, _ = fixture
+    bearer = {"Authorization": "Bearer " + token(auth)}
+    connect, on_loop = auth.store.connect, []
+
+    def watched():
+        try:
+            asyncio.get_running_loop()
+            on_loop.append(True)
+        except RuntimeError:
+            pass
+        return connect()
+
+    monkeypatch.setattr(auth.store, "connect", watched)
+    with TestClient(app_for(auth), base_url="https://private.ts.net") as client:
+        people = client.get("/api/v1/people", headers=bearer).json()["people"]
+        events = client.get("/api/v1/people/activity", headers=bearer).json()
+    assert [p["id"] for p in people] == [owner]
+    assert events["events"][0]["event"] == "login"
+    assert not on_loop, "People pages queried SQLite on the event loop"
 
 
 def test_https_cookie_flags_csrf_and_device_bearer(fixture):
