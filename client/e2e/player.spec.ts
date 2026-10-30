@@ -56,3 +56,32 @@ test("the player's artist link opens the library artist for library playback", a
   await dialog.getByRole("button", { name: "Charli xcx", exact: true }).click();
   await expect(page).toHaveURL(/#\/library\/artist\/artist-1$/);
 });
+
+test("the mini player shows the artist, not a status, while a song loads", async ({
+  page,
+}) => {
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await mockApi(page, {
+    answers: {
+      "/v1/playback/t1/url": async (route) => {
+        await held;
+        await route.fulfill({
+          status: 404,
+          json: { detail: "File unavailable" },
+        });
+      },
+    },
+  });
+  await page.goto(`/#/library/album/${album.id}`);
+  await page.getByText("Von dutch").first().click();
+  const mini = page.locator(".mini-player");
+  await expect(
+    mini.getByRole("button", { name: "Play", exact: true }),
+  ).toBeDisabled();
+  await expect(mini).toContainText("Charli xcx");
+  await expect(mini).not.toContainText("…");
+  release();
+  // A real problem still gets a short message.
+  await expect(mini).toContainText("File unavailable");
+});

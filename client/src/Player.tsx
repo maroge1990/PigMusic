@@ -655,13 +655,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               <span>
                 <strong>{song.title}</strong>
                 <small>
-                  {busy
-                    ? "Finding audio…"
-                    : error
-                      ? error
-                      : song.source && song.source !== "Saved library"
-                        ? `${song.artist} · Streaming`
-                        : song.artist}
+                  {/* No status text in normal use (#60): the play button's
+                      spinner shows loading; only a problem gets words. */}
+                  {error
+                    ? error
+                    : song.source && song.source !== "Saved library"
+                      ? `${song.artist} · Streaming`
+                      : song.artist}
                 </small>
               </span>
             </button>
