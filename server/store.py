@@ -50,6 +50,7 @@ class Store:
         self.mix_lock = TimedRLock("mix_lock")
         # Replacement cleanup rows last hashed, with their files' state then.
         self.cleanup_attempts = {}
+        self.retired_digests = {}
         self.library_lock = TimedRLock("library_lock")
         directory.mkdir(parents=True, exist_ok=True)
         self.cover_dir = directory / "covers"
@@ -87,6 +88,9 @@ class Store:
                 json.loads(r[0]) for r in conn.execute("SELECT payload FROM acquired")
             ]
             categories = dict(conn.execute("SELECT id,category FROM album_categories"))
+            retiring = conn.execute(
+                "SELECT track_id,payload FROM quality_cleanup"
+            ).fetchall()
         replaced = {t["id"] for t in extra}
         exported = {
             t["export_relative_path"] for t in extra if t.get("export_relative_path")
@@ -100,6 +104,7 @@ class Store:
                 if json.loads(v).get("status") in {"removing", "removed"}
             }
         extra = [t for t in extra if t["id"] not in removed]
+        retired = self.retired_files(retiring, {t["id"]: t for t in extra})
         anchors = self.read_document("album-edition-anchors")
         library = build_library(
             {
@@ -111,6 +116,7 @@ class Store:
                         if t["id"] not in removed
                         and t["id"] not in replaced
                         and t.get("relative_path") not in exported
+                        and not self.retired_copy(t, retired)
                     ],
                     *extra,
                 ],
@@ -612,6 +618,59 @@ class Store:
         self.cleanup_attempts[request_id] = (state, now)
         return True
 
+    @staticmethod
+    def retired_files(rows, current):
+        """Old NAS files a quality replacement is retiring, by path: the old
+        version's recorded content, while its replacement is still in the
+        library (#68)."""
+        retired = {}
+        for track_id, raw in rows:
+            old, now = json.loads(raw), current.get(track_id)
+            path = old.get("export_relative_path") or old.get("nas_relative_path")
+            if (
+                path
+                and now
+                and old.get("sha256")
+                and now.get("export_relative_path") != path
+            ):
+                retired[path] = old["sha256"]
+        return retired
+
+    def retired_copy(self, track, retired):
+        """Whether this scanned file is the retired version itself. Only its
+        exact content is hidden: another file at that path (a re-rip, a
+        different song) always shows."""
+        path = track.get("relative_path")
+        if path not in retired:
+            return False
+        from .exporter import contained, digest, fingerprint
+
+        try:
+            nas = Path(os.environ.get("PIG_MUSIC_LIBRARY", "/library")).resolve()
+            file = contained(nas, path)
+            seen = fingerprint(file)
+            cached = self.retired_digests.get(path)
+            if not cached or cached[0] != seen:
+                cached = (seen, digest(file))
+                self.retired_digests[path] = cached
+        except (OSError, ValueError):
+            return False
+        return cached[1] == retired[path]
+
+    def forget_retired(self, path):
+        """The scan's entry for a retired file just moved to Trash goes with
+        it, so it never shows as a song that can't play (#68)."""
+        with self.covers.lock:
+            snapshot = load_json(self.directory / "library-snapshot.json")
+            tracks = snapshot.get("tracks", [])
+            kept = [t for t in tracks if t.get("relative_path") != path]
+            if len(kept) != len(tracks):
+                self.covers.write_snapshot(
+                    self.directory / "library-snapshot.json",
+                    {**snapshot, "tracks": kept},
+                )
+        self.retired_digests.pop(path, None)
+
     @coordinated
     def cleanup_replacements(self):
         root = library_root(self).resolve()
@@ -688,6 +747,9 @@ class Store:
                             (request_id,),
                         )
                     self.cleanup_attempts.pop(request_id, None)
+                    if not original.exists():
+                        self.forget_retired(old_path)
+                        self.refresh_library()
                     continue
                 original = (root / old["relative_path"]).resolve()
                 replacement = (root / current["relative_path"]).resolve()

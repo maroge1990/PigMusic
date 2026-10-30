@@ -175,6 +175,106 @@ def test_nas_quality_replacement_waits_for_export_then_moves_old_file_to_recover
     assert track_file(store, track["id"]).read_bytes() == b"new source"
 
 
+def scanned(store, *tracks):
+    """A scan's snapshot listing these files."""
+    (store.directory / "library-snapshot.json").write_text(
+        json.dumps({"tracks": list(tracks)})
+    )
+    store.refresh_library()
+
+
+def test_a_quality_replacement_never_shows_the_old_nas_copy_as_another_song(
+    tmp_path, monkeypatch
+):
+    """#68: replacing an exported song's quality dropped its export path, so
+    the old NAS file (still in the snapshot) showed as a second song, then as
+    a broken one once cleanup moved it to Trash, until a manual scan."""
+    root = tmp_path / "nas"
+    root.mkdir()
+    monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(root))
+    store = Store(tmp_path / "data")
+    track, source = acquired(store)
+    exporter = Exporter(store, root)
+    exporter.publish(track)
+    old = exporter.records()[0]
+    copy = {
+        **{k: v for k, v in old.items() if k != "id"},
+        "id": "scanned-copy",
+        "relative_path": old["export_relative_path"],
+    }
+    scanned(store, copy)
+    assert store.library["stats"]["tracks"] == 1
+    source.write_bytes(b"new source")
+    replacement = {k: v for k, v in track.items() if k != "export_relative_path"} | {
+        "sha256": hashlib.sha256(b"new source").hexdigest()
+    }
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE acquired SET payload=? WHERE id=?",
+            (json.dumps(replacement), track["id"]),
+        )
+        for table in ("quality_versions", "quality_cleanup"):
+            conn.execute(
+                f"INSERT INTO {table} VALUES (?,?,?)",
+                ("quality-request", track["id"], json.dumps(old)),
+            )
+    store.refresh_library()
+    assert store.library["stats"]["tracks"] == 1  # Not yet exported.
+    exporter.publish(exporter.records()[0])
+    store.refresh_library()
+    assert store.library["stats"]["tracks"] == 1  # Exported, old not yet moved.
+    store.cleanup_replacements()
+    assert not (root / old["export_relative_path"]).exists()
+    # Without a scan: no song that can't play.
+    assert store.library["stats"]["tracks"] == 1
+    assert "scanned-copy" not in store.index.by_id
+
+
+def test_only_the_retired_file_itself_is_hidden(tmp_path, monkeypatch):
+    """#68 (Codex, 30 Oct): hiding by path or by song hid a different file
+    saved there later, possibly the only copy. Only the retired version's
+    exact content is hidden, and only while its replacement is in the
+    library."""
+    root = tmp_path / "nas"
+    root.mkdir()
+    monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(root))
+    store = Store(tmp_path / "data")
+    track, source = acquired(store)
+    exporter = Exporter(store, root)
+    exporter.publish(track)
+    old = exporter.records()[0]
+    copy = {
+        **{k: v for k, v in old.items() if k != "id"},
+        "id": "scanned-copy",
+        "relative_path": old["export_relative_path"],
+    }
+    replacement = {k: v for k, v in track.items() if k != "export_relative_path"}
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE acquired SET payload=? WHERE id=?",
+            (json.dumps(replacement), track["id"]),
+        )
+        conn.execute(
+            "INSERT INTO quality_cleanup VALUES (?,?,?)",
+            ("quality-request", track["id"], json.dumps(old)),
+        )
+    scanned(store, copy)
+    assert "scanned-copy" not in store.index.by_id
+    retired = (root / old["export_relative_path"]).read_bytes()
+    # A re-rip with different content at that path shows.
+    (root / old["export_relative_path"]).write_bytes(b"a different rip")
+    store.refresh_library()
+    assert "scanned-copy" in store.index.by_id
+    # The retired content shows again once no replacement is in the library.
+    (root / old["export_relative_path"]).write_bytes(retired)
+    store.refresh_library()
+    assert "scanned-copy" not in store.index.by_id
+    with store.connect() as conn:
+        conn.execute("DELETE FROM acquired WHERE id=?", (track["id"],))
+    store.refresh_library()
+    assert "scanned-copy" in store.index.by_id
+
+
 def test_a_stuck_replacement_cleanup_is_not_rehashed_every_pass(tmp_path, monkeypatch):
     """#74 (3): a cleanup row that can't finish (the old NAS file no longer
     matches its recorded hash) re-hashed NAS files under the lifecycle lock
