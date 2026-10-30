@@ -99,3 +99,5 @@ The rules these decisions produce, as they stand today, are in [PRODUCT.md](PROD
 **D-45 (30 Oct 2026)** — Remove household network details (LAN addresses, Tailscale host and address, the public domain, Cloudflare rule specifics) from every tracked file except the archive; real values live only in the gitignored `.private/` folder, and scripts read them from there. Git history is not rewritten. Reason: the repository is public.
 
 **D-46 (30 Oct 2026)** — Sign-in checks (`Auth.ready`, `Auth.authenticate`, signed-link verification) run on their own small thread pool, so slow library or NAS work on the shared pool cannot make every request wait to sign in. The resulting session-renewal edge case is recorded for later (#26), not fixed unreviewed.
+
+**D-47 (30 Oct 2026)** — Top five after the reset, in order: release the 30 Oct server fixes (#20); Watch delivery and battery (#64, #70, #71, #65); web listening history (#66); sign-in hardening (two private security advisories); constant idle server CPU (#63, #74, #79). Mark accepted the recommended order (reliability first) over swapping in the quick screen fixes (#60–#62), which lead Next.
