@@ -111,7 +111,7 @@ Unraid pulls with a GitHub credential that has `read:packages`, entered through 
 
 Who may do what:
 - Commit to `main`. A push publishes images: Claude pushes a batch only after its two Codex rounds leave no high finding, and asks Mark otherwise (D-50).
-- Verification and release are separately owner-authorised; file-move work needs the appropriate backup. No issue or task grants standing deploy permission.
+- Releases follow D-52: Claude may verify and release on its own only when the release gives a genuine testing benefit, after CI, two Codex rounds and the Unraid verification, at most once a day and while nobody is playing; otherwise Mark authorises it. File-move work needs the appropriate backup. No issue or task grants deploy permission beyond D-52.
 
 Each release has two steps:
 
