@@ -277,6 +277,9 @@ def auth_router(auth: Auth, security=None, origin: str | None = None):
 
     @router.get("/people/activity")
     async def activity(result=Depends(owner)):
-        return {"events": await read(auth.activity)}
+        return {
+            "events": await read(auth.activity),
+            "warnings": await read(auth.warnings),
+        }
 
     return router

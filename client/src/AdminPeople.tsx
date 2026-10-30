@@ -24,15 +24,18 @@ function json(body: unknown) {
 function useAdminData(inboxOffset = 0) {
   const [people, setPeople] = useState<Person[]>([]);
   const [events, setEvents] = useState<Activity[]>([]);
+  const [warnings, setWarnings] = useState<Activity[]>([]);
   const [inbox, setInbox] = useState<InboxAlbum[]>([]);
   const [inboxNext, setInboxNext] = useState<number | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   async function load() {
     setPeople((await api<{ people: Person[] }>("/v1/people")).people);
-    setEvents(
-      (await api<{ events: Activity[] }>("/v1/people/activity")).events,
+    const activity = await api<{ events: Activity[]; warnings?: Activity[] }>(
+      "/v1/people/activity",
     );
+    setEvents(activity.events);
+    setWarnings(activity.warnings ?? []);
     const page = await api<{
       albums: InboxAlbum[];
       next_offset: number | null;
@@ -59,15 +62,15 @@ function useAdminData(inboxOffset = 0) {
       {error && <p role="alert">{error}</p>}
     </>
   );
-  return { people, events, inbox, inboxNext, action, notices };
+  return { people, events, warnings, inbox, inboxNext, action, notices };
 }
 
 export function AdminPeople() {
-  const { people, events, action, notices } = useAdminData();
+  const { people, events, warnings, action, notices } = useAdminData();
   const [invite, setInvite] = useState<{ invite: Invite; name: string } | null>(
     null,
   );
-  const guessed = guessedAccounts(events);
+  const guessed = guessedAccounts(events, warnings);
   return (
     <>
       {notices}

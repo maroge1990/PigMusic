@@ -206,6 +206,42 @@ def test_guessing_one_account_from_many_addresses_slows_down_and_alerts(fixture)
     assert account_delay(auth, clock) == 0  # A quiet day starts afresh.
 
 
+def test_guessing_for_days_renews_the_owner_warning_daily(fixture):
+    """Guessing that never pauses for a day keeps one account row growing; the
+    owner is still warned every day, and the warning outlives a feed flooded
+    with failed sign-ins (Codex round 2 on 60f84e1)."""
+    auth, owner, clock = fixture
+    start = clock[0]
+    for i in range(36):  # One guess every two hours for three days.
+        with pytest.raises(AuthError, match="invalid_credentials"):
+            token(auth, password="wrong fixture", ip=f"guesser-{i}")
+        clock[0] += 2 * 3600
+    with auth.store.connect() as conn:
+        alerts = [
+            row[0]
+            for row in conn.execute(
+                "SELECT at FROM auth_events WHERE event='sign_in_slowed' ORDER BY id"
+            )
+        ]
+    assert [(at - start) // 3600 for at in alerts] == [18, 42, 66]
+    for i in range(250):  # Refused attempts each add a feed event.
+        auth.failure("mark", f"flood-{i}")
+    assert all(e["event"] != "sign_in_slowed" for e in auth.activity())
+    bearer = {"Authorization": "Bearer " + token(auth, ip="home")}
+    with TestClient(app_for(auth), base_url="https://private.ts.net") as client:
+        listed = client.get("/api/v1/people/activity", headers=bearer).json()
+    assert listed["warnings"] == [
+        {
+            "at": alerts[-1],
+            "user_id": owner,
+            "event": "sign_in_slowed",
+            "display_name": "Mark",
+        }
+    ]
+    clock[0] = alerts[-1] + 7 * DAY + 1
+    assert auth.warnings() == []
+
+
 def test_guessing_an_unknown_name_slows_it_without_an_alert(fixture):
     auth, _, clock = fixture
     for i in range(12):

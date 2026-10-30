@@ -222,7 +222,8 @@ class Auth:
 
     def account_failure(self, conn, name, now):
         """Count a checked wrong password against the account and grow its
-        delay; alert the owner once a day when an account is being guessed."""
+        delay; alert the owner once a day while an account is being guessed.
+        An account row's `lockouts` column holds the time of its last alert."""
         key = self.account_key(name)
         found = conn.execute(
             "SELECT failures,window_started,lockouts,locked_until,updated_at FROM login_attempts WHERE key=?",
@@ -230,18 +231,20 @@ class Auth:
         ).fetchone()
         failures, started, alerted, until, updated = found or (0, now, 0, 0, now)
         if now - updated >= DAY:
-            failures, started, alerted = 0, now, 0
+            failures, started = 0, now
         failures += 1
         if failures >= ACCOUNT_FREE_FAILURES:
             delay = 2 ** min(failures - ACCOUNT_FREE_FAILURES, 16)
             until = now + min(delay, ACCOUNT_MAX_DELAY)
-        if failures >= ACCOUNT_ALERT_FAILURES and not alerted:
+        # Guessing that never pauses for a day keeps one row growing, so the
+        # alert is renewed daily rather than once per row (Codex round 2).
+        if failures >= ACCOUNT_ALERT_FAILURES and now - alerted >= DAY:
             person = conn.execute(
                 "SELECT id FROM users WHERE username=? COLLATE NOCASE", (name.strip(),)
             ).fetchone()
             if person:
                 self.event(conn, "sign_in_slowed", "", person[0])
-            alerted = 1
+            alerted = now
         conn.execute(
             "INSERT OR REPLACE INTO login_attempts VALUES (?,?,?,?,?,?)",
             (key, failures, started, alerted, until, now),
@@ -435,6 +438,30 @@ class Auth:
                     "SELECT a.at,a.user_id,a.event,u.display_name FROM auth_events a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.id DESC LIMIT 200"
                 )
             )
+
+    def warnings(self):
+        """People whose accounts were being guessed in the last week, read from
+        their account rows: failed sign-ins can push the alert events out of
+        the latest-200 activity feed."""
+        since = self.now() - 7 * DAY
+        with self.store.connect() as conn:
+            people = conn.execute("SELECT id,username,display_name FROM users")
+            found = []
+            for identity, name, display_name in people.fetchall():
+                row = conn.execute(
+                    "SELECT lockouts FROM login_attempts WHERE key=?",
+                    (self.account_key(name),),
+                ).fetchone()
+                if row and row[0] >= since:
+                    found.append(
+                        {
+                            "at": row[0],
+                            "user_id": identity,
+                            "event": "sign_in_slowed",
+                            "display_name": display_name,
+                        }
+                    )
+            return found
 
     def revoke(self, identity, public_id):
         with self.store.connect() as conn:
