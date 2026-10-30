@@ -12,7 +12,7 @@ import time
 from urllib.parse import urlsplit
 
 from .library import identifier, normalise
-from .media import public_settings
+from .media import public_settings, saved_track_ids
 from .paths import versioned
 from .quality import LABELS as QUALITY_LABELS
 from .lifecycle import coordinated
@@ -1107,6 +1107,10 @@ class UserLibrary:
         return self.store.submit_catalogue(prepared, user_id=user_id)
 
     def history(self, user_id, events, session_id):
+        """Record listens of the person's songs, household songs (they play for
+        every member without being added: D-48) and their mix entries. A listen
+        of anything else, or outside the time window, is skipped on its own:
+        rejecting the batch made the web client resend it forever (#66)."""
         now = int(time.time())
         mix_tracks = {}
         for event in events:
@@ -1116,26 +1120,29 @@ class UserLibrary:
                         user_id, event["track_id"]
                     )
                 except (LookupError, AttributeError):
-                    raise ValueError("A played track is outside your library")
+                    pass
+        household = saved_track_ids(
+            self.store,
+            [e["track_id"] for e in events if not e["track_id"].startswith("mix:")],
+        )
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             added = 0
             for event in events:
                 if (
                     event["track_id"] not in mix_tracks
+                    and event["track_id"] not in household
                     and not conn.execute(
                         "SELECT 1 FROM library_members WHERE user_id=? AND track_id=?",
                         (user_id, event["track_id"]),
                     ).fetchone()
                 ):
-                    raise ValueError("A played track is outside your library")
+                    continue
                 if (
                     event["played_at"] > now + 300
                     or event["played_at"] < now - 30 * 86400
                 ):
-                    raise ValueError(
-                        "Playback event timestamp is outside the accepted window"
-                    )
+                    continue
                 added += conn.execute(
                     "INSERT OR IGNORE INTO play_events(user_id,track_id,played_at,seconds,device_session_id,event_id) VALUES (?,?,?,?,?,?)",
                     (

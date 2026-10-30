@@ -42,9 +42,22 @@ export function recordListen(listen: Listen) {
   void flushListens();
 }
 
+/** Worth resending later: signed out, refused for now, or rate-limited. Any
+ * other 4xx refuses the batch as sent; the server already skips a listen it
+ * can't record, so resending it would block every later listen (#66). */
+const RETRY_LATER = new Set([401, 403, 408, 425, 429]);
+
+function settled(status: number) {
+  return status < 500 && !RETRY_LATER.has(status);
+}
+
 export async function flushListens() {
   if (sending) return;
-  const pending = read().slice(0, 200);
+  const now = Math.floor(Date.now() / 1000);
+  const listens = read();
+  const fresh = listens.filter((l) => l.played_at >= now - MONTH);
+  if (fresh.length !== listens.length) write(fresh);
+  const pending = fresh.slice(0, 200);
   if (!pending.length) return;
   sending = true;
   try {
@@ -54,7 +67,7 @@ export async function flushListens() {
       body: JSON.stringify({ events: pending }),
       keepalive: true,
     });
-    if (response.ok) {
+    if (settled(response.status)) {
       const sent = new Set(pending.map((l) => l.event_id));
       write(read().filter((l) => !sent.has(l.event_id)));
     }

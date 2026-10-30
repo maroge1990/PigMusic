@@ -143,14 +143,35 @@ def test_shared_request_beneficiaries_and_atomic_history(tmp_path, monkeypatch):
     }
     assert store.user_libraries.history(member, [event], "session")["recorded"] == 1
     assert store.user_libraries.history(member, [event], "session")["recorded"] == 0
-    with pytest.raises(ValueError):
-        store.user_libraries.history(
-            member,
-            [{**event, "event_id": "rollback"}, {**event, "track_id": "outside"}],
-            "session",
-        )
+
+
+def test_household_song_listens_count_and_bad_listens_never_block_the_rest(
+    tmp_path, monkeypatch
+):
+    """#66 (D-48): household songs play for every member without being added,
+    so their listens are recorded; a listen that can't be recorded is skipped
+    on its own instead of failing the batch the web client resends."""
+    app, owner, member, _, _ = household(tmp_path, monkeypatch)
+    store = app.state.store
+    assert not store.user_libraries.contains(member, "song")
+    now = int(time.time())
+    event = {"track_id": "song", "event_id": "heard", "played_at": now, "seconds": 40}
+    batch = [
+        {**event, "track_id": "gone", "event_id": "gone"},
+        {**event, "track_id": "mix:expired", "event_id": "expired"},
+        {**event, "event_id": "future", "played_at": now + 3600},
+        {**event, "event_id": "stale", "played_at": now - 31 * 86400},
+        event,
+    ]
+    assert store.user_libraries.history(member, batch, "session") == {"recorded": 1}
+    assert store.user_libraries.history(member, batch, "session") == {"recorded": 0}
     with store.connect() as conn:
-        assert conn.execute("SELECT count(*) FROM play_events").fetchone()[0] == 1
+        rows = conn.execute(
+            "SELECT user_id,track_id,event_id FROM play_events"
+        ).fetchall()
+    assert [tuple(r) for r in rows] == [(member, "song", "heard")]
+    assert not store.user_libraries.contains(member, "song")
+    assert store.mixes.plays(member)[0] == {"song": 1}
 
 
 def test_owner_backfill_once_and_external_scan_stays_unassigned(tmp_path, monkeypatch):
