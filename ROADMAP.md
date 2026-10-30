@@ -7,9 +7,8 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 *Overwritten at the end of every session. 31 Oct 2026 (morning, Melbourne).*
 
-- **Live:** server `15566c4` (released 30 Oct 13:53 UTC as `reset-20261031-v2` under D-52; rollback container
-  `PigMusic-before-reset-20261031-v2`), carrying every batch pushed on 30 Oct.
-- **Pushed 31 Oct, not released** (the scheduled 1 Nov release was stopped; main CI green at 99b49eb):
+- **Live:** server `99b49eb` (released 30 Oct 23:42 UTC as `reset-20261031-v3` on Mark's instruction, while music was
+  playing; rollback container `PigMusic-before-reset-20261031-v3`). It carries everything pushed on 30 and 31 Oct:
   - Overnight mix searching (#90) and the engine heap (#89): unfindable songs are searched once per household per
     20 h; engine heap 512 MB.
   - Withdrawn designs rebuilt: #68 (only the retired file itself is hidden, by hash, while its replacement plays),
@@ -23,10 +22,8 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   images; not yet run on Unraid with an image carrying the switch. Fake download sources are phase 2.
 - **TestFlight:** both apps are ready for upload (privacy manifests, encryption setting); parked until Apple approves
   Mark's developer membership (about 48 hours), then his one-time account steps.
-- **iPhone/Watch:** native **0.2.0 (13)** on Mark's iPhone (free signing, reinstall before 6 Nov). Build **15** is
-  pushed (31 Oct, two Codex rounds): build 14's screen fixes (#60, #61, #62) plus #78 (no rebuild on a route change
-  while paused), #76 (a changed song stops playback only when queued, D-56), #77 (Watch copies fit the Watch's
-  budget, D-57). Not installed: signing needs Mark's Mac password.
+- **iPhone/Watch:** native **0.2.0 (15)** installed on Mark's iPhone on 31 Oct (free signing; expires after 7 days):
+  build 14's screen fixes (#60, #61, #62) plus #78, #76 (D-56) and #77 (D-57).
 - **Live gates:** #20/#16 idle windows met; the loaded window waits for real use. Idle CPU on `e1557ec`: 11.5% of a
   core; on `15566c4` the server never went quiet overnight (mix searching ran past 07:30), so the re-measure (#63)
   waits for #90 to be live. After the 1 Nov release, compare that night's searches with ~700 / ~7 h (#90).
@@ -45,9 +42,9 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 Reliability first (D-47). In order:
 
-1. **Release and live gates** — a D-52 release (ask Mark; the scheduled one was stopped); then that night's search count (#90), the engine log (#89), the
+1. **Live gates** — the first night's search count on `99b49eb` (#90), the engine log (#89), the
    quiet idle-CPU re-measure (#63) and the loaded 30-minute window for #16/#20
-2. **Device checks** — install build 15 (Mark's Mac password until TestFlight; build 13 expires 6 Nov); Mark's checks and battery runs
+2. **Device checks** — build 15 is installed; Mark's checks and battery runs
    (#18, #19; #64, #65, #70, #71, #60–#62, #76–#78)
 3. **T3 rig on Unraid** (#15): first run with a green main digest; then measure #22 and #43 on it
 4. **TestFlight** once Apple approves the membership
