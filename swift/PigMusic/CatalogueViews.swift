@@ -63,18 +63,19 @@ struct CatalogueArtistView: View {
           }
         }
         if let popular = popularity, !popular.albums.isEmpty {
-          Shelf(title: "Popular albums") {
+          // The Library's album grid and tiles, not a row of fixed cards (#62).
+          Text("Popular albums").font(.title3.weight(.bold))
+          LazyVGrid(columns: cardColumns, spacing: 18) {
             ForEach(popular.albums) { release in
               NavigationLink {
                 CatalogueAlbumView(model: model, groupId: release.id, title: release.title)
               } label: {
                 CollectionCard(
                   model: model, source: .releaseGroup(release.id), title: release.title,
-                  caption: String(release.date.prefix(4))
-                ).frame(width: 150)
+                  caption: String(release.date.prefix(4)))
               }.buttonStyle(.plain)
             }
-          }.padding(.horizontal, -16)
+          }
         }
         if let albums, !albums.releases.isEmpty {
           Text("Albums").font(.title3.weight(.bold))
