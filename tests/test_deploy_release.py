@@ -167,6 +167,8 @@ def test_the_migration_checks_get_memory_for_the_state_they_copy():
     for step in ("server.store import Store", "verify_state_migration.py"):
         command = commands[index(commands, step)]
         assert "--memory=1924m " in command and "--memory=1g" not in command
+        # Its tmpfs is sized to match, not Docker's half-of-host default (#87).
+        assert ",size=1924m," in command
     assert index(commands, "du -scb") < index(commands, "verify_state_migration.py")
 
 

@@ -276,10 +276,14 @@ class Release:
                     f"Migration checks need {needed} MiB; host memory has "
                     f"{available >> 10} MiB available and keeps {HOST_RESERVE_MIB} MiB"
                 )
+            # Docker's default tmpfs is half the host's memory, so state
+            # between the budget and that would pass the guard above and then
+            # fail the copy after the service stopped (#87): size it to match.
             memory = f"--memory={needed}m "
             baseline = self.remote(
                 "docker run --rm --network none " + memory + "--user 99:100 "
-                "--tmpfs /tmp:rw,uid=99,gid=100 -e PYTHONDONTWRITEBYTECODE=1 -v "
+                f"--tmpfs /tmp:rw,size={needed}m,uid=99,gid=100 "
+                "-e PYTHONDONTWRITEBYTECODE=1 -v "
                 + shlex.quote(self.backup + "/data:/backup:ro")
                 + " --entrypoint python "
                 + shlex.quote(live["Image"])
@@ -289,7 +293,8 @@ class Release:
             self.remote("cat > " + shlex.quote(self.stage + "/expected.json"), baseline)
             self.remote(
                 "docker run --rm --network none " + memory + "--user 99:100 "
-                "--tmpfs /data:rw,uid=99,gid=100 -e PYTHONDONTWRITEBYTECODE=1 "
+                f"--tmpfs /data:rw,size={needed}m,uid=99,gid=100 "
+                "-e PYTHONDONTWRITEBYTECODE=1 "
                 "-e PYTHONPATH=/app -v "
                 + shlex.quote(self.backup + "/data:/backup:ro")
                 + " -v "
