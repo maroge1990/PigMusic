@@ -262,6 +262,14 @@ def test_only_the_retired_file_itself_is_hidden(tmp_path, monkeypatch):
     scanned(store, copy)
     assert "scanned-copy" not in store.index.by_id
     retired = (root / old["export_relative_path"]).read_bytes()
+    # An edit in place that keeps the size and restores the time is seen
+    # (Codex round 2).
+    path = root / old["export_relative_path"]
+    stamp = path.stat()
+    path.write_bytes(bytes(b ^ 1 for b in retired))
+    os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    store.refresh_library()
+    assert "scanned-copy" in store.index.by_id
     # A re-rip with different content at that path shows.
     (root / old["export_relative_path"]).write_bytes(b"a different rip")
     store.refresh_library()

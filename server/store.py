@@ -670,12 +670,15 @@ class Store:
         path = track.get("relative_path")
         if path not in retired:
             return False
-        from .exporter import contained, digest, fingerprint
+        from .exporter import contained, digest
 
         try:
             nas = Path(os.environ.get("PIG_MUSIC_LIBRARY", "/library")).resolve()
             file = contained(nas, path)
-            seen = fingerprint(file)
+            info = os.stat(file)
+            # ctime too: an edit can restore size and mtime, never ctime.
+            seen = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+            seen += (info.st_ctime_ns,)
             cached = self.retired_digests.get(path)
             if not cached or cached[0] != seen:
                 cached = (seen, digest(file))
