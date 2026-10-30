@@ -82,7 +82,7 @@ For event-loop blocking (#16) and lock-hold (#17) windows, exclude only the firs
 T3 runs a staging PigMusic on Unraid (D-53) with a disposable generated library and fake metadata services, driven by `scripts/test_rig.py` (#15):
 
 ```sh
-.venv/bin/python -m scripts.test_rig up [--image ghcr.io/maroge1990/pig-music@sha256:…]
+.venv/bin/python -m scripts.test_rig up --image ghcr.io/maroge1990/pig-music@sha256:…   # a digest only, never a tag
 .venv/bin/python -m scripts.test_rig check     # owner, 60 generated songs, scan, Home mixes
 .venv/bin/python -m scripts.test_rig artist    # a cold artist page: seconds, songs, albums, fake requests (#21)
 .venv/bin/python -m scripts.test_rig mixes     # Home mixes p50/p95 over a minute (#22)

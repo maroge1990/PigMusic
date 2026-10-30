@@ -1,7 +1,7 @@
 """The T3 test rig on Unraid (#15, D-53): a staging PigMusic with fake
 metadata services and a disposable generated library.
 
-    python -m scripts.test_rig up [--image ghcr.io/...@sha256:...]
+    python -m scripts.test_rig up --image ghcr.io/maroge1990/pig-music@sha256:...
     python -m scripts.test_rig check | artist | mixes
     python -m scripts.test_rig status | down | reset
 
@@ -14,6 +14,7 @@ inside its container (no published port); the driver runs there.
 """
 
 import argparse
+import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -21,7 +22,9 @@ from pathlib import Path
 ROOT = "/mnt/user/appdata/pig-music-test"
 NETWORK = "pig-music-test"
 APP, FAKE = "pig-music-test-app", "pig-music-test-fake"
-IMAGE = "ghcr.io/maroge1990/pig-music:main"
+# Only an exact digest: pulling a tag such as :main would move that tag in
+# the Docker daemon production shares (D-53, Codex round 1).
+PINNED = re.compile(r"ghcr\.io/maroge1990/pig-music@sha256:[0-9a-f]{64}")
 SCRIPTS = Path(__file__).resolve().parent
 UPLOADS = ("fake_services.py", "rig_driver.py")
 
@@ -32,7 +35,14 @@ def household(key):
     return values.get(key)
 
 
+def pinned(image):
+    if not PINNED.fullmatch(image):
+        raise SystemExit("Use an image digest: ghcr.io/maroge1990/pig-music@sha256:…")
+    return image
+
+
 def up_commands(image):
+    image = pinned(image)
     owned = f"{ROOT}/data {ROOT}/library"
     return [
         f"mkdir -p {owned} {ROOT}/rig/scripts && chown -R 99:100 {owned}",
@@ -91,7 +101,7 @@ def main():
     parser.add_argument(
         "command", choices=["up", "check", "artist", "mixes", "status", "down", "reset"]
     )
-    parser.add_argument("--image", default=IMAGE)
+    parser.add_argument("--image", help="ghcr.io/maroge1990/pig-music@sha256:…")
     parser.add_argument("--key", default=str(Path.home() / ".ssh/pig_music_unraid"))
     args = parser.parse_args()
     ssh = [
@@ -107,6 +117,7 @@ def main():
         return subprocess.run(ssh + [command], check=True, **kwargs)
 
     if args.command == "up":
+        pinned(args.image or "")
         remote(up_commands(args.image)[0])
         for name in UPLOADS:
             with open(SCRIPTS / name, "rb") as source:

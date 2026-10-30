@@ -98,3 +98,18 @@ def test_every_rig_command_keeps_to_its_own_containers_and_limits():
         if command.startswith("docker exec "):
             assert " pig-music-test-app python " in command
     assert " PigMusic" not in " ".join(commands)
+
+
+def test_the_rig_runs_only_an_exact_image_digest():
+    """D-53 (Codex round 1): pulling a tag such as :main moves it in the
+    Docker daemon production shares; a digest moves no tag."""
+    from scripts import test_rig
+
+    for image in (
+        "ghcr.io/maroge1990/pig-music:main",
+        "ghcr.io/maroge1990/pig-music:sha-" + "0" * 40,
+        "ghcr.io/maroge1990/pig-music@sha256:" + "0" * 63,
+        "",
+    ):
+        with pytest.raises(SystemExit):
+            test_rig.up_commands(image)
