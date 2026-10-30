@@ -20,6 +20,10 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 - **Efficiency batch pushed 31 Oct** (two Codex rounds): artist pages answer within ~10 s and finish in the
   background (#21), popularity fetched once per artist (#44), mix planning off the event loop (#42, part). #22 and
   #43 wait for measurement on the T3 rig.
+- **T3 rig phase 1 pushed** (#15): `scripts/test_rig.py` with fake metadata services, internal network, digest-only
+  images; not yet run on Unraid with an image carrying the switch. Fake download sources are phase 2.
+- **TestFlight:** both apps are ready for upload (privacy manifests, encryption setting); parked until Apple approves
+  Mark's developer membership (about 48 hours), then his one-time account steps.
 - **iPhone/Watch:** native **0.2.0 (13)** on Mark's iPhone (free signing, reinstall before 6 Nov). Build **15** is
   pushed (31 Oct, two Codex rounds): build 14's screen fixes (#60, #61, #62) plus #78 (no rebuild on a route change
   while paused), #76 (a changed song stops playback only when queued, D-56), #77 (Watch copies fit the Watch's
@@ -44,10 +48,11 @@ Reliability first (D-47). In order:
 
 1. **Release and live gates** — the 1 Nov release; then that night's search count (#90), the engine log (#89), the
    quiet idle-CPU re-measure (#63) and the loaded 30-minute window for #16/#20
-2. **Device checks** — install build 15 (Mark's Mac password, or TestFlight later); Mark's checks and battery runs
+2. **Device checks** — install build 15 (Mark's Mac password until TestFlight; build 13 expires 6 Nov); Mark's checks and battery runs
    (#18, #19; #64, #65, #70, #71, #60–#62, #76–#78)
-3. **T3 test rig** (#15), approved in D-53; then measure #22 and #43 on it
-4. **Efficiency leftovers** (D-54) — the rest of #42; the flaky `test_mix_responsiveness` timing check
+3. **T3 rig on Unraid** (#15): first run with a green main digest; then measure #22 and #43 on it
+4. **TestFlight** once Apple approves the membership
+5. **Efficiency leftovers** (D-54) — the rest of #42; the flaky `test_mix_responsiveness` timing check
 
 ## Next (P1/P2)
 
