@@ -7,32 +7,29 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 *Overwritten at the end of every session. 30 Oct 2026 (evening).*
 
-- **Live:** server `1bc2039` (released 30 Oct as `reset-20261030-v2`, previous kept as `PigMusic-before-reset-20261030-v2`):
-  the 30 Oct event-loop fixes, web listening history (#66), sign-in hardening, release-tooling fixes. The live
-  container's template had drifted (br0 network and memory/CPU limits lost on 25 Oct); both restored before the
-  release. iPhone: **0.2.0 (12)** installed from the Mac on 30 Oct.
-- **Pushed, not yet released:** the idle-CPU batch (`45d0f3b`, `c4a7887`, `a4bf992`, `bc20fc2`) and the Watch
-  delivery batch (native **build 13**: `b1a5649`, `8d9e5b6`, `f356ea3`, `7946403`, `4e0cc3c`). Both passed two Codex
-  rounds; build 13 is not on Mark's devices yet (signing needs his Mac password in a terminal, or TestFlight).
-- **Live gates:** #20/#16 idle 30-minute window met (0 stalls, 0 lock holds); the *loaded* window still waits for real
-  use. Idle CPU before the idle-CPU batch: 31% of one core (27.5% export pass, 3.1% health check), posted on #63;
-  re-measure after its release.
+- **Live:** server `e1557ec` (released 30 Oct 10:22 UTC as `reset-20261030-v3`; rollback container
+  `PigMusic-before-reset-20261030-v3`): the 30 Oct event-loop fixes, web listening history (#66), sign-in hardening,
+  the Watch delivery batch's server side, the idle-CPU batch (export pass, health check, artwork rebuilds) and the
+  release-tooling fixes. The live template had drifted (br0 and limits lost on 25 Oct); restored before release.
+  iPhone/Watch: native **0.2.0 (13)** installed on Mark's iPhone on 30 Oct (Watch delivery batch: #64, #70, #71, #65).
+- **Pushed, not released:** nothing.
+- **Live gates:** #20/#16 idle 30-minute window met on `1bc2039` (0 stalls, 0 lock holds); a loaded window and the
+  idle-CPU re-measure on `e1557ec` are being taken (baseline before: 31% of one core, on #63).
 - **Ways of working:** area batches with one Codex pair per batch, Claude pushes after two rounds, releases need
   Mark's go-ahead (D-50). New decisions today: D-48 (household-song listens), D-49 (per-account sign-in delay),
   D-50, D-51 (Watch copies prepared only in the foreground).
 - **Household details** live only in the gitignored `.private/` (D-45).
-- **Waiting on Mark:** go-ahead to release the pushed batches; installing build 13 (or choosing TestFlight, which
-  needs a paid Apple Developer account); device evidence for #17, #18, #19; the items labelled
+- **Waiting on Mark:** build-13 device checks (#64, #65, #70, #71, battery #18, #19) and #17 evidence; reinstalling
+  build 13 before 6 Nov (free-account signing) or choosing TestFlight (paid Apple Developer account); the items labelled
   [`owner`](https://github.com/maroge1990/PigMusic/issues?q=is%3Aopen+label%3Aowner); confirming the Cloudflare
   cache bypass and IPv6 rate limit (sign-in advisories).
 
 ## Now
 
-Chosen by Mark on 30 Oct (D-47), reliability first. Done today: items 3 and 4 are live; 2 and 5 are pushed.
+Chosen by Mark on 30 Oct (D-47), reliability first. Done today: all five are live; what remains is below.
 
-1. **Release and live gates** — release the pushed batches (#20); take a loaded 30-minute window for #16; re-measure
-   idle CPU (#63)
-2. **Watch delivery and battery, device checks** — build 13 on phone and Watch, then Mark's battery runs (#19, #18;
+1. **Live gates** — a loaded 30-minute window for #16/#20; the idle-CPU re-measure on #63
+2. **Watch delivery and battery, device checks** — build 13 is installed; Mark's checks and battery runs (#19, #18;
    #64, #70, #71, #65 are fixed in it)
 3. **Sign-in hardening leftovers** — the warning not renewed during multi-day guessing (Codex round 2), IPv6 address
    grouping, a longer rejected-password list, bounding the hashing queue; tracked in the private advisory
