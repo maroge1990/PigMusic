@@ -23,6 +23,10 @@ from ..api_models import (
 )
 
 
+# Password checks that may be hashing (two) or waiting at once.
+HASHING_LIMIT = 10
+
+
 class Credentials(BaseModel):
     username: str = Field(min_length=2, max_length=64)
     password: SecretStr = Field(max_length=256)
@@ -77,6 +81,7 @@ def set_cookie(response, token):
 def auth_router(auth: Auth, security=None, origin: str | None = None):
     router = APIRouter(prefix="/api/v1", tags=["accounts"])
     hashing = asyncio.Semaphore(2)
+    entered = 0
 
     async def call(threads, function, *args, **kwargs):
         try:
@@ -86,9 +91,18 @@ def auth_router(auth: Auth, security=None, origin: str | None = None):
 
     async def hashed(function, *args):
         """Password work (Argon2, 64 MiB each): at most two at a time, on the
-        shared pool so it never occupies the reserved session threads."""
-        async with hashing:
-            return await call(asyncio.to_thread, function, *args)
+        shared pool so it never occupies the reserved session threads. Past
+        HASHING_LIMIT hashing or waiting, more are refused at once instead of
+        queueing behind a burst of anonymous attempts."""
+        nonlocal entered
+        if entered >= HASHING_LIMIT:
+            raise HTTPException(429, "rate_limited")
+        entered += 1
+        try:
+            async with hashing:
+                return await call(asyncio.to_thread, function, *args)
+        finally:
+            entered -= 1
 
     async def run(function, *args, **kwargs):
         """Session and account lookups never wait behind password hashing, so

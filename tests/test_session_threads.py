@@ -163,3 +163,55 @@ def test_sign_in_checks_answer_while_account_changes_wait_for_a_writer(
             writer.close()
             for change in changes:
                 change.join(15)
+
+
+def test_sign_ins_past_the_hashing_queue_are_refused_at_once(tmp_path, monkeypatch):
+    """A burst of anonymous attempts can't pile up an unbounded queue of
+    password checks: past HASHING_LIMIT, sign-ins get 429 straight away."""
+    from server.routes.auth import HASHING_LIMIT
+
+    app, _ = protected(tmp_path, monkeypatch)
+    auth = app.state.auth
+    hashing, release = threading.Semaphore(0), threading.Event()
+
+    def slow_login(*args):
+        hashing.release()
+        release.wait(10)
+        raise AuthError("invalid_credentials")
+
+    monkeypatch.setattr(auth, "login", slow_login)
+    with TestClient(app, base_url="https://private.ts.net") as client:
+
+        def attempt(answers):
+            answers.append(
+                client.post(
+                    "/api/v1/auth/login",
+                    json={"username": "mark", "password": "wrong password"},
+                    headers={"X-Pig-Request": "1"},
+                ).status_code
+            )
+
+        queued = []
+        attempts = [
+            threading.Thread(target=attempt, args=(queued,))
+            for _ in range(HASHING_LIMIT)
+        ]
+        for thread in attempts:
+            thread.start()
+        try:
+            # Two attempts are hashing; give the rest time to queue for the gate.
+            assert hashing.acquire(timeout=5) and hashing.acquire(timeout=5)
+            threading.Event().wait(1)
+            extra = []
+            late = threading.Thread(target=attempt, args=(extra,))
+            late.start()
+            late.join(3)
+            assert extra == [429], "a sign-in past the limit queued for hashing"
+        finally:
+            release.set()
+            for thread in attempts:
+                thread.join(10)
+        assert queued == [401] * HASHING_LIMIT
+        after = []
+        attempt(after)  # Every slot was given back.
+        assert after == [401]
