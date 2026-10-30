@@ -707,3 +707,38 @@ def test_a_failed_songs_lookup_never_becomes_a_day_long_full_answer(tmp_path):
             assert [s["title"] for s in full["songs"]] == ["Song"]
 
     asyncio.run(run())
+
+
+def test_an_expired_partial_answer_is_served_while_its_completion_runs(
+    tmp_path, monkeypatch
+):
+    """#21 (Codex round 2): once a partial answer expired, a person opening
+    the page waited behind the background completion holding the artist's
+    lock, past the phone's timeout."""
+    import server.popularity as module
+
+    monkeypatch.setattr(module, "ALBUM_SECONDS", -1)
+    monkeypatch.setattr(module, "PARTIAL_TTL", -1)
+    store = Store(tmp_path)
+    save_settings(store, True, True, listenbrainz_token=TOKEN)
+    release = asyncio.Event()
+
+    class BlockedCatalogue(SlowCatalogue):
+        async def get(self, client, path):
+            await release.wait()
+            return await super().get(client, path)
+
+    provider = Popularity(store, BlockedCatalogue())
+
+    async def run():
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(listenbrainz([]))
+        ) as client:
+            first = await provider.get(client, ARTIST)
+            await asyncio.sleep(0.05)  # The completion now waits on a lookup.
+            again = await asyncio.wait_for(provider.get(client, ARTIST), 2)
+            assert again == first
+            release.set()
+            await asyncio.gather(*list(provider.completing.values()))
+
+    asyncio.run(run())

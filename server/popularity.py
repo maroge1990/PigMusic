@@ -88,6 +88,16 @@ class Popularity:
                 cached = await asyncio.to_thread(self.store.read_document, name)
                 if usable(cached):
                     return cached["data"]
+                # While its completion runs (and holds the artist's lock), a
+                # partial answer is served even once it expires (Codex round 2).
+                if (
+                    name == full_key
+                    and not complete
+                    and cached
+                    and cached.get("partial")
+                    and artist_id in self.completing
+                ):
+                    return cached["data"]
             return None
 
         found = await known()
