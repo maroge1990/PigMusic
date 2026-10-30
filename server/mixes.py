@@ -56,6 +56,17 @@ RELEASE_ARTISTS, RELEASE_DAYS = 10, 90
 MIN_MIX = 20
 # Radio keeps this many ready songs ahead of the listener, added in batches.
 RADIO_BUFFER, RADIO_BATCH, RADIO_PAGE = 20, 20, 10
+# A song no source could supply is not searched again by any mix or radio for
+# this long (#90): one failed round when every source answered with no match,
+# two when a time limit or outage may have hidden it.
+UNFOUND_HOURS, UNFOUND_ROUNDS = 20, 2
+# Failure details a later retry cannot change: the source answered and nothing
+# it had matched. Anything else (time limits, outages, transfers) may.
+FINAL_FAILURES = (
+    "no candidate passed recording/version matching",
+    "Embedded recording metadata does not match the request",
+    "Downloaded audio does not meet the selected quality profile",
+)
 
 
 def decade_theme(tracks, day):
@@ -652,6 +663,7 @@ class Mixes:
     async def prepare_pass(self, client):
         today = self.day()
         await asyncio.to_thread(self.activate, today)
+        await asyncio.to_thread(self.forget_unfound)
         # Reclaim retired audio before checking capacity for new editions.
         await asyncio.to_thread(self.cache.cleanup)
         for user in await asyncio.to_thread(self.people):
@@ -1067,6 +1079,12 @@ class Mixes:
                 try:
                     await asyncio.to_thread(self.cache.available, track)
                 except FileNotFoundError:
+                    known = await asyncio.to_thread(self.unfound, track)
+                    if known:
+                        payload.setdefault("failures", {})[song_key(track)] = known
+                        payload["cursor"] = position + 1
+                        await asyncio.to_thread(self.update, identity, payload)
+                        continue
                     blocked = await asyncio.to_thread(self.blocked)
                     if blocked:
                         deferred = True
@@ -1089,6 +1107,11 @@ class Mixes:
                                 track.get("title"),
                                 track.get("artist"),
                                 payload["title"],
+                                payload["failures"][song_key(track)],
+                            )
+                            await asyncio.to_thread(
+                                self.record_unfound,
+                                track,
                                 payload["failures"][song_key(track)],
                             )
                         else:
@@ -1169,6 +1192,45 @@ class Mixes:
         log.info(
             "Mixes: retired %s: fewer than %d songs ready", payload["title"], MIN_MIX
         )
+
+    def unfound(self, track):
+        """Why no source can supply this song today, or None to search."""
+        with self.store.connect() as conn:
+            row = conn.execute(
+                "SELECT payload FROM documents WHERE name=?",
+                ("mix-unfound:" + song_key(track),),
+            ).fetchone()
+        entry = json.loads(row[0]) if row else None
+        if entry and entry["final"] and entry["until"] > time.time():
+            return entry["error"]
+        return None
+
+    def record_unfound(self, track, error):
+        """Count one failed round for a song, shared by every mix and person."""
+        name, now = "mix-unfound:" + song_key(track), time.time()
+        with self.store.connect() as conn:
+            row = conn.execute(
+                "SELECT payload FROM documents WHERE name=?", (name,)
+            ).fetchone()
+            entry = json.loads(row[0]) if row else None
+            if not entry or entry["until"] <= now:
+                entry = {"rounds": 0, "until": now + UNFOUND_HOURS * 3600}
+            entry["rounds"] += 1
+            entry["error"] = error
+            entry["final"] = entry["rounds"] >= UNFOUND_ROUNDS or all(
+                part.strip().endswith(FINAL_FAILURES) for part in error.split(";")
+            )
+            conn.execute(
+                "INSERT INTO documents VALUES (?,?) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",
+                (name, json.dumps(entry)),
+            )
+
+    def forget_unfound(self):
+        with self.store.connect() as conn:
+            conn.execute(
+                "DELETE FROM documents WHERE name LIKE 'mix-unfound:%' AND json_extract(payload,'$.until')<=?",
+                (time.time(),),
+            )
 
     def pending(self, user, day):
         with self.store.connect() as conn:
@@ -1548,6 +1610,9 @@ class Mixes:
                 await asyncio.to_thread(self.cache.available, track)
                 ready = True
             except FileNotFoundError:
+                ready = False
+                error = await asyncio.to_thread(self.unfound, track)
+            if error is None and not ready:
                 reason = await asyncio.to_thread(self.blocked)
                 if reason:
                     await asyncio.to_thread(
@@ -1563,7 +1628,9 @@ class Mixes:
                 ready = await asyncio.to_thread(downloader.fetch, track)
                 if not ready and downloader.result != "failed":
                     break  # Deferred: keep the song queued for the next pass.
-                error = downloader.error or "No matching recording available"
+                if not ready:
+                    error = downloader.error or "No matching recording available"
+                    await asyncio.to_thread(self.record_unfound, track, error)
 
             def advance(p, track=track, ready=ready):
                 p["queue"] = [t for t in p["queue"] if song_key(t) != song_key(track)]

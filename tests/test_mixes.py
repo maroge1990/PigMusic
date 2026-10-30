@@ -286,6 +286,101 @@ def test_failed_preparation_retains_last_ready_and_publishes_shorter_complete_mi
     ]
 
 
+def rounds(mixes, user, identity):
+    """One preparation round, then make the edition due again."""
+    asyncio.run(mixes.prepare_staged(user, mixes.day(), mixes.day()))
+    with mixes.store.connect() as conn:
+        payload = json.loads(
+            conn.execute(
+                "SELECT payload FROM mix_editions WHERE id=?", (identity,)
+            ).fetchone()[0]
+        )
+    mixes.update(identity, {**payload, "retry_at": 0})
+    return payload
+
+
+@pytest.mark.parametrize(
+    "error,searches",
+    [
+        # Every source answered and nothing matched: one round settles it.
+        (
+            "soulseek: no candidate passed recording/version matching; "
+            "youtube: Embedded recording metadata does not match the request",
+            1,
+        ),
+        # A time limit may have hidden it: one more round, then no more.
+        (
+            "Preferred quality attempt reached its time limit; "
+            "soulseek: no candidate passed recording/version matching",
+            2,
+        ),
+    ],
+)
+def test_a_song_no_source_has_is_not_searched_again_by_any_mix_or_person(
+    tmp_path, monkeypatch, error, searches
+):
+    """#90: each nightly retry round re-searched every missing song, once per
+    person, a few minutes apart, so ~37 unfindable songs kept the server and
+    the engine busy for ~7 hours."""
+    app, owner = protected(tmp_path, monkeypatch)
+    mixes = app.state.store.mixes
+    user, _ = member(app, owner)
+    mixes.store.save_download_settings({"enabled": True, "sources": ["freemp3cloud"]})
+    missing = track(9)
+    calls = []
+
+    def fail(downloader, song):
+        calls.append(song_key(song))
+        downloader.result, downloader.error = "failed", error
+        return False
+
+    monkeypatch.setattr(MixDownloader, "fetch", fail)
+    mine = mixes.stage(owner, "daily", mixes.day(), "Daily", "Reason", [missing])
+    theirs = mixes.stage(user, "fresh", mixes.day(), "Fresh", "Reason", [missing])
+    for _ in range(3):  # attempts 0, 1, 2: every retry round the edition gets
+        rounds(mixes, owner, mine)
+    payload = rounds(mixes, user, theirs)
+    assert calls == [song_key(missing)] * searches
+    # The other person's mix still says why the song was left out.
+    assert payload["failures"] == {song_key(missing): error}
+    # A day later the song may have appeared somewhere: search again.
+    with mixes.store.connect() as conn:
+        conn.execute(
+            "UPDATE documents SET payload=json_set(payload,'$.until',0) WHERE name LIKE 'mix-unfound:%'"
+        )
+    mixes.forget_unfound()
+    rounds(mixes, user, theirs)
+    assert len(calls) == searches + 1
+
+
+def test_a_deferred_round_does_not_search_failed_songs_again(tmp_path, monkeypatch):
+    """#90: a song deferred behind a busy download restarted the whole round,
+    re-searching songs that had just failed (up to 7 searches a night)."""
+    app, owner = protected(tmp_path, monkeypatch)
+    mixes = app.state.store.mixes
+    mixes.store.save_download_settings({"enabled": True, "sources": ["freemp3cloud"]})
+    gone, busy = track(1), track(2)
+    calls = []
+
+    def fetch(downloader, song):
+        calls.append(song_key(song))
+        if song_key(song) == song_key(busy):
+            downloader.result = "deferred"
+            downloader.error = "Another mix download is in progress"
+        else:
+            downloader.result = "failed"
+            downloader.error = (
+                "soulseek: no candidate passed recording/version matching"
+            )
+        return False
+
+    monkeypatch.setattr(MixDownloader, "fetch", fetch)
+    identity = mixes.stage(owner, "daily", mixes.day(), "Daily", "Reason", [gone, busy])
+    for _ in range(4):
+        rounds(mixes, owner, identity)
+    assert calls.count(song_key(gone)) == 1 and calls.count(song_key(busy)) == 4
+
+
 def test_owned_mix_rows_keep_library_actions_separate_from_private_playback(
     tmp_path, monkeypatch
 ):
