@@ -45,11 +45,18 @@ def container(image):
 
 
 class FakeUnraid:
-    def __init__(self, owner=True, active=0, fail_on=None, state_bytes=100 << 20):
+    def __init__(
+        self,
+        owner=True,
+        active=0,
+        fail_on=None,
+        state_bytes=100 << 20,
+        available_kib=24 << 20,
+    ):
         self.commands, self.settings = [], dict(SETTINGS)
         self.owner, self.active, self.fail_on = owner, active, fail_on
         self.running = "sha256:old"
-        self.state_bytes = state_bytes
+        self.state_bytes, self.available_kib = state_bytes, available_kib
 
     def run(self, command, payload=None):
         self.commands.append(command)
@@ -59,6 +66,8 @@ class FakeUnraid:
             return json.dumps([container(self.running)])
         if command.startswith("du -scb"):
             return str(self.state_bytes)
+        if "MemAvailable" in command:
+            return str(self.available_kib)
         if command.startswith("docker image inspect"):
             return json.dumps(
                 [
@@ -159,6 +168,27 @@ def test_the_migration_checks_get_memory_for_the_state_they_copy():
         command = commands[index(commands, step)]
         assert "--memory=1924m " in command and "--memory=1g" not in command
     assert index(commands, "du -scb") < index(commands, "verify_state_migration.py")
+
+
+def test_state_too_big_for_the_hosts_free_memory_is_refused_before_the_checks():
+    """Codex round 1 on 19cc2a9: the sized limit has no ceiling, and a
+    container limit reserves nothing. The checks must fit in the host's
+    available memory less a reserve, or the release stops and rolls back."""
+    # 20 GiB of state needs 21 GiB; 24 GiB available less 4 GiB reserved is 20.
+    unraid = FakeUnraid(state_bytes=20 << 30)
+    run = release(unraid)
+    with pytest.raises(RuntimeError, match="host memory"):
+        run.apply(*run.preflight())
+    commands = unraid.commands
+    assert not any("docker run" in c for c in commands)
+    assert index(commands, "MemAvailable") > index(commands, "du -scb")
+    assert "docker start PigMusic >/dev/null" in commands
+    assert unraid.settings == SETTINGS
+    # Just inside the budget, the release goes ahead.
+    unraid = FakeUnraid(state_bytes=19 << 30)
+    run = release(unraid)
+    run.apply(*run.preflight())
+    assert any("verify_state_migration.py" in c for c in unraid.commands)
 
 
 def test_migration_state_matches_what_the_check_copies():

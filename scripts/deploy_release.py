@@ -44,6 +44,9 @@ MIGRATION_STATE = (
     "media-settings.json",
     "covers",
 )
+# Host memory the checks may not use: a container limit reserves nothing, so
+# the sized limit must fit in what the host has free, less this reserve.
+HOST_RESERVE_MIB = 4096
 ACTIVE = ("searching", "downloading", "validating", "importing")
 IMAGE = re.compile(r"ghcr.io/maroge1990/pig-music@sha256:[0-9a-f]{64}")
 DATABASE = "/data/pig-music.sqlite3"
@@ -264,7 +267,16 @@ class Release:
                     + " 2>/dev/null | tail -1 | cut -f1"
                 )
             )
-            memory = f"--memory={(copied >> 20) + 1024}m "
+            needed = (copied >> 20) + 1024
+            available = int(
+                self.remote("awk '/^MemAvailable:/ {print $2}' /proc/meminfo")
+            )
+            if needed > (available >> 10) - HOST_RESERVE_MIB:
+                raise RuntimeError(
+                    f"Migration checks need {needed} MiB; host memory has "
+                    f"{available >> 10} MiB available and keeps {HOST_RESERVE_MIB} MiB"
+                )
+            memory = f"--memory={needed}m "
             baseline = self.remote(
                 "docker run --rm --network none " + memory + "--user 99:100 "
                 "--tmpfs /tmp:rw,uid=99,gid=100 -e PYTHONDONTWRITEBYTECODE=1 -v "
