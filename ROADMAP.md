@@ -9,8 +9,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 - **Live:** server `15566c4` (released 30 Oct 13:53 UTC as `reset-20261031-v2` under D-52; rollback container
   `PigMusic-before-reset-20261031-v2`), carrying every batch pushed on 30 Oct.
-- **Pushed 31 Oct, release scheduled** under D-52 for 00:05 Melbourne on 1 Nov (`reset-20261101-v1`, newest main
-  commit whose container CI passes, only while nobody is playing):
+- **Pushed 31 Oct, not released** (the scheduled 1 Nov release was stopped; main CI green at 99b49eb):
   - Overnight mix searching (#90) and the engine heap (#89): unfindable songs are searched once per household per
     20 h; engine heap 512 MB.
   - Withdrawn designs rebuilt: #68 (only the retired file itself is hidden, by hash, while its replacement plays),
@@ -46,7 +45,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 Reliability first (D-47). In order:
 
-1. **Release and live gates** — the 1 Nov release; then that night's search count (#90), the engine log (#89), the
+1. **Release and live gates** — a D-52 release (ask Mark; the scheduled one was stopped); then that night's search count (#90), the engine log (#89), the
    quiet idle-CPU re-measure (#63) and the loaded 30-minute window for #16/#20
 2. **Device checks** — install build 15 (Mark's Mac password until TestFlight; build 13 expires 6 Nov); Mark's checks and battery runs
    (#18, #19; #64, #65, #70, #71, #60–#62, #76–#78)
