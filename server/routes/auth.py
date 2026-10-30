@@ -1,5 +1,6 @@
 """HTTPS-only account API. Password hashing is bounded to two worker threads;
-session lookups run on the reserved session threads, outside that gate."""
+session lookups run on the reserved session threads, outside that gate, and
+account changes on the shared pool."""
 
 import asyncio
 import functools
@@ -93,6 +94,11 @@ def auth_router(auth: Auth, security=None, origin: str | None = None):
         """Session and account lookups never wait behind password hashing, so
         anonymous sign-in attempts can't slow signed-in requests (audit S3)."""
         return await call(session_thread, function, *args, **kwargs)
+
+    async def write(function, *args, **kwargs):
+        """Account changes can wait up to 10 s for a SQLite writer: the shared
+        pool, never the reserved session threads (Codex round 1 on 6f00ce2)."""
+        return await call(asyncio.to_thread, function, *args, **kwargs)
 
     def require_https(request: Request):
         if request.url.scheme != "https":
@@ -216,19 +222,19 @@ def auth_router(auth: Auth, security=None, origin: str | None = None):
     async def revoke_others(result=Depends(current)):
         """Sign out every device except this one."""
         return {
-            "revoked": await run(
+            "revoked": await write(
                 auth.revoke_others, result[0]["id"], result[1]["public_id"]
             )
         }
 
     @router.delete("/me/sessions/{identity}", response_model=RevokedDTO)
     async def revoke(identity: str, result=Depends(current)):
-        await run(auth.revoke, result[0]["id"], identity)
+        await write(auth.revoke, result[0]["id"], identity)
         return {"revoked": True}
 
     @router.post("/auth/logout")
     async def logout(response: Response, result=Depends(current)):
-        await run(auth.revoke, result[0]["id"], result[1]["public_id"])
+        await write(auth.revoke, result[0]["id"], result[1]["public_id"])
         response.delete_cookie(
             COOKIE, path="/", secure=True, httponly=True, samesite="strict"
         )
@@ -261,18 +267,18 @@ def auth_router(auth: Auth, security=None, origin: str | None = None):
     @router.post("/people", response_model=InviteDTO)
     async def add(body: Person, result=Depends(owner)):
         return invite(
-            await run(
+            await write(
                 auth.setup_code, result[0]["id"], body.username, body.display_name
             )
         )
 
     @router.post("/people/{identity}/setup-code", response_model=InviteDTO)
     async def reset(identity: str, result=Depends(owner)):
-        return invite(await run(auth.setup_code, result[0]["id"], identity=identity))
+        return invite(await write(auth.setup_code, result[0]["id"], identity=identity))
 
     @router.put("/people/{identity}/disabled")
     async def disable(identity: str, body: Disabled, result=Depends(owner)):
-        return await run(auth.disable, result[0]["id"], identity, body.disabled)
+        return await write(auth.disable, result[0]["id"], identity, body.disabled)
 
     @router.get("/people/activity")
     async def activity(result=Depends(owner)):

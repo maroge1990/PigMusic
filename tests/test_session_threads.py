@@ -105,3 +105,61 @@ def test_account_pages_answer_while_anonymous_sign_ins_fill_the_password_gate(
             release.set()
             for attempt in attempts:
                 attempt.join(10)
+
+
+def test_sign_in_checks_answer_while_account_changes_wait_for_a_writer(
+    tmp_path, monkeypatch
+):
+    """Codex round 1 on 6f00ce2: account changes (sign out others, revoke,
+    disable, setup codes) wait up to 10 s for a SQLite writer, so on the
+    four reserved session threads they could stall every sign-in check."""
+    import sqlite3
+
+    app, owner = protected(tmp_path, monkeypatch)
+    auth = app.state.auth
+    tokens = [
+        auth.login("mark", PASSWORD, "device", f"phone {i}", "ios", "f")["token"]
+        for i in range(6)
+    ]
+    waiting, revoke_others = threading.Semaphore(0), auth.revoke_others
+
+    def counted(*args):
+        waiting.release()
+        return revoke_others(*args)
+
+    monkeypatch.setattr(auth, "revoke_others", counted)
+    with TestClient(app, base_url="https://private.ts.net") as client:
+        writer = sqlite3.connect(app.state.store.database, timeout=10)
+        writer.execute("BEGIN IMMEDIATE")  # A long write elsewhere in the server.
+        changes = [
+            threading.Thread(
+                target=client.delete,
+                args=("/api/v1/me/sessions",),
+                kwargs={"headers": {"Authorization": "Bearer " + token}},
+            )
+            for token in tokens[:5]
+        ]
+        for change in changes:
+            change.start()
+        try:
+            # Four waiting changes are enough to fill the reserved threads.
+            for _ in range(4):
+                assert waiting.acquire(timeout=5), "an account change never started"
+            answer = {}
+            me = threading.Thread(
+                target=lambda: answer.update(
+                    response=client.get(
+                        "/api/v1/me",
+                        headers={"Authorization": "Bearer " + tokens[5]},
+                    )
+                )
+            )
+            me.start()
+            me.join(3)
+            assert "response" in answer, "sign-in checks waited behind account changes"
+            assert answer["response"].json()["id"] == owner
+        finally:
+            writer.rollback()
+            writer.close()
+            for change in changes:
+                change.join(15)
