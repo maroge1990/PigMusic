@@ -5,7 +5,10 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import threading
 
+from fastapi.testclient import TestClient
 from starlette.requests import Request
+
+from server.auth import AuthError
 
 from test_security import PASSWORD, protected
 
@@ -51,3 +54,54 @@ def test_sign_in_answers_while_slow_work_fills_the_shared_pool(tmp_path, monkeyp
 
     person = asyncio.run(run())
     assert person["id"] == owner
+
+
+def test_account_pages_answer_while_anonymous_sign_ins_fill_the_password_gate(
+    tmp_path, monkeypatch
+):
+    """Wrong-password attempts (below the lockout) must not queue signed-in
+    account requests behind their password hashing (audit S3)."""
+    app, owner = protected(tmp_path, monkeypatch)
+    auth = app.state.auth
+    token = auth.login("mark", PASSWORD, "device", "phone", "ios", "f")["token"]
+    hashing, release = threading.Semaphore(0), threading.Event()
+
+    def slow_login(*args):
+        hashing.release()
+        release.wait(10)
+        raise AuthError("invalid_credentials")
+
+    monkeypatch.setattr(auth, "login", slow_login)
+    with TestClient(app, base_url="https://private.ts.net") as client:
+        attempts = [
+            threading.Thread(
+                target=client.post,
+                args=("/api/v1/auth/login",),
+                kwargs={
+                    "json": {"username": "mark", "password": "wrong password"},
+                    "headers": {"X-Pig-Request": "1"},
+                },
+            )
+            for _ in range(3)
+        ]
+        for attempt in attempts:
+            attempt.start()
+        try:
+            # Two attempts are hashing; the third waits for the gate.
+            assert hashing.acquire(timeout=5) and hashing.acquire(timeout=5)
+            answer = {}
+            me = threading.Thread(
+                target=lambda: answer.update(
+                    response=client.get(
+                        "/api/v1/me", headers={"Authorization": "Bearer " + token}
+                    )
+                )
+            )
+            me.start()
+            me.join(3)
+            assert "response" in answer, "/api/v1/me waited behind password hashing"
+            assert answer["response"].json()["id"] == owner
+        finally:
+            release.set()
+            for attempt in attempts:
+                attempt.join(10)

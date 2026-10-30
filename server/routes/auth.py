@@ -1,12 +1,15 @@
-"""HTTPS-only account API. Credential work is bounded to two worker threads."""
+"""HTTPS-only account API. Password hashing is bounded to two worker threads;
+session lookups run on the reserved session threads, outside that gate."""
 
 import asyncio
+import functools
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, SecretStr
 
 from ..auth import Auth, AuthError, COOKIE, DAY, browser_name
+from ..security import session_thread
 from ..api_models import (
     ActivationDTO,
     DeviceSessionDTO,
@@ -72,14 +75,24 @@ def set_cookie(response, token):
 
 def auth_router(auth: Auth, security=None, origin: str | None = None):
     router = APIRouter(prefix="/api/v1", tags=["accounts"])
-    workers = asyncio.Semaphore(2)
+    hashing = asyncio.Semaphore(2)
+
+    async def call(threads, function, *args, **kwargs):
+        try:
+            return await threads(functools.partial(function, *args, **kwargs))
+        except AuthError as exc:
+            error(exc)
+
+    async def hashed(function, *args):
+        """Password work (Argon2, 64 MiB each): at most two at a time, on the
+        shared pool so it never occupies the reserved session threads."""
+        async with hashing:
+            return await call(asyncio.to_thread, function, *args)
 
     async def run(function, *args, **kwargs):
-        async with workers:
-            try:
-                return await asyncio.to_thread(function, *args, **kwargs)
-            except AuthError as exc:
-                error(exc)
+        """Session and account lookups never wait behind password hashing, so
+        anonymous sign-in attempts can't slow signed-in requests (audit S3)."""
+        return await call(session_thread, function, *args, **kwargs)
 
     def require_https(request: Request):
         if request.url.scheme != "https":
@@ -129,7 +142,7 @@ def auth_router(auth: Auth, security=None, origin: str | None = None):
     ):
         if security is None:
             raise HTTPException(503, "setup_unavailable")
-        result = await run(
+        result = await hashed(
             auth.claim_owner,
             body.code.get_secret_value(),
             security.installation_code(),
@@ -144,7 +157,7 @@ def auth_router(auth: Auth, security=None, origin: str | None = None):
 
     @router.post("/auth/login", dependencies=[Depends(require_https)])
     async def login(body: Credentials, request: Request, response: Response):
-        result = await run(
+        result = await hashed(
             auth.login,
             body.username,
             body.password.get_secret_value(),
@@ -162,7 +175,7 @@ def auth_router(auth: Auth, security=None, origin: str | None = None):
         response_model=DeviceSessionDTO,
     )
     async def device(body: DeviceCredentials, request: Request):
-        return await run(
+        return await hashed(
             auth.login,
             body.username,
             body.password.get_secret_value(),
@@ -177,7 +190,7 @@ def auth_router(auth: Auth, security=None, origin: str | None = None):
     )
     async def activate(body: Activation, request: Request):
         return {
-            "user": await run(
+            "user": await hashed(
                 auth.activate,
                 body.code.get_secret_value(),
                 body.password.get_secret_value(),
@@ -223,7 +236,7 @@ def auth_router(auth: Auth, security=None, origin: str | None = None):
 
     @router.post("/me/password", response_model=PasswordChangedDTO)
     async def password(body: PasswordChange, result=Depends(current)):
-        await run(
+        await hashed(
             auth.change_password,
             result[0],
             result[1],
