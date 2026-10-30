@@ -577,3 +577,102 @@ def test_foreground_popularity_finishes_during_continuous_warming(tmp_path, inte
                 )
 
     asyncio.run(run())
+
+
+GROUPS = [f"2222222{n}-2222-4222-8222-222222222222" for n in range(5)]
+
+
+def listenbrainz(requests):
+    def transport(request):
+        requests.append(request.url.path)
+        if "top-recordings" in request.url.path:
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "artist_mbids": [ARTIST],
+                        "recording_mbid": RELEASE,
+                        "release_mbid": RELEASE,
+                        "recording_name": "Song",
+                        "release_name": "Album",
+                        "total_listen_count": 50,
+                    }
+                ],
+            )
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "release_group_mbid": group,
+                    "release_group": {"type": "Album", "name": group, "date": ""},
+                    "total_listen_count": 100 - n,
+                }
+                for n, group in enumerate(GROUPS)
+            ],
+        )
+
+    return transport
+
+
+class SlowCatalogue:
+    """MusicBrainz release-group details, one paced request each."""
+
+    def __init__(self):
+        self.fetched = []
+
+    async def get(self, client, path):
+        self.fetched.append(path)
+        await asyncio.sleep(0)
+        return {"primary-type": "Album", "title": path[-4:], "secondary-types": []}
+
+    async def cached(self, path):
+        return None
+
+
+def test_an_artist_page_answers_before_every_album_is_looked_up(tmp_path, monkeypatch):
+    """#21: a cold full popularity answer made up to 40 paced album-detail
+    requests first (32-287 s live), past the phone's 20 s timeout. Past its
+    budget the page gets what is known; the rest finish in the background."""
+    import server.popularity as module
+
+    monkeypatch.setattr(module, "ALBUM_SECONDS", -1, raising=False)
+    store = Store(tmp_path)
+    save_settings(store, True, True, listenbrainz_token=TOKEN)
+    catalogue = SlowCatalogue()
+    provider = Popularity(store, catalogue)
+
+    async def run():
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(listenbrainz([]))
+        ) as client:
+            first = await provider.get(client, ARTIST)
+            assert [s["title"] for s in first["songs"]] == ["Song"]
+            assert first["albums"] == [] and catalogue.fetched == []
+            await asyncio.gather(*list(provider.completing.values()))
+            assert len(catalogue.fetched) == len(GROUPS)
+            later = await provider.get(client, ARTIST)
+            assert len(later["albums"]) == len(GROUPS)
+
+    asyncio.run(run())
+
+
+def test_songs_only_and_full_requests_share_one_recordings_fetch(tmp_path):
+    """#44: songs-only and full answers used separate locks, so concurrent
+    requests both fetched the artist's recordings."""
+    store = Store(tmp_path)
+    save_settings(store, True, True, listenbrainz_token=TOKEN)
+    requests = []
+    provider = Popularity(store)
+
+    async def run():
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(listenbrainz(requests))
+        ) as client:
+            songs, full = await asyncio.gather(
+                provider.get(client, ARTIST, include_albums=False),
+                provider.get(client, ARTIST),
+            )
+            assert songs["songs"] == full["songs"] and full["albums"]
+            assert sum("top-recordings" in r for r in requests) == 1
+
+    asyncio.run(run())

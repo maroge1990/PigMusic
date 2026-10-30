@@ -173,6 +173,14 @@ class Catalogue:
             )
             return data
 
+    async def cached(self, path, **params):
+        """A fresh cached answer, or None; never a request."""
+        key = "catalogue:" + path + repr(sorted(params.items()))
+        cached = await asyncio.to_thread(self.store.read_document, key)
+        if cached and still_fresh(time.time() - cached["time"], 86400):
+            return cached["data"]
+        return None
+
     async def pace(self):
         delay = max(0, self.min_interval - (time.monotonic() - self.last_request))
         if delay:

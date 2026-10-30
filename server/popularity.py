@@ -16,6 +16,13 @@ from .media import settings
 from .releases import feature_album
 
 
+# A person waiting for an artist page gets an answer within about this long;
+# album details not looked up by then finish in the background (#21).
+ALBUM_SECONDS = 10
+# A partial answer is kept this long while its background completion runs.
+PARTIAL_TTL = 600
+
+
 def margin():
     """While warming, renew a day-long answer a few hours before it lapses."""
     return RENEW if warming.get() else 0
@@ -30,34 +37,76 @@ class Popularity:
         self.catalogue = catalogue
         self.lock = asyncio.Lock()
         self.artist_locks = {}
+        self.completing = {}
         self.last_request = 0.0
 
-    async def get(self, client, artist_id, include_albums=True):
+    def complete_later(self, client, artist_id):
+        """Finish a partial answer's album details at background priority."""
+        if artist_id in self.completing:
+            return
+
+        async def complete():
+            background_metadata.set(True)
+            try:
+                await self.get(client, artist_id, complete=True)
+            except Exception as error:
+                logger.warning(
+                    "Popularity completion failed (%s)", type(error).__name__
+                )
+            finally:
+                self.completing.pop(artist_id, None)
+
+        self.completing[artist_id] = asyncio.create_task(complete())
+
+    async def get(self, client, artist_id, include_albums=True, complete=False):
         token = settings(self.store).get("listenbrainz_token")
         if not token:
             return {"enabled": False, "songs": [], "albums": []}
         artist_id = mbid(artist_id)
-        key = (
+        full_key = (
             "popularity:v5:"
             + hashlib.sha256(token.encode()).hexdigest()[:12]
             + ":"
             + artist_id
         )
-        if not include_albums:
+        songs_key = full_key + ":songs"
+        key = full_key if include_albums else songs_key
+
+        def usable(cached):
+            # A completion run looks past the partial answer it is replacing.
+            return (
+                cached
+                and cached.get("retry_after", 0) - margin() > time.time()
+                and not (complete and cached.get("partial"))
+            )
+
+        async def known():
             # The warmer only needs song covers. Reuse a complete answer when
             # present, but never let a songs-only cache hide the page's albums.
-            full = await asyncio.to_thread(self.store.read_document, key)
-            if full and full.get("retry_after", 0) - margin() > time.time():
-                return full["data"]
-            key += ":songs"
-        # SQLite can wait on another writer, so the cache is used off the loop.
-        cached = await asyncio.to_thread(self.store.read_document, key)
-        if cached and cached.get("retry_after", 0) - margin() > time.time():
-            return cached["data"]
-        async with self.artist_locks.setdefault(key, asyncio.Lock()):
-            cached = await asyncio.to_thread(self.store.read_document, key)
-            if cached and cached.get("retry_after", 0) - margin() > time.time():
-                return cached["data"]
+            # SQLite can wait on another writer, so caches are read off the loop.
+            for name in (full_key,) if include_albums else (full_key, songs_key):
+                cached = await asyncio.to_thread(self.store.read_document, name)
+                if usable(cached):
+                    return cached["data"]
+            return None
+
+        found = await known()
+        if found is not None:
+            return found
+        # One lock per artist for both kinds of answer, so a songs-only and a
+        # full request never fetch the same recordings at once (#44).
+        async with self.artist_locks.setdefault(full_key, asyncio.Lock()):
+            found = await known()
+            if found is not None:
+                return found
+            songs = None
+            if include_albums:
+                cached = await asyncio.to_thread(self.store.read_document, songs_key)
+                if usable(cached):
+                    songs = cached["data"]["songs"]
+            started = time.monotonic()
+            waiting = not (warming.get() or background_metadata.get() or complete)
+            partial = False
             result = {
                 "enabled": True,
                 "songs": [],
@@ -72,6 +121,10 @@ class Popularity:
                     if include_albums
                     else ("recordings",)
                 )
+                if songs is not None:
+                    # A songs-only answer already has the recordings.
+                    kinds = ("release-groups",)
+                    responses.append([])
                 for kind in kinds:
                     try:
                         async with self.lock:
@@ -152,6 +205,8 @@ class Popularity:
                         continue
                     if len(result["songs"]) == 20:
                         break
+                if songs is not None:
+                    result["songs"] = songs
                 ranked_ids = []
                 for item in responses[1]:
                     group = item.get("release_group")
@@ -179,17 +234,24 @@ class Popularity:
                             if album_lookups >= 40:
                                 break
                             album_lookups += 1
-                            # Optional warming yields to covers. A person
-                            # opening the page retains foreground priority.
-                            priority_token = deferred_metadata.set(
-                                background_metadata.get()
-                            )
-                            try:
-                                detail = await self.catalogue.get(
-                                    client, "release-group/" + identity
+                            path = "release-group/" + identity
+                            if waiting and time.monotonic() - started > ALBUM_SECONDS:
+                                # Past the page's budget: only details already
+                                # known; the rest are looked up in the background.
+                                detail = await self.catalogue.cached(path)
+                                if detail is None:
+                                    partial = True
+                                    continue
+                            else:
+                                # Optional warming yields to covers. A person
+                                # opening the page retains foreground priority.
+                                priority_token = deferred_metadata.set(
+                                    background_metadata.get()
                                 )
-                            finally:
-                                deferred_metadata.reset(priority_token)
+                                try:
+                                    detail = await self.catalogue.get(client, path)
+                                finally:
+                                    deferred_metadata.reset(priority_token)
                             if not feature_album(detail):
                                 continue
                             group = {
@@ -212,15 +274,17 @@ class Popularity:
                         continue
                     if len(result["albums"]) == 10:
                         break
-                ttl = 60 if failed else 86400
+                ttl = 60 if failed else PARTIAL_TTL if partial else 86400
             except Exception as error:
                 logger.warning("Popularity parsing failed (%s)", type(error).__name__)
                 # Unavailable or invalid credentials never add an empty/error panel.
                 result = {"enabled": True, "songs": [], "albums": []}
-                ttl = 60
+                ttl, partial = 60, False
             await settled(
                 self.store.write_document,
                 key,
-                {"retry_after": time.time() + ttl, "data": result},
+                {"retry_after": time.time() + ttl, "data": result, "partial": partial},
             )
+            if partial:
+                self.complete_later(client, artist_id)
             return result
