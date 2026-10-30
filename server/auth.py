@@ -6,6 +6,7 @@ hashes. Call password work off the event loop using a bounded worker gate.
 
 import hashlib
 import hmac
+import ipaddress
 import re
 import secrets
 import time
@@ -92,6 +93,21 @@ class AuthError(ValueError):
 
 def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+def address_group(ip):
+    """The address that sign-in limits count. One IPv6 host or household holds
+    a whole /64 and can rotate through it, so IPv6 counts per /64; IPv4, also
+    when mapped into IPv6, counts per address."""
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if address.version == 4:
+        return str(address)
+    if address.ipv4_mapped:
+        return str(address.ipv4_mapped)
+    return str(ipaddress.IPv6Network((int(address) >> 64 << 64, 64)))
 
 
 def username(value):
@@ -194,7 +210,8 @@ class Auth:
     def keys(self, name, ip):
         # A name locks only for the address that failed: on the internet, anyone
         # knowing a username could otherwise keep that person from signing in.
-        return (self.name_key(name) + ":" + digest(ip), "ip:" + digest(ip))
+        group = digest(address_group(ip))
+        return (self.name_key(name) + ":" + group, "ip:" + group)
 
     def name_key(self, name):
         return "name:" + digest(name.strip().casefold())
@@ -204,7 +221,8 @@ class Auth:
 
     def known_key(self, name, ip):
         """An address that signed in to this account in the last 30 days."""
-        return "known:" + digest(name.strip().casefold()) + ":" + digest(ip)
+        name = digest(name.strip().casefold())
+        return "known:" + name + ":" + digest(address_group(ip))
 
     def slowed(self, name, ip):
         """Whether this sign-in must wait out the account's delay (D-49)."""

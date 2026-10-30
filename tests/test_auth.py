@@ -255,6 +255,34 @@ def test_guessing_an_unknown_name_slows_it_without_an_alert(fixture):
         ).fetchone()
 
 
+def test_ipv6_addresses_count_per_64_and_ipv4_per_address(fixture):
+    auth, _, clock = fixture
+    assert token(auth, ip="2001:db8:5:6::1")  # The owner's home network.
+    # One host rotating through its /64 is one address to the limits.
+    for i in range(5):
+        with pytest.raises(AuthError, match="invalid_credentials"):
+            token(auth, password="wrong fixture", ip=f"2001:db8:1:2::{i + 10:x}")
+    # Past the account's own short delay (D-49), inside the address lock.
+    clock[0] += account_delay(auth, clock) + 1
+    with pytest.raises(AuthError, match="invalid_credentials"):
+        token(auth, ip="2001:db8:1:2:ffff:ffff:ffff:ffff")
+    assert token(auth, ip="2001:db8:1:3::10")  # The next /64 is not locked.
+    # IPv4 stays per address; mapped IPv4 is the same address.
+    for _ in range(5):
+        with pytest.raises(AuthError, match="invalid_credentials"):
+            token(auth, password="wrong fixture", ip="192.0.2.1")
+    clock[0] += account_delay(auth, clock) + 1
+    with pytest.raises(AuthError, match="invalid_credentials"):
+        token(auth, ip="::ffff:192.0.2.1")
+    assert token(auth, ip="192.0.2.2")
+    # While the account is slowed, a new privacy address in the owner's
+    # known /64 still skips the delay.
+    with pytest.raises(AuthError, match="invalid_credentials"):
+        token(auth, password="wrong fixture", ip="198.51.100.1")
+    assert account_delay(auth, clock) > 0
+    assert token(auth, ip="2001:db8:5:6:a:b:c:d")
+
+
 @pytest.mark.parametrize(
     "password", ["short", "password1234", "123456789012", "x" * 257]
 )
