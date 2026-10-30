@@ -33,6 +33,17 @@ EXAMPLE = {
 }
 # The live container must keep a memory limit; release gates still test under 1 GiB.
 MEMORY_LIMITS = range(1 << 30, (8 << 30) + 1)
+# What the baseline and migration checks copy from the backup onto their own
+# tmpfs (scripts/verify_state_migration.py). The tmpfs counts against each
+# check's memory limit, so the limit is sized from this state plus 1 GiB.
+MIGRATION_STATE = (
+    "pig-music.sqlite3",
+    "pig-music.sqlite3-wal",
+    "pig-music.sqlite3-shm",
+    "library-snapshot.json",
+    "media-settings.json",
+    "covers",
+)
 ACTIVE = ("searching", "downloading", "validating", "importing")
 IMAGE = re.compile(r"ghcr.io/maroge1990/pig-music@sha256:[0-9a-f]{64}")
 DATABASE = "/data/pig-music.sqlite3"
@@ -242,8 +253,20 @@ class Release:
                 + shlex.quote(self.backup + "/unraid-autostart")
             )
             flags["backed_up"] = True
+            # A fixed 1 GB limit killed the check once artwork reached 758 MB.
+            copied = int(
+                self.remote(
+                    "du -scb "
+                    + " ".join(
+                        shlex.quote(f"{self.backup}/data/{name}")
+                        for name in MIGRATION_STATE
+                    )
+                    + " 2>/dev/null | tail -1 | cut -f1"
+                )
+            )
+            memory = f"--memory={(copied >> 20) + 1024}m "
             baseline = self.remote(
-                "docker run --rm --network none --memory=1g --user 99:100 "
+                "docker run --rm --network none " + memory + "--user 99:100 "
                 "--tmpfs /tmp:rw,uid=99,gid=100 -e PYTHONDONTWRITEBYTECODE=1 -v "
                 + shlex.quote(self.backup + "/data:/backup:ro")
                 + " --entrypoint python "
@@ -253,7 +276,7 @@ class Release:
             )
             self.remote("cat > " + shlex.quote(self.stage + "/expected.json"), baseline)
             self.remote(
-                "docker run --rm --network none --memory=1g --user 99:100 "
+                "docker run --rm --network none " + memory + "--user 99:100 "
                 "--tmpfs /data:rw,uid=99,gid=100 -e PYTHONDONTWRITEBYTECODE=1 "
                 "-e PYTHONPATH=/app -v "
                 + shlex.quote(self.backup + "/data:/backup:ro")

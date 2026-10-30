@@ -45,10 +45,11 @@ def container(image):
 
 
 class FakeUnraid:
-    def __init__(self, owner=True, active=0, fail_on=None):
+    def __init__(self, owner=True, active=0, fail_on=None, state_bytes=100 << 20):
         self.commands, self.settings = [], dict(SETTINGS)
         self.owner, self.active, self.fail_on = owner, active, fail_on
         self.running = "sha256:old"
+        self.state_bytes = state_bytes
 
     def run(self, command, payload=None):
         self.commands.append(command)
@@ -56,6 +57,8 @@ class FakeUnraid:
             raise RuntimeError("simulated failure: " + self.fail_on)
         if command.startswith("docker inspect PigMusic"):
             return json.dumps([container(self.running)])
+        if command.startswith("du -scb"):
+            return str(self.state_bytes)
         if command.startswith("docker image inspect"):
             return json.dumps(
                 [
@@ -139,6 +142,29 @@ def test_release_backs_up_verifies_and_restores_downloads():
     assert "--bootstrap-owner-fixture" not in commands[verify]
     # Downloads were paused for the switch and restored afterwards.
     assert unraid.settings == SETTINGS
+
+
+def test_the_migration_checks_get_memory_for_the_state_they_copy():
+    """30 Oct live release: the migration check copies the database and 758 MB
+    of artwork onto a tmpfs counted against its fixed 1 GB limit and was
+    killed (exit 137). Its limit is now the copied state plus 1 GiB."""
+    unraid = FakeUnraid(state_bytes=900 << 20)
+    run = release(unraid)
+    run.apply(*run.preflight())
+    commands = unraid.commands
+    measured = commands[index(commands, "du -scb")]
+    for name in deploy.MIGRATION_STATE:
+        assert f"/backups/pre-test-release-v1/data/{name}" in measured
+    for step in ("server.store import Store", "verify_state_migration.py"):
+        command = commands[index(commands, step)]
+        assert "--memory=1924m " in command and "--memory=1g" not in command
+    assert index(commands, "du -scb") < index(commands, "verify_state_migration.py")
+
+
+def test_migration_state_matches_what_the_check_copies():
+    source = (SOURCE / "scripts/verify_state_migration.py").read_text()
+    for name in deploy.MIGRATION_STATE:
+        assert f'"{name}"' in source
 
 
 def test_release_requires_an_owner_and_idle_transfers():
