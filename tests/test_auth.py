@@ -81,6 +81,31 @@ def test_web_and_device_expiry_hourly_writes(fixture):
         auth.authenticate(device)
 
 
+def test_session_renewal_never_waits_for_another_writer(fixture):
+    """#26: the hourly renewal is a write on the reserved sign-in threads; it
+    waited up to 10 s for a busy database (then failed the sign-in check).
+    It is skipped instead, and the next request renews."""
+    import sqlite3
+    import time
+
+    auth, owner, clock = fixture
+    device = token(auth)
+    clock[0] += 3601
+    writer = sqlite3.connect(auth.store.database, timeout=0)
+    writer.execute("BEGIN IMMEDIATE")
+    try:
+        started = time.monotonic()
+        person, session = auth.authenticate(device)
+        assert time.monotonic() - started < 1
+        assert person["id"] == owner
+    finally:
+        writer.rollback()
+        writer.close()
+    _, session = auth.authenticate(device)
+    _, renewed = auth.authenticate(device)
+    assert renewed["last_seen_at"] == clock[0]
+
+
 def test_web_absolute_limit_despite_activity(fixture):
     auth, _, clock = fixture
     web = token(auth, kind="web")

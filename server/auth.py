@@ -9,6 +9,7 @@ import hmac
 import ipaddress
 import re
 import secrets
+import sqlite3
 import time
 import uuid
 from pathlib import Path
@@ -430,10 +431,20 @@ class Auth:
                 expires = now + (14 if session["kind"] == "web" else 180) * DAY
                 if session["kind"] == "web":
                     expires = min(expires, session["created_at"] + 60 * DAY)
-                conn.execute(
-                    "UPDATE sessions SET last_seen_at=?,expires_at=? WHERE id=? AND revoked_at IS NULL",
-                    (now, expires, hashed),
-                )
+                # Best effort: this runs on the few reserved sign-in threads,
+                # so it never waits for another writer (#26). A skipped
+                # renewal is retried by the next request, as last_seen_at
+                # stays old; the session is valid either way.
+                conn.commit()
+                conn.execute("PRAGMA busy_timeout=50")
+                try:
+                    conn.execute(
+                        "UPDATE sessions SET last_seen_at=?,expires_at=? WHERE id=? AND revoked_at IS NULL",
+                        (now, expires, hashed),
+                    )
+                    conn.commit()
+                except sqlite3.OperationalError:
+                    conn.rollback()
         return public_user(person[0]), session
 
     def sessions(self, identity):
