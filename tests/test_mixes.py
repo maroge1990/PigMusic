@@ -353,6 +353,34 @@ def test_a_song_no_source_has_is_not_searched_again_by_any_mix_or_person(
     assert len(calls) == searches + 1
 
 
+def test_a_miss_for_one_edition_does_not_stop_an_ordinary_request(
+    tmp_path, monkeypatch
+):
+    """#90 (Codex round 1): a request for a particular edition rejects
+    candidates an ordinary request accepts, so its miss must not stop the
+    ordinary request from searching."""
+    app, owner = protected(tmp_path, monkeypatch)
+    mixes = app.state.store.mixes
+    mixes.store.save_download_settings({"enabled": True, "sources": ["freemp3cloud"]})
+    strict, ordinary = track(9, explicit_edition=True), track(9)
+    calls = []
+
+    def fetch(downloader, song):
+        calls.append(bool(song.get("explicit_edition")))
+        downloader.result = "failed"
+        downloader.error = "youtube: no candidate passed recording/version matching"
+        return False
+
+    monkeypatch.setattr(MixDownloader, "fetch", fetch)
+    mixes.record_unfound(
+        strict, "youtube: no candidate passed recording/version matching"
+    )
+    assert mixes.unfound(strict) and mixes.unfound(ordinary) is None
+    identity = mixes.stage(owner, "daily", mixes.day(), "Daily", "Reason", [ordinary])
+    rounds(mixes, owner, identity)
+    assert calls == [False]
+
+
 def test_a_deferred_round_does_not_search_failed_songs_again(tmp_path, monkeypatch):
     """#90: a song deferred behind a busy download restarted the whole round,
     re-searching songs that had just failed (up to 7 searches a night)."""

@@ -95,6 +95,17 @@ def radio_opening(count, previous=None):
 LEASE_RENEW_AFTER = 300
 
 
+def unfound_name(track):
+    """A song's no-match record, for one set of matching rules: a request for
+    a particular edition, or with ISRCs, rejects candidates another accepts."""
+    rules = [
+        song_key(track),
+        bool(track.get("explicit_edition")),
+        track.get("isrcs") or track.get("isrc"),
+    ]
+    return "mix-unfound:" + hashlib.sha256(json.dumps(rules).encode()).hexdigest()
+
+
 class TrackKeys:
     """`song_key` once per track for one planning pass. The pass works on a
     stable snapshot, so a track object keeps its key; the object itself is
@@ -1198,7 +1209,7 @@ class Mixes:
         with self.store.connect() as conn:
             row = conn.execute(
                 "SELECT payload FROM documents WHERE name=?",
-                ("mix-unfound:" + song_key(track),),
+                (unfound_name(track),),
             ).fetchone()
         entry = json.loads(row[0]) if row else None
         if entry and entry["final"] and entry["until"] > time.time():
@@ -1207,7 +1218,7 @@ class Mixes:
 
     def record_unfound(self, track, error):
         """Count one failed round for a song, shared by every mix and person."""
-        name, now = "mix-unfound:" + song_key(track), time.time()
+        name, now = unfound_name(track), time.time()
         with self.store.connect() as conn:
             row = conn.execute(
                 "SELECT payload FROM documents WHERE name=?", (name,)
