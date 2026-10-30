@@ -2,6 +2,17 @@ import CryptoKit
 import Foundation
 import PigDomain
 
+/// What the Watch does with a song file the phone sent.
+public enum CompanionArrival: Equatable, Sendable {
+  /// The committed library lists this song and checksum: store it now.
+  case accept
+  /// A newer revision is announced but its manifest has not arrived: keep the
+  /// file in the inbox until it does, then decide again.
+  case wait
+  /// It can never be stored (another account, removed, or not in the library).
+  case stale
+}
+
 /// A bounded, credential-free Watch archive. Removal is driven by a confirmed phone context.
 ///
 /// The last applied manifest is the committed, playable library. A new revision for
@@ -207,14 +218,28 @@ public actor CompanionArchive {
       manifestApplied: appliedRevision == context.revision
     )
   }
+  /// The phone announces a new revision before the songs already on their way
+  /// and sends its manifest after them (#64). A song the committed library lists
+  /// is stored at once; one it doesn't wait for the announced manifest.
+  public func arrival(of ticket: CompanionFile) -> CompanionArrival {
+    guard let account = context.account, ticket.context.account == account,
+      ticket.context.version == 1, ticket.context.revision <= context.revision,
+      !removed.contains(ticket.songId)
+    else { return .stale }
+    if committedSong(for: ticket) != nil { return .accept }
+    return appliedRevision == context.revision ? .stale : .wait
+  }
+  private func committedSong(for ticket: CompanionFile) -> CompanionSong? {
+    guard manifest.context.account == context.account,
+      appliedRevision == manifest.context.revision
+    else { return nil }
+    return manifest.songs.first(where: {
+      $0.id == ticket.songId && $0.checksum == ticket.checksum
+    })
+  }
   /// Called after the delegate synchronously takes ownership of the temporary file.
   public func accept(_ file: URL, ticket: CompanionFile) throws {
-    guard appliedRevision == context.revision, !removed.contains(ticket.songId),
-      ticket.context.account == context.account, ticket.context.version == 1,
-      ticket.context.revision <= context.revision, manifest.context == context,
-      let song = manifest.songs.first(where: {
-        $0.id == ticket.songId && $0.checksum == ticket.checksum
-      })
+    guard arrival(of: ticket) == .accept, let song = committedSong(for: ticket)
     else { throw CompanionFailure.stale }
     guard Self.validChecksum(ticket.checksum),
       let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize,

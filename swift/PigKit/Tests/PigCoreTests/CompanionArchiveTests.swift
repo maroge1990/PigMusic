@@ -284,4 +284,51 @@ struct CompanionArchiveTests {
     }
     #expect(await archive.receipt().ready.isEmpty)
   }
+  /// #64: the phone announces a new revision before the songs already on
+  /// their way and sends its manifest after them. Those songs must not be
+  /// thrown away while the new revision is staged, or they cross again.
+  @Test func songsOnTheirWayArriveWhileANewRevisionIsStaged() async throws {
+    let root = try folder()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let archive = try CompanionArchive(directory: root.appendingPathComponent("Music"))
+    let first = CompanionContext(revision: 1, account: "one")
+    let next = CompanionContext(revision: 2, account: "one")
+    let old = Data("already listed".utf8)
+    let new = Data("added in the next revision".utf8)
+    let listed = song("listed", bytes: old)
+    let added = song("added", bytes: new)
+    try await archive.apply(first)
+    try await archive.apply(CompanionManifest(context: first, songs: [listed]))
+    try await archive.apply(next)  // Announced; its manifest follows the songs.
+    let listedTicket = CompanionFile(context: first, songId: listed.id, checksum: listed.checksum)
+    let addedTicket = CompanionFile(context: next, songId: added.id, checksum: added.checksum)
+    #expect(await archive.arrival(of: listedTicket) == .accept)
+    #expect(await archive.arrival(of: addedTicket) == .wait)
+    let listedFile = root.appendingPathComponent("incoming-listed")
+    try old.write(to: listedFile)
+    try await archive.accept(listedFile, ticket: listedTicket)
+    #expect(await archive.localFile(id: listed.id) != nil)
+    try await archive.apply(CompanionManifest(context: next, songs: [listed, added]))
+    #expect(await archive.arrival(of: addedTicket) == .accept)
+    let addedFile = root.appendingPathComponent("incoming-added")
+    try new.write(to: addedFile)
+    try await archive.accept(addedFile, ticket: addedTicket)
+    #expect(await archive.receipt().ready == [listed.id: listed.checksum, added.id: added.checksum])
+    // Still refused: another account, a newer revision than announced, a
+    // removed song, and a song the applied library no longer lists.
+    let other = CompanionFile(
+      context: CompanionContext(revision: 2, account: "two"), songId: listed.id,
+      checksum: listed.checksum)
+    let ahead = CompanionFile(
+      context: CompanionContext(revision: 3, account: "one"), songId: listed.id,
+      checksum: listed.checksum)
+    #expect(await archive.arrival(of: other) == .stale)
+    #expect(await archive.arrival(of: ahead) == .stale)
+    try await archive.removeLocal(id: listed.id)
+    #expect(await archive.arrival(of: listedTicket) == .stale)
+    try await archive.apply(CompanionContext(revision: 4, account: "one"))
+    try await archive.apply(
+      CompanionManifest(context: CompanionContext(revision: 4, account: "one"), songs: []))
+    #expect(await archive.arrival(of: addedTicket) == .stale)
+  }
 }

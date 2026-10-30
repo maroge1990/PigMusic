@@ -384,15 +384,14 @@ import PigPlayback
         }
         lastSynced = Date()
       } else if envelope.kind == "audio", let ticket = envelope.file {
-        // Audio can be delivered before its manifest. Keep it until that manifest arrives.
-        let snapshot = await archive.snapshot()
-        let applied = await archive.receipt().manifestApplied
-        if snapshot.context != context || !applied,
-          envelope.context == context
-        {
-          return
+        // Audio can be delivered before its manifest, and songs from an earlier
+        // revision after the next one is announced (#64): keep what can't be
+        // stored yet until that manifest arrives.
+        switch await archive.arrival(of: ticket) {
+        case .wait: return
+        case .stale: throw CompanionFailure.stale
+        case .accept: try await archive.accept(file, ticket: ticket)
         }
-        try await archive.accept(file, ticket: ticket)
         DiagnosticsLog.shared.record("sync", "audio accepted for revision \(ticket.context.revision)")
       } else {
         throw CompanionFailure.invalid
