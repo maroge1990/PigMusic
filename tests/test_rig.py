@@ -140,6 +140,6 @@ def test_provider_credentials_never_reach_the_fake_and_only_the_rig_is_accepted(
     assert "secret" not in str(seen[0].headers) and seen[0].url.host == (
         "pig-music-test-fake"
     )
-    for wrong in ("https://example.com", "http://192.168.1.10:8790", "file:///x"):
+    for wrong in ("https://example.com", "http://198.51.100.10:8790", "file:///x"):
         with pytest.raises(ValueError):
             test_services.FakeServices(wrong)
