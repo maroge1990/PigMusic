@@ -23,4 +23,7 @@ public enum ArtworkFailure: Error, Sendable, Equatable {
 
 public enum CatalogueArtworkKind: String, Sendable {
   case release, releaseGroup = "release-group"
+  /// An album found through Apple's search (D-61); its cover comes through
+  /// the server, never from Apple directly.
+  case appleAlbum = "apple-album"
 }

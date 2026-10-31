@@ -37,6 +37,7 @@ final class ArtworkTransport: Sendable {
   /// Server-side artwork aliases. They answer with a redirect to stored bytes.
   enum Alias: Sendable {
     case artist(UUID), background(UUID), release(UUID), releaseGroup(UUID)
+    case appleAlbum(Int)
     var path: String {
       switch self {
       case .artist(let id): "/api/v1/catalogue/artists/" + id.uuidString.lowercased() + "/artwork"
@@ -45,6 +46,7 @@ final class ArtworkTransport: Sendable {
       case .release(let id): "/api/v1/catalogue/artwork/release/" + id.uuidString.lowercased()
       case .releaseGroup(let id):
         "/api/v1/catalogue/artwork/release-group/" + id.uuidString.lowercased()
+      case .appleAlbum(let id): "/api/v1/catalogue/artwork/apple-album/\(id)"
       }
     }
   }

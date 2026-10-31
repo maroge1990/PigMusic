@@ -14,7 +14,14 @@ struct SearchView: View {
   @State private var handledFocus = 0
   var body: some View {
     Group {
-      if let session = model.searchSession {
+      // The ranked search when the server has it and something is typed;
+      // the earlier search before typing (recent picks), offline and on an
+      // older server.
+      if let found = model.foundSearch, !found.unsupported,
+        !SearchText.clean(query).isEmpty, found.error == nil || found.results != nil
+      {
+        FoundResultsView(model: model, search: found)
+      } else if let session = model.searchSession {
         SearchResultsView(model: model, session: session)
       } else {
         ProgressView("Opening library…")
@@ -34,19 +41,29 @@ struct SearchView: View {
       // Debounce typing; the previous results stay until new ones arrive.
       if SearchText.clean(query).isEmpty {
         model.searchSession?.clear()
+        model.foundSearch?.clear()
         return
       }
       do {
         try await Task.sleep(for: SearchText.debounce)
         try Task.checkCancellation()
       } catch { return }
-      await model.searchSession?.search(query)
+      await search(force: false)
     }
     .toolbar {
       Button("Refresh", systemImage: "arrow.clockwise") {
-        Task { await model.searchSession?.search(query, force: true) }
+        Task { await search(force: true) }
       }.disabled(SearchText.clean(query).isEmpty)
     }
+  }
+  /// The ranked search first; the earlier one when it can't answer (an older
+  /// server, or offline), which also searches this phone's library.
+  private func search(force: Bool) async {
+    if let found = model.foundSearch, !found.unsupported {
+      await found.search(query, force: force)
+      if !found.unsupported && found.error == nil { return }
+    }
+    await model.searchSession?.search(query, force: force)
   }
   private func focusIfAsked() {
     guard focusRequest != handledFocus else { return }
@@ -65,7 +82,7 @@ private struct SearchResultsView: View {
         if model.recentSearches.picks.isEmpty {
           ContentUnavailableView(
             "Find music", systemImage: "magnifyingglass",
-            description: Text("Search your saved library, household music and the catalogue."))
+            description: Text("Songs, albums, artists and playlists, wherever they are."))
         } else {
           recent
         }
@@ -408,6 +425,199 @@ struct SearchArtistView: View {
             if identity == nil { unresolved = true }
           }
         }
+    }
+  }
+}
+
+/// The ranked search (D-61): chips across the top, then one list. Top results
+/// mixes every kind; each row is marked by where its music is, never listed
+/// apart for it. Updates as the person types.
+private struct FoundResultsView: View {
+  let model: AppModel
+  @Bindable var search: FoundSearch
+  @State private var kind: FoundKind = .top
+  @Environment(\.colorScheme) private var scheme
+  var body: some View {
+    let screen = search.screen
+    List {
+      Section {
+        let items = screen[kind]
+        ForEach(items) { item in row(item) }
+        if items.isEmpty {
+          if search.loading {
+            ProgressView("Searching…")
+          } else {
+            Text("No matches").foregroundStyle(.secondary)
+          }
+        }
+        if kind == .top || kind == .songs || kind == .albums, let state = search.online?.state,
+          state != "ready"
+        {
+          Text(
+            state == "busy"
+              ? "Showing music on the server; more results in a moment."
+              : "Music not on the server can't be searched right now."
+          ).font(PigType.footnote).foregroundStyle(.secondary)
+        }
+      } header: {
+        chips(screen.kinds).textCase(nil)
+      }
+    }
+    .onChange(of: search.query) { kind = .top }
+  }
+  private func chips(_ kinds: [FoundKind]) -> some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+      HStack(spacing: 8) {
+        ForEach(kinds, id: \.self) { option in
+          Button(option.rawValue) { kind = option }
+            .font(.subheadline.weight(.semibold))
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .foregroundStyle(option == kind ? Color.white : PigBrand.text(scheme))
+            .background(
+              Capsule().fill(option == kind ? PigBrand.accent(scheme) : Color.secondary.opacity(0.15))
+            )
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(option == kind ? .isSelected : [])
+        }
+      }.padding(.vertical, 4)
+    }
+  }
+  @ViewBuilder private func row(_ item: FoundItem) -> some View {
+    switch item {
+    case .song(let song):
+      SongButton(model: model, track: song) {
+        model.rememberSearch(.song(song))
+        model.play(
+          [song],
+          origin: song.serverState == "household_available" ? .catalogue(artistId: nil) : .library)
+      }
+    case .album(let album, let mine):
+      NavigationLink {
+        Group {
+          if !mine, let release = album.musicbrainzReleaseId {
+            CatalogueReleaseView(
+              model: model, releaseId: release, title: album.title, groupId: nil, editionCount: 0)
+          } else {
+            AlbumView(model: model, album: album)
+          }
+        }.onAppear { model.rememberSearch(.album(album)) }
+      } label: {
+        label(
+          ArtworkThumb(model: model, source: album.artworkSource, title: album.title),
+          album.title, "Album · " + album.artist, mark: mine ? .library : .server)
+      }
+    case .artist(let artist, let mine):
+      NavigationLink {
+        SearchArtistView(model: model, artist: artist)
+          .onAppear { model.rememberSearch(.artist(artist)) }
+      } label: {
+        label(
+          SavedArtistThumb(model: model, artist: artist), artist.name, "Artist",
+          mark: mine ? .library : .server)
+      }
+    case .playlist(let playlist):
+      NavigationLink {
+        PlaylistView(model: model, playlist: playlist)
+      } label: {
+        label(
+          Image(systemName: "music.note.list").frame(width: 44, height: 44), playlist.name,
+          "Playlist", mark: .library)
+      }
+    case .appleSong(let song):
+      NavigationLink {
+        AppleResultView(model: model, kind: "song", appleId: song.appleId, title: song.title)
+      } label: {
+        label(
+          ArtworkThumb(
+            model: model, source: song.albumAppleId.map { .appleAlbum($0) }, title: song.title),
+          song.title, "Song · " + song.artist, mark: .elsewhere)
+      }
+    case .appleAlbum(let album):
+      NavigationLink {
+        AppleResultView(model: model, kind: "album", appleId: album.appleId, title: album.title)
+      } label: {
+        label(
+          ArtworkThumb(model: model, source: .appleAlbum(album.appleId), title: album.title),
+          album.title, "Album · " + album.artist, mark: .elsewhere)
+      }
+    case .catalogueArtist(let artist):
+      NavigationLink {
+        CatalogueArtistView(model: model, artistId: artist.id, name: artist.name)
+          .onAppear {
+            model.rememberSearch(.catalogueArtist(id: artist.id, name: artist.name))
+          }
+      } label: {
+        label(
+          Artwork(model: model, source: .artist(artist.id), title: artist.name, circle: true)
+            .frame(width: 44, height: 44),
+          artist.name, artist.description.isEmpty ? "Artist" : "Artist · " + artist.description,
+          mark: .elsewhere)
+      }
+    }
+  }
+  private enum Mark { case library, server, elsewhere }
+  private func label(_ thumb: some View, _ title: String, _ caption: String, mark: Mark)
+    -> some View
+  {
+    HStack(spacing: 12) {
+      thumb
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title).lineLimit(1)
+        Text(caption).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
+        if mark == .elsewhere {
+          Text("Not on the server yet").font(PigType.caption).foregroundStyle(.secondary)
+        }
+      }
+      Spacer(minLength: 0)
+      // The same marks as songs: a cloud for your library, a faded one for
+      // the server; nothing for music not on it yet.
+      if mark != .elsewhere {
+        Image(systemName: "cloud").font(.system(size: 13, weight: .semibold))
+          .foregroundStyle(mark == .library ? PigBrand.accent(scheme) : Color.secondary.opacity(0.5))
+          .accessibilityLabel(mark == .library ? "In your library" : "On the server")
+      }
+    }
+  }
+}
+
+/// An Apple result opens as the exact MusicBrainz version (#103): a song on
+/// its album's page, an album as itself. Nothing opens for an unmatched one.
+private struct AppleResultView: View {
+  let model: AppModel
+  let kind: String
+  let appleId: Int
+  let title: String
+  @State private var resolved: ResolvedApple?
+  @State private var failure: String?
+  var body: some View {
+    Group {
+      if let resolved, kind == "album" {
+        CatalogueAlbumView(
+          model: model, groupId: resolved.id, title: resolved.name, artist: resolved.artist)
+      } else if let resolved, let release = resolved.releaseId {
+        CatalogueReleaseView(
+          model: model, releaseId: release, title: resolved.album ?? resolved.name, groupId: nil,
+          editionCount: 0)
+      } else if let failure {
+        ContentUnavailableView(
+          title, systemImage: "questionmark.circle", description: Text(failure)
+        ).pigCanvas()
+      } else {
+        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).pigCanvas()
+      }
+    }
+    .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+    .task(id: appleId) {
+      do {
+        let value = try await model.readCatalogue {
+          try await $0.resolveApple(kind: kind, appleId: appleId)
+        }
+        if let value, kind == "album" || value.releaseId != nil {
+          resolved = value
+        } else {
+          failure = "PigMusic couldn't find this exact version in its music catalogue yet."
+        }
+      } catch is CancellationError {} catch { failure = error.userMessage }
     }
   }
 }

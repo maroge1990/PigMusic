@@ -3,6 +3,11 @@ import OpenAPIRuntime
 import PigAPI
 import PigDomain
 
+/// The server predates the ranked search (D-61): use the earlier search.
+public struct SearchUnsupported: Error, Sendable, Equatable {
+  public init() {}
+}
+
 public enum NativeFailure: Error, LocalizedError, Sendable, Equatable {
   case authentication, resync, changed
   case unavailable(String)
@@ -271,6 +276,10 @@ public actor NativeService: LibrarySource {
   public func catalogueArtwork(kind: CatalogueArtworkKind, id: String, request: ArtworkRequest)
     async throws -> Data
   {
+    if kind == .appleAlbum {
+      guard let number = Int(id), number > 0 else { throw ArtworkFailure.invalidRequest }
+      return try await artworkTransport.fetch(request, alias: .appleAlbum(number))
+    }
     guard let uuid = UUID(uuidString: id) else { throw ArtworkFailure.invalidRequest }
     return try await artworkTransport.fetch(
       request, alias: kind == .release ? .release(uuid) : .releaseGroup(uuid))
@@ -364,6 +373,43 @@ public actor NativeService: LibrarySource {
     default:
       throw NativeFailure.unavailable(
         "Server search is unavailable. Your cached results are still accessible.")
+    }
+  }
+  /// The ranked search (D-61). An older server without it answers 404:
+  /// `SearchUnsupported`, and the app keeps its earlier search.
+  public func foundResults(query: String) async throws -> FoundResults {
+    switch try await client.find_api_v1_search_results_get(
+      .init(query: .init(q: SearchText.clean(query), limit: 50)))
+    {
+    case .ok(let response): return try LibraryCodec.convert(response.body.json)
+    case .unauthorized: throw NativeFailure.authentication
+    case .notFound: throw SearchUnsupported()
+    default:
+      throw NativeFailure.unavailable(
+        "Server search is unavailable. Your cached results are still accessible.")
+    }
+  }
+  /// Apple's songs and albums not on the server; Apple is asked by the server.
+  public func onlineResults(query: String) async throws -> OnlineResults {
+    switch try await client.online_api_v1_search_online_get(
+      .init(query: .init(q: SearchText.clean(query))))
+    {
+    case .ok(let response): return try LibraryCodec.convert(response.body.json)
+    case .unauthorized: throw NativeFailure.authentication
+    case .notFound: throw SearchUnsupported()
+    default: throw NativeFailure.unavailable("Online search is unavailable right now.")
+    }
+  }
+  /// The exact MusicBrainz version of an Apple song or album; nil when there is none.
+  public func resolveApple(kind: String, appleId: Int) async throws -> ResolvedApple? {
+    switch try await client.resolve_api_v1_search_resolve_post(
+      .init(
+        body: .json(.init(apple_id: appleId, kind: .init(rawValue: kind) ?? .song))))
+    {
+    case .ok(let response): return try LibraryCodec.convert(response.body.json)
+    case .unauthorized: throw NativeFailure.authentication
+    case .notFound: return nil
+    default: throw NativeFailure.unavailable("This music can't be looked up right now.")
     }
   }
   public func catalogueArtists(query: String, offset: Int = 0) async throws -> CatalogueArtistPage {

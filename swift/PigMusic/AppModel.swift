@@ -40,6 +40,9 @@ enum PlayOrigin: Hashable {
   var homeErrors: [HomeSection: String] = [:]
   var homeLoading: Set<HomeSection> = []
   var searchSession: SearchSession?
+  /// The ranked search (D-61); nil offline-only (demo). Falls back to
+  /// `searchSession` when the server predates it.
+  var foundSearch: FoundSearch?
   var actionTrack: Track?
   /// Favourite state by song, shared by the player's star and Song actions.
   var favourites = FavouriteStates()
@@ -415,6 +418,9 @@ enum PlayOrigin: Hashable {
       play(
         restoredQueue.queue.items.map(\.track), at: restoredQueue.queue.index,
         restored: restoredQueue)
+    }
+    foundSearch = FoundSearch(source: service) { [weak self] in
+      self?.revoked(generation: stamp)
     }
     searchSession = SearchSession(cached: database, online: service) { [weak self] in
       self?.revoked(generation: stamp)
@@ -916,6 +922,7 @@ enum PlayOrigin: Hashable {
     case release(String)
     case releaseGroup(String)
     case artist(String)
+    case appleAlbum(Int)
   }
   func artwork(_ source: ArtworkSource?, width: Int = 256) async -> UIImage? {
     switch source {
@@ -931,6 +938,10 @@ enum PlayOrigin: Hashable {
     case .artist(let id):
       return await catalogueImage("artist", id, width) {
         try await $0.artistArtwork(id: id, request: $1)
+      }
+    case .appleAlbum(let id):
+      return await catalogueImage("apple-album", String(id), width) {
+        try await $0.catalogueArtwork(kind: .appleAlbum, id: String(id), request: $1)
       }
     case nil: return nil
     }
@@ -1265,6 +1276,8 @@ enum PlayOrigin: Hashable {
     downloads = nil
     searchSession?.clear()
     searchSession = nil
+    foundSearch?.clear()
+    foundSearch = nil
     actionTrack = nil
     favourites.clear()
     recentSearches = RecentSearches()
