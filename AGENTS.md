@@ -55,8 +55,8 @@ Tests mark provider rate limits off by default; `@pytest.mark.real_rate_limits` 
 
 ## Work in batches
 
-Batch by area (D-50): group the open issues that touch the same code and risk (say, the idle-CPU loops #63/#74/#79, or the Watch delivery issues) and carry them as one batch. The fixed costs are paid once per batch: two Codex rounds, one push, one CI build. Live releases bundle a few batches.
-- Inside a batch each fix stays its own commit (one logical change, `Refs #n`) with its own test that fails on the old code. Run the targeted tests per fix and the full gates once before the batch's first Codex round and again before the push.
+Batch by area (D-50): group the open issues that touch the same code and risk (say, the idle-CPU loops #63/#74/#79, or the Watch delivery issues) and carry them as one batch. The fixed costs are paid once per batch: the Codex round or rounds (D-59), one push, one CI build. Live releases bundle a few batches.
+- Inside a batch each fix stays its own commit (one logical change, `Refs #n`) with its own test that fails on the old code. Run the targeted tests per fix and the full gates once before the batch's Codex round and again before the push.
 - Keep a batch to one platform where possible: a Swift change adds Mac runs, and a mixed diff gives Codex more to misread.
 - Don't batch unrelated areas to save time, and keep a fix whose live effect must be confirmed (for example the event-loop gates in #16) in a release where it can be told apart.
 - Name the batch, its issues and its first commit in the Codex focus; `--base` is the commit before the batch.
@@ -72,7 +72,7 @@ A plain review only reads the diff; ask for an adversarial one. If you can run i
 - The focus names the risky parts, the failure being fixed, what your tests prove and don't, and asks for reproductions (`swift test`, small `swiftc` or pytest programs against the real sources), not only reading. It repeats the fixture rules: disposable data, `PIG_MUSIC_DATA` and `PIG_MUSIC_LIBRARY` set explicitly, no push or deploy.
 - A reviewer in a read-only sandbox can't run tests; say what it couldn't verify. Before acting on a finding, check it against the code.
 
-Stopping rule, so review doesn't loop: at most two Codex rounds per batch of work. After the second round only high findings block the handoff; medium and low ones become issues labelled `finding` for Mark to prioritise; say so in the report. Security findings go to a draft security advisory instead (the repo is public): no exploit detail in public text.
+How many rounds (D-59): one Codex round for an ordinary batch; two for a batch that meets either condition above (the risky list, or the size limit); none for docs-only, test-only or copy changes. Stopping rule, so review doesn't loop: never more than those. After the last round only high findings block the handoff; medium and low ones become issues labelled `finding` for Mark to prioritise; say so in the report. Security findings go to a draft security advisory instead (the repo is public): no exploit detail in public text.
 
 ## Session checklist
 
@@ -82,8 +82,8 @@ Stopping rule, so review doesn't loop: at most two Codex rounds per batch of wor
 
 ## Ship
 
-- Commit straight to `main`, one logical change per commit, writing `Refs #n` (never `Fixes`/`Closes`). Close an issue yourself only once its fix has passed a test you ran on the pushed or released code (suites, T3 rig, live read-only check) and say so in a comment (D-58); `needs-device-test` and `owner` issues wait for Mark. A push to `main` publishes `ghcr.io/maroge1990/pig-music:main` and `sha-<rev>`: push a batch once it has passed its two Codex rounds with no high finding left (D-50); otherwise ask Mark first.
-- Live releases: Claude may release when it gives a genuine testing benefit, under D-52 (CI, two Codex rounds, Unraid verify, at most once a day, nobody playing, tell Mark after); otherwise ask Mark. Verify with `scripts/deploy_unraid.py --image <digest>`, release with `scripts/deploy_release.py` (see [operations](docs/OPERATIONS.md)). Both read household values from `.private/household.env`.
+- Commit straight to `main`, one logical change per commit, writing `Refs #n` (never `Fixes`/`Closes`). Close an issue yourself only once its fix has passed a test you ran on the pushed or released code (suites, T3 rig, live read-only check) and say so in a comment (D-58); `needs-device-test` and `owner` issues wait for Mark. A push to `main` publishes `ghcr.io/maroge1990/pig-music:main` and `sha-<rev>`: push a batch once it has passed its Codex review (D-59) with no high finding left (D-50); otherwise ask Mark first.
+- Live releases: Claude may release when it gives a genuine testing benefit, under D-52 (CI, the Codex review per D-59, Unraid verify, at most once a day, nobody playing, tell Mark after); otherwise ask Mark. Verify with `scripts/deploy_unraid.py --image <digest>`, release with `scripts/deploy_release.py` (see [operations](docs/OPERATIONS.md)). Both read household values from `.private/household.env`.
 - Native build number: change `CURRENT_PROJECT_VERSION` in both `swift/PigMusic.xcodeproj/project.pbxproj` and `scripts/generate_native_project.py`. Current version: 0.2.0 (15).
 - After a delivery, overwrite ROADMAP.md's current state and comment on the issue. Record Mark's decisions in docs/DECISIONS.md. Don't add dated delivery docs.
 

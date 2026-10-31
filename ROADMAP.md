@@ -20,14 +20,13 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 - **Mark's review plan, order confirmed 31 Oct:** (1) CI diet + screenshots, done; (2) issue clean-up, one question
   at a time; (3) grounded iPhone screen review with mockups; (4) brand audit. The PigBrand repository is found
   (private GitHub repo, cloned beside this checkout); PigMusic's vendored kit equals PigBrand 1.7.0 exactly.
-- **Ways of working:** area batches, two Codex rounds, Claude pushes (D-50); Claude may release when it helps
+- **Ways of working:** area batches, one Codex round (two for risky or large batches, D-59), Claude pushes (D-50); Claude may release when it helps
   testing (D-52); efficiency and battery first (D-54); Claude closes an issue once a test it can run has passed on
   the fix, device checks still wait for Mark (D-58). Local suite: `pytest -n 4`, about a minute.
 - **Live gates owed:** the first night's search count on `99b49eb` (#90, compare ~700 / ~7 h), engine exits (#89),
   the quiet idle-CPU re-measure (#63, compare 11.5% on `e1557ec`), the loaded 30-minute window (#16/#20).
 - **Household details** live only in the gitignored `.private/` (D-45).
-- **Waiting on Mark:** whether ordinary batches may have one Codex round instead of two (D-59 candidate); the
-  issue clean-up questions; his device checks (sections B–F of his list: #18, #19, #60–#62, #64, #65, #70, #71,
+- **Waiting on Mark:** the issue clean-up questions; his device checks (sections B–F of his list: #18, #19, #60–#62, #64, #65, #70, #71,
   #76–#78); #17's device numbers; the [`owner`](https://github.com/maroge1990/PigMusic/issues?q=is%3Aopen+label%3Aowner)
   items; the Cloudflare cache-bypass and IPv6 rate-limit confirmations (sign-in advisories); TestFlight once Apple
   approves his membership.
