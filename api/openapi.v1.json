@@ -3830,18 +3830,13 @@
         "type": "object"
       },
       "Resolve": {
+        "description": "Only the id: the title and artist come from Apple, not the device.",
         "properties": {
           "apple_id": {
             "exclusiveMaximum": 1000000000000000.0,
             "exclusiveMinimum": 0.0,
             "title": "Apple Id",
             "type": "integer"
-          },
-          "artist": {
-            "maxLength": 300,
-            "minLength": 1,
-            "title": "Artist",
-            "type": "string"
           },
           "kind": {
             "enum": [
@@ -3850,19 +3845,11 @@
             ],
             "title": "Kind",
             "type": "string"
-          },
-          "title": {
-            "maxLength": 300,
-            "minLength": 1,
-            "title": "Title",
-            "type": "string"
           }
         },
         "required": [
           "kind",
-          "apple_id",
-          "title",
-          "artist"
+          "apple_id"
         ],
         "title": "Resolve",
         "type": "object"

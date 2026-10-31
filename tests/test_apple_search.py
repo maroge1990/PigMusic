@@ -160,9 +160,10 @@ def test_online_search_and_resolve_routes(tmp_path, monkeypatch):
         assert value["albums"][0]["apple_id"] == 21
         assert "mzstatic" not in found.text  # Devices never reach Apple.
 
+        matched = []
+
         async def match_entry(http, kind, entry):
-            if entry["id"] == 404:
-                return None
+            matched.append(entry)
             return {
                 "id": "mb-recording",
                 "name": entry["name"],
@@ -172,12 +173,33 @@ def test_online_search_and_resolve_routes(tmp_path, monkeypatch):
             }
 
         monkeypatch.setattr(app.state.home, "match_entry", match_entry)
-        body = {"kind": "song", "apple_id": 11, "title": "With", "artist": "U2"}
+        # Codex (high): a device's title and artist are never trusted, since
+        # the match is cached for everyone (Home's chart included).
+        body = {"kind": "song", "apple_id": 11, "title": "Wrong", "artist": "Other"}
         resolved = client.post("/api/v1/search/resolve", json=body)
         assert resolved.status_code == 200, resolved.text
         assert resolved.json()["id"] == "mb-recording"
-        missing = client.post("/api/v1/search/resolve", json={**body, "apple_id": 404})
-        assert missing.status_code == 404
+        assert matched[-1] == {
+            "id": 11,
+            "name": "With or Without You",
+            "artistName": "U2",
+        }
+        # An id search never returned is asked of Apple by id.
+        lookups = len([r for r in seen if r.url.path == "/lookup"])
+        album = client.post(
+            "/api/v1/search/resolve", json={"kind": "album", "apple_id": 21}
+        )
+        assert album.status_code == 200, album.text
+        # The search above already knew album 21: no lookup.
+        assert len([r for r in seen if r.url.path == "/lookup"]) == lookups
+        unknown = client.post(
+            "/api/v1/search/resolve", json={"kind": "song", "apple_id": 999}
+        )
+        assert unknown.status_code == 404
+        assert [r.url.params["id"] for r in seen if r.url.path == "/lookup"][
+            -1
+        ] == "999"
+        assert len(matched) == 2
         assert (
             client.post(
                 "/api/v1/search/resolve", json={**body, "kind": "artist"}

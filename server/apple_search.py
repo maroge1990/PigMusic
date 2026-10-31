@@ -98,6 +98,10 @@ class AppleSearch:
         self.inflight = {}
         # Cover addresses seen in answers, so a cover needs no extra lookup.
         self.covers = OrderedDict()
+        # (kind, Apple id) -> the song or album as Apple described it. Resolve
+        # trusts only these, never a device's title and artist (Codex, high):
+        # a match is cached for everyone, Home's chart included.
+        self.items = OrderedDict()
 
     def allow(self, count):
         now = self.clock()
@@ -142,11 +146,62 @@ class AppleSearch:
         )
         for entry in songs + albums:
             self.remember_cover(entry)
-        return {
+        value = {
             "songs": [s for s in map(song, songs) if s],
             "albums": [a for a in map(album, albums) if a],
             "state": "ready",
         }
+        for kind in ("song", "album"):
+            for item in value[kind + "s"]:
+                self.remember(kind, item)
+        return value
+
+    def remember(self, kind, item):
+        key = (kind, item["apple_id"])
+        self.items[key] = item
+        self.items.move_to_end(key)
+        while len(self.items) > 5000:
+            self.items.popitem(last=False)
+
+    async def item(self, client, kind, apple_id):
+        """Apple's own description of a song or album: from a recent answer,
+        else asked of Apple by its id. None when Apple doesn't know it."""
+        if (kind, apple_id) in self.items:
+            return self.items[(kind, apple_id)]
+        entry = next(
+            (
+                e
+                for e in await self.lookup(client, apple_id)
+                if (e.get("trackId") if kind == "song" else e.get("collectionId"))
+                == apple_id
+            ),
+            None,
+        )
+        found = (song if kind == "song" else album)(entry) if entry else None
+        if found:
+            self.remember(kind, found)
+        return found
+
+    async def lookup(self, client, apple_id):
+        if not self.allow(1):
+            raise ValueError("Apple search budget used")
+        response = await client.get(
+            LOOKUP_URL,
+            params={"id": apple_id},
+            headers=HEADERS,
+            timeout=6,
+            follow_redirects=False,
+        )
+        response.raise_for_status()
+        if len(response.content) > 1_000_000:
+            raise ValueError("Answer too large")
+        results = response.json()["results"]
+        if not isinstance(results, list):
+            raise ValueError("Invalid answer")
+        found = [r for r in results if isinstance(r, dict)]
+        for entry in found:
+            self.remember_cover(entry)
+        return found
 
     async def ask(self, client, words, region, entity):
         response = await client.get(
@@ -186,25 +241,10 @@ class AppleSearch:
         """The 600 px cover address for an Apple album."""
         if collection_id in self.covers:
             return self.covers[collection_id]
-        if not self.allow(1):
-            raise ValueError("Apple search budget used")
-        response = await client.get(
-            LOOKUP_URL,
-            params={"id": collection_id},
-            headers=HEADERS,
-            timeout=6,
-            follow_redirects=False,
-        )
-        response.raise_for_status()
-        results = response.json()["results"]
-        entry = next(
-            (r for r in results if isinstance(r, dict) and r.get("collectionId")),
-            None,
-        )
-        if not entry:
+        await self.lookup(client, collection_id)
+        if collection_id not in self.covers:
             raise ValueError("No such album")
-        self.remember_cover(entry)
-        return apple_artwork(entry.get("artworkUrl100"))
+        return self.covers[collection_id]
 
 
 def without(value, known):

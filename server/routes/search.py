@@ -41,10 +41,10 @@ class OnlineResults(BaseModel):
 
 
 class Resolve(BaseModel):
+    """Only the id: the title and artist come from Apple, not the device."""
+
     kind: Literal["song", "album"]
     apple_id: int = Field(gt=0, lt=10**15)
-    title: str = Field(min_length=1, max_length=300)
-    artist: str = Field(min_length=1, max_length=300)
 
 
 class Resolved(BaseModel):
@@ -88,11 +88,17 @@ def search_router(store, home, apple=None):
 
     @router.post("/resolve", response_model=Resolved)
     async def resolve(body: Resolve, request: Request):
-        entry = {"id": body.apple_id, "name": body.title, "artistName": body.artist}
+        client = request.app.state.http
         try:
-            item = await home.match_entry(
-                request.app.state.http, body.kind + "s", entry
-            )
+            found = await apple.item(client, body.kind, body.apple_id)
+            if not found:
+                raise HTTPException(404, "No such Apple music")
+            entry = {
+                "id": body.apple_id,
+                "name": found["title"],
+                "artistName": found["artist"],
+            }
+            item = await home.match_entry(client, body.kind + "s", entry)
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
             raise HTTPException(502, "catalogue_unavailable")
         if not item:
