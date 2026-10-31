@@ -192,7 +192,7 @@ private struct SearchResultsView: View {
           }
         case .album(let album):
           NavigationLink {
-            AlbumView(model: model, album: album).onAppear { model.rememberSearch(pick) }
+            RecentAlbumView(model: model, album: album).onAppear { model.rememberSearch(pick) }
           } label: {
             HStack(spacing: 12) {
               ArtworkThumb(model: model, source: album.artworkSource, title: album.title)
@@ -655,5 +655,23 @@ private struct ServerAlbumView: View {
         if tracks.isEmpty { failure = "This album has no playable songs right now." }
       } catch is CancellationError {} catch { failure = error.userMessage }
     }
+  }
+}
+
+/// A recent album: from the library when it holds it, else from the server,
+/// as it opened from the results (Codex round 2 on stage 4).
+private struct RecentAlbumView: View {
+  let model: AppModel
+  let album: Album
+  @State private var inLibrary: Bool?
+  var body: some View {
+    Group {
+      switch inLibrary {
+      case true?: AlbumView(model: model, album: album)
+      case false?: ServerAlbumView(model: model, album: album)
+      case nil: ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).pigCanvas()
+      }
+    }
+    .task(id: album.id) { inLibrary = await model.store?.holds(albumId: album.id) ?? false }
   }
 }

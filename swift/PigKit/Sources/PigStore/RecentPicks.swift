@@ -17,4 +17,9 @@ extension LibraryStore {
       return pick
     }
   }
+  /// Whether the person's library holds this album now: a recent album from
+  /// the server (not in it) opens with the server's songs instead (Codex).
+  public func holds(albumId: String) -> Bool {
+    ((try? album(id: albumId)) ?? nil) != nil
+  }
 }

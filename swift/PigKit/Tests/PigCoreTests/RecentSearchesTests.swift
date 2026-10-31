@@ -40,3 +40,12 @@ private func song(_ id: String) -> Track {
   let household = Track(id: "household", title: "Other", artist: "Artist")
   #expect(await store.current(.song(household)) == .song(household))
 }
+
+@Test func aRecentAlbumIsKnownToBeInTheLibraryOrNot() async throws {
+  let store = try LibraryStore(path: ":memory:")
+  let albums = try LibraryCodec.decoder().decode(
+    [Album].self, from: Data(#"[{"id":"mine","title":"Mine","artist":"Band"}]"#.utf8))
+  try await store.replace(.init(revision: "one", tracks: [], albums: albums, artists: []))
+  #expect(await store.holds(albumId: "mine"))
+  #expect(!(await store.holds(albumId: "server-only")))
+}
