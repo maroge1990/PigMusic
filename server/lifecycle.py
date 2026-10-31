@@ -19,6 +19,8 @@ class TimedRLock:
         self._lock = threading.RLock()
         self._depth = threading.local()
         self.holder = None  # (label, since) of the outermost hold
+        # The holder's named steps, so a long hold says where it went (#17).
+        self.steps, self._mark = [], 0.0
 
     def acquire(self, blocking=True, timeout=-1, label=None):
         if not self._lock.acquire(blocking, timeout):
@@ -27,19 +29,39 @@ class TimedRLock:
         self._depth.value = depth + 1
         if depth == 0:
             self.holder = (caller(label), time.monotonic())
+            self.steps, self._mark = [], self.holder[1]
         return True
+
+    def step(self, name):
+        """The holder finished `name`: its time joins a long hold's warning."""
+        if not self.owned():
+            return
+        now = time.monotonic()
+        self.steps.append((name, now - self._mark))
+        self._mark = now
 
     def release(self):
         depth = self._depth.value - 1
         self._depth.value = depth
         holder = self.holder if depth == 0 else None
+        steps = self.steps if depth == 0 else []
         if depth == 0:
-            self.holder = None
+            self.holder, self.steps = None, []
         self._lock.release()
         if holder:
             held = time.monotonic() - holder[1]
             if held >= self.warn_after:
-                log.warning("%s held for %.1f s by %s", self.name, held, holder[0])
+                if steps:
+                    rest = held - sum(seconds for _, seconds in steps)
+                    parts = [*steps, ("rest", rest)]
+                    detail = " (%s)" % ", ".join(
+                        f"{name} {seconds:.2f} s" for name, seconds in parts
+                    )
+                else:
+                    detail = ""
+                log.warning(
+                    "%s held for %.1f s by %s%s", self.name, held, holder[0], detail
+                )
 
     def owned(self):
         """Whether the calling thread holds the lock."""
@@ -80,6 +102,12 @@ def caller(label=None):
     return f"{taker} via {name(frame)}" if frame else taker
 
 
+def step(lock, name):
+    """Name a step of the current hold, for locks that keep them."""
+    if isinstance(lock, TimedRLock):
+        lock.step(name)
+
+
 def coordinated(method):
     # The wrapper takes the lock before the method runs, so it names the
     # method itself (a worker thread would otherwise show as the holder).
@@ -99,6 +127,7 @@ def coordinated(method):
         lock.acquire(label=label)
         try:
             catch_up()
+            lock.step("catch-up")
             return method(self, *args, **kwargs)
         finally:
             lock.release()

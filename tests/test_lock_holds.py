@@ -388,3 +388,27 @@ def test_a_scan_holding_the_cover_lock_still_refreshes_beside_another_refresh(
     assert done.wait(5), "the scan's refresh deadlocked"
     other.join(5)
     assert not other.is_alive()
+
+
+def test_a_long_export_hold_names_its_steps(tmp_path, monkeypatch, caplog):
+    """#17: the warning says which part of a publication held the lock."""
+    from test_exporter import acquired
+    from server.exporter import Exporter
+    from server.store import Store
+
+    root = tmp_path / "nas"
+    root.mkdir()
+    monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(root))
+    store = Store(tmp_path / "data")
+    track, _ = acquired(store)
+    # Every hold warns, so the test needs no clock.
+    store.lifecycle_lock.warn_after = 0
+    caplog.set_level(logging.WARNING, "pig_music.timing")
+    Exporter(store, root).publish(track)
+    (message,) = [
+        r.getMessage() for r in caplog.records if "Exporter.publish" in r.getMessage()
+    ]
+    steps = message.split("(", 1)[1]
+    for name in ("catch-up", "current", "source", "place", "verify", "commit", "rest"):
+        assert f"{name} " in steps, message
+    assert store.lifecycle_lock.steps == []

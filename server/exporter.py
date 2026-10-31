@@ -5,7 +5,7 @@ guarded originals until validated publication. NAS mode requires explicit mount
 identity/configuration; isolated previews remain the default.
 """
 
-from .lifecycle import coordinated
+from .lifecycle import coordinated, step
 
 import asyncio
 import hashlib
@@ -335,9 +335,12 @@ class Exporter:
 
     @coordinated
     def publish(self, track):
+        # Each step is named in a long lifecycle_lock hold's warning (#17).
+        lock = self.store.lifecycle_lock
         with self.store.connect() as conn:
             if not self.current(conn, track):
                 return False  # Replaced or removed since this pass began.
+        step(lock, "current")
         source, relative, target = self.paths(track)
         expected = track["sha256"]
         if not source.is_file():
@@ -350,6 +353,7 @@ class Exporter:
             raise ValueError("Validated download is unavailable; export deferred.")
         if self.digest(source, this_pass=True) != expected:
             raise ValueError("Validated download changed; export refused.")
+        step(lock, "source")
         if target.exists():
             if not target.is_file() or self.digest(target, this_pass=True) != expected:
                 raise ValueError(
@@ -389,8 +393,10 @@ class Exporter:
                         raise ValueError("Destination changed during export.")
             finally:
                 stage.unlink(missing_ok=True)
+        step(lock, "place")
         if not self.linked(target, source, expected):
             raise ValueError("Published file verification failed.")
+        step(lock, "verify")
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
@@ -404,6 +410,7 @@ class Exporter:
                 "UPDATE acquired SET payload=? WHERE id=?",
                 (json.dumps(value), track["id"]),
             )
+        step(lock, "commit")
         # The NAS copy is verified and its location durably committed before
         # deleting the staging-library copy. Restart can finish this cleanup.
         if source.exists() and self.linked(source, target, expected):
