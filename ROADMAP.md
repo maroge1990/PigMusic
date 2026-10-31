@@ -35,8 +35,9 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 Mark's review plan first, then reliability (D-47). In order:
 
-1. **Issue clean-up** — done 31 Oct: seven owner decisions settled (D-58–D-60), 35 issues closed or merged
-   (#95 acceptance checklist, #96/#97 findings); 40 remain, all real work or Mark's device checks
+1. **Issue clean-up** — done 31 Oct: seven owner decisions settled (D-58–D-60), 32 issues closed or merged
+   (#95 acceptance checklist, #96/#97 findings); 51 remain, about 30 of them pushed fixes waiting for a test
+   Claude can run (D-58) or for Mark's device checks
 2. **iPhone screen review** — from the #92 pictures: mockups for Library segments, Downloads as one page, one album
    template, a compact song action list; then one fix batch as build 16 with #59, #53, #54, #56
 3. **Brand audit** — web, iPhone and Watch against PigBrand 1.7.0 (taglines, nav labels, radii, Watch colour
