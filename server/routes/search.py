@@ -45,7 +45,8 @@ class Resolve(BaseModel):
     """Only the id: the title and artist come from Apple, not the device."""
 
     kind: Literal["song", "album"]
-    apple_id: int = Field(gt=0, lt=10**15)
+    # Inclusive bounds: the Swift generator reads only OpenAPI 3.0 limits.
+    apple_id: int = Field(ge=1, le=10**15 - 1)
 
 
 class Resolved(BaseModel):

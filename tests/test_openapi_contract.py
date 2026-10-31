@@ -21,3 +21,29 @@ def test_native_contract_is_current_and_core_responses_are_typed():
                 "application/json"
             ]["schema"]
         )
+
+
+def test_the_contract_has_no_limits_the_swift_generator_cannot_read():
+    """swift-openapi-generator reads exclusiveMinimum/exclusiveMaximum only as
+    OpenAPI 3.0 booleans; Pydantic's gt/lt write numbers and broke the native
+    build (31 Oct). Use ge/le instead."""
+    import json
+    from pathlib import Path
+
+    found = []
+
+    def walk(value, path):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in {"exclusiveMinimum", "exclusiveMaximum"} and not isinstance(
+                    item, bool
+                ):
+                    found.append(path + "." + key)
+                walk(item, path + "." + key)
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                walk(item, f"{path}[{index}]")
+
+    root = Path(__file__).resolve().parents[1]
+    walk(json.loads((root / "api" / "openapi.v1.json").read_text()), "")
+    assert found == []

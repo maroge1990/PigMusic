@@ -3833,8 +3833,8 @@
         "description": "Only the id: the title and artist come from Apple, not the device.",
         "properties": {
           "apple_id": {
-            "exclusiveMaximum": 1000000000000000.0,
-            "exclusiveMinimum": 0.0,
+            "maximum": 999999999999999.0,
+            "minimum": 1.0,
             "title": "Apple Id",
             "type": "integer"
           },
