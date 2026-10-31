@@ -5,42 +5,38 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 31 Oct 2026 (evening, Melbourne).*
+*Overwritten at the end of every session. 31 Oct 2026 (night, Melbourne).*
 
 - **Live:** server `99b49eb` (released 30 Oct 23:42 UTC as `reset-20261031-v3`; rollback container
-  `PigMusic-before-reset-20261031-v3`). Container recreated 31 Oct without the plain LAN port (#39), same image;
-  rollback `PigMusic-before-port-20261031`. iPhone/Watch: native **0.2.0 (15)** on Mark's iPhone since 31 Oct (free
-  signing, expires about 7 Nov).
-- **Pushed 31 Oct evening, not yet released:** the server batch, two Codex rounds (round 1 medium fixed, round 2
-  approve): YouTube removed as a source (#94, D-60); a long `lifecycle_lock` hold now names its steps, export
-  publication first (#17); with export off a replaced file goes to Trash instead of being deleted (#96). Earlier on
-  31 Oct: the CI diet (#91) and the simulator screenshot job (#92).
-- **iPhone screen redesign parked** by Mark (31 Oct): he thinks the four mockups need redoing. The brand audit waits
-  with it (same screens). Mark's new player reports (31 Oct) are issues of their own.
-- **Ways of working:** area batches, one Codex round (two for risky or large batches, D-59), Claude pushes (D-50);
-  Claude may release when it helps testing (D-52); efficiency and battery first (D-54); Claude closes an issue once a
-  test it can run has passed on the fix, device checks still wait for Mark (D-58). Local suite: `pytest -n 4`, under
-  a minute.
-- **Live gates owed:** the first night's search count on `99b49eb` (#90, compare ~700 / ~7 h), the quiet idle-CPU
-  re-measure (#63, compare 11.5% on `e1557ec`), the loaded 30-minute window (#16/#20), the first nightly scale-gate
-  run (#91); after the next release, remote-playback "unavailable" time without YouTube (#94) and any lock-hold
-  warning's steps (#17).
+  `PigMusic-before-reset-20261031-v3`); container recreated 31 Oct without the plain LAN port (#39), rollback
+  `PigMusic-before-port-20261031`. Not released since: everything below is pushed only.
+- **iPhone:** native **0.2.0 (16)** uploaded to **TestFlight** on 31 Oct (app record PigMusic, `au.com.pig.music`;
+  App Store Connect key on the Mac in `~/.appstoreconnect/private_keys`, IDs in `.private/household.env`; upload script
+  `~/pigmusic-archives/testflight.sh` on the Mac, needs the Mac password once per run). Build 15 (free signing) is
+  on Mark's phone until he installs 16 from TestFlight. Build 16: player fixes #98 spinner, #99 tap Up next, #100 ⋯
+  menu and favourite star; search stage 1 is after it (next build).
+- **Pushed 31 Oct, not released:** server batch #94 (YouTube removed), #17 (lock-hold steps), #96 (Trash when
+  export is off); search (#53, D-61) stage 1 (iPhone box focused and always shown, Recently searched), stage 2
+  (`/api/v1/search/results`, one ranked search over library and server), stage 3 (`/api/v1/search/online` Apple's
+  order for music not on the server, `/search/resolve`, Apple covers through the server). Every batch had two Codex
+  rounds; final-round mediums are issues #101, #102, #103.
+- **Parked by Mark (31 Oct):** the four-mockup screen redesign and the brand audit.
+- **Ways of working:** area batches, Codex rounds per D-59, Claude pushes (D-50); releases under D-52; D-54
+  efficiency first; D-58 closing rule. Local suite: `pytest -n 4`, under a minute.
+- **Live gates owed:** #90 first night's search count on `99b49eb`, #63 quiet idle CPU, #16/#20 loaded window, #91
+  first nightly run; after the next release: #94 unavailable time, #17 lock-hold steps.
 - **Household details** live only in the gitignored `.private/` (D-45).
-- **Waiting on Mark:** the cellular checks on #39; when to run the tag job (#93); his device checks (sections B–F of
-  his list: #18, #19, #60–#62, #64, #65, #70, #71, #76–#78); the
-  [`owner`](https://github.com/maroge1990/PigMusic/issues?q=is%3Aopen+label%3Aowner) items; the Cloudflare
-  cache-bypass and IPv6 rate-limit confirmations (sign-in advisories); TestFlight once Apple approves his membership.
+- **Waiting on Mark:** installing build 16 from TestFlight (internal tester group) and checking #98–#100; the cellular
+  checks on #39; when to run the tag job (#93); his device checks (#95, sections B–F of his list); the `owner` items.
 
 ## Now
 
 Reliability first (D-47), with Mark's player reports and iPhone search. In order:
 
-1. **iPhone player fixes** — build 16 pushed 31 Oct (#98 spinner, #99 tap Up next, #100 ⋯ menu and favourite
-   star); install and Mark's check
-2. **iPhone search** (Mark, 31 Oct: first, it is a big interaction point for new users) — #53 remake in three stages
-   like Apple Music's (recent picks before typing, a mixed list while typing, Top results · Artists · Albums ·
-   Songs · Playlists after Search; one list with library marks, never split by where music lives); #54 song search
-   speed, measured first; #55 more popular songs in the same build
+1. **iPhone player fixes** — build 16 on TestFlight; Mark installs it and checks #98–#100
+2. **iPhone search** (#53, D-61) — stages 1–3 pushed; next: fix #103 (Apple live/remix versions must not open as the
+   studio recording), then the iPhone results screen (Top results · Artists · Albums · Songs · Playlists, a mixed
+   list while typing, Apple results marked not on the server), #102, #54 timing, #55 popular songs
 3. **Live gates** — #90, #63, #16/#20 measurements; the first nightly scale-gate run (#91)
 4. **Release the server batch** (#94, #17, #96) under D-52 once CI is green and nobody is playing
 5. **T3 rig on Unraid** (#15): first run with a green main digest; then #22 and #43 on it; then the #93 trial
