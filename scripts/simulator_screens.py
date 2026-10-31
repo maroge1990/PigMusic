@@ -1,7 +1,7 @@
 """Photograph every iPhone screen in a booted simulator, light and dark.
 
 Uses the Debug build's headless review switches (`--demo` for the synthetic
-offline library, `--tab=<name>`, `--open-album`, `--demo-play`) so no server,
+offline library, `--tab=<name>`, `--open-album`, `--demo-play`, `--show-player`) so no server,
 account or network is needed. Runs on a macOS machine with Xcode; the
 `screens.yml` workflow runs it on a GitHub macOS runner and uploads the PNGs.
 
@@ -29,7 +29,7 @@ SCREENS = (
     ("album", ["--tab=library", "--open-album"]),
     ("downloads", ["--tab=downloads"]),
     ("search", ["--tab=search"]),
-    ("now-playing", ["--tab=home", "--demo-play"]),
+    ("now-playing", ["--tab=home", "--demo-play", "--show-player"]),
 )
 
 

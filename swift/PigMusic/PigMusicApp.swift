@@ -171,7 +171,7 @@ struct LibraryShell: View {
           .presentationContentInteraction(.scrolls)
       }
       #if DEBUG
-        // Headless UI review: --tab=<name> and --demo-play.
+        // Headless UI review: --tab=<name>, --demo-play and --show-player.
         .task {
           let arguments = ProcessInfo.processInfo.arguments
           if let tab = arguments.first(where: { $0.hasPrefix("--tab=") })?.dropFirst(6),
@@ -183,6 +183,8 @@ struct LibraryShell: View {
             while model.songs.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
             model.play(model.songs)
             if !arguments.contains("--demo-autoplay") { model.player.pause() }
+            // The full player opens only from a MiniPlayer tap; screenshots need it.
+            if arguments.contains("--show-player") { showPlayer = true }
           }
         }
       #endif

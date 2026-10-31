@@ -45,4 +45,4 @@ def test_list_mode_prints_without_a_simulator(capsys):
     assert load().main(["--list"]) == 0
     out = capsys.readouterr().out
     assert out.startswith("home --demo --tab=home")
-    assert "now-playing --demo --tab=home --demo-play" in out
+    assert "now-playing --demo --tab=home --demo-play --show-player" in out
