@@ -28,7 +28,6 @@ def test_the_contract_has_no_limits_the_swift_generator_cannot_read():
     OpenAPI 3.0 booleans; Pydantic's gt/lt write numbers and broke the native
     build (31 Oct). Use ge/le instead."""
     import json
-    from pathlib import Path
 
     found = []
 
@@ -44,6 +43,6 @@ def test_the_contract_has_no_limits_the_swift_generator_cannot_read():
             for index, item in enumerate(value):
                 walk(item, f"{path}[{index}]")
 
-    root = Path(__file__).resolve().parents[1]
-    walk(json.loads((root / "api" / "openapi.v1.json").read_text()), "")
+    # The generated contract itself, so the test runs in the image layout too.
+    walk(json.loads(encoded()), "")
     assert found == []
