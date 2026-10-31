@@ -5,50 +5,47 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 31 Oct 2026 (morning, Melbourne).*
+*Overwritten at the end of every session. 31 Oct 2026 (evening, Melbourne).*
 
-- **Live:** server `99b49eb` (released 30 Oct 23:42 UTC as `reset-20261031-v3` on Mark's instruction, while music was
-  playing; rollback container `PigMusic-before-reset-20261031-v3`). It carries everything pushed on 30 and 31 Oct:
-  - Overnight mix searching (#90) and the engine heap (#89): unfindable songs are searched once per household per
-    20 h; engine heap 512 MB.
-  - Withdrawn designs rebuilt: #68 (only the retired file itself is hidden, by hash, while its replacement plays),
-    #74 part 2 (publication rebuilds outside the lock; locked operations catch the library up first), #80 part 2
-    (offline web sign-out ends that one session by id later; /me returns `session_id`). #80's round-2 high finding
-    was fixed without a third review (two-round limit); behaviour confirmed by Mark (D-55).
-- **Efficiency batch pushed 31 Oct** (two Codex rounds): artist pages answer within ~10 s and finish in the
-  background (#21), popularity fetched once per artist (#44), mix planning off the event loop (#42, part). #22 and
-  #43 wait for measurement on the T3 rig.
-- **T3 rig phase 1 pushed** (#15): `scripts/test_rig.py` with fake metadata services, internal network, digest-only
-  images; not yet run on Unraid with an image carrying the switch. Fake download sources are phase 2.
-- **TestFlight:** both apps are ready for upload (privacy manifests, encryption setting); parked until Apple approves
-  Mark's developer membership (about 48 hours), then his one-time account steps.
-- **iPhone/Watch:** native **0.2.0 (15)** installed on Mark's iPhone on 31 Oct (free signing; expires after 7 days):
-  build 14's screen fixes (#60, #61, #62) plus #78, #76 (D-56) and #77 (D-57).
-- **Live gates:** #20/#16 idle windows met; the loaded window waits for real use. Idle CPU on `e1557ec`: 11.5% of a
-  core; on `15566c4` the server never went quiet overnight (mix searching ran past 07:30), so the re-measure (#63)
-  waits for #90 to be live. After the 1 Nov release, compare that night's searches with ~700 / ~7 h (#90).
-- **Flaky timing tests:** `test_mix_responsiveness` (0.503 s vs 0.5 s) once in CI; the diagnostics stall test and the
-  radio-opening test were fixed.
-- **Ways of working:** area batches, two Codex rounds, Claude pushes (D-50); Claude may release when it helps testing,
-  under D-52; efficiency and battery first (D-54); offline web sign-out (D-55); the Unraid test copy is approved (D-53, #15).
+- **Live:** server `99b49eb` (released 30 Oct 23:42 UTC as `reset-20261031-v3`; rollback container
+  `PigMusic-before-reset-20261031-v3`), carrying every server batch of 30 and 31 Oct (#90/#89, #68, #74 part 2,
+  #80 part 2, the efficiency batch #21/#44/#42 part, T3 rig phase 1, App Store readiness). iPhone/Watch: native
+  **0.2.0 (15)** on Mark's iPhone since 31 Oct (free signing, expires about 7 Nov).
+- **Pushed 31 Oct evening, nothing to release:** the CI diet (#91) and the simulator screenshot job (#92), two
+  Codex rounds each. Container CI is 5–5.5 min per push (was 10.8): backend suite on four workers, 23 wall-clock
+  timing tests reported in the run summary instead of failing the push, OpenAPI contract check inside the image, the
+  three 1 GB scale gates on a nightly schedule (16:00 UTC, first run tonight), on manual runs and on release tags.
+  Mac CI runs only when `swift/`, `api/` or the brand kit changes. `screens.yml` photographs the six main iPhone
+  screens light and dark from the demo library (iPhone 17, iOS 26.5); the first full set is on #92.
+- **Mark's review plan, order confirmed 31 Oct:** (1) CI diet + screenshots, done; (2) issue clean-up, one question
+  at a time; (3) grounded iPhone screen review with mockups; (4) brand audit. The PigBrand repository is found
+  (private GitHub repo, cloned beside this checkout); PigMusic's vendored kit equals PigBrand 1.7.0 exactly.
+- **Ways of working:** area batches, two Codex rounds, Claude pushes (D-50); Claude may release when it helps
+  testing (D-52); efficiency and battery first (D-54); Claude closes an issue once a test it can run has passed on
+  the fix, device checks still wait for Mark (D-58). Local suite: `pytest -n 4`, about a minute.
+- **Live gates owed:** the first night's search count on `99b49eb` (#90, compare ~700 / ~7 h), engine exits (#89),
+  the quiet idle-CPU re-measure (#63, compare 11.5% on `e1557ec`), the loaded 30-minute window (#16/#20).
 - **Household details** live only in the gitignored `.private/` (D-45).
-- **Waiting on Mark:** the server/web checks for the 31 Oct and 1 Nov releases and device checks for builds 13/14;
-  #17's device numbers; the recommended choices
-  used for #69, #72 and the #62 reading; whether the web Library loses its shuffle button too (#61); the
-  [`owner`](https://github.com/maroge1990/PigMusic/issues?q=is%3Aopen+label%3Aowner) items; the Cloudflare
-  cache-bypass and IPv6 rate-limit confirmations (sign-in advisories).
+- **Waiting on Mark:** whether ordinary batches may have one Codex round instead of two (D-59 candidate); the
+  issue clean-up questions; his device checks (sections B–F of his list: #18, #19, #60–#62, #64, #65, #70, #71,
+  #76–#78); #17's device numbers; the [`owner`](https://github.com/maroge1990/PigMusic/issues?q=is%3Aopen+label%3Aowner)
+  items; the Cloudflare cache-bypass and IPv6 rate-limit confirmations (sign-in advisories); TestFlight once Apple
+  approves his membership.
 
 ## Now
 
-Reliability first (D-47). In order:
+Mark's review plan first, then reliability (D-47). In order:
 
-1. **Live gates** — the first night's search count on `99b49eb` (#90), the engine log (#89), the
-   quiet idle-CPU re-measure (#63) and the loaded 30-minute window for #16/#20
-2. **Device checks** — build 15 is installed; Mark's checks and battery runs
-   (#18, #19; #64, #65, #70, #71, #60–#62, #76–#78)
-3. **T3 rig on Unraid** (#15): first run with a green main digest; then measure #22 and #43 on it
-4. **TestFlight** once Apple approves the membership
-5. **Efficiency leftovers** (D-54) — the rest of #42; the flaky `test_mix_responsiveness` timing check
+1. **Issue clean-up** — the 7 owner decisions one at a time; fold the acceptance placeholders (#28–#38) into one
+   checklist; close the set-aside ideas (#48–#52); merge the small P3 findings; close pushed fixes as their tests
+   pass (D-58)
+2. **iPhone screen review** — from the #92 pictures: mockups for Library segments, Downloads as one page, one album
+   template, a compact song action list; then one fix batch as build 16 with #59, #53, #54, #56
+3. **Brand audit** — web, iPhone and Watch against PigBrand 1.7.0 (taglines, nav labels, radii, Watch colour
+   roles); one fix batch
+4. **Live gates** — #90, #89, #63, #16/#20 measurements; the first nightly scale-gate run (#91)
+5. **T3 rig on Unraid** (#15): first run with a green main digest; then #22 and #43 on it
+6. **Later this week** — Mark's device checks; TestFlight; the rest of #42
 
 ## Next (P1/P2)
 
