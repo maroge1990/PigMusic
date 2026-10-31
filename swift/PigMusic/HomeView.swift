@@ -126,10 +126,17 @@ struct HomeView: View {
       if songs, let feed, !feed.songs.isEmpty {
         VStack(alignment: .leading, spacing: 4) {
           Text("Songs").font(.title3.weight(.bold))
-          let tracks = feed.songs.prefix(10).compactMap(\.playbackTrack)
+          let all = feed.songs.compactMap(\.playbackTrack)
+          let tracks = Array(all.prefix(10))
           ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
-            SongRow(model: model, track: track) { model.play(tracks, at: index) }
+            SongRow(model: model, track: track) { model.play(all, at: index) }
             Divider()
+          }
+          // The chart holds up to 100 songs (#55); the rest are a tap away.
+          if all.count > tracks.count {
+            NavigationLink("See all \(all.count) songs") {
+              ChartSongsView(model: model, title: heading, tracks: all)
+            }.padding(.vertical, 8)
           }
         }.padding(.horizontal)
       }
@@ -367,5 +374,25 @@ struct MixArtwork: View {
       context.fill(Path(ellipseIn: CGRect(x: 176, y: 14, width: 10, height: 10)), with: ink)
     }.aspectRatio(1, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 12))
       .accessibilityHidden(true)
+  }
+}
+
+/// Every song in the popular chart, in chart order (#55).
+private struct ChartSongsView: View {
+  let model: AppModel
+  let title: String
+  let tracks: [Track]
+  var body: some View {
+    List {
+      ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
+        SongRow(model: model, track: track, number: index + 1) {
+          model.play(tracks, at: index)
+        }
+      }
+    }
+    .pigCanvas().navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+    .toolbar {
+      Button("Play", systemImage: "play.fill") { model.play(tracks) }
+    }
   }
 }

@@ -50,6 +50,8 @@ const emptyMessages: Record<string, string> = {
 function HomeSection({ kind }: { kind: "popular" | "recommended" }) {
   const [feed, setFeed] = useState<Feed | null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
+  // The chart holds up to 100 songs (#55): the first ten, then all on request.
+  const [allSongs, setAllSongs] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
     const controller = new AbortController();
@@ -123,9 +125,14 @@ function HomeSection({ kind }: { kind: "popular" | "recommended" }) {
           <h3>{collection[0].toUpperCase() + collection.slice(1)}</h3>
           {collection === "songs" ? (
             <div className="song-list home-songs">
-              {songs.map((song, i) => (
+              {(allSongs ? songs : songs.slice(0, 10)).map((song, i) => (
                 <SongRow key={song.key} song={song} queue={songs} index={i} />
               ))}
+              {songs.length > 10 && (
+                <button type="button" onClick={() => setAllSongs(!allSongs)}>
+                  {allSongs ? "Show fewer" : `Show all ${songs.length} songs`}
+                </button>
+              )}
             </div>
           ) : (
             <div className="home-grid">

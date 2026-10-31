@@ -227,3 +227,25 @@ test("Radio starts from Home, refills before it runs out and reports skips", asy
     .poll(() => skips)
     .toEqual([{ track_id: "mix:radio-1:0", action: "skip" }]);
 });
+
+// #55: the chart holds up to 100 songs; Home lists ten, then all on request.
+test("Popular songs show ten, then all on request", async ({ page }) => {
+  const songs = Array.from({ length: 12 }, (_, i) => ({
+    ...item("s" + i, "Song " + i),
+    title: "Song " + i,
+    album: "Album one",
+    duration: 200,
+  }));
+  await mockApi(page, {
+    answers: {
+      "/v1/home/recommended": (route) => route.fulfill({ json: feed("") }),
+      "/v1/home/popular": (route) =>
+        route.fulfill({ json: { ...feed("Popular in Australia"), songs } }),
+    },
+  });
+  await page.goto("/#/home");
+  const list = page.locator(".home-songs");
+  await expect(list.locator(".song-row")).toHaveCount(10);
+  await list.getByRole("button", { name: "Show all 12 songs" }).click();
+  await expect(list.locator(".song-row")).toHaveCount(12);
+});
