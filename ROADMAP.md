@@ -18,7 +18,8 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   three 1 GB scale gates on a nightly schedule (16:00 UTC, first run tonight), on manual runs and on release tags.
   Mac CI runs only when `swift/`, `api/` or the brand kit changes. `screens.yml` photographs the six main iPhone
   screens light and dark from the demo library (iPhone 17, iOS 26.5); the first full set is on #92.
-- **Mark's review plan, order confirmed 31 Oct:** (1) CI diet + screenshots, done; (2) issue clean-up, done; (3) grounded iPhone screen review with mockups; (4) brand audit. The PigBrand repository is found
+- **Mark's review plan, order confirmed 31 Oct:** (1) CI diet + screenshots, done; (2) issue clean-up, done; (3) iPhone
+  screen review published (nine findings, four mockups); Mark's mockup decisions are parked, mockup 1 first; (4) grounded iPhone screen review with mockups; (4) brand audit. The PigBrand repository is found
   (private GitHub repo, cloned beside this checkout); PigMusic's vendored kit equals PigBrand 1.7.0 exactly.
 - **Ways of working:** area batches, one Codex round (two for risky or large batches, D-59), Claude pushes (D-50); Claude may release when it helps
   testing (D-52); efficiency and battery first (D-54); Claude closes an issue once a test it can run has passed on
@@ -26,7 +27,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 - **Live gates owed:** the first night's search count on `99b49eb` (#90, compare ~700 / ~7 h), engine exits (#89, closed; a log glance after the first full night),
   the quiet idle-CPU re-measure (#63, compare 11.5% on `e1557ec`), the loaded 30-minute window (#16/#20).
 - **Household details** live only in the gitignored `.private/` (D-45).
-- **Waiting on Mark:** the cellular checks on #39; when to run the tag job (#93); his device checks (sections B–F of his list: #18, #19, #60–#62, #64, #65, #70, #71,
+- **Waiting on Mark:** the four mockup decisions from the screen review (one at a time); the cellular checks on #39; when to run the tag job (#93); his device checks (sections B–F of his list: #18, #19, #60–#62, #64, #65, #70, #71,
   #76–#78); #17's device numbers; the [`owner`](https://github.com/maroge1990/PigMusic/issues?q=is%3Aopen+label%3Aowner)
   items; the Cloudflare cache-bypass and IPv6 rate-limit confirmations (sign-in advisories); TestFlight once Apple
   approves his membership.
@@ -38,8 +39,8 @@ Mark's review plan first, then reliability (D-47). In order:
 1. **Issue clean-up** — done 31 Oct: seven owner decisions settled (D-58–D-60), 32 issues closed or merged
    (#95 acceptance checklist, #96/#97 findings), then 16 live fixes closed under D-58 with their tests; 35 remain:
    real work, live measurements and Mark's device checks
-2. **iPhone screen review** — from the #92 pictures: mockups for Library segments, Downloads as one page, one album
-   template, a compact song action list; then one fix batch as build 16 with #59, #53, #54, #56
+2. **iPhone screen review** — published 31 Oct; Mark decides the four mockups (Library segments, Downloads as one
+   page, one album template, compact song actions) one at a time; then one fix batch as build 16 with #59, #53, #54, #56
 3. **Brand audit** — web, iPhone and Watch against PigBrand 1.7.0 (taglines, nav labels, radii, Watch colour
    roles); one fix batch
 4. **Live gates** — #90, #89, #63, #16/#20 measurements; the first nightly scale-gate run (#91)
