@@ -23,7 +23,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 - **Ways of working:** area batches, one Codex round (two for risky or large batches, D-59), Claude pushes (D-50); Claude may release when it helps
   testing (D-52); efficiency and battery first (D-54); Claude closes an issue once a test it can run has passed on
   the fix, device checks still wait for Mark (D-58). Local suite: `pytest -n 4`, about a minute.
-- **Live gates owed:** the first night's search count on `99b49eb` (#90, compare ~700 / ~7 h), engine exits (#89),
+- **Live gates owed:** the first night's search count on `99b49eb` (#90, compare ~700 / ~7 h), engine exits (#89, closed; a log glance after the first full night),
   the quiet idle-CPU re-measure (#63, compare 11.5% on `e1557ec`), the loaded 30-minute window (#16/#20).
 - **Household details** live only in the gitignored `.private/` (D-45).
 - **Waiting on Mark:** the cellular checks on #39; when to run the tag job (#93); his device checks (sections B–F of his list: #18, #19, #60–#62, #64, #65, #70, #71,
@@ -36,8 +36,8 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 Mark's review plan first, then reliability (D-47). In order:
 
 1. **Issue clean-up** — done 31 Oct: seven owner decisions settled (D-58–D-60), 32 issues closed or merged
-   (#95 acceptance checklist, #96/#97 findings); 51 remain, about 30 of them pushed fixes waiting for a test
-   Claude can run (D-58) or for Mark's device checks
+   (#95 acceptance checklist, #96/#97 findings), then 16 live fixes closed under D-58 with their tests; 35 remain:
+   real work, live measurements and Mark's device checks
 2. **iPhone screen review** — from the #92 pictures: mockups for Library segments, Downloads as one page, one album
    template, a compact song action list; then one fix batch as build 16 with #59, #53, #54, #56
 3. **Brand audit** — web, iPhone and Watch against PigBrand 1.7.0 (taglines, nav labels, radii, Watch colour
