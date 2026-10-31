@@ -85,6 +85,36 @@ def boot(udid: str):
     )
 
 
+# A screenshot of the simulator before the relaunched app has drawn is a black
+# frame with a status bar, about 70 KB as PNG; any PigMusic screen is far larger.
+BLANK_BYTES = 150_000
+
+
+def settled_screenshot(udid: str, path: Path, wait: float) -> int:
+    """Shoot every 2 s until the picture is not blank and has stopped changing
+    (two consecutive shots within 2% in size), or wait x 4 seconds have passed.
+    Returns the size in bytes of the kept picture."""
+    deadline = time.monotonic() + max(wait, 2.0) * 4
+    time.sleep(min(wait, 2.0))
+    previous = -1
+    while True:
+        simctl("io", udid, "screenshot", str(path))
+        size = path.stat().st_size
+        settled = (
+            size > BLANK_BYTES
+            and previous > 0
+            and abs(size - previous) <= previous * 0.02
+        )
+        if settled or time.monotonic() >= deadline:
+            if size <= BLANK_BYTES:
+                print(
+                    f"warning: {path.name} looks blank ({size} bytes)", file=sys.stderr
+                )
+            return size
+        previous = size
+        time.sleep(2.0)
+
+
 def photograph(
     udid: str, app: Path, out: Path, wait: float, bundle_id: str
 ) -> list[Path]:
@@ -93,22 +123,13 @@ def photograph(
     taken = []
     for appearance in APPEARANCES:
         simctl("ui", udid, "appearance", appearance)
-        first = True
         for name, arguments in SCREENS:
-            simctl(
-                "launch",
-                "--terminate-running-process",
-                udid,
-                bundle_id,
-                "--demo",
-                *arguments,
-            )
-            time.sleep(wait * (2 if first else 1))  # The first launch is cold.
-            first = False
+            simctl("terminate", udid, bundle_id, check=False)
+            simctl("launch", udid, bundle_id, "--demo", *arguments)
             path = out / f"{name}-{appearance}.png"
-            simctl("io", udid, "screenshot", str(path))
+            size = settled_screenshot(udid, path, wait)
             taken.append(path)
-            print(f"{path}", file=sys.stderr)
+            print(f"{path} ({size // 1024} KB)", file=sys.stderr)
         simctl("terminate", udid, bundle_id, check=False)
     return taken
 
@@ -146,7 +167,10 @@ def main(argv=None):
     )
     parser.add_argument("--bundle-id", default=BUNDLE_ID)
     parser.add_argument(
-        "--wait", type=float, default=6.0, help="Seconds for a screen to settle"
+        "--wait",
+        type=float,
+        default=6.0,
+        help="Settle budget per screen; x4 is the cap",
     )
     parser.add_argument(
         "--list", action="store_true", help="Print the screens and exit"
