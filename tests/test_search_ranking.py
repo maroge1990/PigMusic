@@ -204,3 +204,33 @@ def test_a_compilation_only_artist_is_found_and_opens(tmp_path, monkeypatch):
         assert page.status_code == 200, page.text
         assert [t["id"] for t in page.json()["compilation_tracks"]] == ["u2"]
         assert page.json()["albums"] == []
+
+
+def test_a_server_artist_found_by_search_has_a_catalogue_identity(
+    tmp_path, monkeypatch
+):
+    """Opening a server artist outside the library asks for its identity;
+    that must not be a 404 (D-61)."""
+    from server.routes import discover
+
+    app, member, token = library(tmp_path, monkeypatch)
+    asked = []
+
+    async def resolve_artist(store, catalogue, client, artist, albums):
+        asked.append((artist["name"], [a["title"] for a in albums]))
+        return {"id": "mb-coldplay", "name": artist["name"]}
+
+    monkeypatch.setattr(discover, "resolve_artist", resolve_artist)
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token},
+    ) as client:
+        found = client.get("/api/v1/search/results", params={"q": "coldplay"}).json()
+        artist = found["artists"][0]
+        assert artist["in_library"] is False
+        identity = client.get("/api/v1/catalogue/library-artists/" + artist["id"])
+        assert identity.status_code == 200, identity.text
+        assert identity.json()["id"] == "mb-coldplay"
+        assert asked == [("Coldplay", ["Parachutes", "X&Y"])]
+        assert client.get("/api/v1/catalogue/library-artists/nobody").status_code == 404

@@ -246,8 +246,17 @@ def discover_router(store, catalogue, popularity=None, warmer=None, http_client=
         )
         artist = next((a for a in projection["artists"] if a["id"] == artist_id), None)
         if artist is None:
-            raise HTTPException(404, "Artist not found")
-        albums = [a for a in projection["albums"] if a["id"] in artist["album_ids"]]
+            # Search opens server artists outside the person's library (D-61):
+            # identify them from their playable server albums.
+            server = await asyncio.to_thread(
+                store.user_libraries.server_artist, artist_id
+            )
+            if server is None:
+                raise HTTPException(404, "Artist not found")
+            albums = server["albums"]
+            artist = {k: v for k, v in server.items() if k not in {"albums", "tracks"}}
+        else:
+            albums = [a for a in projection["albums"] if a["id"] in artist["album_ids"]]
         try:
             return await resolve_artist(
                 store, catalogue, request.app.state.http, artist, albums

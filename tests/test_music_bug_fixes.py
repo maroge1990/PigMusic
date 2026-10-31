@@ -85,7 +85,10 @@ def test_saved_artist_reuses_identity_and_scopes_access(tmp_path, monkeypatch):
     monkeypatch.setattr(Catalogue, "get", unexpected)
     with client_for(app, token) as client:
         path = "/api/v1/catalogue/library-artists/" + artist["id"]
-        assert client.get(path).status_code == 404
+        # Household music outside the member's library is a search result
+        # (D-61), so its artist opens too; an unknown id is still a 404.
+        assert client.get(path).json() == {"id": ARTIST, "name": artist["name"]}
+        assert client.get(path + "x").status_code == 404
         store.user_libraries.add(member, [track["id"]])
         assert client.get(path).json() == {"id": ARTIST, "name": artist["name"]}
 
