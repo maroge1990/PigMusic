@@ -1,0 +1,53 @@
+name: iPhone screenshots
+
+# On demand only (~15 min of macOS runner): builds the Debug app, boots a
+# simulator and photographs every screen light and dark from the demo library.
+# Download the `iphone-screens` artifact and open index.html.
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        description: "Simulator name (blank = newest iPhone)"
+        required: false
+        default: ''
+      wait:
+        description: "Seconds for each screen to settle"
+        required: false
+        default: '6'
+
+permissions:
+  contents: read
+
+jobs:
+  screens:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Cache Swift packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: swift/build/PigMusic/SourcePackages
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('swift/PigKit/Package.swift', 'swift/PigKit/Package.resolved', 'swift/PigMusic.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: swiftpm-${{ runner.os }}-
+      - name: Available simulators
+        run: xcrun simctl list devices available | grep -i iphone || true
+      - name: Debug iPhone build for the simulator
+        run: |
+          xcodebuild -quiet -project swift/PigMusic.xcodeproj -scheme PigMusic -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath swift/build/PigMusic \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO build
+      - name: Photograph every screen, light and dark
+        env:
+          DEVICE: ${{ inputs.device }}
+          WAIT: ${{ inputs.wait }}
+        run: |
+          python3 scripts/simulator_screens.py \
+            --app swift/build/PigMusic/Build/Products/Debug-iphonesimulator/PigMusic.app \
+            --out screens --wait "$WAIT" ${DEVICE:+--device "$DEVICE"}
+          { printf '### iPhone screens\n\n'; ls screens; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: iphone-screens
+          path: screens/
+          retention-days: 14
