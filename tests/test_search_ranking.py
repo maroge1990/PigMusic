@@ -234,3 +234,13 @@ def test_a_server_artist_found_by_search_has_a_catalogue_identity(
         assert identity.json()["id"] == "mb-coldplay"
         assert asked == [("Coldplay", ["Parachutes", "X&Y"])]
         assert client.get("/api/v1/catalogue/library-artists/nobody").status_code == 404
+
+
+def test_names_are_normalised_once_not_on_every_search():
+    """#54: normalising every server name on every search cost ~140 ms at
+    20,000 songs; the forms are remembered."""
+    search_rank.normalise.cache_clear()
+    for _ in range(3):
+        search_rank.named("yellow", "Yellow Submarine", "The Beatles")
+    info = search_rank.normalise.cache_info()
+    assert info.hits > info.misses

@@ -6,7 +6,14 @@ name), so a song-title search puts that song above unrelated artists and
 albums.
 """
 
-from .library import normalise
+from functools import lru_cache
+
+from .library import normalise as plain
+
+# Every search compares the query with every name on the server; the names
+# rarely change, so their normalised forms are remembered (#54: 20,000
+# songs took ~140 ms a search without it).
+normalise = lru_cache(maxsize=1 << 18)(plain)
 
 EXACT, START, WORDS, WORD_START, ANYWHERE, ALL_WORDS = 100, 80, 65, 55, 40, 30
 # A song or album found only by its artist's name ranks below anything whose
