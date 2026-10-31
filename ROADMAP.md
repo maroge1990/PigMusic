@@ -52,7 +52,7 @@ Reliability first (D-47). In order:
 
 ## Next (P1/P2)
 
-Pushed fixes stay open until Mark confirms them; the lists below are what is not yet built.
+Pushed fixes stay open until a test Claude can run has passed on them (D-58) or, for device checks, until Mark confirms; the lists below are what is not yet built.
 
 - Reliability: #17 export lock (needs Mark's device numbers) · #21 cold popularity · #22 Home mixes latency ·
   #25 harness attribution
