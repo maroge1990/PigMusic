@@ -1,5 +1,6 @@
 -r requirements.txt
 pytest>=8,<10
+pytest-xdist>=3.8,<4
 httpx>=0.27,<1
 black==25.1.0
 httpx2==2.13.1
