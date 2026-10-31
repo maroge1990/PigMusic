@@ -24,9 +24,16 @@ REGIONS = {
     "us": "United States",
     "gb": "United Kingdom",
 }
+# Apple's feed serves at most 100 entries per region (200 fails); Home keeps
+# up to 100 matched songs (Mark, 31 Oct: #55) and 12 albums. Each new entry
+# costs one rate-limited MusicBrainz match, cached a week.
+CHART_SIZE = 100
 CHART_URL = (
-    "https://rss.marketingtools.apple.com/api/v2/{}/music/most-played/25/{}.json"
+    "https://rss.marketingtools.apple.com/api/v2/{}/music/most-played/"
+    + str(CHART_SIZE)
+    + "/{}.json"
 )
+CHART_SONGS, CHART_ALBUMS = 100, 12
 SEED_POOL, SEED_LIMIT, NEW_RESOLUTIONS = 15, 5, 4
 RECOMMENDED_CAPS = {"artists": 6, "albums": 6, "songs": 8}
 RECOMMENDED_SOURCE = "Similar to artists in your library"
@@ -246,14 +253,19 @@ class HomeDiscovery:
             )
 
     async def apple_chart(self, client, region, kind):
-        response = await client.get(
-            CHART_URL.format(region, kind),
-            headers={
-                "User-Agent": "PigMusic/1.0 (https://github.com/maroge1990/Pig-Music)"
-            },
-            timeout=6,
-            follow_redirects=False,
-        )
+        # The feed sometimes answers 502 at once; one more try usually works.
+        for attempt in range(2):
+            response = await client.get(
+                CHART_URL.format(region, kind),
+                headers={
+                    "User-Agent": "PigMusic/1.0 (https://github.com/maroge1990/Pig-Music)"
+                },
+                timeout=6,
+                follow_redirects=False,
+            )
+            if response.status_code < 500 or attempt:
+                break
+            await asyncio.sleep(1)
         response.raise_for_status()
         if len(response.content) > 2_000_000:
             raise ValueError("Feed too large")
@@ -276,7 +288,10 @@ class HomeDiscovery:
         )
         matched = {"songs": [], "albums": []}
         failure, failures = None, 0
-        for kind, entries, cap in (("songs", songs, 10), ("albums", albums, 12)):
+        for kind, entries, cap in (
+            ("songs", songs, CHART_SONGS),
+            ("albums", albums, CHART_ALBUMS),
+        ):
             for entry in entries:
                 # One busy MusicBrainz reply skips an entry; a run of them stops.
                 if len(matched[kind]) >= cap or failures >= 3:

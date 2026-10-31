@@ -344,7 +344,7 @@ def test_popular_chart_is_apple_matched_to_musicbrainz_and_cached(tmp_path):
     assert first == second
     assert first["state"] == "ready" and first["title"] == "Popular in New Zealand"
     assert first["source"] == "Apple Music · New Zealand"
-    assert all("/nz/music/most-played/25/" in url for url in requests)
+    assert all("/nz/music/most-played/100/" in url for url in requests)
     assert not any("listenbrainz" in url for url in requests)
     assert len(requests) == 2
     assert [s["id"] for s in first["songs"]] == [RECORD]
@@ -492,3 +492,52 @@ def test_chart_region_is_validated(tmp_path):
         with pytest.raises(ValueError):
             save_settings(store, True, True, chart_region=bad)
     assert save_settings(store, True, True, chart_region="gb")["chart_region"] == "gb"
+
+
+def test_popular_chart_keeps_up_to_100_songs_and_retries_a_flaky_feed(tmp_path):
+    """#55 (Mark, 31 Oct): Apple's feed serves at most 100; Home keeps every
+    matched song up to 100, and one 502 from the feed is tried again."""
+    from server.catalogue import warming
+
+    store = Store(tmp_path)
+    entries = [
+        {"id": str(i), "name": f"Song {i}", "artistName": "Star"} for i in range(100)
+    ]
+    seen = []
+
+    def respond(request):
+        seen.append(request.url.path)
+        if len(seen) == 1:
+            return httpx.Response(502)
+        kind = request.url.path.rsplit("/", 1)[-1]
+        if kind == "songs.json":
+            return httpx.Response(200, json={"feed": {"results": entries}})
+        return httpx.Response(200, json={"feed": {"results": []}})
+
+    class Every:
+        async def get(self, client, path, **params):
+            title = params["query"].split('"')[1]
+            return {
+                "recordings": [
+                    {
+                        "id": "rec-" + title,
+                        "title": title,
+                        "artist-credit": [
+                            {"name": "Star", "artist": {"id": ARTIST, "name": "Star"}}
+                        ],
+                        "releases": [
+                            {"id": uid(41), "title": "R", "status": "Official"}
+                        ],
+                    }
+                ]
+            }
+
+    async def run():
+        warming.set(True)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            return await HomeDiscovery(store, Every()).popular(client)
+
+    chart = asyncio.run(run())
+    assert chart["state"] == "ready"
+    assert len(chart["songs"]) == 100
+    assert seen.count(seen[0]) == 2  # The 502 was asked again.
