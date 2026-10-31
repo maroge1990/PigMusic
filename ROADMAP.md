@@ -37,8 +37,10 @@ Reliability first (D-47), with Mark's player reports and iPhone search. In order
 
 1. **iPhone player fixes** — build 16 pushed 31 Oct (#98 spinner, #99 tap Up next, #100 ⋯ menu and favourite
    star); install and Mark's check
-2. **iPhone search** (Mark, 31 Oct: first, it is a big interaction point for new users) — #53 remake, after a short
-   design talk with Mark; #54 song search speed, measured first
+2. **iPhone search** (Mark, 31 Oct: first, it is a big interaction point for new users) — #53 remake in three stages
+   like Apple Music's (recent picks before typing, a mixed list while typing, Top results · Artists · Albums ·
+   Songs · Playlists after Search; one list with library marks, never split by where music lives); #54 song search
+   speed, measured first; #55 more popular songs in the same build
 3. **Live gates** — #90, #63, #16/#20 measurements; the first nightly scale-gate run (#91)
 4. **Release the server batch** (#94, #17, #96) under D-52 once CI is green and nobody is playing
 5. **T3 rig on Unraid** (#15): first run with a green main digest; then #22 and #43 on it; then the #93 trial
@@ -51,7 +53,7 @@ Pushed fixes stay open until a test Claude can run has passed on them (D-58) or,
 
 - Reliability: #17 export lock (steps now logged; gate after release) · #22 Home mixes latency · #25 harness
   attribution
-- Mark's requests: #59 album songs delay · #55 more popular songs · #56 tap-to-play mixes
+- Mark's requests: #59 album songs delay · #56 tap-to-play mixes
 - Product and admin: #23 progressive relay · #39 cellular checks (Mark)
 - Device acceptance (Mark, T5): #95, one checklist of the eleven former acceptance issues
 
