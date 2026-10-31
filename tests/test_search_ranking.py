@@ -108,3 +108,60 @@ def test_a_song_title_search_puts_the_song_first_whatever_its_home(
             assert (
                 client.get("/api/v1/search/results", params=params).status_code == 422
             )
+
+
+def test_server_results_are_playable_and_open_for_a_member_without_them(
+    tmp_path, monkeypatch
+):
+    """Codex round 1: unplayable server music is never a result, and a server
+    album or artist found by search opens for someone who hasn't added it."""
+    app, owner, member, token, track = household(tmp_path, monkeypatch)
+    tracks = [
+        {
+            **track,
+            "id": "ok",
+            "title": "Song",
+            "artist": "Band",
+            "album_artist": "Band",
+            "album": "Live",
+        },
+        {
+            **track,
+            "id": "gone",
+            "title": "Other",
+            "artist": "Ghost",
+            "album_artist": "Ghost",
+            "album": "Missing",
+            "available": False,
+        },
+    ]
+    (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": tracks}))
+    app.state.store.refresh_library()
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token},
+    ) as client:
+        ghost = client.get("/api/v1/search/results", params={"q": "ghost"}).json()
+        assert ghost["albums"] == [] and ghost["artists"] == []
+        assert ghost["top"] == []
+        missing = client.get("/api/v1/search/results", params={"q": "missing"}).json()
+        assert missing["albums"] == []
+
+        found = client.get("/api/v1/search/results", params={"q": "live"}).json()
+        album = found["albums"][0]
+        assert album["in_library"] is False
+        assert album["server_state"] == "household_available"
+        opened = client.get("/api/v1/albums/" + album["id"])
+        assert opened.status_code == 200, opened.text
+        assert [t["id"] for t in opened.json()["tracks"]] == ["ok"]
+        assert opened.json()["tracks"][0]["server_state"] == "household_available"
+        artist = client.get("/api/v1/search/results", params={"q": "band"}).json()
+        page = client.get("/api/v1/artists/" + artist["artists"][0]["id"])
+        assert page.status_code == 200, page.text
+        assert [a["id"] for a in page.json()["albums"]] == [album["id"]]
+        ghost_id = next(
+            a["id"] for a in app.state.store.library["artists"] if a["name"] == "Ghost"
+        )
+        assert client.get("/api/v1/artists/" + ghost_id).status_code == 404
+        assert "relative_path" not in opened.text + page.text

@@ -287,6 +287,10 @@ def personal_router(store, artist_jobs, recovery):
         data = await run(users.projection, identity(request))
         found = next((a for a in data["albums"] if a["id"] == album_id), None)
         if not found:
+            # Search finds server albums outside the library; they open too.
+            server = await run(users.server_album, album_id)
+            if server:
+                return server
             raise HTTPException(404, "Album not found")
         return {
             **{k: v for k, v in found.items() if k not in {"tracks", "cover_key"}},
@@ -298,6 +302,9 @@ def personal_router(store, artist_jobs, recovery):
         data = await run(users.projection, identity(request))
         found = next((a for a in data["artists"] if a["id"] == artist_id), None)
         if not found:
+            server = await run(users.server_artist, artist_id)
+            if server:
+                return server
             raise HTTPException(404, "Artist not found")
         albums = [
             {k: v for k, v in a.items() if k not in {"tracks", "cover_key"}}

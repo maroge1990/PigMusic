@@ -394,6 +394,22 @@ def add_pending(albums, household_albums, pending):
     return extra
 
 
+def playable(album):
+    """The album with only its playable songs; None when it has none."""
+    tracks = [t for t in album.get("tracks", []) if t.get("available", True)]
+    if not tracks:
+        return None
+    return {**album, "tracks": tracks, "track_count": len(tracks)}
+
+
+def household_track(track):
+    return {
+        **track_dto(track),
+        "household_available": True,
+        "server_state": "household_available",
+    }
+
+
 def track_dto(track):
     source_revision = hashlib.sha256(
         json.dumps(
@@ -805,13 +821,21 @@ class UserLibrary:
                 for t in album["tracks"]
                 if t["id"] not in mine["song"] and t.get("available", True)
             ]
-            albums = list(data["albums"]) + [
-                a for a in self.store.library["albums"] if a["id"] not in mine["album"]
-            ]
+            server_albums = {
+                a["id"]: a
+                for a in map(playable, self.store.library["albums"])
+                if a and a["id"] not in mine["album"]
+            }
+            albums = list(data["albums"]) + list(server_albums.values())
+            # Only artists with music someone can play here (Codex, stage 2).
+            playable_ids = {
+                a["id"] for a in map(playable, self.store.library["albums"]) if a
+            }
             artists = list(data["artists"]) + [
                 a
                 for a in self.store.library["artists"]
                 if a["id"] not in mine["artist"]
+                and playable_ids & set(a.get("album_ids") or [])
             ]
         lists = Playlists(self.store, user_id).list()
 
@@ -859,18 +883,16 @@ class UserLibrary:
         }
 
         def song(r):
-            if r["in_library"]:
-                return track_dto(r["item"])
-            return {
-                **track_dto(r["item"]),
-                "household_available": True,
-                "server_state": "household_available",
-            }
+            return (
+                track_dto(r["item"]) if r["in_library"] else household_track(r["item"])
+            )
 
         def album(r):
             value = {
                 k: v for k, v in r["item"].items() if k not in {"tracks", "cover_key"}
             }
+            if not r["in_library"]:
+                value["server_state"] = "household_available"
             return {**value, "in_library": r["in_library"]}
 
         return {
@@ -882,6 +904,54 @@ class UserLibrary:
                 for r in ranked["artist"][:limit]
             ],
             "playlists": [r["item"] for r in ranked["playlist"][:limit]],
+        }
+
+    def server_album(self, album_id):
+        """An album on the server but not in the person's library, as search
+        found it: only its playable songs, marked household (D-61)."""
+        with self.store.library_lock:
+            found = next(
+                (a for a in self.store.library["albums"] if a["id"] == album_id), None
+            )
+            album = playable(found) if found else None
+        if not album:
+            return None
+        return {
+            **{k: v for k, v in album.items() if k not in {"tracks", "cover_key"}},
+            "server_state": "household_available",
+            "tracks": [household_track(t) for t in album["tracks"]],
+        }
+
+    def server_artist(self, artist_id):
+        """An artist on the server but not in the person's library: the
+        albums with playable songs, marked household (D-61)."""
+        with self.store.library_lock:
+            found = next(
+                (a for a in self.store.library["artists"] if a["id"] == artist_id),
+                None,
+            )
+            if not found:
+                return None
+            ids = set(found.get("album_ids") or [])
+            albums = [
+                a
+                for a in map(playable, self.store.library["albums"])
+                if a and a["id"] in ids
+            ]
+        if not albums:
+            return None
+        return {
+            **found,
+            "album_ids": [a["id"] for a in albums],
+            "albums": [
+                {
+                    **{k: v for k, v in a.items() if k not in {"tracks", "cover_key"}},
+                    "server_state": "household_available",
+                }
+                for a in albums
+            ],
+            "tracks": [household_track(t) for a in albums for t in a["tracks"]],
+            "compilation_tracks": [],
         }
 
     def lookup(self, user_id, songs):
