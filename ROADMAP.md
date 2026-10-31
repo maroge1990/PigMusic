@@ -33,15 +33,17 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Now
 
-Reliability first (D-47), with Mark's player reports. In order:
+Reliability first (D-47), with Mark's player reports and iPhone search. In order:
 
-1. **iPhone player fixes** — Mark's 31 Oct reports (loading spinner, tap Up next, the ⋯ menu with favourite star);
-   with #59, #53, #54, #56 as native build 16
-2. **Live gates** — #90, #63, #16/#20 measurements; the first nightly scale-gate run (#91)
-3. **Release the server batch** (#94, #17, #96) under D-52 once CI is green and nobody is playing
-4. **T3 rig on Unraid** (#15): first run with a green main digest; then #22 and #43 on it; then the #93 trial
-5. **Parked:** the iPhone screen redesign and the brand audit (Mark, 31 Oct)
-6. **Later this week** — Mark's device checks; TestFlight; the rest of #42 and #96
+1. **iPhone player fixes** — build 16 pushed 31 Oct (#98 spinner, #99 tap Up next, #100 ⋯ menu and favourite
+   star); install and Mark's check
+2. **iPhone search** (Mark, 31 Oct: first, it is a big interaction point for new users) — #53 remake, after a short
+   design talk with Mark; #54 song search speed, measured first
+3. **Live gates** — #90, #63, #16/#20 measurements; the first nightly scale-gate run (#91)
+4. **Release the server batch** (#94, #17, #96) under D-52 once CI is green and nobody is playing
+5. **T3 rig on Unraid** (#15): first run with a green main digest; then #22 and #43 on it; then the #93 trial
+6. **Parked:** the iPhone screen redesign and the brand audit (Mark, 31 Oct)
+7. **Later this week** — Mark's device checks; TestFlight; #101; the rest of #42 and #96; #59, #56
 
 ## Next (P1/P2)
 
@@ -49,8 +51,7 @@ Pushed fixes stay open until a test Claude can run has passed on them (D-58) or,
 
 - Reliability: #17 export lock (steps now logged; gate after release) · #22 Home mixes latency · #25 harness
   attribution
-- Mark's requests: #59 album songs delay · #53 iOS search · #54 song search speed · #55 more popular songs ·
-  #56 tap-to-play mixes
+- Mark's requests: #59 album songs delay · #55 more popular songs · #56 tap-to-play mixes
 - Product and admin: #23 progressive relay · #39 cellular checks (Mark)
 - Device acceptance (Mark, T5): #95, one checklist of the eleven former acceptance issues
 
