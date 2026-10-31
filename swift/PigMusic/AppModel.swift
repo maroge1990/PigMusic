@@ -42,7 +42,7 @@ enum PlayOrigin: Hashable {
   var searchSession: SearchSession?
   var actionTrack: Track?
   /// Favourite state by song, shared by the player's star and Song actions.
-  var favourites: [String: Bool] = [:]
+  var favourites = FavouriteStates()
   /// Music requests the server is still getting, from the requests page summary.
   var serverActiveRequests = 0
   var pendingEdits: [PendingMutation] = []
@@ -710,22 +710,28 @@ enum PlayOrigin: Hashable {
     if let pending = pendingEdits.last(where: {
       $0.mutation.action == "favourite" && $0.mutation.track?.id == track.id
     }) {
-      favourites[track.id] = pending.mutation.favourite
+      // The edit waiting on this phone is the newest state.
+      if let value = pending.mutation.favourite { favourites.change(track.id, value) }
       return
     }
+    // A change made while this reads wins over what the read finds.
+    let revision = favourites.revision(track.id)
     if favourites[track.id] == nil {
-      favourites[track.id] = (try? await store?.cached(key, as: Bool.self)) ?? false
+      let cached = (try? await store?.cached(key, as: Bool.self)) ?? false
+      if favourites[track.id] == nil { favourites.answer(track.id, cached, since: revision) }
     }
-    if let confirmed = try? await readCatalogue({ try await $0.favourite(track) }) {
-      favourites[track.id] = confirmed
+    if let confirmed = try? await readCatalogue({ try await $0.favourite(track) }),
+      favourites.answer(track.id, confirmed, since: revision)
+    {
       try? await store?.cache(confirmed, key: key)
     }
   }
   /// Whether the server confirmed the change; false when it waits on this phone.
   func setFavourite(_ track: Track, _ value: Bool) async throws -> Bool {
+    favourites.invalidate(track.id)
     let confirmed = try await saveEdit(
       OfflineMutation(action: "favourite", track: track, favourite: value))
-    favourites[track.id] = value
+    favourites.change(track.id, value)
     try? await store?.cache(value, key: "favourite:" + track.id)
     return confirmed
   }
@@ -1230,7 +1236,7 @@ enum PlayOrigin: Hashable {
     searchSession?.clear()
     searchSession = nil
     actionTrack = nil
-    favourites = [:]
+    favourites.clear()
     mutationActive = false
     pendingEdits = []
     player.clearAccount()
