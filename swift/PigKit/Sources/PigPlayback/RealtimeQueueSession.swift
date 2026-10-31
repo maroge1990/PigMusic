@@ -297,6 +297,12 @@ public enum PlaybackSeek {
     }
     restart(index: snapshot.index + 1, seconds: 0, autoplay: snapshot.wantsPlayback)
   }
+  /// Plays the queue from `index`, as when an Up next song is tapped (#99).
+  public func select(index: Int) {
+    refreshPosition()
+    guard items.indices.contains(index) else { return }
+    restart(index: index, seconds: 0, autoplay: snapshot.wantsPlayback)
+  }
   public func previous() {
     refreshPosition()
     let index = snapshot.elapsed > 3 ? snapshot.index : max(0, snapshot.index - 1)

@@ -805,6 +805,23 @@ import PigSync
       checkpoint.queue.items.map(\.track), startingAt: checkpoint.queue.index,
       restored: checkpoint, artwork: artwork, resolve: resolve)
   }
+  /// Plays from a song in Up next (#99); the songs before it stay as history.
+  func jump(to id: UUID) {
+    guard let target = queue.items.firstIndex(where: { $0.id == id }), target > queue.index
+    else { return }
+    if let item = queue.current { onSkip?(item.track, listenSeconds) }
+    timeStart("skip")
+    if queueStart.waiting {
+      queue.select(index: target)
+      return beginDeferredAtStart()
+    }
+    if usingEngine {
+      engine?.select(index: target)
+    } else {
+      queue.select(index: target)
+      prepareStreaming()
+    }
+  }
   /// A person chose to move on, as opposed to the song finishing.
   func skip() {
     if let item = queue.current { onSkip?(item.track, listenSeconds) }

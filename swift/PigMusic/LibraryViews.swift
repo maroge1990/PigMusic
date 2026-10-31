@@ -637,13 +637,20 @@ private struct UpNextRow: View {
   let item: PlaybackOccurrence
   var body: some View {
     HStack(spacing: 12) {
-      ArtworkThumb(
-        model: model, source: item.track.artworkSource, title: item.track.title, size: 40)
-      VStack(alignment: .leading) {
-        Text(item.track.title).lineLimit(1)
-        Text(item.track.artist).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
-      }
-      Spacer()
+      // Tapping the song plays from it (#99); the menu edits the queue.
+      Button {
+        model.player.jump(to: item.id)
+      } label: {
+        HStack(spacing: 12) {
+          ArtworkThumb(
+            model: model, source: item.track.artworkSource, title: item.track.title, size: 40)
+          VStack(alignment: .leading) {
+            Text(item.track.title).lineLimit(1)
+            Text(item.track.artist).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
+          }
+          Spacer()
+        }.contentShape(Rectangle())
+      }.buttonStyle(.plain).accessibilityHint("Plays from this song")
       Menu {
         Button("Move earlier") { model.player.moveUpcoming(item.id, by: -1) }
         Button("Move later") { model.player.moveUpcoming(item.id, by: 1) }

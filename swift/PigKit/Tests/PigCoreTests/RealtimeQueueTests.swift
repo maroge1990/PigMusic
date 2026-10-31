@@ -743,6 +743,30 @@ private func queueRoot() throws -> URL {
     await session.stopAndWait()
     #expect(await sources.active.isEmpty)
   }
+  @Test @MainActor func selectingALaterSongPlaysFromItAndKeepsTheQueue() async throws {
+    let root = try queueRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let sources = QueueSources(files: [
+      "a": try queueFixture(root, id: "a", value: 0.2),
+      "b": try queueFixture(root, id: "b", value: 0.4),
+      "c": try queueFixture(root, id: "c", value: 0.6),
+    ])
+    let output = SilentQueueOutput()
+    let session = try RealtimeQueueSession(output: output)
+    let items = [queueTrack("a"), queueTrack("b"), queueTrack("c")]
+    session.replace(
+      items, acquire: { try await sources.get($0) }, release: { await sources.release($0) })
+    try await waitQueue { session.snapshot.state == .playing }
+    session.select(index: 2)
+    try await waitQueue {
+      session.snapshot.occurrenceID == items[2].id && session.snapshot.state == .playing
+    }
+    #expect(session.snapshot.index == 2)
+    session.select(index: 7)  // Out of range: nothing changes.
+    #expect(session.snapshot.occurrenceID == items[2].id)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
   @Test @MainActor func skipCancelsAwaitedUpcomingTransferInsteadOfWaitingForItsTimeout()
     async throws
   {
