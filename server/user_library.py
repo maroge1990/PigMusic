@@ -828,14 +828,23 @@ class UserLibrary:
             }
             albums = list(data["albums"]) + list(server_albums.values())
             # Only artists with music someone can play here (Codex, stage 2).
-            playable_ids = {
-                a["id"] for a in map(playable, self.store.library["albums"]) if a
+            playable_albums = [
+                a for a in map(playable, self.store.library["albums"]) if a
+            ]
+            playable_ids = {a["id"] for a in playable_albums}
+            # Compilation-only performers own no album; their credits count (#102).
+            credited = {
+                identifier("artist", normalise(t.get("artist", "")))
+                for a in playable_albums
+                for t in a["tracks"]
             }
             artists = list(data["artists"]) + [
                 a
                 for a in self.store.library["artists"]
                 if a["id"] not in mine["artist"]
-                and playable_ids & set(a.get("album_ids") or [])
+                and (
+                    playable_ids & set(a.get("album_ids") or []) or a["id"] in credited
+                )
             ]
         lists = Playlists(self.store, user_id).list()
 
@@ -933,12 +942,17 @@ class UserLibrary:
             if not found:
                 return None
             ids = set(found.get("album_ids") or [])
-            albums = [
-                a
-                for a in map(playable, self.store.library["albums"])
-                if a and a["id"] in ids
+            every = [a for a in map(playable, self.store.library["albums"]) if a]
+            albums = [a for a in every if a["id"] in ids]
+            # Songs credited to them on other albums (compilations, #102).
+            credits = [
+                t
+                for a in every
+                if a["id"] not in ids
+                for t in a["tracks"]
+                if identifier("artist", normalise(t.get("artist", ""))) == artist_id
             ]
-        if not albums:
+        if not albums and not credits:
             return None
         return {
             **found,
@@ -951,7 +965,7 @@ class UserLibrary:
                 for a in albums
             ],
             "tracks": [household_track(t) for a in albums for t in a["tracks"]],
-            "compilation_tracks": [],
+            "compilation_tracks": [household_track(t) for t in credits],
         }
 
     def lookup(self, user_id, songs):

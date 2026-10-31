@@ -165,3 +165,42 @@ def test_server_results_are_playable_and_open_for_a_member_without_them(
         )
         assert client.get("/api/v1/artists/" + ghost_id).status_code == 404
         assert "relative_path" not in opened.text + page.text
+
+
+def test_a_compilation_only_artist_is_found_and_opens(tmp_path, monkeypatch):
+    """#102: a performer only on a Various Artists album owns no album, but
+    their playable songs make them a search result with a page."""
+    app, owner, member, token, track = household(tmp_path, monkeypatch)
+    tracks = [
+        {
+            **track,
+            "id": "u2",
+            "title": "One",
+            "artist": "U2",
+            "album_artist": "Various Artists",
+            "album": "Hits",
+            "compilation": True,
+        },
+        {
+            **track,
+            "id": "other",
+            "title": "Two",
+            "artist": "Someone",
+            "album_artist": "Various Artists",
+            "album": "Hits",
+            "compilation": True,
+        },
+    ]
+    (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": tracks}))
+    app.state.store.refresh_library()
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token},
+    ) as client:
+        found = client.get("/api/v1/search/results", params={"q": "u2"}).json()
+        assert [a["name"] for a in found["artists"]] == ["U2"]
+        page = client.get("/api/v1/artists/" + found["artists"][0]["id"])
+        assert page.status_code == 200, page.text
+        assert [t["id"] for t in page.json()["compilation_tracks"]] == ["u2"]
+        assert page.json()["albums"] == []
