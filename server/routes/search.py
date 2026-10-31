@@ -8,6 +8,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from .. import search_match
 from ..apple_search import AppleSearch
 from ..library import normalise
 from ..media import chart_region, settings
@@ -93,12 +94,10 @@ def search_router(store, home, apple=None):
             found = await apple.item(client, body.kind, body.apple_id)
             if not found:
                 raise HTTPException(404, "No such Apple music")
-            entry = {
-                "id": body.apple_id,
-                "name": found["title"],
-                "artistName": found["artist"],
-            }
-            item = await home.match_entry(client, body.kind + "s", entry)
+            # The exact version, never Home's studio-first chart match (#103).
+            item = await search_match.match(
+                store, home.catalogue, client, body.kind, found
+            )
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
             raise HTTPException(502, "catalogue_unavailable")
         if not item:

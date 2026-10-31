@@ -162,28 +162,29 @@ def test_online_search_and_resolve_routes(tmp_path, monkeypatch):
 
         matched = []
 
-        async def match_entry(http, kind, entry):
-            matched.append(entry)
+        async def match(store, catalogue, http, kind, item):
+            matched.append({"kind": kind, **item})
             return {
                 "id": "mb-recording",
-                "name": entry["name"],
-                "artist": entry["artistName"],
+                "name": item["title"],
+                "artist": item["artist"],
                 "artist_id": "mb-artist",
-                "kind": kind,
             }
 
-        monkeypatch.setattr(app.state.home, "match_entry", match_entry)
+        from server import search_match
+
+        monkeypatch.setattr(search_match, "match", match)
         # Codex (high): a device's title and artist are never trusted, since
         # the match is cached for everyone (Home's chart included).
         body = {"kind": "song", "apple_id": 11, "title": "Wrong", "artist": "Other"}
         resolved = client.post("/api/v1/search/resolve", json=body)
         assert resolved.status_code == 200, resolved.text
         assert resolved.json()["id"] == "mb-recording"
-        assert matched[-1] == {
-            "id": 11,
-            "name": "With or Without You",
-            "artistName": "U2",
-        }
+        assert (matched[-1]["apple_id"], matched[-1]["title"]) == (
+            11,
+            "With or Without You",
+        )
+        assert matched[-1]["artist"] == "U2" and matched[-1]["kind"] == "song"
         # An id search never returned is asked of Apple by id.
         lookups = len([r for r in seen if r.url.path == "/lookup"])
         album = client.post(
@@ -213,3 +214,107 @@ def test_online_search_and_resolve_routes(tmp_path, monkeypatch):
             )
     signed_out = TestClient(app, base_url="https://private.ts.net")
     assert signed_out.get("/api/v1/search/online", params={"q": "x"}).status_code == 401
+
+
+def recording(id, title="Song", disambiguation="", live=False, length=200000):
+    group = {"secondary-types": ["Live"] if live else []}
+    return {
+        "id": id,
+        "title": title,
+        "disambiguation": disambiguation,
+        "length": length,
+        "artist-credit": [{"name": "Band", "artist": {"id": "band", "name": "Band"}}],
+        "releases": [
+            {
+                "id": "r-" + id,
+                "title": "R",
+                "status": "Official",
+                "release-group": group,
+            }
+        ],
+    }
+
+
+class Catalogue:
+    def __init__(self, answers):
+        self.answers, self.asked = answers, []
+
+    async def get(self, client, path, **params):
+        self.asked.append((path, params))
+        return self.answers[path]
+
+
+def test_a_live_apple_song_never_opens_as_the_studio_recording(tmp_path):
+    """#103: versions stay distinct (PRODUCT.md), unlike Home's chart."""
+    from server import search_match
+    from server.store import Store
+
+    store = Store(tmp_path)
+    catalogue = Catalogue(
+        {
+            "recording/": {
+                "recordings": [
+                    recording("studio"),
+                    recording("live", disambiguation="live, 1987", length=230000),
+                    recording("live-release", live=True),
+                ]
+            }
+        }
+    )
+
+    def apple(apple_id, title, album=""):
+        return {
+            "apple_id": apple_id,
+            "title": title,
+            "artist": "Band",
+            "album": album,
+            "duration": 230,
+        }
+
+    async def run():
+        return [
+            await search_match.match(store, catalogue, None, "song", item)
+            for item in (
+                apple(1, "Song (Live at the Venue)"),
+                apple(2, "Song", "Live at the Venue"),
+                apple(3, "Song", "Studio Album"),
+                apple(4, "Song (Remix)"),
+            )
+        ]
+
+    live_title, live_album, studio, remix = asyncio.run(run())
+    assert live_title["id"] == "live"  # Same length breaks the tie.
+    assert live_album["id"] == "live"
+    assert studio["id"] == "studio"
+    assert remix is None  # No remix in MusicBrainz: nothing, not the studio song.
+    # The query uses the plain title; matches are kept apart from Home's chart.
+    assert catalogue.asked[0][1]["query"].startswith('recording:"song"')
+    assert store.read_document("search-match:v1:song:1")["item"]["id"] == "live"
+    assert not store.read_document("home-chart-match:v1:songs:1")
+
+
+def test_a_live_apple_album_matches_a_live_release_group(tmp_path):
+    from server import search_match
+    from server.store import Store
+
+    credit = [{"name": "Band", "artist": {"id": "band", "name": "Band"}}]
+    catalogue = Catalogue(
+        {
+            "release-group/": {
+                "release-groups": [
+                    {"id": "studio", "title": "Album", "artist-credit": credit},
+                    {
+                        "id": "live",
+                        "title": "Album",
+                        "secondary-types": ["Live"],
+                        "artist-credit": credit,
+                    },
+                ]
+            }
+        }
+    )
+    item = {"apple_id": 9, "title": "Album (Live)", "artist": "Band"}
+    found = asyncio.run(
+        search_match.match(Store(tmp_path), catalogue, None, "album", item)
+    )
+    assert found["id"] == "live"
