@@ -6,6 +6,8 @@ import json
 import secrets
 import time
 
+import pytest
+
 from server.auth import Auth
 from server.mixes import Mixes
 from server.store import Store
@@ -41,6 +43,7 @@ def household(tmp_path):
     return store, owner
 
 
+@pytest.mark.loop_timing
 def test_preparing_a_large_library_never_stalls_the_event_loop(tmp_path):
     store, owner = household(tmp_path)
     mixes = Mixes(store, None, None)

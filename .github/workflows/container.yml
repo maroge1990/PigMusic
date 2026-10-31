@@ -7,6 +7,9 @@ on:
     branches: [main, 'feature/**']
     tags: ['v*']
     paths: ['api/**', 'swift/PigKit/Sources/PigBrand/**', 'server/**', 'client/**', 'tests/**', 'scripts/**', 'Dockerfile', '.dockerignore', 'requirements*.txt', 'compose*.yaml', 'docs/OPERATIONS.md', '.github/workflows/container.yml']
+  schedule:
+    # Nightly scale gates on main, 03:00 Melbourne; see the steps marked `scale gate`.
+    - cron: '0 16 * * *'
   workflow_dispatch:
 
 permissions:
@@ -49,8 +52,41 @@ jobs:
             -e PYTHONDONTWRITEBYTECODE=1 -e PIG_MUSIC_PRELOAD=false -e PIG_MUSIC_EMBEDDED_ENGINE=false \
             -v "$GITHUB_WORKSPACE/tests:/tests:ro" \
             -v "$GITHUB_WORKSPACE:/source:ro" -e PIG_MUSIC_SOURCE=/source --entrypoint python \
-            pig-music:candidate -m pytest /tests -q -p no:cacheprovider --basetemp=/tmp/pig-tests
+            pig-music:candidate -m pytest /tests -q -p no:cacheprovider --basetemp=/tmp/pig-tests \
+            -n 4 -m "not loop_timing"
+      - name: Event-loop timing gates (reported, not blocking)
+        # Stall limits of 0.2-0.5 s trip at random on shared runners (GC pauses,
+        # noisy neighbours). They stay strict locally and on the Unraid verify;
+        # here a failure is written to the summary instead of failing the push.
+        id: loop_timing
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          docker run --rm --network none --memory=1g --user 99:100 \
+            --tmpfs /tmp:rw,uid=99,gid=100 --tmpfs /data:rw,uid=99,gid=100 \
+            -e PYTHONDONTWRITEBYTECODE=1 -e PIG_MUSIC_PRELOAD=false -e PIG_MUSIC_EMBEDDED_ENGINE=false \
+            -v "$GITHUB_WORKSPACE/tests:/tests:ro" \
+            -v "$GITHUB_WORKSPACE:/source:ro" -e PIG_MUSIC_SOURCE=/source --entrypoint python \
+            pig-music:candidate -m pytest /tests -q -p no:cacheprovider --basetemp=/tmp/pig-timing \
+            -m loop_timing -rf | tee loop-timing.txt
+      - name: Report the timing gates
+        run: |
+          if [ "${{ steps.loop_timing.outcome }}" = success ]; then
+            printf '### Event-loop timing gates\n\nPassed.\n' >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '### Event-loop timing gates\n\n:warning: Failed on this runner (not blocking).\n\n```\n' >> "$GITHUB_STEP_SUMMARY"
+            tail -n 40 loop-timing.txt >> "$GITHUB_STEP_SUMMARY"
+            printf '\n```\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Native OpenAPI contract matches the server
+        run: |
+          docker run --rm --network none -e PYTHONDONTWRITEBYTECODE=1 -e PIG_MUSIC_PRELOAD=false \
+            -v "$GITHUB_WORKSPACE:/source:ro" -w /source --entrypoint python \
+            pig-music:candidate -m scripts.export_openapi --check
+      # The three scale gates (~3.5 min) run nightly on main, on a manual run and on
+      # release tags; `deploy_unraid.py` repeats them before every release.
       - name: Artwork scale gate under 1 GB
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
         run: |
           set -euo pipefail
           docker run --rm --network none --memory=1g \
@@ -60,6 +96,7 @@ jobs:
             -e PYTHONDONTWRITEBYTECODE=1 --entrypoint python pig-music:candidate \
             scripts/benchmark_delivery.py | tee delivery-benchmark.json
       - name: Two-user native sync scale gate under 1 GB
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
         run: |
           set -euo pipefail
           docker run --rm --network none --memory=1g \
@@ -69,6 +106,7 @@ jobs:
             -e PYTHONDONTWRITEBYTECODE=1 --entrypoint python pig-music:candidate - \
             < scripts/benchmark_disjoint_sync.py | tee disjoint-sync-benchmark.json
       - name: Two-person mix preparation and rotation under 1 GB
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
         run: |
           docker run --rm --network none --memory=1g \
             -e PYTHONDONTWRITEBYTECODE=1 --entrypoint python pig-music:candidate \
@@ -88,14 +126,14 @@ jobs:
           npm run build
           npm run test:e2e
       - name: Log in to GitHub Container Registry
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish tested image
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         env:
           REVISION: ${{ github.sha }}
           REF_TYPE: ${{ github.ref_type }}
@@ -115,6 +153,8 @@ jobs:
           fi
           digest=$(docker inspect --format '{{index .RepoDigests 0}}' "$image:sha-$REVISION")
           printf '### Tested container\n\n`%s`\n\nSource commit: `%s`\n' "$digest" "$REVISION" >> "$GITHUB_STEP_SUMMARY"
-          printf '\n### Artwork benchmark\n\n```json\n' >> "$GITHUB_STEP_SUMMARY"
-          cat artwork-benchmark.json >> "$GITHUB_STEP_SUMMARY"
-          printf '\n```\n' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f artwork-benchmark.json ]; then
+            printf '\n### Artwork benchmark\n\n```json\n' >> "$GITHUB_STEP_SUMMARY"
+            cat artwork-benchmark.json >> "$GITHUB_STEP_SUMMARY"
+            printf '\n```\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
