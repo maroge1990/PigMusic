@@ -644,18 +644,17 @@ class Store:
         return True
 
     @staticmethod
-    def retire(original, trash, sha256):
-        """Move a replaced file into Trash, both copies checked; False while
-        it can't be done yet (the row is tried again later)."""
-        from .exporter import digest
+    def retire(original, trash, sha256, root):
+        """Move a replaced file into root's Trash, both copies checked; False
+        while it can't be done yet (the row is tried again later)."""
+        from .exporter import contained, digest
 
         if not original.exists():
             return trash.is_file() and digest(trash) == sha256
         if digest(original) != sha256:
             return False
         trash.parent.mkdir(parents=True, exist_ok=True)
-        top = next(p for p in trash.parents if p.name == ".pig-music-trash")
-        ignore = top / ".plexignore"
+        ignore = contained(root, ".pig-music-trash/.plexignore")
         try:
             with ignore.open("x", encoding="utf-8") as stream:
                 stream.write("*\n")
@@ -780,7 +779,7 @@ class Store:
                         or digest(replacement) != current["sha256"]
                     ):
                         continue
-                    if not self.retire(original, trash, old["sha256"]):
+                    if not self.retire(original, trash, old["sha256"], nas):
                         continue
                     with self.connect() as conn:
                         conn.execute(
@@ -811,13 +810,15 @@ class Store:
                     ):
                         continue
                 # Export off: the old file still goes to Trash, never deleted.
-                trash = (
-                    root / ".pig-music-trash" / request_id / old["relative_path"]
-                ).resolve()
-                if (
-                    original.exists()
-                    and trash.is_relative_to(root)
-                    and not self.retire(original, trash, old["sha256"])
+                # contained() refuses a symlinked or escaping Trash path; the
+                # row then stays for a later try.
+                from .exporter import contained
+
+                trash = contained(
+                    root, ".pig-music-trash/" + request_id + "/" + old["relative_path"]
+                )
+                if original.exists() and not self.retire(
+                    original, trash, old["sha256"], root
                 ):
                     continue
                 with self.connect() as conn:

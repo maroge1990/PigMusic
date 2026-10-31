@@ -569,3 +569,51 @@ def test_aac_saved_track_is_upgraded_daily_without_fallback(tmp_path, aac_audio)
     calls.clear()
     worker.process(retry)
     assert "jiosaavn" not in calls
+
+
+@pytest.mark.parametrize("inside", [True, False])
+def test_a_symlinked_trash_keeps_the_replaced_file_and_its_cleanup_row(
+    tmp_path, inside
+):
+    """Codex round 1: a Trash folder that is a symlink must not lose the old
+    file, drop its cleanup row or stop the cleanup pass."""
+    store = Store(tmp_path / "data")
+    root = tmp_path / "data" / "downloads" / "library"
+    root.mkdir(parents=True)
+    elsewhere = root / "archive" if inside else tmp_path / "outside"
+    elsewhere.mkdir()
+    (root / ".pig-music-trash").symlink_to(elsewhere)
+    old, new = root / "old.mp3", root / "new.flac"
+    old.write_bytes(b"old")
+    new.write_bytes(b"new")
+    with store.connect() as conn:
+        conn.execute(
+            "INSERT INTO acquired VALUES (?,?)",
+            (
+                "track",
+                json.dumps(
+                    {
+                        "relative_path": new.name,
+                        "sha256": hashlib.sha256(b"new").hexdigest(),
+                    }
+                ),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO quality_cleanup VALUES (?,?,?)",
+            (
+                "request",
+                "track",
+                json.dumps(
+                    {
+                        "relative_path": old.name,
+                        "sha256": hashlib.sha256(b"old").hexdigest(),
+                    }
+                ),
+            ),
+        )
+    store.cleanup_replacements()
+    assert old.read_bytes() == b"old"
+    assert not any(elsewhere.iterdir())
+    with store.connect() as conn:
+        assert conn.execute("SELECT 1 FROM quality_cleanup").fetchall()
