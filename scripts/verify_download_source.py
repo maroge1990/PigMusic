@@ -121,9 +121,7 @@ def verify(source, target, output, metadata_only=False, mix_cache=False, profile
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--source", required=True, choices=("youtube", "soundcloud", "monochrome")
-    )
+    parser.add_argument("--source", required=True, choices=("soundcloud", "monochrome"))
     parser.add_argument(
         "--track",
         required=True,

@@ -13,7 +13,6 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
-from urllib.parse import quote_plus
 
 import httpx
 from yt_dlp import YoutubeDL
@@ -138,8 +137,6 @@ class GuardedRH(RequestHandler):
 
 
 def canonical(source, identity):
-    if source == "youtube" and re.fullmatch(r"[A-Za-z0-9_-]{11}", identity):
-        return "https://www.youtube.com/watch?v=" + identity
     # SoundCloud public permalink paths must remain inside its canonical host.
     if source == "soundcloud" and re.fullmatch(
         r"[A-Za-z0-9_-]{1,150}/[A-Za-z0-9_-]{1,200}", identity
@@ -153,14 +150,11 @@ def candidate(info, source, profile):
     choices = formats(info, profile)
     if not fields or not choices:
         return None
-    if source == "youtube":
-        identity = str(info.get("id") or "")
-    else:
-        from urllib.parse import urlsplit
+    from urllib.parse import urlsplit
 
-        url = info.get("webpage_url") or ""
-        validate_url(url, ("soundcloud.com",))
-        identity = urlsplit(url).path.strip("/")
+    url = info.get("webpage_url") or ""
+    validate_url(url, ("soundcloud.com",))
+    identity = urlsplit(url).path.strip("/")
     canonical(source, identity)
     return {**fields, **choices[0], "source": source, "provider_track_id": identity}
 
@@ -172,11 +166,8 @@ def search(ydl, query, source, profile, limit):
         if not entry:
             continue
         try:
-            if source == "youtube":
-                url = canonical(source, str(entry.get("id") or ""))
-            else:
-                url = entry.get("webpage_url") or entry.get("url") or ""
-                validate_url(url, ("soundcloud.com",))
+            url = entry.get("webpage_url") or entry.get("url") or ""
+            validate_url(url, ("soundcloud.com",))
             info = ydl.extract_info(url, download=False)
             result = candidate(info, source, profile)
             if result:
@@ -224,7 +215,8 @@ def execute(request):
         "external_downloader": None,
         "postprocessors": [],
         "max_filesize": context.max_bytes,
-        "js_runtimes": {"node": {}},
+        # SoundCloud needs no JavaScript runtime; none is offered.
+        "js_runtimes": {},
         "remote_components": set(),
         "proxy": "",
         "extract_flat": "in_playlist",
@@ -235,8 +227,6 @@ def execute(request):
         "format": "bestaudio",
         "plugin_dirs": [],
     }
-    if request.get("cookie_path") and source == "youtube":
-        options["cookiefile"] = request["cookie_path"]
     plugin_dirs.value = []
 
     # HlsFD can delegate unsupported manifests to FFmpeg even with native HLS
@@ -257,28 +247,12 @@ def execute(request):
         )
         operation = request["operation"]
         if operation == "check":
-            url = (
-                "https://www.youtube.com"
-                if source == "youtube"
-                else "https://soundcloud.com"
-            )
-            with ydl.urlopen(url) as response:
+            with ydl.urlopen("https://soundcloud.com") as response:
                 response.read(65536)
             return {"metadata_reachable": True}
         if operation == "search":
             limit = min(request.get("limit", 8), 8)
-            if source == "soundcloud":
-                query = f"scsearch{limit}:" + request["query"]
-            elif request.get("catalogue") == "music":
-                # YouTube Music song results are the official "Topic" audio
-                # uploads with structured credits.
-                query = (
-                    "https://music.youtube.com/search?q="
-                    + quote_plus(request["query"])
-                    + "#songs"
-                )
-            else:
-                query = f"ytsearch{limit}:" + request["query"]
+            query = f"scsearch{limit}:" + request["query"]
             ydl.params["playlistend"] = limit
             return {"candidates": search(ydl, query, source, profile, limit)}
         if operation != "transfer":

@@ -1,10 +1,8 @@
 """Shared source orchestration used by acquisition and owner diagnostics."""
 
-import shutil
 import time
 
 from .contracts import Context, ProviderError
-from .credentials import Cookies
 from .extractor import Extractor
 from .health import Health
 from .monochrome import Monochrome
@@ -14,10 +12,9 @@ class Runtime:
     def __init__(self, store):
         self.store = store
         self.health = Health()
-        self.cookies = Cookies(store.directory)
-        self.adapters = {
-            source: Extractor(source) for source in ("youtube", "soundcloud")
-        }
+        # YouTube was removed as a source (D-60); its saved session goes too.
+        (store.directory / "youtube-cookies.txt").unlink(missing_ok=True)
+        self.adapters = {"soundcloud": Extractor("soundcloud")}
         # Invalid operator config should leave unrelated sources usable.
         try:
             self.adapters["monochrome"] = Monochrome()
@@ -25,12 +22,10 @@ class Runtime:
             pass
 
     def configured(self, source):
-        if source in {"youtube", "soundcloud"}:
+        if source == "soundcloud":
             import importlib.util
 
-            return importlib.util.find_spec("yt_dlp") is not None and (
-                source != "youtube" or shutil.which("node") is not None
-            )
+            return importlib.util.find_spec("yt_dlp") is not None
         if source == "monochrome":
             return source in self.adapters
         if source == "soulseek":
@@ -40,11 +35,7 @@ class Runtime:
     def search(self, source, target, context):
         if not self.configured(source):
             raise ProviderError("not_configured")
-        with (
-            self.health.operation(source),
-            self.cookies.snapshot() if source == "youtube" else _anonymous() as cookie,
-        ):
-            context.cookie_path = cookie
+        with self.health.operation(source):
             try:
                 results = self.adapters[source].search(target, context)
             except ProviderError as exc:
@@ -54,11 +45,7 @@ class Runtime:
             return results
 
     def transfer(self, source, candidate, path, context):
-        with (
-            self.health.operation(source),
-            self.cookies.snapshot() if source == "youtube" else _anonymous() as cookie,
-        ):
-            context.cookie_path = cookie
+        with self.health.operation(source):
             try:
                 return self.adapters[source].transfer(candidate, path, context)
             except ProviderError as exc:
@@ -76,9 +63,6 @@ class Runtime:
                 "profiles": sorted(spec.profiles),
                 "configured": self.configured(source),
                 "enabled": source in settings["sources"],
-                "session_configured": (
-                    self.cookies.configured() if source == "youtube" else False
-                ),
                 **self.health.snapshot(source),
             }
             for source, spec in REGISTRY.items()
@@ -94,17 +78,13 @@ class Runtime:
         with self.health.operation(source):
             try:
                 if source in self.adapters:
-                    with (
-                        self.cookies.snapshot() if source == "youtube" else _anonymous()
-                    ) as cookie:
-                        self.adapters[source].check(
-                            Context(
-                                "native_standard",
-                                cookie_path=cookie,
-                                deadline=time.monotonic() + 30,
-                                max_bytes=2_000_000,
-                            )
+                    self.adapters[source].check(
+                        Context(
+                            "native_standard",
+                            deadline=time.monotonic() + 30,
+                            max_bytes=2_000_000,
                         )
+                    )
                 elif source == "soulseek":
                     from ..soulseek import Soulseek
 
@@ -129,9 +109,3 @@ class Runtime:
                 self.health.outcome(source, error=error)
                 raise error from exc
         return next(value for value in self.statuses() if value["id"] == source)
-
-
-def _anonymous():
-    from contextlib import nullcontext
-
-    return nullcontext(None)

@@ -75,7 +75,6 @@ def test_soundcloud_title_only_uploads_are_credited_by_uploader_for_review():
     assert recording(upload, "soundcloud")["channel"] == "Artist"
     explicit = recording({**upload, "title": "Artist - Song"}, "soundcloud")
     assert explicit["identity_evidence"] == "explicit_credit"
-    assert recording(upload, "youtube") is None
 
 
 def test_an_uploader_named_like_the_artist_is_held_not_downloaded(

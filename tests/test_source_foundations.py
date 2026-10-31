@@ -58,7 +58,6 @@ def test_registry_settings_preserve_defaults_order_and_reject_unknown_sources(tm
         "freemp3cloud",
         "zvu4no",
         "jiosaavn",
-        "youtube",
         "soundcloud",
         "monochrome",
     }
@@ -79,6 +78,33 @@ def test_registry_settings_preserve_defaults_order_and_reject_unknown_sources(tm
         store.save_download_settings({"profile": "mp3_320", "sources": ["jiosaavn"]})
     with pytest.raises(ValueError, match="container"):
         REGISTRY["jiosaavn"].extension({"extension": "../../escape.mp3"})
+
+
+def test_settings_saved_with_youtube_keep_working_without_it(tmp_path):
+    """YouTube was removed as a source (D-60); settings saved before still
+    load and save, never search it, and its stored session is deleted."""
+    from server.providers.runtime import Runtime
+
+    store = Store(tmp_path)
+    saved = {
+        **store.download_settings(),
+        "enabled": True,
+        "profile": "native_standard",
+        "sources": ["youtube", "zvu4no"],
+    }
+    with store.connect() as conn:
+        conn.execute(
+            "INSERT INTO documents VALUES ('downloads',?) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",
+            (json.dumps(saved),),
+        )
+    cookies = tmp_path / "youtube-cookies.txt"
+    cookies.write_text("# Netscape HTTP Cookie File\n")
+    assert store.download_settings()["sources"] == ["zvu4no"]
+    store.save_download_settings({"concurrent_downloads": 2})
+    assert Store(tmp_path).download_settings()["sources"] == ["zvu4no"]
+    runtime = Runtime(store)
+    assert not cookies.exists()
+    assert "youtube" not in {status["id"] for status in runtime.statuses()}
 
 
 def test_known_identity_conflicts_cannot_pass_equal_names():

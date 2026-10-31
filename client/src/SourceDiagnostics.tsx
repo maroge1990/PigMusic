@@ -8,7 +8,6 @@ type Status = {
   profiles: string[];
   configured: boolean;
   enabled: boolean;
-  session_configured: boolean;
   metadata_reachable: boolean | null;
   last_transfer: string | null;
   last_transfer_at: number | null;
@@ -47,7 +46,7 @@ export function SourceDiagnostics() {
   }
   return (
     <details>
-      <summary>Source diagnostics and YouTube session</summary>
+      <summary>Source diagnostics</summary>
       <p>
         Metadata checks do not download audio. Audio is marked verified only
         after a complete recording passes validation. Temporary source failures
@@ -87,51 +86,6 @@ export function SourceDiagnostics() {
           </button>
         </div>
       ))}
-      <p>
-        YouTube can work anonymously. If access is required, upload a Netscape
-        cookie file containing only YouTube and Google cookies. Session data
-        stays on the server; removing it makes future operations anonymous.
-      </p>
-      <label className="download-option">
-        YouTube cookie file
-        <input
-          aria-label="YouTube cookie file"
-          type="file"
-          accept=".txt"
-          disabled={busy}
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            event.target.value = "";
-            if (!file) return;
-            if (file.size > 262144) {
-              setMessage("Choose a cookie file smaller than 256 KiB");
-              return;
-            }
-            void action(async () =>
-              api(`${root}/youtube/cookies`, {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ cookies: await file.text() }),
-              }),
-            );
-          }}
-        />
-      </label>
-      <p>
-        {sources.find((source) => source.id === "youtube")?.session_configured
-          ? "YouTube session configured"
-          : "YouTube uses anonymous access"}
-      </p>
-      <button
-        disabled={busy}
-        onClick={() =>
-          void action(() =>
-            api(`${root}/youtube/cookies`, { method: "DELETE" }),
-          )
-        }
-      >
-        Remove YouTube session
-      </button>
       <p role="status" aria-live="polite">
         {busy ? "Checking source…" : message}
       </p>

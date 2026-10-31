@@ -32,13 +32,6 @@ class ProviderSpec:
 
 
 REGISTRY = {
-    "youtube": ProviderSpec(
-        "youtube",
-        "YouTube",
-        frozenset({"native_standard", "aac_256"}),
-        frozenset({".m4a", ".opus"}),
-        adapter=True,
-    ),
     "soundcloud": ProviderSpec(
         "soundcloud",
         "SoundCloud",

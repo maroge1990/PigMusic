@@ -26,7 +26,7 @@ from server.providers.legacy import search as legacy_search
 from server.providers.runtime import Runtime
 from server.store import Store
 
-SOURCES = ("youtube", "soundcloud", "monochrome", "jiosaavn", "freemp3cloud", "zvu4no")
+SOURCES = ("soundcloud", "monochrome", "jiosaavn", "freemp3cloud", "zvu4no")
 # Paces sources that throttle or silently return empty pages when searched fast.
 GAPS = {"freemp3cloud": 2.5, "zvu4no": 1.0, "jiosaavn": 0.5}
 CHART_URL = (

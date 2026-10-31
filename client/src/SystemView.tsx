@@ -264,9 +264,9 @@ export function DownloadSettingsPanel({
         </label>
       ))}
       <p>
-        Sources are tried in the saved order; drag to reorder. YouTube usually
-        needs native audio quality; SoundCloud formats depend on each upload.
-        Monochrome supplies FLAC. Opus and Ogg playback depends on your player.
+        Sources are tried in the saved order; drag to reorder. SoundCloud
+        formats depend on each upload. Monochrome supplies FLAC. Opus and Ogg
+        playback depends on your player.
       </p>
       <SourceOrder
         sources={downloadSettings.sources}

@@ -11,11 +11,6 @@ export const sources: Record<string, { name: string; description: string }> = {
     description:
       "AAC 256 kbps; eligible for AAC and native audio; also used as the last-resort AAC fallback.",
   },
-  youtube: {
-    name: "YouTube",
-    description:
-      "Native Opus or AAC from independently matched full recordings.",
-  },
   soundcloud: {
     name: "SoundCloud",
     description: "Full recordings in the upload's supported native format.",
@@ -29,4 +24,8 @@ export const sources: Record<string, { name: string; description: string }> = {
 
 export const sourceIds = Object.keys(sources);
 
-export const sourceName = (id: string) => sources[id]?.name ?? id;
+// Removed sources keep their name in older download history (D-60).
+const retired: Record<string, string> = { youtube: "YouTube" };
+
+export const sourceName = (id: string) =>
+  sources[id]?.name ?? retired[id] ?? id;

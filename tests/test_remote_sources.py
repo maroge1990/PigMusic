@@ -132,7 +132,7 @@ def test_remote_falls_back_in_order_to_a_relayed_lossy_source(
     for step in ("jiosaavn no match", "zvu4no no match", "freemp3cloud found"):
         assert step in timing
     assert "freemp3cloud transfer " in timing
-    assert sorted(searched) == ["freemp3cloud", "youtube", "zvu4no"]
+    assert sorted(searched) == ["freemp3cloud", "zvu4no"]
     phases = [name for name, _ in traces[0].phases]
     for name in ("relay-cache", "jiosaavn-miss", "zvu4no-miss", "freemp3cloud-found"):
         assert name in phases, phases
@@ -150,7 +150,7 @@ def test_remote_falls_back_in_order_to_a_relayed_lossy_source(
     assert resolver.relay(found["relay"], "someone-else") is None
     # The fetched file is reused for the same recording.
     assert asyncio.run(run())["source"] == "freemp3cloud"
-    assert len(searched) == 3
+    assert len(searched) == 2
 
 
 def test_relay_cache_survives_restarts_expires_and_keeps_recent_plays(
@@ -176,7 +176,7 @@ def test_relay_cache_survives_restarts_expires_and_keeps_recent_plays(
     # Over budget, the least recently played copy goes first.
     monkeypatch.setattr(remote, "RELAY_BYTES", 15)
     for name, age in (("a", 300), ("b", 200), ("c", 100)):
-        stale = directory / f"{name * 32}.youtube.m4a"
+        stale = directory / f"{name * 32}.zvu4no.mp3"
         stale.write_bytes(b"x" * 10)
         os.utime(stale, (time.time() - age, time.time() - age))
     resolver.prune()
@@ -197,13 +197,13 @@ def test_playing_a_song_being_prepared_joins_that_work(tmp_path):
         def find(self, source, track):
             calls.append(source)
             release.wait(5)
-            if source != "youtube":
+            if source != "freemp3cloud":
                 raise ValueError("No recording matched.")
             return {"source": source}
 
         def download(self, source, track, candidate):
             self.directory.mkdir(parents=True, exist_ok=True)
-            path = self.directory / f"{self.name(track)}.youtube.m4a"
+            path = self.directory / f"{self.name(track)}.freemp3cloud.mp3"
             path.write_bytes(b"audio")
             return path
 
@@ -218,10 +218,10 @@ def test_playing_a_song_being_prepared_joins_that_work(tmp_path):
         return await playing
 
     found = asyncio.run(run())
-    assert found["source"] == "youtube"
+    assert found["source"] == "freemp3cloud"
     # One search per source, shared by the preparation and the play.
-    assert sorted(calls) == ["freemp3cloud", "youtube", "zvu4no"]
-    assert resolver.relay(found["relay"], "member")[1] == "audio/mp4"
+    assert sorted(calls) == ["freemp3cloud", "zvu4no"]
+    assert resolver.relay(found["relay"], "member")[1] == "audio/mpeg"
 
 
 def test_a_relayed_copy_plays_before_any_provider_is_asked(tmp_path):
@@ -307,17 +307,17 @@ def test_a_song_no_source_has_is_remembered_as_a_miss(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError):
         asyncio.run(play())
-    assert sorted(asked) == ["freemp3cloud", "jiosaavn", "youtube", "zvu4no"]
+    assert sorted(asked) == ["freemp3cloud", "jiosaavn", "zvu4no"]
     started = time.monotonic()
     with pytest.raises(ValueError):
         asyncio.run(play())
-    assert time.monotonic() - started < 1 and len(asked) == 4
+    assert time.monotonic() - started < 1 and len(asked) == 3
     # Once the miss has expired, the sources are asked again.
     for name, (_, kind, message) in list(resolver.misses.items()):
         resolver.misses[name] = (time.monotonic() - 1, kind, message)
     with pytest.raises(ValueError):
         asyncio.run(play())
-    assert len(asked) == 8
+    assert len(asked) == 6
 
 
 def test_a_network_failure_is_remembered_only_briefly():
@@ -360,7 +360,7 @@ def test_a_slow_source_gives_way_within_its_limit(tmp_path, monkeypatch):
         [ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=duration=3", str(fixture)],
         check=True,
     )
-    monkeypatch.setattr(remote, "DEFAULT_SEARCH_SECONDS", 0.3)
+    monkeypatch.setattr(remote, "SEARCH_SECONDS", 0.3)
     candidate = {
         "channel": "Artist",
         "title": "Song",
@@ -460,8 +460,7 @@ def test_a_transient_failure_is_never_a_long_miss(tmp_path, monkeypatch, trouble
     from server import remote
     from server.providers import network
 
-    monkeypatch.setattr(remote, "DEFAULT_SEARCH_SECONDS", 0.2)
-    monkeypatch.setattr(remote, "SEARCH_SECONDS", {})
+    monkeypatch.setattr(remote, "SEARCH_SECONDS", 0.2)
     candidate = {
         "channel": "Artist",
         "title": "Song",
@@ -640,7 +639,7 @@ def test_a_jiosaavn_outage_falls_back_to_relays_and_is_remembered_briefly(
     # answer, and the outcome is uncertain (503, minutes).
     with pytest.raises(TimeoutError):
         asyncio.run(play())
-    assert sorted(relayed) == ["freemp3cloud", "youtube", "zvu4no"]
+    assert sorted(relayed) == ["freemp3cloud", "zvu4no"]
     ((expiry, kind, _),) = resolver.misses.values()
     assert kind is TimeoutError
     assert expiry - time.monotonic() <= remote.FAILURE_SECONDS
@@ -654,16 +653,18 @@ def test_repeated_source_failures_cool_down_without_remembering_false_misses(
     from server import remote
     from server.providers.contracts import ProviderError
 
-    monkeypatch.setattr(remote, "SEARCH_SECONDS", {"youtube": 0.01})
+    # One limit for every relayed source: long enough for the instant
+    # answers, short enough that the slow fixture search times out.
+    monkeypatch.setattr(remote, "SEARCH_SECONDS", 0.1)
     calls = []
     restored = False
     loop_errors = []
 
     def find(source, track):
         calls.append(source)
-        if source == "youtube" and not restored:
+        if source == "freemp3cloud" and not restored:
             if failure == "timeout":
-                time.sleep(0.05)
+                time.sleep(0.3)
                 raise ValueError("late no match")
             raise ProviderError("access_required")
         raise ValueError("No recording matched.")
@@ -681,10 +682,10 @@ def test_repeated_source_failures_cool_down_without_remembering_false_misses(
                 song = {"artist": "Fixture", "title": str(index), "album": "Fixture"}
                 with pytest.raises(TimeoutError):
                     await resolver.shared(client, song)
-            assert calls.count("youtube") == 2
+            assert calls.count("freemp3cloud") == 2
             assert all(kind is TimeoutError for _, kind, _ in resolver.misses.values())
-            failures, _ = resolver.source_health[("youtube", "search")]
-            resolver.source_health[("youtube", "search")] = (
+            failures, _ = resolver.source_health[("freemp3cloud", "search")]
+            resolver.source_health[("freemp3cloud", "search")] = (
                 failures,
                 time.monotonic() - 1,
             )
@@ -693,15 +694,15 @@ def test_repeated_source_failures_cool_down_without_remembering_false_misses(
                 await resolver.shared(
                     client, {"artist": "Fixture", "title": "retry", "album": "Fixture"}
                 )
-            assert calls.count("youtube") == 3
-            assert ("youtube", "search") not in resolver.source_health
+            assert calls.count("freemp3cloud") == 3
+            assert ("freemp3cloud", "search") not in resolver.source_health
             # Let the old timed-out threads finish; their late failures are consumed.
-            await asyncio.sleep(0.08)
+            await asyncio.sleep(0.4)
 
     with caplog.at_level("INFO", logger="pig_music.remote"):
         asyncio.run(run())
-    assert "youtube cooling down" in caplog.text
-    assert "youtube healthy again" in caplog.text
+    assert "freemp3cloud cooling down" in caplog.text
+    assert "freemp3cloud healthy again" in caplog.text
     assert "exception was never retrieved" not in caplog.text.lower()
     assert not loop_errors
 
@@ -716,7 +717,7 @@ def test_repeated_transfer_access_failures_also_cool_down_the_source(
 
     def find(source, track):
         searched.append(source)
-        if source == "youtube":
+        if source == "freemp3cloud":
             return {"fixture": True}
         raise ValueError("No match")
 
@@ -734,13 +735,13 @@ def test_repeated_transfer_access_failures_also_cool_down_the_source(
                         client,
                         {"artist": "Fixture", "title": str(index), "album": "Fixture"},
                     )
-        assert searched.count("youtube") == 2
+        assert searched.count("freemp3cloud") == 2
 
     asyncio.run(run())
 
 
 def test_successful_fallback_searches_break_the_timeout_streak(tmp_path, monkeypatch):
-    """A fifth song only YouTube has stays playable after separated timeouts."""
+    """A fifth song only FreeMp3Cloud has stays playable after separated timeouts."""
     resolver = RemoteAudio(lambda *_: [], directory=tmp_path / "relay")
     searched = []
     fallback_finished = asyncio.Event()
@@ -751,7 +752,7 @@ def test_successful_fallback_searches_break_the_timeout_streak(tmp_path, monkeyp
     def find(source, track):
         index = int(track["title"])
         searched.append((source, index))
-        if source == "youtube":
+        if source == "freemp3cloud":
             if index in (0, 3):
                 raise TimeoutError("fixture source timeout")
             return {"fixture": True}
@@ -763,7 +764,7 @@ def test_successful_fallback_searches_break_the_timeout_streak(tmp_path, monkeyp
         try:
             return await original_search(source, track)
         finally:
-            if source == "youtube":
+            if source == "freemp3cloud":
                 fallback_finished.set()
 
     monkeypatch.setattr(resolver, "find", find)
@@ -778,12 +779,12 @@ def test_successful_fallback_searches_break_the_timeout_streak(tmp_path, monkeyp
                     client,
                     {"artist": "Fixture", "title": str(index), "album": "Fixture"},
                 )
-                assert found["source"] == ("youtube" if index == 4 else "zvu4no")
+                assert found["source"] == ("freemp3cloud" if index == 4 else "zvu4no")
                 # The lower-priority result must be handled before the next song.
                 await asyncio.wait_for(fallback_finished.wait(), 1)
-        assert [index for source, index in searched if source == "youtube"] == list(
-            range(5)
-        )
+        assert [
+            index for source, index in searched if source == "freemp3cloud"
+        ] == list(range(5))
 
     asyncio.run(run())
 
@@ -811,12 +812,14 @@ def test_old_search_success_cannot_clear_a_newer_cooldown(monkeypatch, late_outc
             raise TimeoutError("fixture source timeout")
 
         monkeypatch.setattr(resolver, "find", find)
-        old = asyncio.create_task(resolver.search_source("youtube", {"title": "old"}))
+        old = asyncio.create_task(
+            resolver.search_source("freemp3cloud", {"title": "old"})
+        )
         try:
             await asyncio.wait_for(entered.wait(), 1)
             for title in ("new-one", "new-two"):
                 with pytest.raises(TimeoutError):
-                    await resolver.search_source("youtube", {"title": title})
+                    await resolver.search_source("freemp3cloud", {"title": title})
             release.set()
             if late_outcome == "candidate":
                 assert await old == {"fixture": True}
@@ -824,7 +827,7 @@ def test_old_search_success_cannot_clear_a_newer_cooldown(monkeypatch, late_outc
                 with pytest.raises(ValueError, match="No recording matched"):
                     await old
             with pytest.raises(TimeoutError, match="cooling down"):
-                await resolver.search_source("youtube", {"title": "blocked"})
+                await resolver.search_source("freemp3cloud", {"title": "blocked"})
             assert "blocked" not in calls
         finally:
             release.set()

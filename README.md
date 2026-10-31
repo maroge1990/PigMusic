@@ -15,7 +15,7 @@ Private household music-library management in one Unraid container: shared setti
 - Personal accounts and libraries over shared files, joined by one-use invites.
 - Saved and catalogue browsing, artist portraits and backgrounds, discographies, popular music and recommendations.
 - Song, album and artist requests, optional monitoring, parallel transfers and a recoverable queue.
-- Seven acquisition sources: Soulseek, FreeMp3Cloud, zvu4no, JioSaavn, YouTube, SoundCloud and Monochrome. Each file is validated before publication, and nothing is ever transcoded to reach a quality.
+- Six acquisition sources: Soulseek, FreeMp3Cloud, zvu4no, JioSaavn, SoundCloud and Monochrome. Each file is validated before publication, and nothing is ever transcoded to reach a quality.
 - System, artist and album quality preferences, with replacement upgrades and downgrades.
 - Native scanning, reviewed naming and tagging, recoverable removal and undo.
 - Reviewed Apple XML imports, ordered playlists, favourites that never download.

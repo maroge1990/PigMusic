@@ -185,7 +185,7 @@ class Store:
         return self.summary()
 
     def download_settings(self):
-        return {
+        settings = {
             "enabled": False,
             "profile": "mp3_320",
             "sources": ["freemp3cloud", "zvu4no"],
@@ -195,6 +195,10 @@ class Store:
             "recheck_hours": 24,
             **self.read_document("downloads"),
         }
+        # Saved settings can name a source since removed (YouTube, D-60).
+        if isinstance(settings["sources"], list):
+            settings["sources"] = [s for s in settings["sources"] if s in REGISTRY]
+        return settings
 
     def save_download_settings(self, settings):
         previous = self.download_settings()

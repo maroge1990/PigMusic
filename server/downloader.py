@@ -110,7 +110,7 @@ def matches(target, candidate):
     strict = target.get("explicit_edition")
     if (
         strict
-        and candidate.get("source") in {"youtube", "soundcloud", "monochrome"}
+        and candidate.get("source") in {"soundcloud", "monochrome"}
         and target.get("album")
         and candidate.get("album")
         and folded(target["album"]) != folded(candidate["album"])

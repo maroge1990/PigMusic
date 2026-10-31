@@ -76,7 +76,6 @@ class Context:
     profile: str
     check: Callable = lambda: None
     progress: Callable = lambda received, total: None
-    cookie_path: str | None = None
     deadline: float = field(default_factory=lambda: time.monotonic() + 180)
     max_bytes: int = 160_000_000
 

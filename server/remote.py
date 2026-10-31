@@ -24,12 +24,11 @@ log = logging.getLogger("pig_music.remote")
 
 # After JioSaavn's direct stream, in coverage order (14 October 2026 test).
 # Lossless sources are never streamed.
-RELAYED = ("zvu4no", "freemp3cloud", "youtube")
+RELAYED = ("zvu4no", "freemp3cloud")
 LABELS = {
     "jiosaavn": "JioSaavn",
     "zvu4no": "zvu4no",
     "freemp3cloud": "FreeMp3Cloud",
-    "youtube": "YouTube",
 }
 MEDIA_TYPES = {".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".opus": "audio/ogg"}
 # Relayed songs stay for two weeks after they were last played, within 5 GB;
@@ -42,10 +41,9 @@ TOKEN_SECONDS = 6 * 3600
 # source or the network only briefly (REMOTE1: a miss took 30-35 s each time).
 MISS_SECONDS = 30 * 60
 FAILURE_SECONDS = 2 * 60
-# Each relayed source's search gets this long, from when they all start
-# (YouTube search took up to 15 s); a slower one counts as no match.
-SEARCH_SECONDS = {"youtube": 10}
-DEFAULT_SEARCH_SECONDS = 8
+# Each relayed source's search gets this long, from when they all start;
+# a slower one counts as no match.
+SEARCH_SECONDS = 8
 SOURCE_FAILURE_LIMIT = 2
 SOURCE_COOLDOWN_SECONDS = 120
 
@@ -95,10 +93,7 @@ class RemoteAudio:
         # A timed-out worker may still finish or raise. Always retrieve its result.
         search.add_done_callback(lambda t: t.cancelled() or t.exception())
         try:
-            candidate = await shared_result(
-                search,
-                SEARCH_SECONDS.get(source, DEFAULT_SEARCH_SECONDS),
-            )
+            candidate = await shared_result(search, SEARCH_SECONDS)
         except (TimeoutError, ProviderError) as exc:
             self.source_failed(source, "search", exc)
             raise
@@ -234,7 +229,7 @@ class RemoteAudio:
         def step(name, outcome, since):
             seconds = time.monotonic() - since
             steps.append(f"{name} {outcome} {seconds:.1f} s")
-            # The same steps in Server-Timing: "youtube-found", "jiosaavn-miss".
+            # The same steps in Server-Timing: "zvu4no-found", "jiosaavn-miss".
             outcome = {
                 "no match": "miss",
                 "transfer failed": "failed",
@@ -363,10 +358,7 @@ class RemoteAudio:
     def context(source):
         from .providers.contracts import Context
 
-        context = Context(
-            "native_standard",
-            deadline=time.monotonic() + (90 if source == "youtube" else 30),
-        )
+        context = Context("native_standard", deadline=time.monotonic() + 30)
         context.max_bytes = 40_000_000
         return context
 

@@ -165,7 +165,7 @@ Keep old manager recovery material, images, trash and backups until the owner re
 Owner diagnostics in Admin separate **metadata reachable** from **audio transfer verified**. For an authorised test recording (a JSON file with artist, title, album, duration and optional ISRCs), run:
 
 ```sh
-.venv/bin/python -m scripts.verify_download_source --source youtube|soundcloud|monochrome --track track.json --output <new-empty-dir>
+.venv/bin/python -m scripts.verify_download_source --source soundcloud|monochrome --track track.json --output <new-empty-dir>
 ```
 
 Add `--metadata-only` to skip the audio transfer. The harness uses fresh appdata and the real pipeline. Never reuse an output directory or point the harness at the household library. For each source, check:
@@ -177,7 +177,7 @@ Add `--metadata-only` to skip the audio transfer. The harness uses fresh appdata
 
 For temporary mix preparation, add `--mix-cache`. This verifies the real transfer and complete audio validation, reopens fresh state to verify cache persistence, checks that no queue/acquired/library-membership rows were created, then reclaims the unreferenced test audio. The report includes the measured codec/bitrate, size, hash and elapsed time. `--profile mp3_320` tests the default mix quality; `--profile native_standard` tests retained source-native audio. These tests use a new isolated output directory and explicitly override library/download paths, never household appdata or the NAS.
 
-The yt-dlp, EJS and Node runtimes are pinned in the image. Release changes to them only through CI. YouTube cookies are uploaded in Admin (Netscape format) and are never echoed back.
+yt-dlp (used only by SoundCloud) is pinned in the image. Release changes to it only through CI. YouTube is not a source (D-60); a YouTube session file left in appdata is deleted at startup.
 
 ## Native app installation (free Apple account)
 
