@@ -43,6 +43,9 @@ enum PlayOrigin: Hashable {
   var actionTrack: Track?
   /// Favourite state by song, shared by the player's star and Song actions.
   var favourites = FavouriteStates()
+  /// What this person opened or played from search, newest first (D-61).
+  private(set) var recentSearches = RecentSearches()
+  @ObservationIgnored private var recentSearchesLoaded = false
   /// Music requests the server is still getting, from the requests page summary.
   var serverActiveRequests = 0
   var pendingEdits: [PendingMutation] = []
@@ -703,6 +706,29 @@ enum PlayOrigin: Hashable {
     }
   }
 
+  func loadRecentSearches() async {
+    guard !recentSearchesLoaded, let store else { return }
+    let stamp = generation
+    let saved = try? await store.cached("search-recent", as: RecentSearches.self)
+    // A pick made while this read is newer than what was saved.
+    guard generation == stamp, !recentSearchesLoaded else { return }
+    recentSearchesLoaded = true
+    if let saved, recentSearches.picks.isEmpty { recentSearches = saved }
+  }
+  func rememberSearch(_ pick: RecentPick) {
+    recentSearches.add(pick)
+    saveRecentSearches()
+  }
+  func clearRecentSearches() {
+    recentSearches.clear()
+    saveRecentSearches()
+  }
+  private func saveRecentSearches() {
+    guard let store else { return }
+    recentSearchesLoaded = true
+    let value = recentSearches
+    Task { try? await store.cache(value, key: "search-recent") }
+  }
   /// A song's favourite state: a waiting edit or the cached answer at once,
   /// then the server's when it can be reached.
   func loadFavourite(_ track: Track) async {
@@ -1237,6 +1263,8 @@ enum PlayOrigin: Hashable {
     searchSession = nil
     actionTrack = nil
     favourites.clear()
+    recentSearches = RecentSearches()
+    recentSearchesLoaded = false
     mutationActive = false
     pendingEdits = []
     player.clearAccount()

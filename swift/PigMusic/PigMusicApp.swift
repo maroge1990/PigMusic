@@ -149,6 +149,8 @@ struct LibraryShell: View {
   @State private var selection: Destination = .home
   @State private var showPlayer = false
   @State private var showAccount = false
+  /// Counts choices of the Search tab, so its box takes the cursor each time.
+  @State private var searchFocus = 0
   /// The player's artist link: pushed onto the selected tab once the player closes.
   @State private var artistRoute: ArtistRoute?
   private var playing: Bool { model.player.queue.current != nil }
@@ -205,6 +207,9 @@ struct LibraryShell: View {
       Tab(value: Destination.search, role: .search) { stack(.search) }
     }
     .tabViewStyle(.sidebarAdaptable)
+    .onChange(of: selection) { _, chosen in
+      if chosen == .search { searchFocus += 1 }
+    }
     if #available(iOS 26.1, *) {
       view.tabBarMinimizeBehavior(.onScrollDown)
         .tabViewBottomAccessory(isEnabled: playing) {
@@ -225,7 +230,7 @@ struct LibraryShell: View {
         case .home: HomeView(model: model)
         case .library: LibraryView(model: model)
         case .downloads: DownloadsHubView(model: model)
-        case .search: SearchView(model: model)
+        case .search: SearchView(model: model, focusRequest: searchFocus)
         }
       }
       .pigCanvas()

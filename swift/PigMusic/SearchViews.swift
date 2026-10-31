@@ -6,7 +6,12 @@ import SwiftUI
 
 struct SearchView: View {
   @Bindable var model: AppModel
+  /// Rises each time the Search tab is chosen: the box takes the cursor and
+  /// the keyboard opens (D-61). Coming back from a result doesn't.
+  var focusRequest = 0
   @State private var query = ""
+  @State private var searching = false
+  @State private var handledFocus = 0
   var body: some View {
     Group {
       if let session = model.searchSession {
@@ -16,7 +21,15 @@ struct SearchView: View {
       }
     }
     .navigationTitle("Search")
-    .searchable(text: $query, prompt: "Songs, albums and artists")
+    // Always shown, never hidden until the page is pulled down.
+    .searchable(
+      text: $query, isPresented: $searching,
+      placement: .navigationBarDrawer(displayMode: .always),
+      prompt: "Songs, albums and artists"
+    )
+    .onAppear(perform: focusIfAsked)
+    .onChange(of: focusRequest) { focusIfAsked() }
+    .task { await model.loadRecentSearches() }
     .task(id: "\(model.artworkNamespace)|\(SearchText.clean(query))") {
       // Debounce typing; the previous results stay until new ones arrive.
       if SearchText.clean(query).isEmpty {
@@ -35,6 +48,12 @@ struct SearchView: View {
       }.disabled(SearchText.clean(query).isEmpty)
     }
   }
+  private func focusIfAsked() {
+    guard focusRequest != handledFocus else { return }
+    handledFocus = focusRequest
+    // Presenting in the same update as the tab change can be ignored.
+    Task { @MainActor in searching = true }
+  }
 }
 
 private struct SearchResultsView: View {
@@ -43,9 +62,13 @@ private struct SearchResultsView: View {
   var body: some View {
     List {
       if session.query.isEmpty {
-        ContentUnavailableView(
-          "Find music", systemImage: "magnifyingglass",
-          description: Text("Search your saved library, household music and the catalogue."))
+        if model.recentSearches.picks.isEmpty {
+          ContentUnavailableView(
+            "Find music", systemImage: "magnifyingglass",
+            description: Text("Search your saved library, household music and the catalogue."))
+        } else {
+          recent
+        }
       } else {
         Section("Your library") {
           status(
@@ -54,6 +77,7 @@ private struct SearchResultsView: View {
           ForEach(session.artists) { artist in
             NavigationLink {
               SearchArtistView(model: model, artist: artist)
+                .onAppear { model.rememberSearch(.artist(artist)) }
             } label: {
               HStack(spacing: 12) {
                 SavedArtistThumb(model: model, artist: artist)
@@ -64,6 +88,7 @@ private struct SearchResultsView: View {
           ForEach(session.albums) { album in
             NavigationLink {
               AlbumView(model: model, album: album)
+                .onAppear { model.rememberSearch(.album(album)) }
             } label: {
               HStack(spacing: 12) {
                 ArtworkThumb(model: model, source: album.artworkSource, title: album.title)
@@ -75,7 +100,10 @@ private struct SearchResultsView: View {
             }
           }
           ForEach(session.tracks) { song in
-            SongButton(model: model, track: song) { model.play([song]) }
+            SongButton(model: model, track: song) {
+              model.rememberSearch(.song(song))
+              model.play([song])
+            }
           }
           if session.localNext != nil {
             Button("More library results") { Task { await session.moreLocal() } }.disabled(
@@ -89,6 +117,7 @@ private struct SearchResultsView: View {
               empty: session.household.isEmpty)
             ForEach(session.household) { song in
               SongButton(model: model, track: song) {
+                model.rememberSearch(.song(song))
                 model.play([song], origin: .catalogue(artistId: nil))
               }
             }
@@ -107,6 +136,9 @@ private struct SearchResultsView: View {
               ForEach(session.catalogue) { artist in
                 NavigationLink {
                   CatalogueArtistView(model: model, artistId: artist.id, name: artist.name)
+                    .onAppear {
+                      model.rememberSearch(.catalogueArtist(id: artist.id, name: artist.name))
+                    }
                 } label: {
                   HStack(spacing: 12) {
                     Artwork(model: model, source: .artist(artist.id), title: artist.name, circle: true)
@@ -127,6 +159,68 @@ private struct SearchResultsView: View {
             }
           }
         }
+      }
+    }
+  }
+  /// Picks opened or played from search, newest first; tapping one does the
+  /// same again (D-61).
+  private var recent: some View {
+    Section {
+      ForEach(model.recentSearches.picks) { pick in
+        switch pick {
+        case .song(let song):
+          SongButton(model: model, track: song) {
+            model.rememberSearch(pick)
+            model.play(
+              [song],
+              origin: song.serverState == "household_available"
+                ? .catalogue(artistId: nil) : .library)
+          }
+        case .album(let album):
+          NavigationLink {
+            AlbumView(model: model, album: album).onAppear { model.rememberSearch(pick) }
+          } label: {
+            HStack(spacing: 12) {
+              ArtworkThumb(model: model, source: album.artworkSource, title: album.title)
+              VStack(alignment: .leading) {
+                Text(album.title)
+                Text("Album · " + album.artist).font(PigType.footnote).foregroundStyle(.secondary)
+              }
+            }
+          }
+        case .artist(let artist):
+          NavigationLink {
+            SearchArtistView(model: model, artist: artist).onAppear { model.rememberSearch(pick) }
+          } label: {
+            HStack(spacing: 12) {
+              SavedArtistThumb(model: model, artist: artist)
+              VStack(alignment: .leading) {
+                Text(artist.name)
+                Text("Artist").font(PigType.footnote).foregroundStyle(.secondary)
+              }
+            }
+          }
+        case .catalogueArtist(let id, let name):
+          NavigationLink {
+            CatalogueArtistView(model: model, artistId: id, name: name)
+              .onAppear { model.rememberSearch(pick) }
+          } label: {
+            HStack(spacing: 12) {
+              Artwork(model: model, source: .artist(id), title: name, circle: true)
+                .frame(width: 44, height: 44)
+              VStack(alignment: .leading) {
+                Text(name)
+                Text("Artist").font(PigType.footnote).foregroundStyle(.secondary)
+              }
+            }
+          }
+        }
+      }
+    } header: {
+      HStack {
+        Text("Recently searched")
+        Spacer()
+        Button("Clear") { model.clearRecentSearches() }.textCase(nil)
       }
     }
   }
