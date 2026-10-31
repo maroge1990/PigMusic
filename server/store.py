@@ -643,6 +643,35 @@ class Store:
         self.cleanup_attempts[request_id] = (state, now)
         return True
 
+    @staticmethod
+    def retire(original, trash, sha256):
+        """Move a replaced file into Trash, both copies checked; False while
+        it can't be done yet (the row is tried again later)."""
+        from .exporter import digest
+
+        if not original.exists():
+            return trash.is_file() and digest(trash) == sha256
+        if digest(original) != sha256:
+            return False
+        trash.parent.mkdir(parents=True, exist_ok=True)
+        top = next(p for p in trash.parents if p.name == ".pig-music-trash")
+        ignore = top / ".plexignore"
+        try:
+            with ignore.open("x", encoding="utf-8") as stream:
+                stream.write("*\n")
+        except FileExistsError:
+            if ignore.read_text(encoding="utf-8").strip() != "*":
+                return False
+        try:
+            os.link(original, trash)
+        except FileExistsError:
+            if digest(trash) != sha256:
+                return False
+        if digest(original) != sha256 or digest(trash) != sha256:
+            return False
+        original.unlink()
+        return True
+
     def retired_files(self, rows, current):
         """Old NAS files a quality replacement is retiring, by path: the old
         version's recorded content, while its replacement is in the library
@@ -751,29 +780,7 @@ class Store:
                         or digest(replacement) != current["sha256"]
                     ):
                         continue
-                    if original.exists():
-                        if digest(original) != old["sha256"]:
-                            continue
-                        trash.parent.mkdir(parents=True, exist_ok=True)
-                        ignore = contained(nas, ".pig-music-trash/.plexignore")
-                        try:
-                            with ignore.open("x", encoding="utf-8") as stream:
-                                stream.write("*\n")
-                        except FileExistsError:
-                            if ignore.read_text(encoding="utf-8").strip() != "*":
-                                continue
-                        try:
-                            os.link(original, trash)
-                        except FileExistsError:
-                            if digest(trash) != old["sha256"]:
-                                continue
-                        if (
-                            digest(original) != old["sha256"]
-                            or digest(trash) != old["sha256"]
-                        ):
-                            continue
-                        original.unlink()
-                    elif not trash.is_file() or digest(trash) != old["sha256"]:
+                    if not self.retire(original, trash, old["sha256"]):
                         continue
                     with self.connect() as conn:
                         conn.execute(
@@ -803,14 +810,16 @@ class Store:
                         != current["sha256"]
                     ):
                         continue
-                if original.exists():
-                    with original.open("rb") as stream:
-                        if (
-                            hashlib.file_digest(stream, "sha256").hexdigest()
-                            != old["sha256"]
-                        ):
-                            continue
-                    original.unlink()
+                # Export off: the old file still goes to Trash, never deleted.
+                trash = (
+                    root / ".pig-music-trash" / request_id / old["relative_path"]
+                ).resolve()
+                if (
+                    original.exists()
+                    and trash.is_relative_to(root)
+                    and not self.retire(original, trash, old["sha256"])
+                ):
+                    continue
                 with self.connect() as conn:
                     conn.execute(
                         "DELETE FROM quality_cleanup WHERE request_id=?", (request_id,)

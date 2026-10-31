@@ -134,7 +134,15 @@ def test_upgrade_and_downgrade_download_sources_keep_stable_identity_and_remove_
     assert downgraded["id"] == track_id and downgraded["codec"] == "mp3"
     assert downgraded["bitrate"] >= 300 and not flac.exists()
     assert calls == ["mp3_320", "lossless", "mp3_320"]
-    assert len(list(worker.library_root.rglob("*.*"))) == 1
+    trash = worker.library_root / ".pig-music-trash"
+    files = [p for p in worker.library_root.rglob("*.*") if p.is_file()]
+    assert len([p for p in files if not p.is_relative_to(trash)]) == 1
+    # Both replaced files (the first MP3, then the FLAC) wait in Trash.
+    assert sorted(p.suffix for p in trash.rglob("*") if p.is_file()) == [
+        "",
+        ".flac",
+        ".mp3",
+    ]
     assert store.library["stats"]["tracks"] == 1
 
 
@@ -258,6 +266,12 @@ def test_cleanup_requires_both_recorded_hashes_and_contained_paths(tmp_path):
     old.write_bytes(b"old")
     store.cleanup_replacements()
     assert not old.exists() and new.exists()
+    # With export off the replaced file goes to Trash, not away for good (#96).
+    trash = root / ".pig-music-trash" / "request" / "old.mp3"
+    assert trash.read_bytes() == b"old"
+    assert (root / ".pig-music-trash" / ".plexignore").read_text() == "*\n"
+    with store.connect() as conn:
+        assert not conn.execute("SELECT 1 FROM quality_cleanup").fetchall()
 
 
 def test_upgrade_scan_does_not_treat_unknown_quality_as_permission_to_downgrade(
