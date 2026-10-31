@@ -41,6 +41,8 @@ enum PlayOrigin: Hashable {
   var homeLoading: Set<HomeSection> = []
   var searchSession: SearchSession?
   var actionTrack: Track?
+  /// Favourite state by song, shared by the player's star and Song actions.
+  var favourites: [String: Bool] = [:]
   /// Music requests the server is still getting, from the requests page summary.
   var serverActiveRequests = 0
   var pendingEdits: [PendingMutation] = []
@@ -701,6 +703,32 @@ enum PlayOrigin: Hashable {
     }
   }
 
+  /// A song's favourite state: a waiting edit or the cached answer at once,
+  /// then the server's when it can be reached.
+  func loadFavourite(_ track: Track) async {
+    let key = "favourite:" + track.id
+    if let pending = pendingEdits.last(where: {
+      $0.mutation.action == "favourite" && $0.mutation.track?.id == track.id
+    }) {
+      favourites[track.id] = pending.mutation.favourite
+      return
+    }
+    if favourites[track.id] == nil {
+      favourites[track.id] = (try? await store?.cached(key, as: Bool.self)) ?? false
+    }
+    if let confirmed = try? await readCatalogue({ try await $0.favourite(track) }) {
+      favourites[track.id] = confirmed
+      try? await store?.cache(confirmed, key: key)
+    }
+  }
+  /// Whether the server confirmed the change; false when it waits on this phone.
+  func setFavourite(_ track: Track, _ value: Bool) async throws -> Bool {
+    let confirmed = try await saveEdit(
+      OfflineMutation(action: "favourite", track: track, favourite: value))
+    favourites[track.id] = value
+    try? await store?.cache(value, key: "favourite:" + track.id)
+    return confirmed
+  }
   @discardableResult func saveEdit(_ mutation: OfflineMutation) async throws -> Bool {
     guard let store, person != nil else { throw NativeFailure.authentication }
     let stamp = generation
@@ -1202,6 +1230,7 @@ enum PlayOrigin: Hashable {
     searchSession?.clear()
     searchSession = nil
     actionTrack = nil
+    favourites = [:]
     mutationActive = false
     pendingEdits = []
     player.clearAccount()

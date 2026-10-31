@@ -8,7 +8,7 @@ struct SongActionsView: View {
   let track: Track
   @Environment(\.dismiss) private var dismiss
   @State private var addedToLibrary = false
-  @State private var favourite: Bool?
+  private var favourite: Bool? { model.favourites[track.id] }
   @State private var loading = false
   @State private var message: String?
   var body: some View {
@@ -24,7 +24,7 @@ struct SongActionsView: View {
           if let favourite {
             Button(
               favourite ? "Remove from favourites" : "Add to favourites",
-              systemImage: favourite ? "heart.slash" : "heart"
+              systemImage: favourite ? "star.slash" : "star"
             ) {
               Task { await changeFavourite(!favourite) }
             }.disabled(loading || !model.canMutate)
@@ -85,18 +85,7 @@ struct SongActionsView: View {
     guard !loading else { return }
     loading = true
     defer { loading = false }
-    let key = "favourite:" + track.id
-    if let pending = model.pendingEdits.last(where: {
-      $0.mutation.action == "favourite" && $0.mutation.track?.id == track.id
-    }) {
-      favourite = pending.mutation.favourite
-    } else {
-      favourite = (try? await model.store?.cached(key, as: Bool.self)) ?? false
-      if let confirmed = try? await model.readCatalogue({ try await $0.favourite(track) }) {
-        favourite = confirmed
-        try? await model.store?.cache(confirmed, key: key)
-      }
-    }
+    await model.loadFavourite(track)
   }
   private func changeFavourite(_ value: Bool) async {
     guard !loading else { return }
@@ -104,10 +93,7 @@ struct SongActionsView: View {
     message = nil
     defer { loading = false }
     do {
-      let confirmed = try await model.saveEdit(
-        OfflineMutation(action: "favourite", track: track, favourite: value))
-      favourite = value
-      try? await model.store?.cache(value, key: "favourite:" + track.id)
+      let confirmed = try await model.setFavourite(track, value)
       message =
         confirmed
         ? (value ? "Added to favourites." : "Removed from favourites.")
@@ -282,5 +268,35 @@ struct RequestsView: View {
     }
     loading = false
     await load(reset: true)
+  }
+}
+
+/// The playing song's favourite star: filled when it is a favourite (#100).
+struct FavouriteStar: View {
+  let model: AppModel
+  let track: Track
+  @State private var saving = false
+  @State private var failed = false
+  private var favourite: Bool { model.favourites[track.id] ?? false }
+  var body: some View {
+    RoundIcon(
+      label: favourite ? "Remove from favourites" : "Add to favourites",
+      systemImage: favourite ? "star.fill" : "star"
+    ) {
+      Task { await toggle() }
+    }
+    .disabled(saving || !model.canMutate || model.favourites[track.id] == nil)
+    .task(id: track.id) { await model.loadFavourite(track) }
+    .alert("Favourite not saved", isPresented: $failed) {
+      Button("OK", role: .cancel) {}
+    }
+  }
+  private func toggle() async {
+    guard !saving, let current = model.favourites[track.id] else { return }
+    saving = true
+    defer { saving = false }
+    do { _ = try await model.setFavourite(track, !current) } catch is CancellationError {} catch {
+      failed = true
+    }
   }
 }

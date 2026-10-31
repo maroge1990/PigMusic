@@ -488,6 +488,9 @@ struct NowPlayingView: View {
   @Environment(\.colorScheme) private var scheme
   /// Dragging updates only this value; one seek happens when the drag ends.
   @State private var scrubbing: Double?
+  /// Song actions open from this sheet: the app's own action sheet can't
+  /// show while the player covers it (#100).
+  @State private var actionTrack: Track?
   // Sections are separate properties so each type-checks quickly.
   var body: some View {
     NavigationStack {
@@ -504,6 +507,12 @@ struct NowPlayingView: View {
       }
       .navigationTitle("Now playing").navigationBarTitleDisplayMode(.inline)
       .toolbar { Button("Done") { dismiss() } }
+      .sheet(item: $actionTrack) {
+        SongActionsView(model: model, track: $0.actionTrack)
+          .presentationDetents([.medium, .large])
+          .presentationDragIndicator(.visible)
+          .presentationContentInteraction(.scrolls)
+      }
     }.pigBrandedCanvas()
   }
   private var current: Track? { player.queue.current?.track }
@@ -577,7 +586,8 @@ struct NowPlayingView: View {
           .overlay(ring(player.repeatMode != .off))
       }.buttonStyle(.plain).accessibilityLabel("Repeat").accessibilityValue(repeatLabel)
       if let track = current {
-        RoundIcon(label: "Song actions", systemImage: "ellipsis") { model.actionTrack = track }
+        FavouriteStar(model: model, track: track.actionTrack)
+        RoundIcon(label: "Song actions", systemImage: "ellipsis") { actionTrack = track }
       }
       AirPlayButton().frame(width: 40, height: 40)
     }
