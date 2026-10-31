@@ -341,6 +341,92 @@
         "title": "AlbumQuality",
         "type": "object"
       },
+      "AppleAlbum": {
+        "properties": {
+          "apple_id": {
+            "title": "Apple Id",
+            "type": "integer"
+          },
+          "artist": {
+            "title": "Artist",
+            "type": "string"
+          },
+          "explicit": {
+            "default": false,
+            "title": "Explicit",
+            "type": "boolean"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "track_count": {
+            "nullable": true,
+            "title": "Track Count",
+            "type": "integer"
+          },
+          "year": {
+            "default": "",
+            "title": "Year",
+            "type": "string"
+          }
+        },
+        "required": [
+          "apple_id",
+          "title",
+          "artist"
+        ],
+        "title": "AppleAlbum",
+        "type": "object"
+      },
+      "AppleSong": {
+        "properties": {
+          "album": {
+            "default": "",
+            "title": "Album",
+            "type": "string"
+          },
+          "album_apple_id": {
+            "nullable": true,
+            "title": "Album Apple Id",
+            "type": "integer"
+          },
+          "apple_id": {
+            "title": "Apple Id",
+            "type": "integer"
+          },
+          "artist": {
+            "title": "Artist",
+            "type": "string"
+          },
+          "duration": {
+            "nullable": true,
+            "title": "Duration",
+            "type": "number"
+          },
+          "explicit": {
+            "default": false,
+            "title": "Explicit",
+            "type": "boolean"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "year": {
+            "default": "",
+            "title": "Year",
+            "type": "string"
+          }
+        },
+        "required": [
+          "apple_id",
+          "title",
+          "artist"
+        ],
+        "title": "AppleSong",
+        "type": "object"
+      },
       "ArtistAcquisitionDTO": {
         "properties": {
           "created": {
@@ -2413,6 +2499,40 @@
         "title": "NativeMutationReceipt",
         "type": "object"
       },
+      "OnlineResults": {
+        "properties": {
+          "albums": {
+            "items": {
+              "$ref": "#/components/schemas/AppleAlbum"
+            },
+            "title": "Albums",
+            "type": "array"
+          },
+          "songs": {
+            "items": {
+              "$ref": "#/components/schemas/AppleSong"
+            },
+            "title": "Songs",
+            "type": "array"
+          },
+          "state": {
+            "enum": [
+              "ready",
+              "busy",
+              "unavailable"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "songs",
+          "albums",
+          "state"
+        ],
+        "title": "OnlineResults",
+        "type": "object"
+      },
       "OrganiseRequest": {
         "properties": {
           "tags": {
@@ -3707,6 +3827,88 @@
           "items"
         ],
         "title": "RequestList",
+        "type": "object"
+      },
+      "Resolve": {
+        "properties": {
+          "apple_id": {
+            "exclusiveMaximum": 1000000000000000.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Apple Id",
+            "type": "integer"
+          },
+          "artist": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Artist",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "song",
+              "album"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "apple_id",
+          "title",
+          "artist"
+        ],
+        "title": "Resolve",
+        "type": "object"
+      },
+      "Resolved": {
+        "description": "The MusicBrainz recording (song) or release group (album) to open.",
+        "properties": {
+          "album": {
+            "nullable": true,
+            "title": "Album",
+            "type": "string"
+          },
+          "artist": {
+            "title": "Artist",
+            "type": "string"
+          },
+          "artist_id": {
+            "title": "Artist Id",
+            "type": "string"
+          },
+          "artist_name": {
+            "nullable": true,
+            "title": "Artist Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "release_id": {
+            "nullable": true,
+            "title": "Release Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "artist",
+          "artist_id"
+        ],
+        "title": "Resolved",
         "type": "object"
       },
       "RestoredDTO": {
@@ -22644,6 +22846,260 @@
           }
         ],
         "summary": "Search",
+        "tags": [
+          "personal-library"
+        ]
+      }
+    },
+    "/api/v1/search/online": {
+      "get": {
+        "operationId": "online_api_v1_search_online_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnlineResults"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          }
+        },
+        "security": [
+          {
+            "deviceBearer": []
+          }
+        ],
+        "summary": "Online",
+        "tags": [
+          "personal-library"
+        ]
+      }
+    },
+    "/api/v1/search/resolve": {
+      "post": {
+        "operationId": "resolve_api_v1_search_resolve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Resolve"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resolved"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          }
+        },
+        "security": [
+          {
+            "deviceBearer": []
+          }
+        ],
+        "summary": "Resolve",
         "tags": [
           "personal-library"
         ]

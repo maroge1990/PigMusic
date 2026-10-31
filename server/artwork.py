@@ -265,9 +265,10 @@ class Artwork:
                     return target
         return None
 
-    async def fetch(self, client, url):
+    async def fetch(self, client, url, address=archive_url):
+        """`address` checks every hop, redirects included: only trusted hosts."""
         for _ in range(6):
-            url = archive_url(url)
+            url = address(url)
             async with client.stream(
                 "GET",
                 url,

@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -279,6 +280,11 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     app.include_router(mixes_router(mixes))
     warmer = Warmer(store, home, lambda: app.state.http)
     app.include_router(home_router(store, music_catalogue, home, warmer))
+    from .routes.search import search_router
+
+    search_routes = search_router(store, home)
+    app.state.home = home
+    app.include_router(search_routes)
     discover_routes = discover_router(
         store, music_catalogue, popularity, warmer, lambda: app.state.http
     )
@@ -823,6 +829,15 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
 
     @app.get("/api/v1/catalogue/artwork/{kind}/{item_id}", tags=["personal-library"])
     async def catalogue_artwork(kind: str, item_id: str, w: int = 0):
+        if kind == "apple-album":
+            # Search results from Apple (D-61): their covers come through here.
+            if not re.fullmatch(r"[1-9][0-9]{0,14}", item_id):
+                raise HTTPException(404, "Artwork not found.")
+            key = "catalogue-artwork:apple-album:" + item_id
+            target = store.cover_dir / (identifier(key) + ".jpg")
+            if not target.is_file():
+                enrichment.submit(key, lambda: apple_cover(int(item_id), target))
+            return await image_response(target, w)
         if kind not in {"release", "release-group"}:
             raise HTTPException(404, "Artwork not found.")
         item_id = valid_id(item_id)
@@ -831,6 +846,17 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         if not target.is_file():
             enrichment.submit(key, lambda: catalogue_cover(kind, item_id, target))
         return await image_response(target, w)
+
+    async def apple_cover(collection_id, target):
+        from .apple_search import apple_artwork
+
+        try:
+            url = await search_routes.apple.cover_url(app.state.http, collection_id)
+            content = await artwork.fetch(app.state.http, url, address=apple_artwork)
+            await asyncio.to_thread(artwork.save, content, target)
+            return target
+        except (httpx.HTTPError, ValueError, KeyError, TypeError, OSError):
+            return None
 
     async def catalogue_cover(kind, item_id, target):
         found = await artwork.catalogue_cover(app.state.http, kind, item_id)
