@@ -7,6 +7,7 @@ MusicBrainz recording or release group of that same kind matches.
 """
 
 import asyncio
+import re
 import time
 
 from .artwork import quoted
@@ -20,36 +21,62 @@ from .home import (
 )
 from .catalogue import credit
 from .library import normalise
-from .matching import QUALIFIER, flavour
+from .matching import DISTINCT, EDITION, QUALIFIER, flavour
 
 MATCH_TTL = 7 * 86400
 # Release-group types that make every recording on them that kind.
 TYPES = {"live": "live", "remix": "remix", "demo": "demo"}
+LIVE_ALBUM = re.compile(r"^(?:mtv )?live (?:at|in|from|on)\b")
+
+
+def split(title):
+    """The title without the trailing qualifiers that name an edition
+    ("Remastered 2011") or a known kind of version ("Live at …", "Remix"),
+    and the kinds those named. Any other qualifier ("Part Two", "Club Mix")
+    stays part of the title: it names a different recording (Codex, high)."""
+    text, kinds = clean_title(title), set()
+    while (found := QUALIFIER.search(text)) and found.start() > 0:
+        words = found.group(1) or found.group(2) or ""
+        named = flavour(words)
+        if not named and not (EDITION.search(words) and not DISTINCT.search(words)):
+            break
+        kinds |= named
+        text = text[: found.start()]
+    return normalise(text) or normalise(title), same_kinds(kinds)
+
+
+def same_kinds(kinds):
+    # An unplugged set is a live recording; MusicBrainz says either.
+    return frozenset("live" if k == "unplugged" else k for k in kinds)
 
 
 def base(title):
-    """The title without trailing qualifiers ("(Live at …)", "- Remix"):
-    the version is compared through its kinds instead."""
-    text = clean_title(title)
-    while found := QUALIFIER.search(text):
-        if found.start() == 0:
-            break
-        text = text[: found.start()]
-    return normalise(text) or normalise(title)
+    return split(title)[0]
+
+
+def album_kinds(album):
+    """Kinds an album's title names in a qualifier ("Album (Live)") or as a
+    live album ("Live at …", "MTV Unplugged"), never ordinary words in it
+    ("Live Through This" is a studio album; Codex, medium)."""
+    kinds = set(split(album)[1])
+    words = normalise(album)
+    if LIVE_ALBUM.match(words) or "unplugged" in words.split():
+        kinds.add("live")
+    return frozenset(kinds)
 
 
 def apple_kinds(title, album=""):
-    return flavour(title) | flavour(album)
+    return split(title)[1] | (album_kinds(album) if album else frozenset())
 
 
 def group_kinds(group):
     types = {t.lower() for t in group.get("secondary-types") or []}
-    return flavour(group.get("title", "")) | {TYPES[t] for t in types if t in TYPES}
+    return album_kinds(group.get("title", "")) | {TYPES[t] for t in types if t in TYPES}
 
 
 def recording_kinds(recording):
-    kinds = flavour(recording.get("title", "")) | flavour(
-        recording.get("disambiguation", "")
+    kinds = split(recording.get("title", ""))[1] | same_kinds(
+        flavour(recording.get("disambiguation", ""))
     )
     groups = [r.get("release-group", {}) for r in recording.get("releases", [])]
     # Only on live releases: a live recording even when nothing else says so.

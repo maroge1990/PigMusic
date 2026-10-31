@@ -318,3 +318,43 @@ def test_a_live_apple_album_matches_a_live_release_group(tmp_path):
         search_match.match(Store(tmp_path), catalogue, None, "album", item)
     )
     assert found["id"] == "live"
+
+
+def test_other_parts_and_named_mixes_are_other_songs_and_album_words_are_not_versions(
+    tmp_path,
+):
+    """Codex on #103: only edition and known version qualifiers are dropped;
+    an ordinary word in an album title doesn't make a song live."""
+    from server import search_match
+    from server.store import Store
+
+    catalogue = Catalogue(
+        {
+            "recording/": {
+                "recordings": [
+                    recording("one", title="Song (Part One)"),
+                    recording("plain", title="Song"),
+                    recording("club", title="Song (Club Mix)"),
+                    recording("forever", title="Live Forever"),
+                ]
+            }
+        }
+    )
+    store = Store(tmp_path)
+
+    def apple(apple_id, title, album=""):
+        item = {"apple_id": apple_id, "title": title, "artist": "Band"}
+        return {**item, "album": album, "duration": None}
+
+    async def run(item):
+        return await search_match.match(store, catalogue, None, "song", item)
+
+    def found(item):
+        value = asyncio.run(run(item))
+        return value and value["id"]
+
+    assert found(apple(1, "Song (Part Two)")) is None
+    assert found(apple(2, "Song (Club Mix)")) == "club"
+    assert found(apple(3, "Song (2011 Remaster)")) == "plain"
+    assert found(apple(4, "Song", "Live Through This")) == "plain"
+    assert found(apple(5, "Live Forever")) == "forever"
