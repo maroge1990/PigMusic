@@ -34,7 +34,7 @@ Small, public-safe text evidence only, in `docs/evidence/YYYY-MM-DD-slug/`: befo
 
 ## T1: Automated
 
-The commands, in order of cost, are in [AGENTS.md](../AGENTS.md#test-cheapest-first): the backend suite, the web unit tests, Playwright against a mocked API, formatting and OpenAPI checks, the brand checks, PigKit `swift test`, the two Swift contract tests against `scripts.serve_contract_fixture`, and the unsigned iOS and watchOS builds. CI repeats them on push.
+The commands, in order of cost, are in [AGENTS.md](../AGENTS.md#test-cheapest-first): the backend suite, the web unit tests, Playwright against a mocked API, formatting and OpenAPI checks, the brand checks, PigKit `swift test`, the two Swift contract tests against `scripts.serve_contract_fixture`, and the unsigned iOS and watchOS builds. CI repeats them on push (the Mac checks only when native code, the API or the brand kit changed; the 1 GB scale gates nightly and on release tags), and `screens.yml` photographs every iPhone screen in a simulator on demand.
 
 ### Behaviour the suites must keep covering
 
@@ -60,7 +60,7 @@ Mix acceptance uses a disposable library and cache: open Home on web and iOS/iPa
 For each measurement, record the dataset size, sample count and network location. Report warm cached reads separately from cold metadata, image or provider work, and use at least 30 samples for a p95 claim. Gates:
 - cached local browsing: p95 under 100 ms;
 - playlist cards: p95 under 150 ms;
-- 50k-track artwork, delivery and two-person sync: under 1 GiB (CI repeats these in the image).
+- 50k-track artwork, delivery and two-person sync: under 1 GiB (CI repeats these in the image nightly and on release tags; `deploy_unraid.py` before every release).
 
 Never trade matching or validation guarantees for throughput.
 

@@ -103,7 +103,7 @@ Active/current and staged-next editions retain their files; retired/hidden editi
 
 ## Container images
 
-`.github/workflows/container.yml` builds the pinned Dockerfile, tests that exact image (backend suite, then 1 GB artwork, delivery, sync and mix scale gates), and publishes `ghcr.io/maroge1990/pig-music:sha-<rev>` (plus `:main` on main, `:vX.Y.Z` on tags). Pull requests only validate. No workflow deploys, and there is no `latest` tag. Images carry OCI source/revision labels. The package stays private.
+`.github/workflows/container.yml` builds the pinned Dockerfile, tests that exact image (backend suite, OpenAPI contract, web checks; the 1 GB artwork, delivery, sync and mix scale gates run on the nightly schedule, on manual runs and on release tags), and publishes `ghcr.io/maroge1990/pig-music:sha-<rev>` (plus `:main` on main, `:vX.Y.Z` on tags). The nightly run publishes nothing. Pull requests only validate. No workflow deploys, and there is no `latest` tag. Images carry OCI source/revision labels. The package stays private.
 
 Unraid pulls with a GitHub credential that has `read:packages`, entered through `docker login ghcr.io --password-stdin`. Never put it in templates, Git, docs, shell history or build arguments.
 

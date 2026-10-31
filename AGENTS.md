@@ -39,7 +39,7 @@ The preview config `pig-music-dev` attaches to port 8765. A fresh install shows 
 
 Tiers and who runs what: [docs/TESTING.md](docs/TESTING.md). Every functional change has a test that **fails on the old code**; show it.
 
-1. **Every change (~4 min):** `.venv/bin/python -m pytest tests -q -p no:cacheprovider` and `(cd client && npm test)`. Web UI changes: `(cd client && npm run build && npm run test:e2e)` (Playwright against a mocked API; first run `npx playwright install chromium`).
+1. **Every change (~1 min):** `.venv/bin/python -m pytest tests -q -p no:cacheprovider -n 4` and `(cd client && npm test)`. The event-loop timing gates (`-m loop_timing`) are strict locally; if one trips under the parallel run, rerun it alone before blaming the change. Web UI changes: `(cd client && npm run build && npm run test:e2e)` (Playwright against a mocked API; first run `npx playwright install chromium`).
 2. **Before commit (~1 min more):**
    ```sh
    .venv/bin/python -m black --check server tests scripts --workers 1
@@ -49,7 +49,7 @@ Tiers and who runs what: [docs/TESTING.md](docs/TESTING.md). Every functional ch
    swift test --package-path swift/PigKit
    ```
    For the two Swift contract tests, run `.venv/bin/python -m scripts.serve_contract_fixture` in another terminal and add `PIG_CONTRACT_SERVER=http://127.0.0.1:8781`. When Swift changes, also build: `xcodebuild -quiet -project swift/PigMusic.xcodeproj -scheme PigMusic -destination 'generic/platform=iOS Simulator' -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO build` (and `-scheme PigMusicWatch` with `generic/platform=watchOS Simulator`).
-3. **CI on push:** `.github/workflows/container.yml` runs dependency audits, the backend suite in the exact Linux image, 1 GB artwork/delivery/sync scale gates and web checks; `native.yml` runs the brand, contract, PigKit and unsigned app builds.
+3. **CI on push:** `.github/workflows/container.yml` (~7 min) runs dependency audits, the backend suite in the exact Linux image (timing gates reported, not blocking), the OpenAPI contract check and web checks; the 1 GB scale gates run nightly, on a manual run and on release tags (and in `deploy_unraid.py` before every release). `native.yml` (~13 min) runs only when `swift/`, `api/` or the brand kit changes: brand, contract, PigKit tests and unsigned app builds. `screens.yml` is on demand: it photographs every iPhone screen in a simulator, light and dark (`gh workflow run screens.yml`, then download the `iphone-screens` artifact).
 
 Tests mark provider rate limits off by default; `@pytest.mark.real_rate_limits` (see `tests/test_rate_limits.py`) keeps them.
 
