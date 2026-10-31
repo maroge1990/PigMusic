@@ -7,19 +7,14 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 *Overwritten at the end of every session. 31 Oct 2026 (night, Melbourne).*
 
-- **Live:** server `99b49eb` (released 30 Oct 23:42 UTC as `reset-20261031-v3`; rollback container
-  `PigMusic-before-reset-20261031-v3`); container recreated 31 Oct without the plain LAN port (#39), rollback
-  `PigMusic-before-port-20261031`. Not released since: everything below is pushed only.
-- **iPhone:** native **0.2.0 (16)** uploaded to **TestFlight** on 31 Oct (app record PigMusic, `au.com.pig.music`;
-  App Store Connect key on the Mac in `~/.appstoreconnect/private_keys`, IDs in `.private/household.env`; upload script
-  `~/pigmusic-archives/testflight.sh` on the Mac, needs the Mac password once per run). Build 15 (free signing) is
-  on Mark's phone until he installs 16 from TestFlight. Build 16: player fixes #98 spinner, #99 tap Up next, #100 ⋯
-  menu and favourite star; search stage 1 is after it (next build).
-- **Pushed 31 Oct, not released:** server batch #94 (YouTube removed), #17 (lock-hold steps), #96 (Trash when
-  export is off); search (#53, D-61) stage 1 (iPhone box focused and always shown, Recently searched), stage 2
-  (`/api/v1/search/results`, one ranked search over library and server), stage 3 (`/api/v1/search/online` Apple's
-  order for music not on the server, `/search/resolve`, Apple covers through the server). Every batch had two Codex
-  rounds; final-round mediums are issues #101, #102, #103.
+- **Live:** server `03b44b5` (released 31 Oct 10:25 UTC as `search-20261031-v1`, the second release that day with
+  Mark's approval; rollback container `PigMusic-before-search-20261031-v1`). It carries every batch of 31 Oct: YouTube
+  removed (#94), lock-hold steps (#17), export-off Trash (#96), the ranked search, Apple's lane and exact-version
+  matching (#53, #102, #103), and up to 100 popular songs (#55).
+- **iPhone:** native **0.2.0 (17)** uploaded to TestFlight on 31 Oct (new search screen, #101, #55 See all); build 16
+  is on Mark's phone. Uploads run from the Mac (`~/pigmusic-archives/testflight.sh`, Mac password once per run until
+  the separate build keychain of D-63 is set up).
+- **Codex findings open:** #104 (fixed before push, no own round), #105 (cold chart build vs web polling).
 - **Parked by Mark (31 Oct):** the four-mockup screen redesign and the brand audit.
 - **Ways of working:** area batches, Codex rounds per D-59, Claude pushes (D-50); releases under D-52; D-54
   efficiency first; D-58 closing rule. Local suite: `pytest -n 4`, under a minute.
