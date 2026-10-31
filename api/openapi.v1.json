@@ -1538,6 +1538,234 @@
         "title": "FavouriteResultDTO",
         "type": "object"
       },
+      "FoundAlbum": {
+        "properties": {
+          "artist": {
+            "title": "Artist",
+            "type": "string"
+          },
+          "artist_id": {
+            "default": "",
+            "title": "Artist Id",
+            "type": "string"
+          },
+          "category": {
+            "default": "album",
+            "title": "Category",
+            "type": "string"
+          },
+          "codecs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Codecs",
+            "type": "array"
+          },
+          "compilation": {
+            "default": false,
+            "title": "Compilation",
+            "type": "boolean"
+          },
+          "cover_colour": {
+            "nullable": true,
+            "title": "Cover Colour",
+            "type": "string"
+          },
+          "cover_sha": {
+            "nullable": true,
+            "title": "Cover Sha",
+            "type": "string"
+          },
+          "cover_url": {
+            "nullable": true,
+            "title": "Cover Url",
+            "type": "string"
+          },
+          "duration": {
+            "default": 0,
+            "title": "Duration",
+            "type": "number"
+          },
+          "edition": {
+            "nullable": true,
+            "title": "Edition",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "in_library": {
+            "default": false,
+            "title": "In Library",
+            "type": "boolean"
+          },
+          "musicbrainz_release_id": {
+            "nullable": true,
+            "title": "Musicbrainz Release Id",
+            "type": "string"
+          },
+          "server_state": {
+            "default": "in_library",
+            "enum": [
+              "not_in_library",
+              "household_available",
+              "requested",
+              "in_library",
+              "failed"
+            ],
+            "title": "Server State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "track_count": {
+            "default": 0,
+            "title": "Track Count",
+            "type": "integer"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "default": "",
+            "title": "Year"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "artist"
+        ],
+        "title": "FoundAlbum",
+        "type": "object"
+      },
+      "FoundArtist": {
+        "properties": {
+          "album_count": {
+            "default": 0,
+            "title": "Album Count",
+            "type": "integer"
+          },
+          "album_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Album Ids",
+            "type": "array"
+          },
+          "compilation_only": {
+            "default": false,
+            "title": "Compilation Only",
+            "type": "boolean"
+          },
+          "cover_album_id": {
+            "nullable": true,
+            "title": "Cover Album Id",
+            "type": "string"
+          },
+          "cover_sha": {
+            "nullable": true,
+            "title": "Cover Sha",
+            "type": "string"
+          },
+          "cover_url": {
+            "nullable": true,
+            "title": "Cover Url",
+            "type": "string"
+          },
+          "fallback_cover_url": {
+            "nullable": true,
+            "title": "Fallback Cover Url",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "in_library": {
+            "default": false,
+            "title": "In Library",
+            "type": "boolean"
+          },
+          "musicbrainz_artist_id": {
+            "nullable": true,
+            "title": "Musicbrainz Artist Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "track_count": {
+            "default": 0,
+            "title": "Track Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "FoundArtist",
+        "type": "object"
+      },
+      "FoundResults": {
+        "description": "One ranked search (D-61): Top results point into the typed lists.",
+        "properties": {
+          "albums": {
+            "items": {
+              "$ref": "#/components/schemas/FoundAlbum"
+            },
+            "title": "Albums",
+            "type": "array"
+          },
+          "artists": {
+            "items": {
+              "$ref": "#/components/schemas/FoundArtist"
+            },
+            "title": "Artists",
+            "type": "array"
+          },
+          "playlists": {
+            "items": {
+              "$ref": "#/components/schemas/PlaylistDTO"
+            },
+            "title": "Playlists",
+            "type": "array"
+          },
+          "songs": {
+            "items": {
+              "$ref": "#/components/schemas/TrackDTO"
+            },
+            "title": "Songs",
+            "type": "array"
+          },
+          "top": {
+            "items": {
+              "$ref": "#/components/schemas/SearchRef"
+            },
+            "title": "Top",
+            "type": "array"
+          }
+        },
+        "required": [
+          "top",
+          "songs",
+          "albums",
+          "artists",
+          "playlists"
+        ],
+        "title": "FoundResults",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -3531,6 +3759,30 @@
           "revoked"
         ],
         "title": "RevokedOthersDTO",
+        "type": "object"
+      },
+      "SearchRef": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "song",
+              "album",
+              "artist",
+              "playlist"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "SearchRef",
         "type": "object"
       },
       "SearchResults": {
@@ -22392,6 +22644,146 @@
           }
         ],
         "summary": "Search",
+        "tags": [
+          "personal-library"
+        ]
+      }
+    },
+    "/api/v1/search/results": {
+      "get": {
+        "operationId": "find_api_v1_search_results_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 10,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FoundResults"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          }
+        },
+        "security": [
+          {
+            "deviceBearer": []
+          }
+        ],
+        "summary": "Find",
         "tags": [
           "personal-library"
         ]

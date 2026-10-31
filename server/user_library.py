@@ -776,6 +776,114 @@ class UserLibrary:
                 "revision": data["revision"],
             }
 
+    def find(self, user_id, query, limit=50):
+        """One ranked search over the person's library and the rest of the
+        server (D-61): songs, albums, artists and playlists, each marked in
+        the library or not, never split into lists by where they live."""
+        from . import search_rank
+        from .playlists import Playlists
+
+        # Top results point into these lists, so each holds at least its best.
+        if not 10 <= limit <= 200:
+            raise ValueError("Invalid search page")
+        query = query[:150]
+        if not normalise(query):
+            return {
+                "top": [],
+                **{k: [] for k in ("songs", "albums", "artists", "playlists")},
+            }
+        with self.store.library_lock:
+            data = self.projection(user_id)
+            mine = {
+                "song": {t["id"] for t in data["tracks"]},
+                "album": {a["id"] for a in data["albums"]},
+                "artist": {a["id"] for a in data["artists"]},
+            }
+            songs = list(data["tracks"]) + [
+                t
+                for album in self.store.library["albums"]
+                for t in album["tracks"]
+                if t["id"] not in mine["song"] and t.get("available", True)
+            ]
+            albums = list(data["albums"]) + [
+                a for a in self.store.library["albums"] if a["id"] not in mine["album"]
+            ]
+            artists = list(data["artists"]) + [
+                a
+                for a in self.store.library["artists"]
+                if a["id"] not in mine["artist"]
+            ]
+        lists = Playlists(self.store, user_id).list()
+
+        def result(kind, item, name, value):
+            return {
+                "kind": kind,
+                "id": item["id"],
+                "name": name,
+                "score": value,
+                "in_library": kind == "playlist" or item["id"] in mine[kind],
+                "item": item,
+            }
+
+        ranked = {
+            "song": [
+                result(
+                    "song",
+                    t,
+                    t["title"],
+                    search_rank.named(query, t["title"], t.get("artist", "")),
+                )
+                for t in songs
+            ],
+            "album": [
+                result(
+                    "album",
+                    a,
+                    a["title"],
+                    search_rank.named(query, a["title"], a.get("artist", "")),
+                )
+                for a in albums
+            ],
+            "artist": [
+                result("artist", a, a["name"], search_rank.score(query, a["name"]))
+                for a in artists
+            ],
+            "playlist": [
+                result("playlist", p, p["name"], search_rank.score(query, p["name"]))
+                for p in lists
+            ],
+        }
+        ranked = {
+            kind: search_rank.order([r for r in found if r["score"]])
+            for kind, found in ranked.items()
+        }
+
+        def song(r):
+            if r["in_library"]:
+                return track_dto(r["item"])
+            return {
+                **track_dto(r["item"]),
+                "household_available": True,
+                "server_state": "household_available",
+            }
+
+        def album(r):
+            value = {
+                k: v for k, v in r["item"].items() if k not in {"tracks", "cover_key"}
+            }
+            return {**value, "in_library": r["in_library"]}
+
+        return {
+            "top": search_rank.top(ranked),
+            "songs": [song(r) for r in ranked["song"][:limit]],
+            "albums": [album(r) for r in ranked["album"][:limit]],
+            "artists": [
+                {**r["item"], "in_library": r["in_library"]}
+                for r in ranked["artist"][:limit]
+            ],
+            "playlists": [r["item"] for r in ranked["playlist"][:limit]],
+        }
+
     def lookup(self, user_id, songs):
         """Which of these songs are already in a person's library.
 

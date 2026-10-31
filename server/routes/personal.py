@@ -14,6 +14,7 @@ from ..api_models import (
     ArtistDetail,
     PlaylistDTO,
     PlaylistList,
+    FoundResults,
     SearchResults,
     RequestList,
     RequestGroupList,
@@ -361,6 +362,14 @@ def personal_router(store, artist_jobs, recovery):
             )
         except SearchChanged as exc:
             raise HTTPException(409, str(exc))
+
+    @router.get("/search/results", response_model=FoundResults)
+    async def find(
+        request: Request,
+        q: str = "",
+        limit: int = Query(default=50, ge=10, le=200),
+    ):
+        return await asyncio.to_thread(users.find, identity(request), q, limit)
 
     @router.post("/library/lookup")
     async def lookup(body: Lookup, request: Request):

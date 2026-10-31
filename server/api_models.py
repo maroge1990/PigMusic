@@ -178,6 +178,29 @@ class SearchResults(BaseModel):
     revision: str = ""
 
 
+class SearchRef(BaseModel):
+    kind: Literal["song", "album", "artist", "playlist"]
+    id: str
+
+
+class FoundAlbum(AlbumDTO):
+    in_library: bool = False
+
+
+class FoundArtist(ArtistDTO):
+    in_library: bool = False
+
+
+class FoundResults(BaseModel):
+    """One ranked search (D-61): Top results point into the typed lists."""
+
+    top: list[SearchRef]
+    songs: list[TrackDTO]
+    albums: list[FoundAlbum]
+    artists: list[FoundArtist]
+    playlists: list[PlaylistDTO]
+
+
 class Entities(BaseModel):
     playlists: list[PlaylistDTO] = Field(default_factory=list)
     tracks: list[TrackDTO] = Field(default_factory=list)
