@@ -725,6 +725,17 @@ enum PlayOrigin: Hashable {
   func currentPick(_ pick: RecentPick) async -> RecentPick {
     await store?.current(pick) ?? pick
   }
+  /// Plays a recent song as the library holds it now; dropped if the account
+  /// changes while it is looked up (#101).
+  func replayRecent(_ pick: RecentPick) async {
+    let stamp = generation
+    let fresh = await currentPick(pick)
+    guard generation == stamp, case .song(let song) = fresh else { return }
+    rememberSearch(fresh)
+    play(
+      [song],
+      origin: song.serverState == "household_available" ? .catalogue(artistId: nil) : .library)
+  }
   func rememberSearch(_ pick: RecentPick) {
     recentSearches.add(pick)
     saveRecentSearches()
@@ -743,6 +754,9 @@ enum PlayOrigin: Hashable {
   /// then the server's when it can be reached.
   func loadFavourite(_ track: Track) async {
     let key = "favourite:" + track.id
+    // Every answer belongs to this account: a sign-out while reading drops it (#101).
+    let stamp = generation
+    let store = self.store
     if let pending = pendingEdits.last(where: {
       $0.mutation.action == "favourite" && $0.mutation.track?.id == track.id
     }) {
@@ -754,19 +768,23 @@ enum PlayOrigin: Hashable {
     let revision = favourites.revision(track.id)
     if favourites[track.id] == nil {
       let cached = (try? await store?.cached(key, as: Bool.self)) ?? false
+      guard generation == stamp else { return }
       if favourites[track.id] == nil { favourites.answer(track.id, cached, since: revision) }
     }
-    if let confirmed = try? await readCatalogue({ try await $0.favourite(track) }),
+    let confirmed = try? await readCatalogue({ try await $0.favourite(track) })
+    guard generation == stamp, let confirmed,
       favourites.answer(track.id, confirmed, since: revision)
-    {
-      try? await store?.cache(confirmed, key: key)
-    }
+    else { return }
+    try? await store?.cache(confirmed, key: key)
   }
   /// Whether the server confirmed the change; false when it waits on this phone.
   func setFavourite(_ track: Track, _ value: Bool) async throws -> Bool {
+    let stamp = generation
+    let store = self.store
     favourites.invalidate(track.id)
     let confirmed = try await saveEdit(
       OfflineMutation(action: "favourite", track: track, favourite: value))
+    guard generation == stamp else { throw CancellationError() }
     favourites.change(track.id, value)
     try? await store?.cache(value, key: "favourite:" + track.id)
     return confirmed
@@ -780,6 +798,8 @@ enum PlayOrigin: Hashable {
     let applied = await flushEdits()
     guard generation == stamp else { throw CancellationError() }
     if applied { await refresh() }
+    // The refresh can end this account (Codex on #101): its answer is stale.
+    guard generation == stamp else { throw CancellationError() }
     return !pendingEdits.contains { $0.id == mutation.id }
   }
   @discardableResult func flushEdits() async -> Bool {

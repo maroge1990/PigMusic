@@ -7,15 +7,18 @@ import Foundation
 public struct FavouriteStates: Sendable {
   public private(set) var values: [String: Bool] = [:]
   private var revisions: [String: Int] = [:]
+  /// Rises on every clear (sign-out), so a read started before it never
+  /// counts after it, even for a song with no revision yet (#101).
+  private var epoch = 0
   public init() {}
   public subscript(id: String) -> Bool? { values[id] }
   /// Taken when a read starts; hand it back with the answer.
-  public func revision(_ id: String) -> Int { revisions[id, default: 0] }
+  public func revision(_ id: String) -> Int { epoch << 32 | revisions[id, default: 0] }
   /// A read's answer: false (and ignored) when a change came after it started.
   @discardableResult public mutating func answer(_ id: String, _ value: Bool, since revision: Int)
     -> Bool
   {
-    guard revisions[id, default: 0] == revision else { return false }
+    guard self.revision(id) == revision else { return false }
     values[id] = value
     return true
   }
@@ -29,5 +32,6 @@ public struct FavouriteStates: Sendable {
   public mutating func clear() {
     values = [:]
     revisions = [:]
+    epoch += 1
   }
 }

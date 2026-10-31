@@ -19,3 +19,13 @@ import Testing
   states.clear()
   #expect(states["song"] == nil)
 }
+
+@Test func aReadStartedBeforeSignOutNeverCountsAfterIt() {
+  var states = FavouriteStates()
+  // A read starts for a song this account never touched, then sign-out.
+  let before = states.revision("song")
+  states.clear()
+  let stale = states.answer("song", true, since: before)
+  #expect(!stale)
+  #expect(states["song"] == nil)
+}
