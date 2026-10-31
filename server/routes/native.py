@@ -11,6 +11,10 @@ from ..native_sync import NativeSync, ResyncRequired
 from ..auth import AuthError
 
 
+# A comment line keeps idle streams open through proxies; tests shorten it.
+KEEPALIVE_SECONDS = 25
+
+
 def native_router(store, auth, health_snapshot=None, admin_snapshot=None):
     """`admin_snapshot` feeds the owner-only `admin` event: the full download
     queue and library scan, so the web Admin section needs no timers."""
@@ -116,7 +120,7 @@ def native_router(store, auth, health_snapshot=None, admin_snapshot=None):
                         if previous.get(kind) != value:
                             yield f'event: {kind}\ndata: {json.dumps(value,separators=(",", ":"))}\n\n'
                             previous[kind] = value
-                    if time.monotonic() - heartbeat >= 25:
+                    if time.monotonic() - heartbeat >= KEEPALIVE_SECONDS:
                         yield ": keepalive\n\n"
                         heartbeat = time.monotonic()
                     await asyncio.sleep(2)

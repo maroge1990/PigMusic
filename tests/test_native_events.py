@@ -2,6 +2,7 @@ from types import SimpleNamespace
 import pytest
 import asyncio
 from fastapi import HTTPException
+from server.routes import native
 from server.routes.native import native_router
 from test_native_sync import fixture
 from server.auth import Auth
@@ -50,7 +51,10 @@ async def events_journey(tmp_path):
     await final.body_iterator.aclose()
 
 
-def test_only_the_owner_receives_the_admin_event(tmp_path):
+def test_only_the_owner_receives_the_admin_event(tmp_path, monkeypatch):
+    # The member's fourth message is the keepalive comment, which proves no
+    # admin event followed; at the real 25 s interval this test took 26 s.
+    monkeypatch.setattr(native, "KEEPALIVE_SECONDS", 0)
     asyncio.run(admin_journey(tmp_path))
 
 
