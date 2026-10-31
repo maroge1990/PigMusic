@@ -170,11 +170,16 @@ private struct SearchResultsView: View {
         switch pick {
         case .song(let song):
           SongButton(model: model, track: song) {
-            model.rememberSearch(pick)
-            model.play(
-              [song],
-              origin: song.serverState == "household_available"
-                ? .catalogue(artistId: nil) : .library)
+            Task {
+              // Played as the library holds it now, so a newer download is used.
+              let fresh = await model.currentPick(pick)
+              guard case .song(let current) = fresh else { return }
+              model.rememberSearch(fresh)
+              model.play(
+                [current],
+                origin: current.serverState == "household_available"
+                  ? .catalogue(artistId: nil) : .library)
+            }
           }
         case .album(let album):
           NavigationLink {

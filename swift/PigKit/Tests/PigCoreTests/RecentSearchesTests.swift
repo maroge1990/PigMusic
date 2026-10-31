@@ -23,3 +23,20 @@ private func song(_ id: String) -> Track {
   recent.clear()
   #expect(recent.picks.isEmpty)
 }
+
+@Test func aRecentSongIsReplayedAsTheLibraryHoldsItNow() async throws {
+  let store = try LibraryStore(path: ":memory:")
+  var saved = Track(id: "song", title: "Song", artist: "Artist")
+  saved.sourceRevision = "A"
+  var now = saved
+  now.sourceRevision = "B"
+  try await store.replace(.init(revision: "one", tracks: [now], albums: [], artists: []))
+  guard case .song(let replayed) = await store.current(.song(saved)) else {
+    Issue.record("not a song")
+    return
+  }
+  #expect(replayed.sourceRevision == "B")
+  // Music the library doesn't hold is replayed as it was saved.
+  let household = Track(id: "household", title: "Other", artist: "Artist")
+  #expect(await store.current(.song(household)) == .song(household))
+}

@@ -715,6 +715,10 @@ enum PlayOrigin: Hashable {
     recentSearchesLoaded = true
     if let saved, recentSearches.picks.isEmpty { recentSearches = saved }
   }
+  /// A recent pick as this phone's library holds it now.
+  func currentPick(_ pick: RecentPick) async -> RecentPick {
+    await store?.current(pick) ?? pick
+  }
   func rememberSearch(_ pick: RecentPick) {
     recentSearches.add(pick)
     saveRecentSearches()
