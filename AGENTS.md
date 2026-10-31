@@ -84,7 +84,7 @@ How many rounds (D-59): one Codex round for an ordinary batch; two for a batch t
 
 - Commit straight to `main`, one logical change per commit, writing `Refs #n` (never `Fixes`/`Closes`). Close an issue yourself only once its fix has passed a test you ran on the pushed or released code (suites, T3 rig, live read-only check) and say so in a comment (D-58); `needs-device-test` and `owner` issues wait for Mark. A push to `main` publishes `ghcr.io/maroge1990/pig-music:main` and `sha-<rev>`: push a batch once it has passed its Codex review (D-59) with no high finding left (D-50); otherwise ask Mark first.
 - Live releases: Claude may release when it gives a genuine testing benefit, under D-52 (CI, the Codex review per D-59, Unraid verify, at most once a day, nobody playing, tell Mark after); otherwise ask Mark. Verify with `scripts/deploy_unraid.py --image <digest>`, release with `scripts/deploy_release.py` (see [operations](docs/OPERATIONS.md)). Both read household values from `.private/household.env`.
-- Native build number: change `CURRENT_PROJECT_VERSION` in both `swift/PigMusic.xcodeproj/project.pbxproj` and `scripts/generate_native_project.py`. Current version: 0.2.0 (16).
+- Native build number: change `CURRENT_PROJECT_VERSION` in both `swift/PigMusic.xcodeproj/project.pbxproj` and `scripts/generate_native_project.py`. Current version: 0.2.0 (17).
 - After a delivery, overwrite ROADMAP.md's current state and comment on the issue. Record Mark's decisions in docs/DECISIONS.md. Don't add dated delivery docs.
 
 ## Conventions
