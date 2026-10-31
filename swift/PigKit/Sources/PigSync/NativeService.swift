@@ -389,6 +389,16 @@ public actor NativeService: LibrarySource {
         "Server search is unavailable. Your cached results are still accessible.")
     }
   }
+  /// An album on the server with its playable songs, in or outside the
+  /// person's library (search opens household albums by id; D-61).
+  public func serverAlbum(id: String) async throws -> Album {
+    switch try await client.album_api_v1_albums__album_id__get(.init(path: .init(album_id: id))) {
+    case .ok(let response): return try LibraryCodec.convert(response.body.json)
+    case .unauthorized: throw NativeFailure.authentication
+    case .notFound: throw NativeFailure.unavailable("This album is no longer on the server.")
+    default: throw NativeFailure.unavailable("This album is unavailable. Try again shortly.")
+    }
+  }
   /// Apple's songs and albums not on the server; Apple is asked by the server.
   public func onlineResults(query: String) async throws -> OnlineResults {
     switch try await client.online_api_v1_search_online_get(

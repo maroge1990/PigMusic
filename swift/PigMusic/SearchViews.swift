@@ -486,11 +486,12 @@ private struct FoundResultsView: View {
     case .album(let album, let mine):
       NavigationLink {
         Group {
-          if !mine, let release = album.musicbrainzReleaseId {
-            CatalogueReleaseView(
-              model: model, releaseId: release, title: album.title, groupId: nil, editionCount: 0)
-          } else {
+          if mine {
             AlbumView(model: model, album: album)
+          } else {
+            // On the server, not in the library: its songs come from the
+            // server, with or without a catalogue release (Codex).
+            ServerAlbumView(model: model, album: album)
           }
         }.onAppear { model.rememberSearch(.album(album)) }
       } label: {
@@ -609,6 +610,49 @@ private struct AppleResultView: View {
         } else {
           failure = "PigMusic couldn't find this exact version in its music catalogue yet."
         }
+      } catch is CancellationError {} catch { failure = error.userMessage }
+    }
+  }
+}
+
+/// A server album outside the person's library, opened from search: its
+/// playable songs from the server, played as household music.
+private struct ServerAlbumView: View {
+  let model: AppModel
+  let album: Album
+  @State private var tracks: [Track] = []
+  @State private var failure: String?
+  var body: some View {
+    List {
+      Section {
+        HStack(spacing: 14) {
+          ArtworkThumb(model: model, source: album.artworkSource, title: album.title, size: 88)
+          VStack(alignment: .leading, spacing: 4) {
+            Text(album.title).font(.headline)
+            Text(album.artist).foregroundStyle(.secondary)
+            Text("On the server").font(PigType.footnote).foregroundStyle(.secondary)
+          }
+        }
+      }
+      Section {
+        ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+          SongRow(model: model, track: track, number: track.trackNumber ?? index + 1) {
+            model.play(tracks, at: index, origin: .catalogue(artistId: nil))
+          }
+        }
+        if let failure {
+          Text(failure).font(PigType.footnote).foregroundStyle(.secondary)
+        } else if tracks.isEmpty {
+          ProgressView()
+        }
+      }
+    }
+    .pigCanvas().navigationTitle(album.title).navigationBarTitleDisplayMode(.inline)
+    .task(id: album.id) {
+      do {
+        tracks = try await model.readCatalogue { try await $0.serverAlbum(id: album.id) }.tracks
+          ?? []
+        if tracks.isEmpty { failure = "This album has no playable songs right now." }
       } catch is CancellationError {} catch { failure = error.userMessage }
     }
   }

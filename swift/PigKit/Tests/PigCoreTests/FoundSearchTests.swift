@@ -87,3 +87,32 @@ private struct FakeSource: FoundSearchSource {
   #expect(search.unsupported)
   #expect(!search.loading)
 }
+
+private actor Hold {
+  /// Waits until cancelled: a remote lane that never answers.
+  func forever() async {
+    while !Task.isCancelled { await Task.yield() }
+  }
+}
+
+private struct FailingSource: FoundSearchSource {
+  let hold: Hold
+  func foundResults(query: String) async throws -> FoundResults {
+    throw NativeFailure.unavailable("down")
+  }
+  func onlineResults(query: String) async throws -> OnlineResults {
+    await hold.forever()
+    throw CancellationError()
+  }
+  func catalogueArtists(query: String, offset: Int) async throws -> CatalogueArtistPage {
+    await hold.forever()
+    throw CancellationError()
+  }
+}
+
+@MainActor @Test func aFailedServerSearchDoesNotWaitForSlowerLanes() async {
+  // Codex: the earlier (cached) search must start as soon as ranked results fail.
+  let search = FoundSearch(source: FailingSource(hold: Hold()))
+  await search.search("Yellow")
+  #expect(search.error != nil && !search.loading)
+}

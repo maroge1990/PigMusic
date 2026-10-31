@@ -112,6 +112,9 @@ extension NativeService: FoundSearchSource {}
       for await delivery in group {
         guard stamp == generation else { continue }
         accept(delivery, key: key, now: now)
+        // Without the ranked results the earlier search takes over: it must
+        // not wait for Apple's or MusicBrainz's slower answers (Codex).
+        if case .failure("results", _) = delivery { group.cancelAll() }
       }
     }
   }
