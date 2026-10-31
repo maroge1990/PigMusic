@@ -13,7 +13,8 @@ from server.downloader import Downloader
 from server.user_library import initialise_owner
 from test_security import PASSWORD, protected
 
-pytestmark = pytest.mark.loop_timing
+# Only the tests with a wall-clock limit carry loop_timing (CI reports those
+# instead of failing the push); the rest are deterministic and must block.
 
 
 def library(tmp_path):
@@ -26,6 +27,7 @@ def library(tmp_path):
     )
 
 
+@pytest.mark.loop_timing
 def test_requests_answer_while_another_thread_holds_the_household_locks(
     tmp_path, monkeypatch
 ):
@@ -98,6 +100,7 @@ def test_requests_answer_while_another_thread_holds_the_household_locks(
             holder.join(5)
 
 
+@pytest.mark.loop_timing
 def test_owner_initialisation_runs_once_then_skips_its_lock(tmp_path, monkeypatch):
     library(tmp_path)
     app, owner = protected(tmp_path, monkeypatch)
@@ -132,6 +135,7 @@ def test_owner_initialisation_waits_for_an_owner(tmp_path, monkeypatch):
     assert store.user_libraries.contains(owner, "song")
 
 
+@pytest.mark.loop_timing
 def test_artist_submission_waits_for_lifecycle_lock_off_the_loop(tmp_path):
     from server.artist_jobs import ArtistJobs
     from server.store import Store
@@ -169,6 +173,7 @@ def test_artist_submission_waits_for_lifecycle_lock_off_the_loop(tmp_path):
     assert len(store.queue()["items"]) == 1
 
 
+@pytest.mark.loop_timing
 def test_removing_an_artist_cancels_its_job_off_the_loop(tmp_path, monkeypatch):
     from server.artist_jobs import ArtistJobs
     from server.routes import catalogue

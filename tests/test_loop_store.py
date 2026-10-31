@@ -18,7 +18,8 @@ from server.media import save_settings
 from server.popularity import Popularity
 from server.store import Store
 
-pytestmark = pytest.mark.loop_timing
+# Only the tests with a wall-clock limit carry loop_timing (CI reports those
+# instead of failing the push); the rest are deterministic and must block.
 
 ARTIST = "70248960-cb53-4ea4-943a-edb18f7d336f"
 TOKEN = "00000000-0000-4000-8000-000000000000"
@@ -86,6 +87,7 @@ def client(handler):
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
+@pytest.mark.loop_timing
 def test_catalogue_cache_reads_and_writes_leave_the_loop_free(tmp_path, monkeypatch):
     store = Store(tmp_path)
     catalogue = Catalogue(store)
@@ -113,6 +115,7 @@ def test_catalogue_cache_reads_and_writes_leave_the_loop_free(tmp_path, monkeypa
     asyncio.run(run())
 
 
+@pytest.mark.loop_timing
 def test_popularity_cache_reads_and_writes_leave_the_loop_free(tmp_path, monkeypatch):
     store = Store(tmp_path)
     save_settings(store, False, True, listenbrainz_token=TOKEN)
@@ -143,6 +146,7 @@ def test_popularity_cache_reads_and_writes_leave_the_loop_free(tmp_path, monkeyp
     asyncio.run(run())
 
 
+@pytest.mark.loop_timing
 def test_home_recommendations_read_identities_and_feeds_off_the_loop(
     tmp_path, monkeypatch
 ):
@@ -179,6 +183,7 @@ def test_home_recommendations_read_identities_and_feeds_off_the_loop(
     assert stall < 0.2, stall
 
 
+@pytest.mark.loop_timing
 def test_cover_presentation_does_not_wait_for_a_scan_holding_the_cover_lock(
     tmp_path,
 ):
@@ -215,6 +220,7 @@ def test_cover_presentation_does_not_wait_for_a_scan_holding_the_cover_lock(
         reader.join(5)
 
 
+@pytest.mark.loop_timing
 def test_resolving_a_new_artist_reads_and_saves_its_identity_off_the_loop(
     tmp_path, monkeypatch
 ):
@@ -360,6 +366,7 @@ def test_a_cancelled_home_feed_write_never_overwrites_a_newer_answer(
     assert cached == result
 
 
+@pytest.mark.loop_timing
 def test_mix_planning_reads_artist_identities_and_the_day_off_the_loop(
     tmp_path, monkeypatch
 ):

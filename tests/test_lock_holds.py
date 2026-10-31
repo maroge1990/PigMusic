@@ -15,7 +15,8 @@ from server.lifecycle import TimedRLock
 from test_exporter import acquired, download, nas_with
 from test_downloader import audio  # noqa: F401  Shared real MP3 fixture.
 
-pytestmark = pytest.mark.loop_timing
+# Only the tests with a wall-clock limit carry loop_timing (CI reports those
+# instead of failing the push); the rest are deterministic and must block.
 
 
 def settle(*paths):
@@ -37,6 +38,7 @@ def counting(monkeypatch, store):
     return calls
 
 
+@pytest.mark.loop_timing
 def test_an_unchanged_export_pass_reads_no_audio(tmp_path, monkeypatch):
     store, root = nas_with(tmp_path, monkeypatch, [])
     for name in ("one", "two", "three"):
@@ -114,6 +116,7 @@ def test_a_song_removed_during_the_pass_is_not_published(tmp_path, monkeypatch):
     assert not any(root.rglob("*.mp3"))
 
 
+@pytest.mark.loop_timing
 def test_long_holds_are_logged_with_their_holder(caplog):
     lock = TimedRLock("lifecycle_lock", warn_after=0.05)
     caplog.set_level(logging.WARNING, "pig_music.timing")
@@ -243,6 +246,7 @@ def test_an_edited_source_is_kept_beside_a_separate_valid_copy(tmp_path, monkeyp
     assert Exporter(store, root).records()[0].get("export_relative_path") is None
 
 
+@pytest.mark.loop_timing
 def test_library_readers_never_wait_for_a_refresh_build(tmp_path, monkeypatch):
     # Live 28 Oct: each rebuild held library_lock 1-2 s, about six times a
     # minute, and household search and sync waited behind it.
