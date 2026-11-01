@@ -5,43 +5,35 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 1 Nov 2026 (Melbourne).*
+*Overwritten at the end of every session. 1 Nov 2026 (afternoon, Melbourne).*
 
-- **Live:** server `03b44b5` (`search-20261031-v1`, released 31 Oct 10:25 UTC; rollback container
-  `PigMusic-before-search-20261031-v1`). Overnight 31 Oct→1 Nov: 255 mix searches in ~2.5 h (was ~700 in ~7 h, #90
-  closed), 0 event-loop stalls, 146 export lock holds of 1–2.5 s (#17, the time is in the unnamed "rest" step).
-- **iPhone/Watch:** native **0.2.0 (17)** from TestFlight on Mark's phone; his overnight test was very positive.
-- **Closed on 1 Nov** after Mark's device checks: #98, #99, #100, #53 (search; his playlist note is #109), #64,
-  #70, #71, #77, #19, #18, #60, #61, #39 (invite and lockout checks moved to #95). Closed on live checks: #90, #91.
-- **New from Mark's testing:** #106 an album download split across two editions (cause found: MusicBrainz lists only
-  25 releases per song; D-64 one album, one edition), #107 artist popular songs wait up to 10 s for album details,
-  #108 one-line song and artist names that scroll (D-65), #109 playlists, mixes and Apple Music playlists in search,
-  #62 re-scoped (the album *song list* differs between Library and artist/Home albums).
-- **Still to check on devices (Mark):** #78 AirPods while paused, #76 changed downloads keep playback, #65 Pause stays
-  paused; the #95 checklist.
-- **Codex findings open:** #104, #105, #101 (fixed and shipped in build 17; close after a Mac test run).
+- **Live:** server `03b44b5` (`search-20261031-v1`; rollback container `PigMusic-before-search-20261031-v1`).
+  Overnight 31 Oct→1 Nov: 255 mix searches in ~2.5 h (was ~700 in ~7 h, #90 closed), 0 event-loop stalls, 146 export
+  lock holds of 1–2.5 s (#17).
+- **Pushed, not live** (main `4b17b88`): #106 one album download, one edition (D-64); #107 popular songs within ~2 s;
+  #17 published-song check outside the lifecycle lock; #109 stage A Home mixes in search. Each with two Codex rounds;
+  findings left: #110, #111 (P3).
+- **iPhone/Watch:** native **0.2.0 (18)** uploaded to TestFlight on 1 Nov (#108 scrolling names, #62 one album page,
+  #59, #107, #56 tap-to-play mixes, #109 mixes in search, four #97 fixes incl. offline sign-out per D-55). Build 17 is
+  on Mark's phone. Not seen in a simulator (the Mac can't run one).
+- **Closed on 1 Nov** after Mark's device checks: #98, #99, #100, #53, #64, #70, #71, #77, #19, #18, #60, #61, #39.
+  Closed on live checks: #90, #91.
+- **Still to check on devices (Mark):** #78, #76, #65; build 18's changes; Home See all (#55); the #95 checklist.
+- **Codex findings open:** #104, #105, #101, #110, #111.
 - **Parked by Mark (31 Oct):** the four-mockup screen redesign and the brand audit.
 - **Ways of working:** area batches, Codex rounds per D-59, Claude pushes (D-50); releases under D-52; D-58 closing.
 - **Household details** live only in the gitignored `.private/` (D-45).
 
-## Now (today, 1 Nov)
+## Now
 
-Mark's fresh reports first, then the server reliability tail. In order:
-
-1. **Server batch "catalogue lookups"** (#106, #107 server part): one album request files on one edition, editions
-   chosen from the release group's own track lists (not the capped 25-release list); popular songs never wait for
-   album details. Library identity is on the risky list: two Codex rounds. Then Mark runs **Tidy** on *Enema of the
-   State* and *Dude Ranch* to merge the existing halves.
-2. **Server batch "export lock"** (#17): name the "rest" step and move it out of the lifecycle lock; one Codex round
-   with batch 1's second round if small.
-3. **Release** batches 1–2 under D-52 tonight once CI is green and nobody is playing; then the live gates: #63 quiet
-   idle CPU after the night's mix work, #94 remote "unavailable" time, #17 hold count, #16/#20 loaded window.
-4. **iPhone batch → build 18** (#108 scrolling one-line names, #62 one album screen for every album, #107 show songs as
-   they arrive, #59 album songs delay, #56 tap-to-play smart playlists): Mac build, two Codex rounds (playback screen),
-   TestFlight upload (first one with the D-63 build keychain).
-5. **Search playlists, stage A** (#109): own playlists checked, Home mixes and smart playlists in search results.
-6. **Waiting on Mark:** device checks #78, #76, #65, and Home's See all with up to 100 popular songs (#55); Tidy after batch 1; go-ahead on Apple Music playlists (#109 stage
-   B needs a MusicKit key from the Apple Developer account); when to run the tag job (#93).
+1. **Release** the server batches (#106, #107, #17, #109) under D-52 tonight once CI is green and nobody is playing;
+   then Mark runs **Tidy** on *Enema of the State* and *Dude Ranch*.
+2. **Live gates after the release:** #17 hold count and named steps, #63 quiet idle CPU, #94 remote "unavailable"
+   time, #16/#20 loaded window.
+3. **Mark on build 18:** the scrolling names, album pages, tap-to-play mixes, mixes in search; then #78, #76, #65.
+4. **Web half of #56** (tap-to-play mixes on the web) and the rest of #97.
+5. **Waiting on Mark:** go-ahead on Apple Music playlists (#109 stage B needs a MusicKit key); when to run the tag job
+   (#93); setting up the D-63 build keychain so uploads stop needing his Mac password.
 
 ## Next (P1/P2)
 
