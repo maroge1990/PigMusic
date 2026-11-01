@@ -15,7 +15,7 @@ Commands for the automated suites are in [AGENTS.md](../AGENTS.md#test-cheapest-
 | T5 Owner devices | Physical iPhone, iPad and Watch; the release acceptance checklist; native device acceptance; deploy | Mark | Release acceptance and anything no other tier can settle |
 
 - **T3 runs on the Unraid rig** (see T3 below); fake download sources are not built yet, so checks that need a real transfer still fall to T5.
-- **Machines:** the development Mac has 8 GB of memory and cannot run the iOS simulator. Native screen checks are therefore T5, and native playback is covered by PigKit harness runs (T2 locally, T4 against the live server).
+- **Machines:** the development Mac (8 GB) runs one iPhone simulator paired with one Watch simulator (since 2 Nov 2026). Native screens are checked there with the `--demo` library (`scripts/simulator_screens.py`) before devices; real audio routes, background playback, battery and Watch delivery to hardware stay T5, and native playback is covered by PigKit harness runs (T2 locally, T4 against the live server).
 - **Claude's default is to test, not to ask.** T1 to T4 touch no household data and change nothing on the live server, so Claude runs them without asking. Anything that changes production (a release, a template, a setting, the household library) needs Mark's yes; see [Releasing](OPERATIONS.md#releasing).
 - **Status words:** *Implemented* (code done) → *Locally verified* (T1 to T3 pass, evidence linked) → *Verified* (Mark's T5 report). Only Mark writes *Verified*. An implemented change stays open until its acceptance gate passes.
 - **Mark's checklist** in each handoff lists only T5 items: numbered steps, each with the expected result and what to report (server revision, app build, device, OS, connection).
@@ -97,7 +97,7 @@ T3 runs a staging PigMusic on Unraid (D-53) with a disposable generated library 
 
 The browser checks below still run against a local server with disposable fixtures.
 
-The iOS simulator cannot run on the 8 GB development Mac, so native screens are checked on devices (T5) and native playback through PigKit harness runs.
+Native screens are checked first in the Mac's simulators (iPhone and Watch, `--demo` library), then on devices (T5); native playback runs through PigKit harness runs.
 
 ### Browser checks
 
