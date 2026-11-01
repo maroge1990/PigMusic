@@ -19,43 +19,58 @@ public actor ParkedSessions {
   /// Every change applies to this copy at once (no suspension between
   /// reading and changing it) and the copies are saved in order.
   private var memory: [String: [String]]?
-  private var saving: Task<Void, Never>?
-  private func current() async -> [String: [String]] {
+  private var saving: Task<Result<Void, any Error>, Never>?
+  /// The parked sessions, read from the Keychain the first time. A failed
+  /// read is not "none": it throws and nothing is cached, so a later save
+  /// can't overwrite sessions it never saw (Codex round 2).
+  private func current() async throws -> [String: [String]] {
     if let memory { return memory }
     var loaded: [String: [String]] = [:]
-    if let text = (try? await store.read()) ?? nil,
-      let value = try? JSONDecoder().decode([String: [String]].self, from: Data(text.utf8))
-    {
-      loaded = value
+    if let text = try await store.read() {
+      loaded = try JSONDecoder().decode([String: [String]].self, from: Data(text.utf8))
     }
     // Another change may have loaded and changed it while the Keychain read.
     if let memory { return memory }
     memory = loaded
     return loaded
   }
-  private func change(_ value: [String: [String]]) {
+  /// Applies `value` now and saves it after the saves before it.
+  private func change(_ value: [String: [String]]) -> Task<Result<Void, any Error>, Never> {
     let kept = value.filter { !$0.value.isEmpty }
     memory = kept
     let previous = saving
     let store = store
-    saving = Task {
-      await previous?.value
-      if kept.isEmpty {
-        try? await store.clear()
-      } else if let data = try? JSONEncoder().encode(kept) {
-        try? await store.save(String(decoding: data, as: UTF8.self))
+    let task = Task {
+      _ = await previous?.value
+      return await Result {
+        if kept.isEmpty {
+          try await store.clear()
+        } else {
+          try await store.save(String(decoding: try JSONEncoder().encode(kept), as: UTF8.self))
+        }
       }
     }
+    saving = task
+    return task
   }
+  /// Parks a session; returns only once it is saved, so the caller may
+  /// forget the token (Codex round 2: a failed save lost it). On a failed
+  /// save the session is taken out again and the error thrown.
   public func park(server: String, token: String) async throws {
-    var value = await current()
-    if value[server, default: []].contains(token) { return }
-    value[server, default: []].append(token)
-    change(value)
-    await saving?.value
+    var value = try await current()
+    if !value[server, default: []].contains(token) {
+      value[server, default: []].append(token)
+    }
+    if case .failure(let error) = await change(value).value {
+      if var now = memory {
+        now[server] = now[server]?.filter { $0 != token }
+        memory = now.filter { !$0.value.isEmpty }
+      }
+      throw error
+    }
   }
   public var count: Int {
-    get async { await current().values.reduce(0) { $0 + $1.count } }
+    get async { ((try? await current()) ?? [:]).values.reduce(0) { $0 + $1.count } }
   }
   /// Asks each server to end its parked sessions; those it can't be asked
   /// about yet stay parked. One run at a time.
@@ -64,19 +79,21 @@ public actor ParkedSessions {
     ending = true
     defer { ending = false }
     var ended: [String: Set<String>] = [:]
-    for (server, tokens) in await current() {
+    guard let parked = try? await current() else { return }
+    for (server, tokens) in parked {
       for token in tokens where await logout(server: server, token: token) {
         ended[server, default: []].insert(token)
       }
     }
     guard !ended.isEmpty else { return }
-    // From the copy as it is now: a session parked while the requests ran stays.
-    var value = await current()
+    // From the copy as it is now: a session parked while the requests ran
+    // stays. A failed save leaves ended sessions listed; ending one again is
+    // harmless.
+    guard var value = try? await current() else { return }
     for (server, gone) in ended {
       value[server] = value[server]?.filter { !gone.contains($0) }
     }
-    change(value)
-    await saving?.value
+    _ = await change(value).value
   }
   private func logout(server: String, token: String) async -> Bool {
     let vault = ParkedToken(token: token)

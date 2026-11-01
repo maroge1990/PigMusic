@@ -97,3 +97,55 @@ private func service(
   #expect(Set(await servers.ended) == ["a.invalid Bearer one", "b.invalid Bearer two"])
   #expect(await parked.count == 0)
 }
+
+/// A Keychain that fails while `broken`.
+private actor Flaky: DeviceTokenStore {
+  var token: String?
+  var broken = false
+  init(_ token: String?) { self.token = token }
+  func breakIt(_ value: Bool) { broken = value }
+  func read() throws -> String? {
+    if broken { throw Unreachable() }
+    return token
+  }
+  func save(_ value: String) throws {
+    if broken { throw Unreachable() }
+    token = value
+  }
+  func clear() throws {
+    if broken { throw Unreachable() }
+    token = nil
+  }
+}
+
+@Test func aParkedSessionThatCantBeSavedKeepsThePhoneSignedIn() async throws {
+  // Codex round 2 (high): a failed save still signed out, losing the session.
+  let servers = Servers()
+  let store = Flaky(nil)
+  let parked = ParkedSessions(store: store, transport: servers)
+  let (native, vault) = service("a.invalid", token: "one", servers: servers, parked: parked)
+  await store.breakIt(true)
+  await #expect(throws: (any Error).self) { try await native.signOut() }
+  #expect(await vault.token == "one")
+  await store.breakIt(false)
+  #expect(try await native.signOut() == false)
+  #expect(await vault.token == nil)
+  let restarted = ParkedSessions(store: store, transport: servers)
+  #expect(await restarted.count == 1)
+}
+
+@Test func aFailedFirstReadNeverOverwritesParkedSessions() async throws {
+  // Codex round 2 (medium): a failed read counted as none, and the next
+  // save replaced every parked session with the new one.
+  let servers = Servers()
+  let store = Flaky(#"{"https://a.invalid":["one"]}"#)
+  let parked = ParkedSessions(store: store, transport: servers)
+  await store.breakIt(true)
+  await #expect(throws: (any Error).self) {
+    try await parked.park(server: "https://a.invalid", token: "two")
+  }
+  await store.breakIt(false)
+  try await parked.park(server: "https://a.invalid", token: "two")
+  let restarted = ParkedSessions(store: store, transport: servers)
+  #expect(await restarted.count == 2)
+}
