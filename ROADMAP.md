@@ -5,14 +5,17 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 1 Nov 2026 (afternoon, Melbourne).*
+*Overwritten at the end of every session. 2 Nov 2026 (morning, Melbourne).*
 
 - **Live:** server `03b44b5` (`search-20261031-v1`; rollback container `PigMusic-before-search-20261031-v1`).
   Overnight 31 Oct→1 Nov: 255 mix searches in ~2.5 h (was ~700 in ~7 h, #90 closed), 0 event-loop stalls, 146 export
   lock holds of 1–2.5 s (#17).
 - **Pushed, not live** (main `4b17b88`): #106 one album download, one edition (D-64); #107 popular songs within ~2 s;
   #17 published-song check outside the lifecycle lock; #109 stage A Home mixes in search. Each with two Codex rounds;
-  findings left: #110, #111 (P3).
+  findings left: #110, #111 (P3). **Idle-loop batch** (#63, two #96 items): the download queue waits for a change
+  instead of polling every 0.5 s, artist jobs and the warming pass read their state in one query, device copies stop
+  loading the whole queue; two Codex rounds, no findings. Idle measured on 03b44b5 (2 Nov): 7.3% of a core, ~3,500
+  worker wakeups/s from the download poll; re-measure after release.
 - **iPhone/Watch:** native **0.2.0 (18)** uploaded to TestFlight on 1 Nov (#108 scrolling names, #62 one album page,
   #59, #107, #56 tap-to-play mixes, #109 mixes in search, four #97 fixes incl. offline sign-out per D-55). Build 17 is
   on Mark's phone. Not seen in a simulator (the Mac can't run one).
@@ -26,9 +29,9 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Now
 
-1. **Release** the server batches (#106, #107, #17, #109) under D-52 tonight once CI is green and nobody is playing;
+1. **Release** the server batches (#106, #107, #17, #109, idle loops #63) under D-52 tonight once CI is green and nobody is playing;
    then Mark runs **Tidy** on *Enema of the State* and *Dude Ranch*.
-2. **Live gates after the release:** #17 hold count and named steps, #63 quiet idle CPU, #94 remote "unavailable"
+2. **Live gates after the release:** #17 hold count and named steps, #63 quiet idle CPU (15 min, per thread; was 7.3%), #94 remote "unavailable"
    time, #16/#20 loaded window.
 3. **Mark on build 18:** the scrolling names, album pages, tap-to-play mixes, mixes in search; then #78, #76, #65.
 4. **Web half of #56** (tap-to-play mixes on the web) and the rest of #97.
