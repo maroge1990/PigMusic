@@ -210,11 +210,8 @@ class DeviceCopies:
         while not self.stopping:
             # Publishing a download (validating its audio, importing it) has
             # priority; a download still transferring does not hold copies up.
-            active = await asyncio.to_thread(self.store.queue)
-            if any(
-                item.get("status") in {"validating", "importing"}
-                for item in active.get("items", [])
-            ):
+            # One query, not the whole queue loaded and decoded each time (#96).
+            if await asyncio.to_thread(self.store.publishing):
                 await asyncio.sleep(2)
                 continue
             job = await asyncio.to_thread(self.claim)

@@ -353,7 +353,15 @@ def test_only_a_download_being_published_holds_copies_up(
     if not shutil.which("ffmpeg"):
         pytest.skip("ffmpeg is required for AAC validation")
     _, copies = audio_fixture(tmp_path, monkeypatch)
-    monkeypatch.setattr(copies.store, "queue", lambda: {"items": [{"status": status}]})
+    with copies.store.connect() as conn:
+        conn.execute(
+            "INSERT INTO queue(id,payload,status) VALUES ('download','{}',?)", (status,)
+        )
+
+    def whole_queue():
+        raise AssertionError("The whole download queue was loaded (#96)")
+
+    monkeypatch.setattr(copies.store, "queue", whole_queue)
 
     async def exercise():
         copies.manifest("song", "aac", True)

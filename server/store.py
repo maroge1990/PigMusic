@@ -1158,6 +1158,16 @@ class Store:
             ).fetchone()
         return due
 
+    def publishing(self):
+        """Whether a download is being validated or imported."""
+        with self.connect() as conn:
+            return (
+                conn.execute(
+                    "SELECT 1 FROM queue WHERE status IN ('validating','importing') LIMIT 1"
+                ).fetchone()
+                is not None
+            )
+
     def read_document(self, name):
         with self.connect() as conn:
             row = conn.execute(
