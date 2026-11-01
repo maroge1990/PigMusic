@@ -1366,7 +1366,7 @@ enum PlayOrigin: Hashable {
     private func loadDemo() async {
       do {
         let fixture =
-          #"{"revision":"demo","tracks":[{"id":"one","title":"First Light","artist":"The Orchard","album":"Sunrise","album_id":"sunrise","track_number":1,"duration":3},{"id":"two","title":"Open Road","artist":"The Orchard","album":"Sunrise","album_id":"sunrise","track_number":2,"duration":3},{"id":"three","title":"After the Rain","artist":"Riverlight","album":"Quiet Hours","album_id":"quiet","track_number":1,"duration":3}],"albums":[{"id":"sunrise","title":"Sunrise","artist":"The Orchard","track_count":2},{"id":"quiet","title":"Quiet Hours","artist":"Riverlight","track_count":1}],"artists":[{"id":"orchard","name":"The Orchard","track_count":2},{"id":"river","name":"Riverlight","track_count":1}],"playlists":[]}"#
+          #"{"revision":"demo","tracks":[{"id":"one","title":"First Light","artist":"The Orchard","album":"Sunrise","album_id":"sunrise","track_number":1,"duration":3},{"id":"two","title":"Open Road","artist":"The Orchard","album":"Sunrise","album_id":"sunrise","track_number":2,"duration":3},{"id":"three","title":"After the Rain","artist":"Riverlight","album":"Quiet Hours","album_id":"quiet","track_number":1,"duration":3}],"albums":[{"id":"sunrise","title":"Sunrise","artist":"The Orchard","track_count":2},{"id":"quiet","title":"Quiet Hours","artist":"Riverlight","track_count":1}],"artists":[{"id":"orchard","name":"The Orchard","track_count":2,"album_ids":["sunrise"]},{"id":"river","name":"Riverlight","track_count":1,"album_ids":["quiet"]}],"playlists":[]}"#
         let database = try LibraryStore(path: ":memory:")
         var snapshot = try LibraryCodec.decoder().decode(
           LibrarySnapshot.self, from: Data(fixture.utf8))
