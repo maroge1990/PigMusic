@@ -5,48 +5,50 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 31 Oct 2026 (night, Melbourne).*
+*Overwritten at the end of every session. 1 Nov 2026 (Melbourne).*
 
-- **Live:** server `03b44b5` (released 31 Oct 10:25 UTC as `search-20261031-v1`, the second release that day with
-  Mark's approval; rollback container `PigMusic-before-search-20261031-v1`). It carries every batch of 31 Oct: YouTube
-  removed (#94), lock-hold steps (#17), export-off Trash (#96), the ranked search, Apple's lane and exact-version
-  matching (#53, #102, #103), and up to 100 popular songs (#55).
-- **iPhone:** native **0.2.0 (17)** uploaded to TestFlight on 31 Oct (new search screen, #101, #55 See all); build 16
-  is on Mark's phone. Uploads run from the Mac (`~/pigmusic-archives/testflight.sh`, Mac password once per run until
-  the separate build keychain of D-63 is set up).
-- **Codex findings open:** #104 (fixed before push, no own round), #105 (cold chart build vs web polling).
+- **Live:** server `03b44b5` (`search-20261031-v1`, released 31 Oct 10:25 UTC; rollback container
+  `PigMusic-before-search-20261031-v1`). Overnight 31 Oct→1 Nov: 255 mix searches in ~2.5 h (was ~700 in ~7 h, #90
+  closed), 0 event-loop stalls, 146 export lock holds of 1–2.5 s (#17, the time is in the unnamed "rest" step).
+- **iPhone/Watch:** native **0.2.0 (17)** from TestFlight on Mark's phone; his overnight test was very positive.
+- **Closed on 1 Nov** after Mark's device checks: #98, #99, #100, #53 (search; his playlist note is #109), #64,
+  #70, #71, #77, #19, #18, #60, #61, #39 (invite and lockout checks moved to #95). Closed on live checks: #90, #91.
+- **New from Mark's testing:** #106 an album download split across two editions (cause found: MusicBrainz lists only
+  25 releases per song; D-64 one album, one edition), #107 artist popular songs wait up to 10 s for album details,
+  #108 one-line song and artist names that scroll (D-65), #109 playlists, mixes and Apple Music playlists in search,
+  #62 re-scoped (the album *song list* differs between Library and artist/Home albums).
+- **Still to check on devices (Mark):** #78 AirPods while paused, #76 changed downloads keep playback, #65 Pause stays
+  paused; the #95 checklist.
+- **Codex findings open:** #104, #105, #101 (fixed and shipped in build 17; close after a Mac test run).
 - **Parked by Mark (31 Oct):** the four-mockup screen redesign and the brand audit.
-- **Ways of working:** area batches, Codex rounds per D-59, Claude pushes (D-50); releases under D-52; D-54
-  efficiency first; D-58 closing rule. Local suite: `pytest -n 4`, under a minute.
-- **Live gates owed:** #90 first night's search count on `99b49eb`, #63 quiet idle CPU, #16/#20 loaded window, #91
-  first nightly run; after the next release: #94 unavailable time, #17 lock-hold steps.
+- **Ways of working:** area batches, Codex rounds per D-59, Claude pushes (D-50); releases under D-52; D-58 closing.
 - **Household details** live only in the gitignored `.private/` (D-45).
-- **Waiting on Mark:** installing build 16 from TestFlight (internal tester group) and checking #98–#100; the cellular
-  checks on #39; when to run the tag job (#93); his device checks (#95, sections B–F of his list); the `owner` items.
 
-## Now
+## Now (today, 1 Nov)
 
-Reliability first (D-47), with Mark's player reports and iPhone search. In order:
+Mark's fresh reports first, then the server reliability tail. In order:
 
-1. **iPhone player fixes** — build 16 on TestFlight; Mark installs it and checks #98–#100
-2. **iPhone search** (#53, D-61) — stages 1–3 pushed; next: fix #103 (Apple live/remix versions must not open as the
-   studio recording), then the iPhone results screen (Top results · Artists · Albums · Songs · Playlists, a mixed
-   list while typing, Apple results marked not on the server), #102, #54 timing, #55 popular songs
-3. **Live gates** — #90, #63, #16/#20 measurements; the first nightly scale-gate run (#91)
-4. **Release the server batch** (#94, #17, #96) under D-52 once CI is green and nobody is playing
-5. **T3 rig on Unraid** (#15): first run with a green main digest; then #22 and #43 on it; then the #93 trial
-6. **Parked:** the iPhone screen redesign and the brand audit (Mark, 31 Oct)
-7. **Later this week** — Mark's device checks; TestFlight; #101; the rest of #42 and #96; #59, #56
+1. **Server batch "catalogue lookups"** (#106, #107 server part): one album request files on one edition, editions
+   chosen from the release group's own track lists (not the capped 25-release list); popular songs never wait for
+   album details. Library identity is on the risky list: two Codex rounds. Then Mark runs **Tidy** on *Enema of the
+   State* and *Dude Ranch* to merge the existing halves.
+2. **Server batch "export lock"** (#17): name the "rest" step and move it out of the lifecycle lock; one Codex round
+   with batch 1's second round if small.
+3. **Release** batches 1–2 under D-52 tonight once CI is green and nobody is playing; then the live gates: #63 quiet
+   idle CPU after the night's mix work, #94 remote "unavailable" time, #17 hold count, #16/#20 loaded window.
+4. **iPhone batch → build 18** (#108 scrolling one-line names, #62 one album screen for every album, #107 show songs as
+   they arrive, #59 album songs delay, #56 tap-to-play smart playlists): Mac build, two Codex rounds (playback screen),
+   TestFlight upload (first one with the D-63 build keychain).
+5. **Search playlists, stage A** (#109): own playlists checked, Home mixes and smart playlists in search results.
+6. **Waiting on Mark:** device checks #78, #76, #65, and Home's See all with up to 100 popular songs (#55); Tidy after batch 1; go-ahead on Apple Music playlists (#109 stage
+   B needs a MusicKit key from the Apple Developer account); when to run the tag job (#93).
 
 ## Next (P1/P2)
 
-Pushed fixes stay open until a test Claude can run has passed on them (D-58) or, for device checks, until Mark confirms; the lists below are what is not yet built.
-
-- Reliability: #17 export lock (steps now logged; gate after release) · #22 Home mixes latency · #25 harness
-  attribution
-- Mark's requests: #59 album songs delay · #56 tap-to-play mixes
-- Product and admin: #23 progressive relay · #39 cellular checks (Mark)
-- Device acceptance (Mark, T5): #95, one checklist of the eleven former acceptance issues
+- Reliability: #15 T3 rig first full Unraid run, then #22 Home mixes latency on it · #25 harness attribution · #105
+  first chart build vs web polling · #104
+- Mark's requests: #109 stage B (Apple Music playlists) · #54 song search timing · #23 progressive relay
+- Device acceptance (Mark, T5): #95, one checklist of the former acceptance issues
 
 ## Later (P3)
 
