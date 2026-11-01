@@ -128,3 +128,36 @@ def test_an_idle_artist_job_pass_reads_the_jobs_once(tmp_path):
 
     asyncio.run(one_pass())
     assert len(connections) <= 2
+
+
+def test_a_warming_pass_reads_known_artist_identities_at_once(tmp_path):
+    # The old pass read each library artist's identity in its own worker hop
+    # and SQLite connection: ~470 live, every 30 minutes.
+    from server.warmer import Warmer
+
+    store = Store(tmp_path)
+    artists = []
+    for index in range(30):
+        identity = f"{index:08x}-2222-4222-8222-222222222222"
+        artists.append({"id": f"lib-{index}", "name": f"Artist {index}"})
+        store.write_document(
+            f"library-artist:lib-{index}", {"id": identity, "name": f"Artist {index}"}
+        )
+    artists.append({"id": "lib-new", "name": "Not Yet Known"})
+    store.library = {"artists": artists}
+
+    class Home:
+        async def popular(self, client):
+            return {}
+
+    warmer = Warmer(store, Home(), lambda: None)
+    resolved = []
+
+    async def library_identity(artist_id):
+        resolved.append(artist_id)
+        return "99999999-2222-4222-8222-222222222222"
+
+    warmer.library_identity = library_identity
+    asyncio.run(warmer.run_pass())
+    assert resolved == ["lib-new"]
+    assert len(warmer.pending) == 31

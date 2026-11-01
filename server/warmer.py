@@ -14,6 +14,7 @@ import logging
 import time
 from collections import OrderedDict
 
+from .artist_identity import cached_identities
 from .catalogue import background_metadata, mbid, warming
 
 log = logging.getLogger("pig_music.warmer")
@@ -251,10 +252,20 @@ class Warmer:
                 self.state["failures"] += 1
         for feed in feeds:
             self.queue_feed(feed)
-        for artist in list(self.store.library.get("artists", [])):
-            if artist.get("compilation_only"):
-                continue
-            identity = await self.library_identity(artist["id"])
+        artists = [
+            artist
+            for artist in list(self.store.library.get("artists", []))
+            if not artist.get("compilation_only")
+        ]
+        # Known identities in one read, not one connection per artist (#96).
+        known = await asyncio.to_thread(cached_identities, self.store, artists)
+        for artist in artists:
+            identity = known.get(artist["id"])
+            identity = (
+                identity["id"]
+                if identity
+                else await self.library_identity(artist["id"])
+            )
             if identity:
                 self.submit(identity, full=True, priority=LIBRARY)
 
