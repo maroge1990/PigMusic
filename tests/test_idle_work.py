@@ -183,3 +183,27 @@ def test_the_idle_server_leaves_the_database_alone(tmp_path, monkeypatch):
         )
         time.sleep(3)
     assert len(connections) <= 1
+
+
+def test_a_busy_download_never_makes_the_queue_loop_busier_than_the_old_poll(
+    tmp_path,
+):
+    # Each progress write wakes the loop; passes stay at least 0.5 s apart.
+    store = Store(tmp_path)
+    enable_downloads(store)
+    queue_row(store, "busy")
+    worker = Downloader(store, providers={})
+    passes = []
+    original = worker.prepare_storage
+    worker.prepare_storage = lambda: (passes.append(1), original())
+
+    async def handle(job):
+        for received in range(40):
+            await asyncio.to_thread(
+                store.request_state, job["id"], "downloading", received=received
+            )
+            await asyncio.sleep(0.05)
+
+    worker.handle = handle
+    asyncio.run(run_for(worker, 2.2))
+    assert 2 <= len(passes) <= 6
