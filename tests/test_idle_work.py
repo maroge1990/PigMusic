@@ -161,3 +161,25 @@ def test_a_warming_pass_reads_known_artist_identities_at_once(tmp_path):
     asyncio.run(warmer.run_pass())
     assert resolved == ["lib-new"]
     assert len(warmer.pending) == 31
+
+
+def test_the_idle_server_leaves_the_database_alone(tmp_path, monkeypatch):
+    # The gate for the whole area: started with nothing to do, the server's
+    # background loops open no SQLite connection for seconds at a time
+    # (old: 20 in 5 s from the download queue alone).
+    from fastapi.testclient import TestClient
+
+    from server.app import create_app
+
+    monkeypatch.setenv("PIG_MUSIC_PRELOAD", "false")
+    app = create_app(tmp_path)
+    with TestClient(app):
+        time.sleep(2)  # Start-up recovery and first passes.
+        store = app.state.store
+        connections = []
+        original = store.connect
+        monkeypatch.setattr(
+            store, "connect", lambda: (connections.append(1), original())[1]
+        )
+        time.sleep(3)
+    assert len(connections) <= 1
