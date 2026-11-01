@@ -289,8 +289,10 @@ struct AlbumView: View {
     }
     .task(id: "\(album.id)#\(model.libraryRevision)") {
       tracks = await model.albumTracks(album)
-      artist = await model.savedArtist(id: album.artistId, name: album.artist)
+      // The other songs no longer wait behind the artist lookup (#59).
+      async let found = model.savedArtist(id: album.artistId, name: album.artist)
       await loadRelease()
+      artist = await found
     }
   }
   private func loadRelease() async {
@@ -298,10 +300,18 @@ struct AlbumView: View {
       let releaseId = album.musicbrainzReleaseId
         ?? tracks.lazy.compactMap(\.musicbrainzReleaseId).first
     else { return }
+    // The tracklist saved on this phone shows at once; the server's answer
+    // replaces it when it arrives (#59: only owned songs showed until then).
+    if release == nil {
+      release = await model.storedCatalogue(key: "release:" + releaseId)
+    }
     // Offline, the last answer is used; without one the page shows what you own.
-    release = try? await model.cachedCatalogue(
+    if let fresh = try? await model.cachedCatalogue(
       key: "release:" + releaseId,
       conditional: { try await $0.catalogueRelease(releaseId: releaseId, etag: $1) })
+    {
+      release = fresh
+    }
   }
   private func requestMissing() async {
     guard !requesting else { return }
