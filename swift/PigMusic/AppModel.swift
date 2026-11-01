@@ -103,7 +103,7 @@ enum PlayOrigin: Hashable {
         return
       }
     #endif
-    Task { await finishParkedSignOut() }
+    Task { await Self.parkedSessions.end() }
     guard let data = defaults.data(forKey: "pig.connection"),
       let connection = try? JSONDecoder().decode(Connection.self, from: data)
     else { return }
@@ -115,7 +115,7 @@ enum PlayOrigin: Hashable {
         return
       }
       let service = try NativeService(
-        server: connection.server, vault: vault, parked: Self.parkedSignOuts(connection.server))
+        server: connection.server, vault: vault, parked: Self.parkedSessions)
       try await attach(connection.person, service: service)
       await refresh()
       startLiveUpdates()
@@ -274,7 +274,7 @@ enum PlayOrigin: Hashable {
         invite, password: password, deviceName: UIDevice.current.name)
       server = saved.origin.absoluteString
       let service = try NativeService(
-        server: server, vault: TokenVault(account: server), parked: Self.parkedSignOuts(server))
+        server: server, vault: TokenVault(account: server), parked: Self.parkedSessions)
       let user = try await service.me()
       try await attach(user, service: service)
       defaults.set(
@@ -295,12 +295,12 @@ enum PlayOrigin: Hashable {
       let origin = try ServerAddress.validate(server)
       let service = try NativeService(
         server: origin.absoluteString, vault: TokenVault(account: origin.absoluteString),
-        parked: Self.parkedSignOuts(origin.absoluteString))
+        parked: Self.parkedSessions)
       let user = try await service.signIn(
         username: username, password: password, deviceName: UIDevice.current.name)
       server = origin.absoluteString
       try await attach(user, service: service)
-      Task { await finishParkedSignOut() }
+      Task { await Self.parkedSessions.end() }
       defaults.set(
         try JSONEncoder().encode(Connection(server: server, person: user)), forKey: "pig.connection"
       )
@@ -1296,7 +1296,6 @@ enum PlayOrigin: Hashable {
     defer { busy = false }
     do {
       let ended = try await service.signOut()
-      if !ended { defaults.set(server, forKey: Self.parkedServer) }
       detach()
       if !ended {
         message =
@@ -1304,21 +1303,10 @@ enum PlayOrigin: Hashable {
       }
     } catch { message = error.userMessage }
   }
-  /// Where sessions signed out offline wait to be ended (D-55, #97).
-  private static let parkedServer = "pig.parked-sign-out-server"
-  private static func parkedSignOuts(_ server: String) -> TokenVault {
-    TokenVault(service: "au.com.pig.music.parked-sign-out", account: server)
-  }
-  /// Ends sessions signed out while the server was out of reach, by their own
-  /// tokens, once it answers; it never touches the current sign-in.
-  private func finishParkedSignOut() async {
-    guard let server = defaults.string(forKey: Self.parkedServer) else { return }
-    let parked = Self.parkedSignOuts(server)
-    await NativeService.endParkedSessions(server: server, parked: parked)
-    if ((try? await parked.read()) ?? nil) == nil {
-      defaults.removeObject(forKey: Self.parkedServer)
-    }
-  }
+  /// Sessions signed out offline, for every server, waiting to be ended
+  /// by their own tokens once the server answers (D-55, #97).
+  private static let parkedSessions = ParkedSessions(
+    store: TokenVault(service: "au.com.pig.music.parked-sign-out", account: "sessions"))
   private func detach() {
     watch?.disconnect()
     generation += 1
