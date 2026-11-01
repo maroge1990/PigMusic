@@ -76,7 +76,12 @@ import PigDomain
     self.source = source
     self.onFailure = onFailure
   }
-  public func reload() async { records = await archive.snapshot() }
+  /// The Watch poll reloads every 2 s; an unchanged list is not assigned, so
+  /// the Downloads rows aren't redrawn for nothing (#97).
+  public func reload() async {
+    let fresh = await archive.snapshot()
+    if fresh != records { records = fresh }
+  }
   public func enqueue(
     _ tracks: [Track], quality: String = "original", origin: DownloadOrigin = .direct
   ) async throws {

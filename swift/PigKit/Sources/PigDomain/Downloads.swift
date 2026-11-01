@@ -17,7 +17,7 @@ public protocol DeviceCopySource: Sendable {
   func deviceCopy(trackId: String, quality: String, create: Bool) async throws -> DeviceCopy
   func copyRequest(trackId: String, quality: String) async throws -> URLRequest
 }
-public struct RetainedDownload: Codable, Sendable {
+public struct RetainedDownload: Codable, Sendable, Equatable {
   public var quality: String
   public var bytes: Int64
   public var fileName: String
@@ -45,7 +45,7 @@ public struct DownloadOrigin: Codable, Sendable, Hashable {
   }
   public func same(_ other: DownloadOrigin) -> Bool { playlistId == other.playlistId }
 }
-public struct DownloadRecord: Codable, Sendable, Identifiable {
+public struct DownloadRecord: Codable, Sendable, Identifiable, Equatable {
   public let track: Track
   public var quality: String
   public var state: String

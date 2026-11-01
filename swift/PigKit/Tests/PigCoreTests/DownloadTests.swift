@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Observation
 import PigDomain
 import PigDownloads
 import PigPlayback
@@ -143,6 +144,27 @@ private actor Flag {
     #expect(calls.prefix(poll).contains("create three"))
     #expect(await archive.snapshot().allSatisfy { $0.state == "ready" })
   }
+  /// #97: the Watch poll reloads the download list every 2 s; assigning an
+  /// unchanged list told every Downloads row to redraw.
+  @MainActor @Test func reloadingAnUnchangedListChangesNothingObserved() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let archive = try archive(root)
+    let song = try LibraryCodec.decoder().decode(
+      Track.self,
+      from: Data(#"{"id":"one","title":"Song","artist":"Artist","source_revision":"v1"}"#.utf8))
+    try await archive.enqueue([song], quality: "original")
+    let controller = DownloadController(
+      archive: archive, source: AheadSource(ready: try copy(), preparing: try copy()))
+    await controller.reload()
+    let changed = Raised()
+    withObservationTracking { _ = controller.records } onChange: { changed.set() }
+    await controller.reload()
+    #expect(!changed.value)
+    try await archive.enqueue([song], quality: "aac")
+    await controller.reload()
+    #expect(changed.value)
+  }
   /// #65 (D-51): internal restarts (removing or releasing a song, adding songs,
   /// the cellular setting) used the person's Resume, which cleared both their
   /// Pause and the background suspension: pausing and then removing one song
@@ -255,7 +277,7 @@ private actor Flag {
     #expect(await source.waiting)
     try await Task.sleep(for: .milliseconds(200))  // Later turns queue another batch.
     // Without opening the stalled request: pausing cancels it.
-    let done = Flag()
+    let done = Raised()
     let paused = Task {
       await controller.pause()
       await done.set()
@@ -450,4 +472,11 @@ private actor Flag {
       for _ in 0...2 * 1024 * 1024 + 1 { _ = try parser.append(65) }
     }
   }
+}
+
+private final class Raised: @unchecked Sendable {
+  private let lock = NSLock()
+  private var raised = false
+  var value: Bool { lock.withLock { raised } }
+  func set() { lock.withLock { raised = true } }
 }
