@@ -157,9 +157,16 @@ struct CatalogueArtistView: View {
         saved,
         await model.storedCatalogue(key: "popular-matches:" + artistId, as: [Track?].self))
     }
+    // Not cancelled when the page closes: the answer is saved for the next
+    // visit instead of thrown away (#107: Mark reopened pages until the
+    // popular songs appeared).
+    let model = model
+    let artistId = artistId
     guard
-      let popular = try? await model.cachedCatalogue(
-        key: "popular:" + artistId, load: { try await $0.cataloguePopularity(artistId: artistId) })
+      let popular = try? await Task(operation: {
+        try await model.cachedCatalogue(
+          key: "popular:" + artistId, load: { try await $0.cataloguePopularity(artistId: artistId) })
+      }).value
     else { return }
     popularity = popular
     // Show the songs straight away; library matches replace rows as they arrive.
@@ -169,9 +176,11 @@ struct CatalogueArtistView: View {
     let matches =
       tracks.isEmpty
       ? nil
-      : try? await model.cachedCatalogue(key: "popular-matches:" + artistId) {
-        try await $0.lookupSongs(tracks)
-      }
+      : try? await Task(operation: {
+        try await model.cachedCatalogue(key: "popular-matches:" + artistId) {
+          try await $0.lookupSongs(tracks)
+        }
+      }).value
     popularSongs = Self.songs(popular, matches)
   }
   private func loadAlbums() async {
