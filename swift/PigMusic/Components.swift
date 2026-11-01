@@ -455,3 +455,62 @@ struct InlineQualityPicker: View {
     } catch { message = error.userMessage }
   }
 }
+
+/// One line that scrolls when the name doesn't fit (D-65, #108): after a
+/// pause it slides to show the rest, pauses and returns. With Reduce Motion
+/// it stays still and ends in "…". VoiceOver reads the whole name.
+struct ScrollingLine: View {
+  let text: String
+  let font: Font
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @State private var box: CGFloat = 0
+  @State private var full: CGFloat = 0
+  @State private var offset: CGFloat = 0
+  private struct Run: Hashable {
+    let text: String
+    let plan: ScrollPlan
+    let still: Bool
+  }
+  var body: some View {
+    let plan = ScrollPlan(textWidth: full, boxWidth: box)
+    let moving = plan.scrolls && !reduceMotion
+    Text(text).font(font).lineLimit(1)
+      .opacity(moving ? 0 : 1)
+      .frame(maxWidth: .infinity)
+      .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { box = $0 }
+      .background {
+        Text(text).font(font).lineLimit(1).fixedSize().hidden()
+          .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { full = $0 }
+      }
+      .overlay(alignment: .leading) {
+        if moving {
+          Text(text).font(font).lineLimit(1).fixedSize().offset(x: offset)
+        }
+      }
+      .mask {
+        LinearGradient(
+          stops: moving
+            ? [
+              .init(color: .clear, location: 0), .init(color: .black, location: 0.04),
+              .init(color: .black, location: 0.96), .init(color: .clear, location: 1),
+            ] : [.init(color: .black, location: 0), .init(color: .black, location: 1)],
+          startPoint: .leading, endPoint: .trailing)
+      }
+      .task(id: Run(text: text, plan: plan, still: !moving)) { await scroll(plan, moving) }
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel(text)
+  }
+  private func scroll(_ plan: ScrollPlan, _ moving: Bool) async {
+    offset = 0
+    guard moving else { return }
+    while !Task.isCancelled {
+      try? await Task.sleep(for: .seconds(ScrollPlan.pause))
+      if Task.isCancelled { return }
+      withAnimation(.linear(duration: plan.duration)) { offset = -plan.distance }
+      try? await Task.sleep(for: .seconds(plan.duration + ScrollPlan.pause))
+      if Task.isCancelled { return }
+      withAnimation(.easeInOut(duration: 0.5)) { offset = 0 }
+      try? await Task.sleep(for: .seconds(0.5))
+    }
+  }
+}

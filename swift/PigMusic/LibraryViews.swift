@@ -526,14 +526,15 @@ struct NowPlayingView: View {
   }
   private var titles: some View {
     VStack(spacing: 4) {
-      Text(current?.title ?? "").font(.title2.weight(.bold)).multilineTextAlignment(.center)
+      // One line each; a long name scrolls (D-65, #108).
+      ScrollingLine(text: current?.title ?? "", font: .title2.weight(.bold))
       Button {
         if let current {
           openArtist(ArtistRoute(track: current, origin: model.playOrigin))
           dismiss()
         }
       } label: {
-        Text(current?.artist ?? "").font(.headline)
+        ScrollingLine(text: current?.artist ?? "", font: .headline)
           .foregroundStyle(PigBrand.textAccent(scheme))
       }
       .buttonStyle(.plain).disabled(current == nil)
