@@ -594,83 +594,29 @@ struct CatalogueReleaseView: View {
     self.savedAlbumId = savedAlbumId
     _release = State(initialValue: model.peekCatalogue(key: "release:" + releaseId))
   }
+  // The same page as a library album: header, controls, then full-width
+  // song rows with dividers (#62).
   var body: some View {
-    List {
-      if release == nil {
-        Section {
-          DetailHeader(
-            model: model, source: .release(releaseId),
-            fallback: groupId.map { .releaseGroup($0) }, eyebrow: "ALBUM", title: title)
-        }.listRowSeparator(.hidden)
-        if let error {
-          Text(error).foregroundStyle(.secondary)
-          Button("Try again") { Task { await load() } }.disabled(loading)
-        } else {
-          ProgressView().frame(maxWidth: .infinity)
-        }
-      } else if release?.songs.isEmpty == true {
-        Text("No catalogue results.").foregroundStyle(.secondary)
-      }
-      if let release {
-        Section {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 14) {
+        if let release {
           DetailHeader(
             model: model, source: .release(releaseId),
             fallback: groupId.map { .releaseGroup($0) }, eyebrow: "ALBUM", title: release.title,
             artist: release.artist,
             openArtist: release.artistId == nil ? nil : { showingArtist = true }
           ).preparesPlayback(release.songs.map(\.track), model: model)
-          let missing = release.songs.filter {
-            $0.availability != "in_library" && $0.availability != "requested"
-          }.map(\.track)
-          HStack(spacing: 10) {
-            PlayCapsule { model.play(release.songs.map(\.track), origin: origin) }
-              .disabled(release.songs.isEmpty)
-            RoundIcon(label: "Shuffle", systemImage: "shuffle") {
-              model.play(release.songs.map(\.track).shuffled(), origin: origin)
-            }.disabled(release.songs.isEmpty)
-            // The request is shown only by its mark: sending, then the song
-            // states (clock = requested), or a warning that retries.
-            if requesting {
-              ProgressView().frame(width: 40, height: 40).accessibilityLabel("Sending request")
-            } else if let requestFailure {
-              RoundIcon(label: "Request failed: \(requestFailure). Try again",
-                systemImage: "exclamationmark.circle") { Task { await request(missing) } }
-              .foregroundStyle(PigBrand.danger(scheme))
-            } else if !missing.isEmpty {
-              RoundIcon(label: "Add or request album", systemImage: "plus") {
-                Task { await request(missing) }
-              }
-              .disabled(!model.canMutate || missing.count > 500)
-            } else if release.songs.contains(where: { $0.availability == "requested" }) {
-              RoundIconLabel(systemImage: "clock").accessibilityLabel("Requested")
-            }
-            Spacer()
-          }.buttonStyle(.plain)
-          if !release.songs.isEmpty
-            && release.songs.allSatisfy({ $0.availability == "in_library" })
-          {
-            Text("Already in your library: nothing to request.")
-              .font(PigType.footnote).foregroundStyle(.secondary)
+          controls(release)
+          if release.songs.isEmpty {
+            Text("No catalogue results.").foregroundStyle(.secondary)
           }
-          if let savedAlbum {
-            NavigationLink {
-              AlbumView(model: model, album: savedAlbum)
-            } label: {
-              Label("Open in your library", systemImage: "checkmark.circle.fill")
-                .font(.subheadline.weight(.semibold))
-            }
+          AlbumSongList(
+            model: model, tracks: release.songs.map(track),
+            number: { index, _ in index + 1 }
+          ) { index in
+            model.play(release.songs.map(\.track), at: index, origin: origin)
           }
-        }
-        .listRowSeparator(.hidden)
-        Section {
-          ForEach(Array(release.songs.enumerated()), id: \.offset) { index, song in
-            SongRow(model: model, track: track(song), number: index + 1) {
-              model.play(release.songs.map(\.track), at: index, origin: origin)
-            }
-          }
-        }
-        if let groupId, editionCount > 1 {
-          Section {
+          if let groupId, editionCount > 1 {
             NavigationLink {
               CatalogueEditionsView(model: model, groupId: groupId, title: release.title)
             } label: {
@@ -678,8 +624,18 @@ struct CatalogueReleaseView: View {
                 "Other versions of this album (\(editionCount - 1))", systemImage: "square.stack")
             }
           }
+        } else {
+          DetailHeader(
+            model: model, source: .release(releaseId),
+            fallback: groupId.map { .releaseGroup($0) }, eyebrow: "ALBUM", title: title)
+          if let error {
+            Text(error).foregroundStyle(.secondary)
+            Button("Try again") { Task { await load() } }.disabled(loading)
+          } else {
+            ProgressView().frame(maxWidth: .infinity)
+          }
         }
-      }
+      }.padding(.horizontal).padding(.bottom, 24)
     }
     .pigCanvas().navigationTitle(release?.title ?? title)
     .navigationDestination(isPresented: $showingArtist) {
@@ -690,6 +646,49 @@ struct CatalogueReleaseView: View {
     .task { await load() }
     .task(id: savedAlbumId) {
       if let savedAlbumId { savedAlbum = try? await model.store?.album(id: savedAlbumId) }
+    }
+  }
+  @ViewBuilder private func controls(_ release: CatalogueRelease) -> some View {
+    let missing = release.songs.filter {
+      $0.availability != "in_library" && $0.availability != "requested"
+    }.map(\.track)
+    HStack(spacing: 10) {
+      PlayCapsule { model.play(release.songs.map(\.track), origin: origin) }
+        .disabled(release.songs.isEmpty)
+      RoundIcon(label: "Shuffle", systemImage: "shuffle") {
+        model.play(release.songs.map(\.track).shuffled(), origin: origin)
+      }.disabled(release.songs.isEmpty)
+      // The request is shown only by its mark: sending, then the song
+      // states (clock = requested), or a warning that retries.
+      if requesting {
+        ProgressView().frame(width: 40, height: 40).accessibilityLabel("Sending request")
+      } else if let requestFailure {
+        RoundIcon(
+          label: "Request failed: \(requestFailure). Try again",
+          systemImage: "exclamationmark.circle"
+        ) { Task { await request(missing) } }
+        .foregroundStyle(PigBrand.danger(scheme))
+      } else if !missing.isEmpty {
+        RoundIcon(label: "Add or request album", systemImage: "plus") {
+          Task { await request(missing) }
+        }
+        .disabled(!model.canMutate || missing.count > 500)
+      } else if release.songs.contains(where: { $0.availability == "requested" }) {
+        RoundIconLabel(systemImage: "clock").accessibilityLabel("Requested")
+      }
+      Spacer()
+    }.buttonStyle(.plain)
+    if !release.songs.isEmpty && release.songs.allSatisfy({ $0.availability == "in_library" }) {
+      Text("Already in your library: nothing to request.")
+        .font(PigType.footnote).foregroundStyle(.secondary)
+    }
+    if let savedAlbum {
+      NavigationLink {
+        AlbumView(model: model, album: savedAlbum)
+      } label: {
+        Label("Open in your library", systemImage: "checkmark.circle.fill")
+          .font(.subheadline.weight(.semibold))
+      }
     }
   }
   private var origin: PlayOrigin { .catalogue(artistId: release?.artistId) }

@@ -630,30 +630,30 @@ private struct ServerAlbumView: View {
   let album: Album
   @State private var tracks: [Track] = []
   @State private var failure: String?
+  // The same page as a library album (#62).
   var body: some View {
-    List {
-      Section {
-        HStack(spacing: 14) {
-          ArtworkThumb(model: model, source: album.artworkSource, title: album.title, size: 88)
-          VStack(alignment: .leading, spacing: 4) {
-            Text(album.title).font(.headline)
-            Text(album.artist).foregroundStyle(.secondary)
-            Text("On the server").font(PigType.footnote).foregroundStyle(.secondary)
-          }
+    ScrollView {
+      VStack(alignment: .leading, spacing: 14) {
+        DetailHeader(
+          model: model, source: album.artworkSource, eyebrow: "ON THE SERVER",
+          title: album.title, artist: album.artist)
+        HStack(spacing: 10) {
+          PlayCapsule { model.play(tracks, origin: .catalogue(artistId: nil)) }
+            .disabled(tracks.isEmpty)
+          RoundIcon(label: "Shuffle", systemImage: "shuffle") {
+            model.play(tracks.shuffled(), origin: .catalogue(artistId: nil))
+          }.disabled(tracks.isEmpty)
+          Spacer()
         }
-      }
-      Section {
-        ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-          SongRow(model: model, track: track, number: track.trackNumber ?? index + 1) {
-            model.play(tracks, at: index, origin: .catalogue(artistId: nil))
-          }
+        AlbumSongList(model: model, tracks: tracks) {
+          model.play(tracks, at: $0, origin: .catalogue(artistId: nil))
         }
         if let failure {
           Text(failure).font(PigType.footnote).foregroundStyle(.secondary)
         } else if tracks.isEmpty {
-          ProgressView()
+          ProgressView().frame(maxWidth: .infinity)
         }
-      }
+      }.padding(.horizontal).padding(.bottom, 24)
     }
     .pigCanvas().navigationTitle(album.title).navigationBarTitleDisplayMode(.inline)
     .task(id: album.id) {

@@ -260,15 +260,8 @@ struct AlbumView: View {
           DownloadMenu(model: model, tracks: tracks)
           Spacer()
         }
-        LazyVStack(spacing: 0) {
-          let rows = rows
-          ForEach(Array(rows.enumerated()), id: \.offset) { index, song in
-            SongRow(model: model, track: song, number: song.trackNumber ?? index + 1) {
-              model.play(rows, at: index)
-            }
-            Divider()
-          }
-        }
+        let rows = rows
+        AlbumSongList(model: model, tracks: rows) { model.play(rows, at: $0) }
         if !missing.isEmpty {
           VStack(alignment: .leading, spacing: 6) {
             Button {

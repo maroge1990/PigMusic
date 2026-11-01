@@ -514,3 +514,21 @@ struct ScrollingLine: View {
     }
   }
 }
+
+
+/// An album's songs as the Library album page lists them: full-width rows
+/// with dividers. Every album page uses it, wherever it opened from (#62).
+struct AlbumSongList: View {
+  let model: AppModel
+  let tracks: [Track]
+  var number: (Int, Track) -> Int = { index, track in track.trackNumber ?? index + 1 }
+  let play: (Int) -> Void
+  var body: some View {
+    LazyVStack(spacing: 0) {
+      ForEach(Array(tracks.enumerated()), id: \.offset) { index, song in
+        SongRow(model: model, track: song, number: number(index, song)) { play(index) }
+        Divider()
+      }
+    }
+  }
+}
