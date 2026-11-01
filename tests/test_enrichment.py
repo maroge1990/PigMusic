@@ -656,6 +656,37 @@ def test_an_artist_page_answers_before_every_album_is_looked_up(tmp_path, monkey
     asyncio.run(run())
 
 
+def test_popular_songs_arrive_within_seconds_while_albums_are_slow(tmp_path):
+    """#107: a person opening an artist page waited up to 10 s of album
+    lookups for the popular songs ListenBrainz gave in about a second (live:
+    3.5-10.5 s), and left before they arrived."""
+    store = Store(tmp_path)
+    save_settings(store, True, True, listenbrainz_token=TOKEN)
+
+    class PacedCatalogue(SlowCatalogue):
+        async def get(self, client, path):
+            await asyncio.sleep(0.6)  # One paced MusicBrainz lookup.
+            return await super().get(client, path)
+
+    provider = Popularity(store, PacedCatalogue())
+
+    async def run():
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(listenbrainz([]))
+        ) as client:
+            try:
+                page = await asyncio.wait_for(provider.get(client, ARTIST), 3)
+                assert [s["title"] for s in page["songs"]] == ["Song"]
+            finally:
+                for task in provider.completing.values():
+                    task.cancel()
+                await asyncio.gather(
+                    *provider.completing.values(), return_exceptions=True
+                )
+
+    asyncio.run(run())
+
+
 def test_songs_only_and_full_requests_share_one_recordings_fetch(tmp_path):
     """#44: songs-only and full answers used separate locks, so concurrent
     requests both fetched the artist's recordings."""

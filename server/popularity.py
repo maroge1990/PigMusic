@@ -17,8 +17,9 @@ from .releases import feature_album
 
 
 # A person waiting for an artist page gets an answer within about this long;
-# album details not looked up by then finish in the background (#21).
-ALBUM_SECONDS = 10
+# album details not looked up by then finish in the background (#21). The
+# popular songs come with it, so the wait stays short (#107: 10 s was too long).
+ALBUM_SECONDS = 2
 # A partial answer is kept this long while its background completion runs.
 PARTIAL_TTL = 600
 
