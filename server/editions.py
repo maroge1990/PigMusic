@@ -305,8 +305,13 @@ class EditionResolver:
                 )
                 if ranked:
                     chosen = ranked[0]["id"]
-            except (httpx.HTTPError, ValueError, KeyError, TypeError):
-                pass  # The requested release itself is filed.
+            except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+                # A passing outage is retried (prepare defers it): filing this
+                # song on the requested release now while its album-mates
+                # later reach the best edition would split the album again.
+                if transient(error):
+                    raise
+                # Otherwise the requested release itself is filed.
         if not recording_id:
             return {"recording_kind": sorted(kinds)} if kinds else None
         return await self.filing(job, chosen, recording_id, kinds)

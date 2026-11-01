@@ -549,3 +549,50 @@ def test_an_edition_missing_one_of_the_albums_recordings_takes_none_of_them(
         ORIGINAL,
         ORIGINAL,
     ]
+
+
+def test_a_passing_browse_outage_defers_the_song_instead_of_splitting_the_album(
+    tmp_path,
+):
+    """#106 (Codex round 1): a failed later page of editions filed that song
+    on the requested release for good, while its album-mates reached the
+    reissue once the outage passed."""
+    import httpx
+    import pytest
+
+    from server.editions import Deferred
+
+    songs = [(HIT, "All the Small Things"), (DEEP, "Dumpweed")]
+    reissue = holding(
+        release(REISSUE, "Enema of the State", ENEMA, date="2016"), HIT, DEEP
+    )
+
+    class Paged(FakeCatalogue):
+        outage = True
+
+        async def get(self, client, path, **params):
+            if path == "release":
+                if params["offset"] == 0:
+                    return {"release-count": 2, "releases": [reissue]}
+                if self.outage:
+                    raise httpx.ConnectError("MusicBrainz unreachable")
+                original = release(ORIGINAL, "Enema of the State", ENEMA)
+                return {"release-count": 2, "releases": [holding(original, HIT)]}
+            return await super().get(client, path, **params)
+
+    catalogue = Paged(
+        {
+            "release/" + ORIGINAL: album_detail(ORIGINAL, "1999", *songs),
+            "release/" + REISSUE: album_detail(REISSUE, "2016", *songs),
+        }
+    )
+    resolve = EditionResolver(
+        Store(tmp_path), catalogue, FakeArtwork(jpeg(tmp_path)), None
+    )
+    with pytest.raises(Deferred):
+        asyncio.run(resolve.prepare(album_request("All the Small Things", HIT, 1)))
+    catalogue.outage = False
+    changes = asyncio.run(
+        resolve.prepare(album_request("All the Small Things", HIT, 1))
+    )
+    assert changes["musicbrainz_release_id"] == REISSUE
