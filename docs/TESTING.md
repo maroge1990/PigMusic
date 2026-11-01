@@ -99,6 +99,15 @@ The browser checks below still run against a local server with disposable fixtur
 
 Native screens are checked first in the Mac's simulators (iPhone and Watch, `--demo` library), then on devices (T5); native playback runs through PigKit harness runs.
 
+### Simulator tap-through tests
+
+`swift/PigMusicUITests` holds XCUITest bundles in their own project (`scripts/generate_ui_test_project.py` writes it; `--check` runs in the pytest suite and `native.yml`), so the app project never changes for a test. Each bundle drives the Debug app already installed in the simulator by its bundle identifier.
+- **Run (on the Mac, ~3 min):** `python3 scripts/simulator_ui_tests.py` builds both apps, installs them on the first paired iPhone and Watch simulator, runs both bundles and shuts the simulators down. `--skip-build` reuses the installed apps; `--only iphone|watch`; `--keep` leaves them running.
+- **iPhone (offline `--demo` library):** a Home album opens as a library album (#62), the player names the song and artist (#108), Next song, the song menu's actions, artist to album in Library, search finds a library song.
+- **Watch:** the empty Watch explains how to send music.
+- **Not covered yet:** anything that needs a server: Send to Apple Watch and delivery, mixes, search beyond the library, downloads.
+- **Adding a test:** put the file in `iPhone/` or `Watch/`, run the generator, and find elements by their accessibility labels (a failing `expect` prints the screen's tree).
+
 ### Browser checks
 
 Use local disposable fixtures for mutations, on desktop and at 375 px, in light, dark and system appearance, with keyboard focus and reduced motion.
