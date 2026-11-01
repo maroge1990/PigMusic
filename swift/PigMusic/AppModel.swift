@@ -121,29 +121,36 @@ enum PlayOrigin: Hashable {
   }
   /// When the app last stopped being active.
   @ObservationIgnored private var inactiveSince: ContinuousClock.Instant?
+  /// Whether the foreground work (live updates, downloads, Watch copying) is
+  /// stopped; true until the first activation, which starts it.
+  @ObservationIgnored private var suspended = true
   func sceneActive(_ active: Bool, background: Bool = false) async {
     activeScene = active
     player.sceneBackground(background)
-    liveTask?.cancel()
-    liveTask = nil
-    if !active, inactiveSince == nil { inactiveSince = .now }
-    if active, let since = inactiveSince {
-      inactiveSince = nil
-      // Connections kept through a break may be dead without the system
-      // knowing; the first request on one waited for its timeout.
-      let away = ContinuousClock.now - since
-      if away >= .seconds(30) {
-        service?.renewConnections()
-        player.renewConnections()
-        DiagnosticsLog.shared.record(
-          "network", "new connections after \(Int(away / .seconds(1))) s away")
-      }
-    }
     if !active {
+      if inactiveSince == nil { inactiveSince = .now }
+      // A moment of Control Centre or a notification keeps everything
+      // running; only the background stops it (#97).
+      guard background, !suspended else { return }
+      suspended = true
+      liveTask?.cancel()
+      liveTask = nil
       await downloads?.suspendPreparation()
       await watch?.suspend()
       return
     }
+    let away = inactiveSince.map { ContinuousClock.now - $0 } ?? .zero
+    inactiveSince = nil
+    // Connections kept through a break may be dead without the system
+    // knowing; the first request on one waited for its timeout.
+    if away >= SceneReturn.longAway {
+      service?.renewConnections()
+      player.renewConnections()
+      DiagnosticsLog.shared.record(
+        "network", "new connections after \(Int(away / .seconds(1))) s away")
+    }
+    guard SceneReturn.restarts(away: away, suspended: suspended) else { return }
+    suspended = false
     downloads?.resumePreparation()
     watch?.resume()
     await refresh()
