@@ -13,6 +13,7 @@ on:
       - 'docs/brand-asset-provenance.json'
       - 'scripts/serve_contract_fixture.py'
       - 'scripts/generate_native_project.py'
+      - 'scripts/generate_ui_test_project.py'
       - 'scripts/sync_native_brand.py'
       - 'scripts/generate_brand_tokens.py'
       - '.github/workflows/native.yml'
@@ -26,6 +27,7 @@ on:
       - 'docs/brand-asset-provenance.json'
       - 'scripts/serve_contract_fixture.py'
       - 'scripts/generate_native_project.py'
+      - 'scripts/generate_ui_test_project.py'
       - 'scripts/sync_native_brand.py'
       - 'scripts/generate_brand_tokens.py'
       - '.github/workflows/native.yml'
@@ -86,3 +88,14 @@ jobs:
           xcodebuild -quiet -project swift/PigMusic.xcodeproj -scheme PigMusicWatch \
             -destination 'generic/platform=watchOS Simulator' -derivedDataPath swift/build/PigMusic \
             -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO build
+      # The tap-through tests run on the Mac's simulators (docs/TESTING.md);
+      # here they only have to compile, so a renamed screen breaks the push.
+      - name: Simulator UI test bundles compile
+        run: |
+          python3 scripts/generate_ui_test_project.py --check
+          xcodebuild -quiet -project swift/PigMusicUITests/PigMusicUITests.xcodeproj \
+            -scheme PigMusicUITests -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath swift/build/PigMusicUITests CODE_SIGNING_ALLOWED=NO build-for-testing
+          xcodebuild -quiet -project swift/PigMusicUITests/PigMusicUITests.xcodeproj \
+            -scheme PigMusicWatchUITests -destination 'generic/platform=watchOS Simulator' \
+            -derivedDataPath swift/build/PigMusicUITests CODE_SIGNING_ALLOWED=NO build-for-testing
