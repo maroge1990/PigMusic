@@ -7,6 +7,9 @@ import SwiftUI
 /// albums only) and the popular chart, each as a shelf of artwork cards.
 struct HomeView: View {
   @Bindable var model: AppModel
+  /// The mix whose songs a long press asked to see (#56).
+  @State private var openedMix: String?
+  @State private var mixNotice: String?
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 28) {
@@ -32,8 +35,9 @@ struct HomeView: View {
               }.buttonStyle(.plain)
             }
             ForEach(mixes) { mix in
-              NavigationLink {
-                MixDetailView(model: model, mix: mix)
+              // Tap plays the mix; a long press offers its songs and options (#56).
+              Button {
+                model.play(mix.tracks)
               } label: {
                 VStack(alignment: .leading, spacing: 6) {
                   MixArtwork(kind: mix.kind, title: mix.title).frame(width: 150, height: 150)
@@ -47,7 +51,13 @@ struct HomeView: View {
                   ).font(PigType.footnote)
                     .foregroundStyle(.secondary)
                 }.frame(width: 150, alignment: .leading)
-              }.buttonStyle(.plain)
+              }
+              .buttonStyle(.plain)
+              .disabled(mix.tracks.isEmpty)
+              .accessibilityLabel("Play \(mix.title)")
+              .accessibilityHint("Touch and hold for the songs and more options")
+              .accessibilityAction(named: "Show songs") { openedMix = mix.id }
+              .contextMenu { mixOptions(mix) }
             }
           }
         } else {
@@ -81,11 +91,42 @@ struct HomeView: View {
       }.padding(.vertical, 8)
     }
     .navigationTitle("Home")
+    .navigationDestination(item: $openedMix) { id in
+      if let mix = model.homeContent[.mixes]?.mixes?.first(where: { $0.id == id }) {
+        MixDetailView(model: model, mix: mix)
+      }
+    }
+    .alert(
+      "Mix",
+      isPresented: Binding(get: { mixNotice != nil }, set: { if !$0 { mixNotice = nil } })
+    ) {
+      Button("OK") { mixNotice = nil }
+    } message: {
+      Text(mixNotice ?? "")
+    }
     .task(id: model.artworkNamespace) { await model.refreshHome() }
     .refreshable {
       await model.refresh()
       await model.refreshHome(force: true)
     }
+  }
+
+  @ViewBuilder private func mixOptions(_ mix: PersonalMix) -> some View {
+    Button("Show songs", systemImage: "list.bullet") { openedMix = mix.id }
+    Button("Shuffle", systemImage: "shuffle") { model.play(mix.tracks.shuffled()) }
+    Button("Save this edition", systemImage: "plus") {
+      Task {
+        do {
+          _ = try await model.performPersonal { try await $0.saveMix(mix.id) }
+          mixNotice = MixDetailView.savedNotice
+        } catch { mixNotice = error.userMessage }
+      }
+    }.disabled(!model.canMutate)
+    Button("Hide this edition", systemImage: "eye.slash", role: .destructive) {
+      Task {
+        do { try await model.hideMixEdition(mix.id) } catch { mixNotice = error.userMessage }
+      }
+    }.disabled(!model.canMutate)
   }
 
   @ViewBuilder private func discovery(_ section: HomeSection, title: String, songs: Bool)
@@ -177,6 +218,8 @@ struct HomeView: View {
 }
 
 struct MixDetailView: View {
+  static let savedNotice =
+    "Playlist saved. Add songs to your library to keep their audio after this mix leaves rotation."
   @Environment(\.dismiss) private var dismiss
   let model: AppModel
   let mix: PersonalMix
@@ -201,8 +244,7 @@ struct MixDetailView: View {
           Task {
             do {
               _ = try await model.performPersonal { try await $0.saveMix(mix.id) }
-              notice =
-                "Playlist saved. Add songs to your library to keep their audio after this mix leaves rotation."
+              notice = Self.savedNotice
             } catch { notice = error.userMessage }
             saving = false
           }
@@ -232,15 +274,8 @@ struct MixDetailView: View {
               saving = true
               Task {
                 do {
-                  try await model.performPersonal { try await $0.hideMix(mix.id) }
-                  let current = model.homeContent[.mixes]
-                  let updated = HomeContent(
-                    mixes: current?.mixes?.filter { $0.id != mix.id },
-                    mixesPreparing: current?.mixesPreparing, radio: current?.radio)
-                  model.homeContent[.mixes] = updated
-                  let archive = model.store
+                  try await model.hideMixEdition(mix.id)
                   dismiss()
-                  try? await archive?.cache(updated, key: "home:mixes")
                 } catch { notice = error.userMessage }
                 saving = false
               }
@@ -394,5 +429,18 @@ private struct ChartSongsView: View {
     .toolbar {
       Button("Play", systemImage: "play.fill") { model.play(tracks) }
     }
+  }
+}
+
+extension AppModel {
+  /// Hides a mix edition on the server and drops it from Home at once.
+  func hideMixEdition(_ id: String) async throws {
+    try await performPersonal { try await $0.hideMix(id) }
+    let current = homeContent[.mixes]
+    let updated = HomeContent(
+      mixes: current?.mixes?.filter { $0.id != id },
+      mixesPreparing: current?.mixesPreparing, radio: current?.radio)
+    homeContent[.mixes] = updated
+    try? await store?.cache(updated, key: "home:mixes")
   }
 }
