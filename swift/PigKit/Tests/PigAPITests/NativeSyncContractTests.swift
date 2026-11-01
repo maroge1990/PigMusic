@@ -211,7 +211,7 @@ final class NativeSyncContractTests: XCTestCase {
     XCTAssertEqual(manifest.state, "ready")
     XCTAssertGreaterThan(manifest.bytes, 0)
     XCTAssertEqual(manifest.sha256?.count, 64)
-    try await service.signOut()
+    _ = try await service.signOut()
     let token = await tokens.read()
     XCTAssertNil(token)
   }

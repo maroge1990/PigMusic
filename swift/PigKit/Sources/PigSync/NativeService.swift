@@ -47,6 +47,9 @@ public actor NativeService: LibrarySource {
   let client: Client
   public let server: URL
   let vault: any DeviceTokenStore
+  /// Tokens of sessions signed out while the server was out of reach, to be
+  /// ended by `endParkedSessions` once it answers (D-55, #97).
+  let parked: (any DeviceTokenStore)?
   private let artworkTransport: ArtworkTransport
   private var playbackHistory: [String: String] = [:]
   /// Signed file addresses fetched ahead for the songs a page shows, so a tap
@@ -61,9 +64,12 @@ public actor NativeService: LibrarySource {
   private let connections: RenewableSession
   /// The wait before asking for a failed library page again, longer each time.
   private let pageRetryPause: Duration
-  public init(server: String, vault: any DeviceTokenStore) throws {
+  public init(
+    server: String, vault: any DeviceTokenStore, parked: (any DeviceTokenStore)? = nil
+  ) throws {
     self.server = try ServerAddress.validate(server)
     self.vault = vault
+    self.parked = parked
     pageRetryPause = .seconds(1)
     artworkTransport = ArtworkTransport(server: self.server, vault: vault)
     let connections = RenewableSession {
@@ -102,9 +108,10 @@ public actor NativeService: LibrarySource {
   // Injectable generated client for isolated transport/fixture tests, not an app URL bypass.
   init(
     server: URL, client: Client, vault: any DeviceTokenStore,
-    pageRetryPause: Duration = .seconds(1)
+    parked: (any DeviceTokenStore)? = nil, pageRetryPause: Duration = .seconds(1)
   ) {
     self.server = server
+    self.parked = parked
     self.client = client
     self.pageRetryPause = pageRetryPause
     connections = RenewableSession { URLSession(configuration: .ephemeral) }
@@ -153,12 +160,59 @@ public actor NativeService: LibrarySource {
     default: return nil
     }
   }
-  public func signOut() async throws {
-    let result = try await client.logout_api_v1_auth_logout_post(.init())
+  /// Ends this session; true when the server ended it now. Without a server
+  /// in reach the phone signs out anyway (D-55, #97: it used to stay signed
+  /// in): its token is parked, so the session can be ended by that token the
+  /// next time the server answers, never touching a newer sign-in.
+  public func signOut() async throws -> Bool {
+    let result: Operations.logout_api_v1_auth_logout_post.Output
+    do {
+      result = try await client.logout_api_v1_auth_logout_post(.init())
+    } catch {
+      try await park()
+      return false
+    }
     switch result {
-    case .ok, .unauthorized: try await vault.clear()
+    case .ok, .unauthorized:
+      try await vault.clear()
+      return true
     default:
-      throw NativeFailure.unavailable("Couldn't revoke this session. Reconnect and try again.")
+      try await park()
+      return false
+    }
+  }
+  private func park() async throws {
+    if let parked, let token = try await vault.read() {
+      let earlier = (try? await parked.read()) ?? nil
+      try await parked.save(([earlier].compactMap { $0 } + [token]).joined(separator: "\n"))
+    }
+    try await vault.clear()
+  }
+  /// Ends the sessions parked by offline sign-outs, each by its own token;
+  /// those the server can't be asked about yet stay parked.
+  public static func endParkedSessions(
+    server: String, parked: any DeviceTokenStore, transport: (any ClientTransport)? = nil
+  ) async {
+    guard let saved = (try? await parked.read()) ?? nil, !saved.isEmpty else { return }
+    var left: [String] = []
+    for token in saved.split(separator: "\n").map(String.init) {
+      let vault = ParkedToken(token: token)
+      let made: Client?
+      if let transport {
+        made = try? PigClient.make(server: server, vault: vault, transport: transport)
+      } else {
+        made = try? PigClient.make(server: server, vault: vault)
+      }
+      guard let client = made else { continue }
+      switch try? await client.logout_api_v1_auth_logout_post(.init()) {
+      case .ok?, .unauthorized?: continue
+      default: left.append(token)
+      }
+    }
+    if left.isEmpty {
+      try? await parked.clear()
+    } else {
+      try? await parked.save(left.joined(separator: "\n"))
     }
   }
 
@@ -769,4 +823,12 @@ public actor NativeService: LibrarySource {
         "Remote streaming is unavailable. Try again or play a saved song.")
     }
   }
+}
+
+/// One parked session's token, for the request that ends it.
+private struct ParkedToken: DeviceTokenStore {
+  let token: String
+  func read() async throws -> String? { token }
+  func save(_ token: String) async throws {}
+  func clear() async throws {}
 }
