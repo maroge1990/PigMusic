@@ -516,6 +516,14 @@ private struct FoundResultsView: View {
           Image(systemName: "music.note.list").frame(width: 44, height: 44), playlist.name,
           "Playlist", mark: .library)
       }
+    case .mix(let mix):
+      NavigationLink {
+        MixDetailView(model: model, mix: mix)
+      } label: {
+        label(
+          MixArtwork(kind: mix.kind, title: mix.title).frame(width: 44, height: 44), mix.title,
+          "Mix · " + mix.reason, mark: .library)
+      }
     case .appleSong(let song):
       NavigationLink {
         AppleResultView(model: model, kind: "song", appleId: song.appleId, title: song.title)

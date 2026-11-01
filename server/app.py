@@ -290,7 +290,8 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     )
     app.include_router(discover_routes)
     warmer.warm_album = discover_routes.warm_album
-    app.include_router(personal_router(store, artist_jobs, recovery))
+    app.include_router(personal_router(store, artist_jobs, recovery, mixes))
+    app.state.mixes = mixes
     install_validation_redaction(app)
     app.state.store = store
     app.state.source_runtime = source_runtime

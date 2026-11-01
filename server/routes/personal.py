@@ -8,6 +8,7 @@ from fastapi import APIRouter, Header, HTTPException, Request, Response, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from .. import search_rank
 from ..library import identifier, normalise
 from ..api_models import (
     AlbumDetail,
@@ -223,7 +224,7 @@ class NativeMutationReceipt(BaseModel):
     favourited: bool | None = None
 
 
-def personal_router(store, artist_jobs, recovery):
+def personal_router(store, artist_jobs, recovery, mixes=None):
     router = APIRouter(prefix="/api/v1", tags=["personal-library"])
     users = store.user_libraries
     removal = PersonalRemoval(store, recovery)
@@ -376,7 +377,23 @@ def personal_router(store, artist_jobs, recovery):
         q: str = "",
         limit: int = Query(default=50, ge=10, le=200),
     ):
-        return await asyncio.to_thread(users.find, identity(request), q, limit)
+        found = await asyncio.to_thread(users.find, identity(request), q, limit)
+        return {**found, "mixes": await found_mixes(identity(request), q)}
+
+    async def found_mixes(user, query):
+        """The person's Home mixes named like the search, best first (#109)."""
+        if mixes is None or not normalise(query[:150]):
+            return []
+        listed = await asyncio.to_thread(mixes.list, user)
+        scored = [
+            (search_rank.score(query[:150], mix["title"]), index, mix)
+            for index, mix in enumerate(listed["mixes"])
+        ]
+        return [
+            mix
+            for value, _, mix in sorted(scored, key=lambda s: (-s[0], s[1]))
+            if value
+        ]
 
     @router.post("/library/lookup")
     async def lookup(body: Lookup, request: Request):

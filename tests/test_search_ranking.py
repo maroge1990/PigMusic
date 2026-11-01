@@ -103,6 +103,7 @@ def test_a_song_title_search_puts_the_song_first_whatever_its_home(
             "albums": [],
             "artists": [],
             "playlists": [],
+            "mixes": [],
         }
         for params in ({"q": "x", "limit": 9}, {"q": "x", "limit": 201}):
             assert (
@@ -244,3 +245,34 @@ def test_names_are_normalised_once_not_on_every_search():
         search_rank.named("yellow", "Yellow Submarine", "The Beatles")
     info = search_rank.normalise.cache_info()
     assert info.hits > info.misses
+
+
+def test_home_mixes_are_found_by_their_title(tmp_path, monkeypatch):
+    """#109: search found only the person's own playlists; Mark looked for
+    his Home mixes too."""
+    app, member, token = library(tmp_path, monkeypatch)
+    mix = {
+        "id": "edition-1",
+        "kind": "daily",
+        "day": "2026-11-01",
+        "title": "Daily blend",
+        "reason": "Songs you play most",
+        "tracks": [],
+    }
+    seen = []
+
+    def listed(user):
+        seen.append(user)
+        return {"mixes": [mix], "preparing": False}
+
+    monkeypatch.setattr(app.state.mixes, "list", listed)
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token},
+    ) as client:
+        found = client.get("/api/v1/search/results", params={"q": "daily"}).json()
+        assert [m["id"] for m in found["mixes"]] == ["edition-1"]
+        assert seen == [member]
+        other = client.get("/api/v1/search/results", params={"q": "coldplay"}).json()
+        assert other["mixes"] == []

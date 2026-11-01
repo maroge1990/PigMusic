@@ -199,6 +199,8 @@ class FoundResults(BaseModel):
     albums: list[FoundAlbum]
     artists: list[FoundArtist]
     playlists: list[PlaylistDTO]
+    # The person's Home mixes named like the search (#109).
+    mixes: list[MixDTO] = Field(default_factory=list)
 
 
 class Entities(BaseModel):

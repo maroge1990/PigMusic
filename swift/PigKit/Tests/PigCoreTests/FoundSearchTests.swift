@@ -45,6 +45,19 @@ private func decode<T: Decodable>(_ json: String) -> T {
   #expect(only.top.first?.id == "apple-song:11")
 }
 
+@Test func homeMixesShowUnderPlaylistsAndOldServersStillDecode() {
+  // #109: the person's Home mixes named like the search.
+  let found: FoundResults = decode(
+    #"{"top":[],"songs":[],"albums":[],"artists":[],"playlists":[],"#
+      + #""mixes":[{"id":"e1","kind":"daily","day":"2026-11-01","#
+      + #""title":"Daily blend","reason":"Songs you play most","tracks":[]}]}"#)
+  let screen = FoundScreen(found)
+  #expect(screen.playlists.map(\.id) == ["mix:e1"])
+  #expect(screen.kinds == [.top, .playlists])
+  // A server before #109 sends no mixes.
+  #expect(FoundScreen(decode(serverJSON)).playlists.isEmpty)
+}
+
 private actor Gate {
   var open = false
   func wait() async {
