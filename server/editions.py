@@ -1,8 +1,9 @@
 """Which edition a requested song is filed under, and its cover.
 
 Known identity comes first. A request naming a release keeps that release
-group (an album asked for stays that album) and moves only to its recommended
-edition that holds the same recording. A request naming only a recording is
+group (an album asked for stays that album), and every song asked for from
+one release lands on one edition: the best-ranked edition holding all of
+that release's recordings (D-64). A request naming only a recording is
 filed under the best album holding that recording. A request naming neither
 (a playlist import) is filed under the artist's own studio album containing
 the song. Release types (Live, Remix, Demo) are recording kinds: a live
@@ -128,6 +129,19 @@ def choose(recordings, job, kinds=frozenset(), recording_id=None):
     return release, recording
 
 
+def recordings(release):
+    """The recording IDs on a release's track list."""
+    return {
+        (track.get("recording") or {}).get("id")
+        for medium in release.get("media") or []
+        for track in medium.get("tracks") or []
+    } - {None}
+
+
+# Pages of 100 editions read for one release group (a few albums have
+# hundreds; past this the requested release itself still qualifies).
+EDITION_PAGES = 5
+
 # A song whose lookup keeps failing is filed as requested after this many
 # tries (about half an hour of waiting in all), so it never blocks for good.
 RESOLUTION_ATTEMPTS = 5
@@ -220,9 +234,37 @@ class EditionResolver:
         release, recording = chosen
         return await self.filing(job, release["id"], recording, kinds)
 
+    async def editions(self, group_id):
+        """Every edition of a release group with its track list, paged.
+
+        A recording lookup lists only its first 25 releases, so a popular
+        song (on hundreds of compilations) seemed missing from a reissue
+        that holds it, and one album landed on two editions (#106)."""
+        found, offset = [], 0
+        for _ in range(EDITION_PAGES):
+            page = await self.catalogue.get(
+                self.client,
+                "release",
+                **{
+                    "release-group": group_id,
+                    "inc": "media+recordings",
+                    "limit": 100,
+                    "offset": offset,
+                },
+            )
+            releases = page.get("releases") or []
+            found += releases
+            offset += len(releases)
+            if not releases or offset >= (page.get("release-count") or 0):
+                break
+        return found
+
     async def within_release(self, job, release_id, recording_id):
-        """The requested release's group on its recommended edition that holds
-        the same recording; the requested release itself when none does."""
+        """The requested release's group on one edition for every song asked
+        for from that release (D-64): the best-ranked edition holding all of
+        the requested release's recordings, so the requested release itself
+        when no other does. A recording not on the requested release goes to
+        the best-ranked edition holding it."""
         detail = await self.catalogue.get(
             self.client, "release/" + release_id, inc=RELEASE_INC
         )
@@ -249,24 +291,16 @@ class EditionResolver:
         chosen = release_id
         if recording_id and group.get("id"):
             try:
-                holding = await self.catalogue.get(
-                    self.client,
-                    "recording/" + mbid(recording_id),
-                    inc="releases",
-                )
-                ids = {r.get("id") for r in holding.get("releases") or []}
-                editions = await self.catalogue.get(
-                    self.client,
-                    "release",
-                    **{
-                        "release-group": mbid(group["id"]),
-                        "inc": "media",
-                        "limit": 50,
-                        "offset": 0,
-                    },
-                )
+                asked = {
+                    t["musicbrainz_recording_id"] for t in release_tracks(detail)
+                } - {None}
+                needed = asked if recording_id in asked else {recording_id}
                 ranked = sorted(
-                    (e for e in editions.get("releases", []) if e.get("id") in ids),
+                    (
+                        e
+                        for e in await self.editions(mbid(group["id"]))
+                        if needed <= recordings(e)
+                    ),
                     key=edition_rank,
                 )
                 if ranked:

@@ -373,6 +373,15 @@ def live_detail(release_id, title, group):
     }
 
 
+def holding(edition, *recording_ids, form="Digital Media"):
+    """A browsed edition with its track list."""
+    tracks = [
+        {"id": f"t{n}", "position": n, "recording": {"id": r}}
+        for n, r in enumerate(recording_ids, 1)
+    ]
+    return {**edition, "media": [{"format": form, "tracks": tracks}]}
+
+
 def test_a_known_live_recording_stays_live_and_keeps_its_identity(tmp_path):
     store = Store(tmp_path)
     remaster = "66666666-6666-4666-8666-666666666666"
@@ -383,9 +392,11 @@ def test_a_known_live_recording_stays_live_and_keeps_its_identity(tmp_path):
             "recording/" + LIVE: {"releases": [{"id": HITS}, {"id": remaster}]},
             "release": {
                 "releases": [
-                    {**release(HITS, "Wembley 1986", WEMBLEY), "date": "1987"},
-                    {**release(remaster, "Wembley 1986", WEMBLEY), "date": "1986"},
-                    release(STUDIO, "Rumours", "g-rumours"),
+                    holding(release(HITS, "Wembley 1986", WEMBLEY, date="1987"), LIVE),
+                    holding(
+                        release(remaster, "Wembley 1986", WEMBLEY, date="1986"), LIVE
+                    ),
+                    holding(release(STUDIO, "Rumours", "g-rumours"), RECORDING),
                 ]
             },
         }
@@ -430,3 +441,111 @@ def test_a_recording_only_released_live_is_filed_as_live(tmp_path):
     changes = asyncio.run(resolve.prepare(job))
     assert changes["album"] == "The Dance" and changes["recording_kind"] == ["live"]
     assert changes["musicbrainz_recording_id"] == LIVE
+
+
+ORIGINAL = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+REISSUE = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+HIT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+DEEP = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+REMASTERED = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+ENEMA = "ffffffff-ffff-4fff-8fff-ffffffffffff"
+
+
+def album_detail(release_id, date, *songs):
+    return {
+        "id": release_id,
+        "title": "Enema of the State",
+        "date": date,
+        "artist-credit": [{"name": "blink-182", "joinphrase": ""}],
+        "release-group": {"id": ENEMA, "primary-type": "Album"},
+        "media": [
+            {
+                "position": 1,
+                "tracks": [
+                    {
+                        "id": f"{release_id[:4]}-{n}",
+                        "position": n,
+                        "title": title,
+                        "length": 180000,
+                        "recording": {"id": recording_id, "title": title},
+                    }
+                    for n, (recording_id, title) in enumerate(songs, 1)
+                ],
+            }
+        ],
+    }
+
+
+def album_request(title, recording_id, number):
+    return {
+        "title": title,
+        "artist": "blink-182",
+        "album": "Enema of the State",
+        "album_artist": "blink-182",
+        "duration": 180,
+        "disc_number": 1,
+        "track_number": number,
+        "musicbrainz_release_id": ORIGINAL,
+        "musicbrainz_recording_id": recording_id,
+    }
+
+
+def filed(tmp_path, reissue_songs, hit_releases):
+    """Where each song of one album download from the original is filed."""
+    songs = [(HIT, "All the Small Things"), (DEEP, "Dumpweed")]
+    original = album_detail(ORIGINAL, "1999", *songs)
+    reissue = album_detail(REISSUE, "2016", *reissue_songs)
+    catalogue = FakeCatalogue(
+        {
+            "release/" + ORIGINAL: original,
+            "release/" + REISSUE: reissue,
+            # A lookup lists only a recording's first 25 releases: a hit's
+            # list ends before the reissue.
+            "recording/" + HIT: {"releases": [{"id": r} for r in hit_releases]},
+            "recording/" + DEEP: {"releases": [{"id": ORIGINAL}, {"id": REISSUE}]},
+            "release": {
+                "release-count": 2,
+                "releases": [
+                    holding(
+                        release(ORIGINAL, "Enema of the State", ENEMA, date="1999"),
+                        HIT,
+                        DEEP,
+                        form="CD",
+                    ),
+                    holding(
+                        release(REISSUE, "Enema of the State", ENEMA, date="2016"),
+                        *[r for r, _ in reissue_songs],
+                    ),
+                ],
+            },
+        }
+    )
+    resolve = EditionResolver(
+        Store(tmp_path), catalogue, FakeArtwork(jpeg(tmp_path)), None
+    )
+    return [
+        asyncio.run(resolve.resolve(album_request(title, recording_id, n)))[
+            "musicbrainz_release_id"
+        ]
+        for n, (recording_id, title) in enumerate(songs, 1)
+    ]
+
+
+def test_one_album_download_lands_on_one_edition_whatever_the_lookup_lists(tmp_path):
+    """#106: a popular song's recording lookup stopped at 25 releases before
+    the reissue, so the hits stayed on the 1999 original and the rest went
+    to the 2016 digital reissue: one album download, two albums."""
+    both = [(HIT, "All the Small Things"), (DEEP, "Dumpweed")]
+    assert filed(tmp_path, both, hit_releases=[ORIGINAL]) == [REISSUE, REISSUE]
+
+
+def test_an_edition_missing_one_of_the_albums_recordings_takes_none_of_them(
+    tmp_path,
+):
+    """D-64: a reissue with another recording of one song (a remaster)
+    doesn't hold the album asked for, so every song stays on the original."""
+    remastered = [(HIT, "All the Small Things"), (REMASTERED, "Dumpweed")]
+    assert filed(tmp_path, remastered, hit_releases=[ORIGINAL, REISSUE]) == [
+        ORIGINAL,
+        ORIGINAL,
+    ]
