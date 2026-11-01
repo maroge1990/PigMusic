@@ -40,14 +40,17 @@ public actor ParkedSessions {
     memory = kept
     let previous = saving
     let store = store
-    let task = Task {
+    let task = Task { () -> Result<Void, any Error> in
       _ = await previous?.value
-      return await Result {
+      do {
         if kept.isEmpty {
           try await store.clear()
         } else {
           try await store.save(String(decoding: try JSONEncoder().encode(kept), as: UTF8.self))
         }
+        return .success(())
+      } catch {
+        return .failure(error)
       }
     }
     saving = task
