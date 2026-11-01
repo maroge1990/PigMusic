@@ -172,6 +172,12 @@ FREEMP3CLOUD_RETRY_PAUSE = 10.0
 _freemp3cloud_lock = threading.Lock()
 _freemp3cloud_last = [0.0]
 
+# The queue loop's passes: at most one per PASS_GAP seconds, and the upgrade
+# scan (also the fallback for changes made outside this process) at least
+# every UPGRADE_SCAN_EVERY.
+PASS_GAP = 0.5
+UPGRADE_SCAN_EVERY = 60
+
 
 class Cancelled(Exception):
     pass
@@ -191,6 +197,8 @@ class Downloader:
         self.runtime = runtime or Runtime(store)
         self.soulseek = Soulseek(store)
         self.stopping = asyncio.Event()
+        # Set when the queue or download settings change (Store.queue_listeners).
+        self.wake = asyncio.Event()
         # Set once staged downloads are recovered (and the library refreshed).
         self.recovered = threading.Event()
         self.deadlines = {}
@@ -288,8 +296,21 @@ class Downloader:
         # request the server answered.
         tasks = set()
         next_scan = 0
+        loop = asyncio.get_running_loop()
+
+        def changed():
+            try:
+                loop.call_soon_threadsafe(self.wake.set)
+            except RuntimeError:
+                pass  # The loop has closed; nothing is waiting.
+
+        self.store.queue_listeners.append(changed)
         try:
             while not self.stopping.is_set():
+                started = time.monotonic()
+                # Cleared before the queue is read: a change from here on
+                # starts another pass.
+                self.wake.clear()
                 try:
                     await asyncio.to_thread(self.prepare_storage)
                 except (OSError, ValueError):
@@ -304,7 +325,7 @@ class Downloader:
                 tasks = {t for t in tasks if not t.done()}
                 if time.monotonic() >= next_scan:
                     await asyncio.to_thread(self.store.schedule_upgrades)
-                    next_scan = time.monotonic() + 60
+                    next_scan = time.monotonic() + UPGRADE_SCAN_EVERY
                 settings = await asyncio.to_thread(self.store.download_settings)
                 while (
                     len(tasks) < settings["concurrent_downloads"]
@@ -315,14 +336,52 @@ class Downloader:
                         break
                     # A claimed job always gets its handler, even when stopping
                     # began meanwhile: process() then cancels it as before.
-                    tasks.add(asyncio.create_task(self.handle(job)))
-                try:
-                    await asyncio.wait_for(self.stopping.wait(), timeout=0.5)
-                except TimeoutError:
-                    pass
+                    task = asyncio.create_task(self.handle(job))
+                    task.add_done_callback(lambda _: self.wake.set())
+                    tasks.add(task)
+                # Nothing is polled while idle (#63): the next pass is for a
+                # queue or settings change, a finished download, a deferred
+                # request falling due, or the upgrade scan.
+                until = next_scan
+                if (
+                    settings["enabled"]
+                    and len(tasks) < settings["concurrent_downloads"]
+                ):
+                    retry = await asyncio.to_thread(self.store.next_retry)
+                    if retry is not None:
+                        until = min(until, time.monotonic() + retry - time.time())
+                await self.rest(started, until)
         finally:
+            self.store.queue_listeners.remove(changed)
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def rest(self, started, until):
+        """Wait for a wake or `until` (monotonic), but start the next pass no
+        sooner than PASS_GAP after `started`: a download's progress writes
+        wake it often, and passes stay as frequent as the old poll at most."""
+        try:
+            await asyncio.wait_for(
+                self.stopping.wait(),
+                timeout=max(0, started + PASS_GAP - time.monotonic()),
+            )
+            return
+        except TimeoutError:
+            pass
+        waits = [
+            asyncio.create_task(self.stopping.wait()),
+            asyncio.create_task(self.wake.wait()),
+        ]
+        try:
+            await asyncio.wait(
+                waits,
+                timeout=max(0, until - time.monotonic()),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            for wait in waits:
+                wait.cancel()
+            await asyncio.gather(*waits, return_exceptions=True)
 
     async def handle(self, job):
         # Quality replacements keep the file's own identity.

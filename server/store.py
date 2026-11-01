@@ -36,12 +36,19 @@ from .matching import (
 # A held upload is decided only while its request has stopped (SC1).
 REVIEWABLE = {"failed", "waiting_for_sources"}
 
+# Statements that change a table's rows, as SQLite's authorizer reports them.
+ROW_WRITES = {sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE}
+
 
 class Store:
     """Durable application state and revisioned projection of the music library."""
 
     def __init__(self, directory: Path):
         self.directory = directory
+        # Called (from any thread) after a commit that wrote the download
+        # queue or its settings, so the downloader waits for that instead of
+        # polling (#63).
+        self.queue_listeners = []
         # Holds over a second are logged with their holder (LOCK1).
         self.lifecycle_lock = TimedRLock("lifecycle_lock")
         # Mix playback leases against mix cache cleanup only. Playback must not
@@ -252,6 +259,7 @@ class Store:
                 "INSERT INTO documents VALUES ('downloads',?) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",
                 (json.dumps(settings),),
             )
+        self.queue_changed()
         if previous["profile"] != settings["profile"]:
             with self.connect() as conn:
                 conn.execute("BEGIN IMMEDIATE")
@@ -1114,13 +1122,41 @@ class Store:
     @contextmanager
     def connect(self):
         conn = sqlite3.connect(self.database, timeout=10)
+        wrote_queue = False
+
+        def authorise(action, table, *_):
+            nonlocal wrote_queue
+            if action in ROW_WRITES and table == "queue":
+                wrote_queue = True
+            return sqlite3.SQLITE_OK
+
         try:
+            conn.set_authorizer(authorise)
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
             with conn:
                 yield conn
+            # The authorizer sees statements, not rows: an UPDATE matching
+            # nothing changes nothing.
+            wrote_queue = wrote_queue and conn.total_changes > 0
         finally:
             conn.close()
+        if wrote_queue:
+            self.queue_changed()
+
+    def queue_changed(self):
+        for listener in list(self.queue_listeners):
+            listener()
+
+    def next_retry(self):
+        """When the earliest deferred request may be claimed (epoch seconds),
+        or None when no request is waiting."""
+        with self.connect() as conn:
+            (due,) = conn.execute(
+                "SELECT MIN(COALESCE(json_extract(payload,'$.retry_after'),0)) "
+                "FROM queue WHERE status='waiting_for_sources'"
+            ).fetchone()
+        return due
 
     def read_document(self, name):
         with self.connect() as conn:
