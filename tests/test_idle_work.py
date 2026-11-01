@@ -94,3 +94,37 @@ def test_changing_download_settings_wakes_the_download_queue(tmp_path):
     store.queue_listeners.append(lambda: woken.append(1))
     store.save_download_settings({"concurrent_downloads": 2})
     assert woken
+
+
+def test_an_idle_artist_job_pass_reads_the_jobs_once(tmp_path):
+    # The old pass opened three connections per artist job saved, every 15 s,
+    # whether or not any was due.
+    from server.artist_jobs import ArtistJobs
+    from test_artist_jobs import Catalogue
+
+    store = Store(tmp_path)
+    jobs = ArtistJobs(store, Catalogue())
+    for index in range(20):
+        identity = f"{index:08x}-1111-4111-8111-111111111111"
+        jobs.save(
+            jobs.key(identity),
+            {
+                "id": identity,
+                "status": "completed",
+                "monitor": index % 2 == 0,
+                "kinds": ["album"],
+                "checked_at": time.time(),
+            },
+        )
+    connections = []
+    original = store.connect
+    store.connect = lambda: (connections.append(1), original())[1]
+
+    async def one_pass():
+        task = asyncio.create_task(jobs.run(None))
+        await asyncio.sleep(0.3)
+        jobs.stopping.set()
+        await task
+
+    asyncio.run(one_pass())
+    assert len(connections) <= 2

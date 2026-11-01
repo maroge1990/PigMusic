@@ -17,6 +17,23 @@ from .catalogue import (
 from .releases import release_query
 
 
+# A followed artist's catalogue is checked for new releases this often.
+MONITOR_EVERY = 86400
+
+
+def monitor_due(state):
+    return time.time() - state.get("checked_at", 0) > MONITOR_EVERY and state.get(
+        "status"
+    ) not in {"queued", "running"}
+
+
+def may_be_due(state):
+    """Whether a saved job could run now: requested, or monitored and due."""
+    return state.get("status") in {"queued", "running"} or bool(
+        state.get("monitor") and monitor_due(state)
+    )
+
+
 class ArtistJobs:
     def __init__(self, store, catalogue, user_id=None, root=None):
         self.store, self.catalogue = store, catalogue
@@ -235,21 +252,26 @@ class ArtistJobs:
         )
 
     def pending(self):
+        """Jobs that may be due, read in one query: an idle pass every 15 s
+        must not open three connections per artist ever followed (#63).
+        `due` decides afresh under the lock."""
         from .user_library import initialise_owner
 
         initialise_owner(self.store)
         with self.store.connect() as conn:
-            keys = [
-                key
-                for (key,) in conn.execute(
-                    "SELECT name FROM documents WHERE name LIKE 'artist-job:%'"
-                )
-            ]
+            rows = conn.execute(
+                "SELECT name,payload FROM documents WHERE name LIKE 'artist-job:%'"
+            ).fetchall()
+        owned = None
         jobs = []
-        for key in keys:
+        for key, raw in rows:
+            if not may_be_due(json.loads(raw)):
+                continue
             parts = key.split(":")
             if len(parts) == 2:
-                if self.owner():
+                if owned is None:
+                    owned = bool(self.owner())
+                if owned:
                     continue  # Legacy rows are retained, but migrated owner jobs run instead.
                 scoped, identity = self, parts[1]
             elif len(parts) == 3:
@@ -266,11 +288,7 @@ class ArtistJobs:
             if not self.active():
                 return None
             state = self.state(identity)
-            if (
-                state.get("monitor")
-                and time.time() - state.get("checked_at", 0) > 86400
-                and state.get("status") not in {"queued", "running"}
-            ):
+            if state.get("monitor") and monitor_due(state):
                 state = self.configure(
                     identity, state["kinds"], True, request=True, periodic=True
                 )
