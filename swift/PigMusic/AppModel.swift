@@ -410,11 +410,13 @@ enum PlayOrigin: Hashable {
       else { return }
       self.refillRadio(continuing: true)
     }
+    // In order, so an older position never overwrites a newer one (#97).
+    let checkpoints = OrderedWrites()
     player.onCheckpoint = { checkpoint in
       let ids = checkpoint.queue.items.map(\.id)
       let changed = ids != savedOccurrenceIds
       savedOccurrenceIds = ids
-      Task {
+      checkpoints.add {
         if changed { try? await database.cache(checkpoint, key: "playback") }
         try? await database.cache(
           PlaybackPosition(index: checkpoint.queue.index, elapsed: checkpoint.elapsed),
