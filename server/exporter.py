@@ -160,6 +160,19 @@ class Exporter:
             pass  # publish() reports it.
         return True
 
+    def confirmed(self, track):
+        """A published song whose download is gone only needs its NAS copy
+        checked. That changes nothing, so it runs without lifecycle_lock: up
+        to 2.5 s of NAS reads per song held the lock live (#17)."""
+        if not track.get("export_relative_path"):
+            return False
+        source, _, target = self.paths(track)
+        return (
+            not source.is_file()
+            and target.is_file()
+            and self.digest(target) == track["sha256"]
+        )
+
     def current(self, conn, track):
         """The download as it stands now: still the same file, not in Trash."""
         row = conn.execute(
@@ -342,6 +355,7 @@ class Exporter:
                 return False  # Replaced or removed since this pass began.
         step(lock, "current")
         source, relative, target = self.paths(track)
+        step(lock, "paths")
         expected = track["sha256"]
         if not source.is_file():
             if (
@@ -349,6 +363,7 @@ class Exporter:
                 and target.is_file()
                 and self.digest(target) == expected
             ):
+                step(lock, "published")
                 return
             raise ValueError("Validated download is unavailable; export deferred.")
         if self.digest(source, this_pass=True) != expected:
@@ -472,6 +487,9 @@ class Exporter:
                     unsettled.add(track.get("id"))
                     continue
                 try:
+                    if self.confirmed(track):
+                        completed += 1
+                        continue
                     published = self.publish(track)
                     if published is False:
                         continue

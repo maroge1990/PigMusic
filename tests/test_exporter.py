@@ -633,9 +633,15 @@ def test_published_songs_are_rechecked_hourly_not_every_pass(tmp_path, monkeypat
         download(store, name, album=f"Album {name}")
     exporter = Exporter(store, root)
     checked = []
-    publish = exporter.publish
+    publish, confirmed = exporter.publish, exporter.confirmed
     monkeypatch.setattr(
         exporter, "publish", lambda track: checked.append(track["id"]) or publish(track)
+    )
+    # A published song is checked without publishing it again (#17).
+    monkeypatch.setattr(
+        exporter,
+        "confirmed",
+        lambda track: confirmed(track) and not checked.append(track["id"]),
     )
     exporter.process()
     assert sorted(checked) == ["one", "three", "two"]
@@ -704,3 +710,29 @@ def test_a_failed_cleanup_after_publishing_is_retried_every_pass(tmp_path, monke
     status = store.read_document("library-export-status")
     assert status["status"] == "completed" and "pending" not in status, status
     assert not source.exists()
+
+
+def test_checking_published_songs_never_holds_the_lifecycle_lock(tmp_path, monkeypatch):
+    """#17: the hourly check of songs already published read each NAS copy
+    under lifecycle_lock (live: 1.3-2.5 s holds, 146 a day, all 'current'
+    then 'rest'), stalling downloads, sync and Trash meanwhile."""
+    store, root = nas_with(tmp_path, monkeypatch, [])
+    for name in ("one", "two"):
+        download(store, name, album=f"Album {name}")
+    exporter = Exporter(store, root)
+    exporter.process()
+    assert all(t.get("export_relative_path") for t in exporter.records())
+    lock = store.lifecycle_lock
+    holders = []
+    acquire = lock.acquire
+
+    def recorded(*args, **kwargs):
+        holders.append(kwargs.get("label"))
+        return acquire(*args, **kwargs)
+
+    monkeypatch.setattr(lock, "acquire", recorded)
+    exporter.verified_at -= 3601
+    exporter.process()
+    assert "exporter.Exporter.publish" not in holders
+    status = store.read_document("library-export-status")
+    assert status["status"] == "completed" and status["files"] == 2
