@@ -12,6 +12,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 GENERATOR = ROOT / "scripts/generate_ui_test_project.py"
+SERVER = ROOT / "scripts/serve_ui_test_server.py"
 
 
 @pytest.mark.skipif(
@@ -24,13 +25,17 @@ def test_the_ui_test_project_matches_its_generator():
     assert generator.main(["--check"]) == 0
 
 
-@pytest.mark.skipif(shutil.which("openssl") is None, reason="needs openssl")
+@pytest.mark.skipif(
+    not SERVER.exists() or shutil.which("openssl") is None,
+    reason="needs the simulator test server's script and openssl",
+)
 def test_the_ui_test_servers_certificate_passes_strict_checks(tmp_path):
     """iOS and Python 3.13+ reject a CA without key usages; the first
     certificates made with `req -x509` failed the runner's health check."""
-    from scripts.serve_ui_test_server import certificates
-
-    _, cert = certificates(tmp_path)
+    spec = importlib.util.spec_from_file_location("serve_ui_test_server", SERVER)
+    server = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(server)
+    _, cert = server.certificates(tmp_path)
     result = subprocess.run(
         ["openssl", "verify", "-x509_strict", "-CAfile", str(tmp_path / "ca.pem")]
         + [str(cert)],
