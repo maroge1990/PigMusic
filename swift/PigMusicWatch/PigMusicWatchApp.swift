@@ -247,19 +247,23 @@ private struct WatchNowPlayingRow: View {
         NavigationLink {
           WatchNowPlaying(model: model)
         } label: {
+          // Full width, so play/pause sits at the row's end.
           VStack(alignment: .leading, spacing: 2) {
             Text("Now playing").font(.caption2).foregroundStyle(.secondary)
             Text(track.title).font(.headline).lineLimit(1)
             Text(track.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-          }
+          }.frame(maxWidth: .infinity, alignment: .leading)
         }
+        // The accent button, not .plain: plain kept the on-accent icon colour
+        // with no accent behind it, which hid it on the dark canvas. Round and
+        // its own size, since Watch buttons otherwise share the row's width.
         Button {
           model.toggle()
         } label: {
           Image(systemName: model.playback.wantsPlayback ? "pause.fill" : "play.fill")
-            .frame(width: 36, height: 36)
+            .frame(width: 28, height: 28)
         }
-        .buttonStyle(.plain).pigPrimaryAction()
+        .pigPrimaryAction().buttonBorderShape(.circle).fixedSize()
         .accessibilityLabel(model.playback.wantsPlayback ? "Pause" : "Play")
       }
     }
@@ -314,7 +318,8 @@ private struct WatchNowPlaying: View {
   @Bindable var model: WatchModel
   var body: some View {
     TabView {
-      NowPlayingView().navigationTitle("Now playing")
+      // No title: the system player puts the clock where it would go.
+      NowPlayingView()
       WatchPlaybackDetails(model: model)
     }.tabViewStyle(.verticalPage)
   }

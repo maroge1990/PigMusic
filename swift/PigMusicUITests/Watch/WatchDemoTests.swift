@@ -26,7 +26,25 @@ final class WatchDemoTests: XCTestCase {
     expect(app.buttons["Pause"])
   }
 
-  func testTheDemoLibraryPlays() {
+  /// The library's Now playing row keeps its play/pause button at the row's
+  /// end, after the song, not straight after the title mid-row.
+  func testTheRowsPauseButtonSitsAtItsEnd() {
     launchPlaying()
+    let pause = app.buttons["Pause"]
+    let title = app.staticTexts["First Light"]
+    XCTAssertGreaterThan(pause.frame.maxX, app.frame.maxX * 0.85, app.debugDescription)
+    XCTAssertGreaterThan(pause.frame.minX, title.frame.maxX)
+    // A round button, leaving the song and artist their room.
+    XCTAssertLessThan(pause.frame.width, app.frame.width * 0.3)
+  }
+
+  /// The system player draws the clock at the top; a title of our own
+  /// overlapped it.
+  func testThePlayerHasNoTitleOverTheClock() {
+    launchPlaying()
+    app.staticTexts["First Light"].tap()
+    expect(app.staticTexts["The Orchard"])
+    sleep(1)
+    XCTAssertFalse(app.staticTexts["Now playing"].exists, app.debugDescription)
   }
 }
