@@ -18,8 +18,8 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   worker wakeups/s from the download poll; re-measure after release.
 - **iPhone/Watch:** native **0.2.0 (18)** uploaded to TestFlight on 1 Nov (#108 scrolling names, #62 one album page,
   #59, #107, #56 tap-to-play mixes, #109 mixes in search, four #97 fixes incl. offline sign-out per D-55). Build 17 is
-  on Mark's phone. **Pushed for the next build:** #114 Watch Now playing row's hidden play/pause and the player's title
-  over the clock (Mark's report).
+  on Mark's phone. **0.2.0 (19)** uploaded to TestFlight on 2 Nov: #114 Watch Now playing row's hidden play/pause and
+  the player's title over the clock (Mark's report); waits for Mark's Watch check.
 - **Simulator tap-through tests (#113):** the Mac runs `scripts/simulator_ui_tests.py` (~4 min, 11 tests): iPhone demo
   library, sign-in and Send to Apple Watch against a disposable HTTPS test server, Watch empty and `--demo` screens.
   Watch delivery can't be tested in simulators (file transfers never arrive); mixes, catalogue search and downloads
