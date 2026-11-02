@@ -1,7 +1,11 @@
-"""The simulator UI tests' Xcode project must match its generator, so a test
-file added under swift/PigMusicUITests is never left out of the build."""
+"""The simulator UI tests: their Xcode project must match its generator, so a
+test file added under swift/PigMusicUITests is never left out of the build,
+and their test server's certificates must pass strict checks."""
 
 import importlib.util
+import shutil
+import ssl
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -18,3 +22,21 @@ def test_the_ui_test_project_matches_its_generator():
     generator = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(generator)
     assert generator.main(["--check"]) == 0
+
+
+@pytest.mark.skipif(shutil.which("openssl") is None, reason="needs openssl")
+def test_the_ui_test_servers_certificate_passes_strict_checks(tmp_path):
+    """iOS and Python 3.13+ reject a CA without key usages; the first
+    certificates made with `req -x509` failed the runner's health check."""
+    from scripts.serve_ui_test_server import certificates
+
+    _, cert = certificates(tmp_path)
+    result = subprocess.run(
+        ["openssl", "verify", "-x509_strict", "-CAfile", str(tmp_path / "ca.pem")]
+        + [str(cert)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    strict = ssl.create_default_context(cafile=str(tmp_path / "ca.pem"))
+    assert strict.verify_flags & ssl.VERIFY_X509_STRICT

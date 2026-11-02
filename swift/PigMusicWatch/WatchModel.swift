@@ -1,5 +1,6 @@
 import AVFoundation
 import Combine
+import CryptoKit
 import Foundation
 import MediaPlayer
 import Observation
@@ -182,14 +183,15 @@ import PigPlayback
     do {
       let base = try FileManager.default.url(
         for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
-      ).appendingPathComponent("PigMusicWatch")
+      ).appendingPathComponent(Self.demo ? "PigMusicWatchDemo" : "PigMusicWatch")
       var values = URLResourceValues()
       values.isExcludedFromBackup = true
       try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
       var excluded = base
       try excluded.setResourceValues(values)
       archive = try CompanionArchive(directory: base.appendingPathComponent("Music"))
-      link = try CompanionLink(inbox: base.appendingPathComponent("Inbox"))
+      // The demo library never talks to the phone, so a real one can't replace it.
+      if !Self.demo { link = try CompanionLink(inbox: base.appendingPathComponent("Inbox")) }
       link?.onContext = { [weak self] context in await self?.contextReceived(context) }
       link?.onFile = { [weak self] file, data in await self?.fileReceived(file, data: data) }
       link?.onActivated = { [weak self] in
@@ -295,6 +297,67 @@ import PigPlayback
       }
     } catch { message = error.localizedDescription }
   }
+  #if DEBUG
+    /// Headless UI review (`--demo`): its own archive with three generated
+    /// songs, stored through the archive's usual checks, and no phone link.
+    static let demo = ProcessInfo.processInfo.arguments.contains("--demo")
+    func loadDemo() async {
+      guard let archive else { return }
+      let context = CompanionContext(revision: 1, account: "demo")
+      let titles = [
+        ("First Light", "The Orchard"),
+        ("A Very Long Song Title That Keeps On Going Past the Edge", "The Orchard"),
+        ("After the Rain", "Riverlight with a Long Featured Artist Name"),
+      ]
+      do {
+        var songs: [CompanionSong] = []
+        var files: [(URL, CompanionFile)] = []
+        for (number, (title, artist)) in titles.enumerated() {
+          let file = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "demo-\(number).m4a")
+          try? FileManager.default.removeItem(at: file)
+          try Self.writeTone(to: file, frequency: 220 * Double(number + 2), seconds: 30)
+          let data = try Data(contentsOf: file)
+          let checksum = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+          var track = Track(
+            id: "demo-\(number)", title: title, artist: artist, album: "Sunrise", duration: 30)
+          track.albumArtist = "The Orchard"
+          track.trackNumber = number + 1
+          songs.append(CompanionSong(track: track, checksum: checksum, bytes: Int64(data.count)))
+          files.append((file, CompanionFile(context: context, songId: track.id, checksum: checksum)))
+        }
+        try await archive.apply(context)
+        try await archive.apply(CompanionManifest(context: context, songs: songs))
+        for (file, ticket) in files { try await archive.accept(file, ticket: ticket) }
+      } catch {
+        message = "Demo library: \(error.localizedDescription)"
+      }
+      await reload()
+      if ProcessInfo.processInfo.arguments.contains("--demo-play") {
+        await play(manifest.songs.map(\.id))
+      }
+    }
+    private static func writeTone(to url: URL, frequency: Double, seconds: Double) throws {
+      let rate = 44_100.0
+      let file = try AVAudioFile(
+        forWriting: url,
+        settings: [
+          AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: rate, AVNumberOfChannelsKey: 1,
+        ])
+      let frames = AVAudioFrameCount(rate * seconds)
+      guard let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: frames),
+        let samples = buffer.floatChannelData?[0]
+      else { throw CocoaError(.fileWriteUnknown) }
+      for frame in 0..<Int(frames) {
+        samples[frame] = Float(0.2 * sin(2 * .pi * frequency * Double(frame) / rate))
+      }
+      buffer.frameLength = frames
+      try file.write(from: buffer)
+      file.close()
+    }
+  #else
+    static let demo = false
+  #endif
   func reload() async {
     guard let archive else { return }
     manifest = await archive.snapshot()

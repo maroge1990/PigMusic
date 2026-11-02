@@ -14,6 +14,9 @@ import WatchKit
       WatchLibraryView(model: model)
         .overlay { if starting { PigBrandSplash(size: 120) } }
         .task {
+          #if DEBUG
+            if WatchModel.demo { await model.loadDemo() }
+          #endif
           await model.reload()
           starting = false
         }

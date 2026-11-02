@@ -33,7 +33,7 @@ Node 24 and FFmpeg are also required.
 PIG_MUSIC_DATA=.localdata/dev PIG_MUSIC_PRELOAD=false .venv/bin/python -m uvicorn server.app:app --host 127.0.0.1 --port 8765
 ```
 
-The preview config `pig-music-dev` attaches to port 8765. A fresh install shows the first-run admin form; the installation code is printed to the server console. Use generated test credentials only. iPhone: open `swift/PigMusic.xcodeproj`, scheme **PigMusic** (embeds **PigMusicWatch**); Debug launch argument `--demo` gives a synthetic offline library.
+The preview config `pig-music-dev` attaches to port 8765. A fresh install shows the first-run admin form; the installation code is printed to the server console. Use generated test credentials only. iPhone: open `swift/PigMusic.xcodeproj`, scheme **PigMusic** (embeds **PigMusicWatch**); Debug launch argument `--demo` gives a synthetic offline library (iPhone and Watch).
 
 ## Test, cheapest first
 
