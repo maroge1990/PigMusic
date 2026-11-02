@@ -5,7 +5,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 2 Nov 2026 (morning, Melbourne).*
+*Overwritten at the end of every session. 2 Nov 2026 (afternoon, Melbourne).*
 
 - **Live:** server `03b44b5` (`search-20261031-v1`; rollback container `PigMusic-before-search-20261031-v1`).
   Overnight 31 Oct→1 Nov: 255 mix searches in ~2.5 h (was ~700 in ~7 h, #90 closed), 0 event-loop stalls, 146 export
@@ -18,7 +18,12 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   worker wakeups/s from the download poll; re-measure after release.
 - **iPhone/Watch:** native **0.2.0 (18)** uploaded to TestFlight on 1 Nov (#108 scrolling names, #62 one album page,
   #59, #107, #56 tap-to-play mixes, #109 mixes in search, four #97 fixes incl. offline sign-out per D-55). Build 17 is
-  on Mark's phone. Not seen in a simulator (the Mac can't run one).
+  on Mark's phone. **Pushed for the next build:** #114 Watch Now playing row's hidden play/pause and the player's title
+  over the clock (Mark's report).
+- **Simulator tap-through tests (#113):** the Mac runs `scripts/simulator_ui_tests.py` (~4 min, 11 tests): iPhone demo
+  library, sign-in and Send to Apple Watch against a disposable HTTPS test server, Watch empty and `--demo` screens.
+  Watch delivery can't be tested in simulators (file transfers never arrive); mixes, catalogue search and downloads
+  are not covered yet. Open finding: #112 Watch logo.
 - **Closed on 1 Nov** after Mark's device checks: #98, #99, #100, #53, #64, #70, #71, #77, #19, #18, #60, #61, #39.
   Closed on live checks: #90, #91.
 - **Still to check on devices (Mark):** #78, #76, #65; build 18's changes; Home See all (#55); the #95 checklist.
