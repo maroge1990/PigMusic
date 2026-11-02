@@ -38,6 +38,14 @@ final class WatchDemoTests: XCTestCase {
     XCTAssertLessThan(pause.frame.width, app.frame.width * 0.3)
   }
 
+  /// The button is its own tap target inside the row's link.
+  func testTheRowsButtonPausesWithoutOpeningThePlayer() {
+    launchPlaying()
+    app.buttons["Pause"].tap()
+    expect(app.buttons["Play"])
+    XCTAssertTrue(app.staticTexts["PigMusic"].exists, "The player opened instead")
+  }
+
   /// The system player draws the clock at the top; a title of our own
   /// overlapped it.
   func testThePlayerHasNoTitleOverTheClock() {
