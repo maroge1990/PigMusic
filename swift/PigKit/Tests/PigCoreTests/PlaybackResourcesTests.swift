@@ -188,6 +188,21 @@ private final class AudioSessionProbe: @unchecked Sendable {
   }
 }
 
+/// A seek that completes only when the test says so.
+@MainActor private final class Seek {
+  private var waiting: CheckedContinuation<Void, Never>?
+  private var done = false
+  func wait() async {
+    guard !done else { return }
+    await withCheckedContinuation { waiting = $0 }
+  }
+  func finish() {
+    done = true
+    waiting?.resume()
+    waiting = nil
+  }
+}
+
 /// A stream that wants to play and never moves is renewed once, then fails,
 /// instead of waiting silently (#115: 89 s with no sound).
 struct StreamWatchTests {
@@ -234,6 +249,33 @@ struct StreamWatchTests {
     watch.started(UUID())
     _ = watch.observe(position: 0, at: at(20))
     #expect(watch.observe(position: 0, at: at(35)) == .renew)
+  }
+
+  /// Codex round 1: a renewal waits on the new item's seek with the progress
+  /// ticks stopped; a seek that never completes must still end in a failure.
+  @MainActor @Test func aRecoveryWhoseSeekNeverCompletesFailsInTime() async throws {
+    let deadline = StreamRecoveryDeadline(limit: .milliseconds(100))
+    var failed = false
+    let seek = Seek()
+    deadline.start { failed = true }
+    let recovery = Task { await seek.wait() }  // The new item's seek: never completes.
+    try await Task.sleep(for: .milliseconds(400))
+    #expect(failed && !deadline.isActive)
+    seek.finish()
+    await recovery.value
+  }
+
+  /// Skipping, pausing or the first progress during the recovery: no failure.
+  @MainActor @Test func aRecoveryCancelledInTimeNeverFails() async throws {
+    let deadline = StreamRecoveryDeadline(limit: .milliseconds(100))
+    var failed = false
+    deadline.start { failed = true }
+    deadline.cancel()
+    // Starting again (a second renewal) replaces the first deadline.
+    deadline.start { failed = true }
+    deadline.start {}
+    try await Task.sleep(for: .milliseconds(400))
+    #expect(!failed && !deadline.isActive)
   }
 
   /// #97: after a failed preparation Play showed Pause and played nothing.

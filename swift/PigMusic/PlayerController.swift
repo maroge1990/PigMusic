@@ -331,6 +331,7 @@ import PigSync
       return
     }
     preparation?.cancel()
+    recovery.cancel()
     engine?.stop()
     clock.stop()
     player.pause()
@@ -478,6 +479,9 @@ import PigSync
   private func prepareStreaming() {
     generation += 1
     let stamp = generation
+    // A new preparation (a skip, a new queue) ends a renewal's deadline; a
+    // renewal starts its own after this.
+    recovery.cancel()
     preparation?.cancel()
     clock.stop()
     player.pause()
@@ -592,13 +596,27 @@ import PigSync
   /// The stream stopped moving: start it again from there on a new item.
   private func renewStalledStream() {
     DiagnosticsLog.shared.record("playback", "stream stalled, starting it again")
-    queueStart.seek(queue, to: elapsed)
+    let from = elapsed
+    queueStart.seek(queue, to: from)
     prepareStreaming()
+    // The new item, its seek and its first progress share one deadline: the
+    // progress ticks stop meanwhile, and a seek may never complete.
+    let stamp = generation
+    recoveryFrom = from
+    recovery.start { [weak self] in
+      guard let self, generation == stamp, intent.canPlay else { return }
+      failStalledStream()
+    }
   }
+  @ObservationIgnored private let recovery = StreamRecoveryDeadline()
+  @ObservationIgnored private var recoveryFrom: Double = 0
   /// The stream stalled again after its renewal: stop and say why. Play
   /// prepares it again from here.
   private func failStalledStream() {
     DiagnosticsLog.shared.record("playback", "stream stalled again, stopped")
+    recovery.cancel()
+    // A preparation still waiting (on the new item's seek) can no longer play.
+    generation += 1
     error = URLError(.timedOut).userMessage
     preparing = false
     intent.pause()
@@ -622,6 +640,7 @@ import PigSync
     if playing { reportStart("stream") }
     preparing = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
     if let failed = player.currentItem?.error {
+      recovery.cancel()
       error = failed.userMessage
       preparing = false
       intent.pause()
@@ -629,6 +648,8 @@ import PigSync
       checkpoint(force: true)
       return
     }
+    // The renewed stream plays on from where it stopped: recovered.
+    if recovery.isActive, playing, elapsed > recoveryFrom { recovery.cancel() }
     if intent.canPlay {
       switch streamWatch.observe(position: elapsed, at: .now) {
       case .fine: break
@@ -816,6 +837,7 @@ import PigSync
   }
   func pause() {
     measureListen()
+    recovery.cancel()
     intent.pause()
     suspend()
     checkpoint(force: true)
@@ -934,6 +956,7 @@ import PigSync
   }
   func stop() {
     generation += 1
+    recovery.cancel()
     outputOwed = false
     queueStart.reset()
     preparation?.cancel()

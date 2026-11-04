@@ -61,3 +61,30 @@ public struct StreamWatch: Sendable {
     !preparing && (!hasItem || itemFailed)
   }
 }
+
+/// Bounds a renewed stream's whole recovery: preparing the new item, its seek
+/// to where the song stopped, and its first progress. The progress ticks stop
+/// while the new item is prepared, and a seek the item can never complete
+/// would otherwise wait for ever (Codex, #115). A new song, a pause or a stop
+/// cancels it; so does the first progress.
+@MainActor public final class StreamRecoveryDeadline {
+  private let limit: Duration
+  private var task: Task<Void, Never>?
+  public init(limit: Duration = StreamWatch.stallLimit) { self.limit = limit }
+  public var isActive: Bool { task != nil }
+  /// Runs `expired` after the limit unless `cancel()` comes first.
+  public func start(_ expired: @escaping @MainActor () -> Void) {
+    cancel()
+    let limit = limit
+    task = Task { [weak self] in
+      do { try await Task.sleep(for: limit) } catch { return }
+      guard !Task.isCancelled, let self else { return }
+      self.task = nil
+      expired()
+    }
+  }
+  public func cancel() {
+    task?.cancel()
+    task = nil
+  }
+}
