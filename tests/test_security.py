@@ -508,9 +508,13 @@ def test_the_legacy_test_switch_is_closed_outside_pytest():
 
 
 def test_the_image_does_not_run_as_root():
-    from pathlib import Path
+    from source import SOURCE
 
-    dockerfile = (Path(__file__).parents[1] / "Dockerfile").read_text()
+    # Inside the image the checkout is mounted at PIG_MUSIC_SOURCE.
+    path = SOURCE / "Dockerfile"
+    if not path.is_file():
+        pytest.skip("Dockerfile is not part of this checkout")
+    dockerfile = path.read_text()
     final = dockerfile.rsplit("\nFROM ", 1)[1]
     users = re.findall(r"^USER\s+(\S+)", final, re.M)
     assert users and users[-1] == "99:100"
