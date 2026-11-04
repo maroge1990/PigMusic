@@ -39,14 +39,12 @@ private func marker(_ index: Int, at frame: Int64) -> QueueAudioMarker {
 }
 
 @Test func aFailureBelongsToTheSongsThatFailedNotTheNextOne() {
-  // The first song could not be prepared: nothing was heard.
-  #expect(PlaybackTimeline.failedSongs(start: 2, lastHeard: nil, unprepared: [2, 3]) == [2, 3])
+  // The first song could not be opened: the queue reported nothing.
+  #expect(PlaybackTimeline.failedSongs(start: 2, passedOver: [], ending: nil) == [2])
   // Song 4 failed mid-song (a transfer or decode error): song 5 is healthy.
-  #expect(PlaybackTimeline.failedSongs(start: 2, lastHeard: 4, unprepared: []) == [4])
-  // None of the songs after 4 could be prepared.
-  #expect(PlaybackTimeline.failedSongs(start: 2, lastHeard: 4, unprepared: [5, 6]) == [5, 6])
-  // Failures from an earlier queue, or passed over before 4, do not count again.
-  #expect(PlaybackTimeline.failedSongs(start: 2, lastHeard: 4, unprepared: [1, 3]) == [4])
+  #expect(PlaybackTimeline.failedSongs(start: 2, passedOver: [], ending: 4) == [4])
+  // 3 was passed over, then none of the songs after 4 could be prepared.
+  #expect(PlaybackTimeline.failedSongs(start: 2, passedOver: [3, 5], ending: 6) == [3, 5, 6])
 }
 
 /// A song's bytes that fail part-way, as a dropped transfer does.
@@ -99,9 +97,10 @@ private func failure(
       timeline.received(frames: block.pcm.frameCount, markers: block.markers, at: .zero)
     }
   } catch {
-    await stream.close()
     let failed = PlaybackTimeline.failedSongs(
-      start: 0, lastHeard: timeline.songs.last?.index, unprepared: await unprepared.indices)
+      start: 0, passedOver: await stream.passedOverSongs.map(\.index),
+      ending: await stream.endingFailure?.index)
+    await stream.close()
     return (failed, timeline.songs.map(\.index), await unprepared.indices)
   }
   await stream.close()
@@ -140,4 +139,43 @@ private actor Unprepared {
     return PreparedAudioSource(file: files[0], byteCount: size, bytes: bytes)
   }
   #expect(dropped.failed == [0] && dropped.heard == [0])
+}
+
+/// #25 (a): the next song could not be prepared, then the playing song's
+/// transfer dropped. The drop ended the queue: it is the playing song's.
+@Test func aDropAfterTheNextSongFailedIsThePlayingSongs() async throws {
+  let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: root) }
+  let file = try tone(root, "a")
+  let items = ["a", "b"].map {
+    PlaybackOccurrence(track: Track(id: $0, title: $0, artist: "Fixture", duration: 2))
+  }
+  let size = try LocalAudioBytes(file: file).length
+  let result = try await failure(items) { index in
+    guard index == 0 else { throw AudioSourceFailure.unavailable }
+    let bytes = try FailingBytes(file: file, failAt: size / 2)
+    return PreparedAudioSource(file: file, byteCount: size, bytes: bytes)
+  }
+  #expect(result.heard == [0] && result.unprepared == [1])
+  #expect(result.failed == [0])
+}
+
+/// #25 (b): songs that arrive but cannot be opened are passed over; when none
+/// of the rest opens, they are the failures, not the last song heard.
+@Test func songsThatCannotBeOpenedAreTheFailures() async throws {
+  let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: root) }
+  let good = try tone(root, "a")
+  let broken = root.appendingPathComponent("broken.wav")
+  try Data("not audio at all".utf8).write(to: broken)
+  let items = ["a", "b", "c"].map {
+    PlaybackOccurrence(track: Track(id: $0, title: $0, artist: "Fixture", duration: 2))
+  }
+  let result = try await failure(items) { index in
+    PreparedAudioSource(file: index == 0 ? good : broken, byteCount: 0)
+  }
+  #expect(result.heard == [0] && result.unprepared == [])
+  #expect(result.failed == [1, 2])
 }

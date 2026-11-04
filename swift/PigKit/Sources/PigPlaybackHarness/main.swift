@@ -164,17 +164,20 @@ do {
         timeline.received(
           frames: block.pcm.frameCount, markers: block.markers, at: .now - queueBegan)
       }
+      for song in await queue.passedOverSongs { failedAt[song.index] = song.cause }
       await queue.close()
       timelines.append((start, timeline))
       break
     } catch {
+      // Each song the queue could not play, with its own cause (#25).
+      let passedOver = await stream?.passedOverSongs ?? []
+      let ending = await stream?.endingFailure
       await stream?.close()
       timelines.append((start, timeline))
-      let unprepared = await acquisitions.entries.filter { $0.value.failure != nil }.keys
+      for song in passedOver { failedAt[song.index] = song.cause }
+      failedAt[ending?.index ?? start] = ending?.cause ?? error.localizedDescription
       let failed = PlaybackTimeline.failedSongs(
-        start: start, lastHeard: timeline.songs.last?.index,
-        unprepared: Set(items.indices.filter { unprepared.contains(items[$0].id) }))
-      for index in failed { failedAt[index] = error.localizedDescription }
+        start: start, passedOver: passedOver.map(\.index), ending: ending?.index)
       start = failed.last! + 1
     }
   }

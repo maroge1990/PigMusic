@@ -17,6 +17,12 @@ public struct QueuePCMBlock: Sendable {
   public let pcm: PCMBlock
   public let markers: [QueueAudioMarker]
 }
+/// A song the queue could not play: its queue position, occurrence and why.
+public struct QueueSongFailure: Sendable, Equatable {
+  public let index: Int
+  public let occurrenceID: UUID
+  public let cause: String
+}
 
 /// A bounded decoder queue. Sources are prefetched one occurrence ahead and
 /// decode while their bytes arrive; a slow network shows as buffering.
@@ -50,6 +56,11 @@ public actor QueuePCMStream {
     let source: PreparedAudioSource
   }
   private var upcoming: Task<Upcoming, Error>?
+  /// No song after the playing one could be prepared; `song` was the last tried.
+  private struct UpcomingFailure: Error {
+    let song: QueueSongFailure
+    let error: Error
+  }
   /// The prepared following song, from when its source arrives until it plays.
   private var incoming: (index: Int, occurrence: PlaybackOccurrence)?
   private var incomingLease: PreparedAudioSource?
@@ -70,6 +81,13 @@ public actor QueuePCMStream {
   private var closed = false
   private var reading = false
   private var sourceFailure: Error?
+  /// The song `sourceFailure` belongs to.
+  private var sourceFailureSong: QueueSongFailure?
+  /// Songs passed over because they could not be prepared or opened, in order.
+  public private(set) var passedOverSongs: [QueueSongFailure] = []
+  /// The song whose failure ended the queue, once `next()` has thrown it
+  /// (#25: the harness once guessed it from the songs heard).
+  public private(set) var endingFailure: QueueSongFailure?
 
   public init(
     items: [PlaybackOccurrence], startingAt: Int = 0, startSeconds: Double = 0,
@@ -162,7 +180,10 @@ public actor QueuePCMStream {
         return Upcoming(index: position, occurrence: occurrence, source: source)
       } catch {
         try Task.checkCancellation()
-        guard passOver() else { throw error }
+        let song = QueueSongFailure(
+          index: position, occurrenceID: occurrence.id, cause: error.localizedDescription)
+        guard passOver() else { throw UpcomingFailure(song: song, error: error) }
+        passedOverSongs.append(song)
       }
     }
   }
@@ -200,7 +221,16 @@ public actor QueuePCMStream {
           ended = true
           continue
         }
-        let decoded = try await decoder.read(maxFrames: blockFrames)
+        let decoded: AVAudioPCMBuffer?
+        do { decoded = try await decoder.read(maxFrames: blockFrames) } catch {
+          // A transfer or decode failing mid-song is the playing song's.
+          if !(error is CancellationError), !closed {
+            endingFailure = QueueSongFailure(
+              index: index, occurrenceID: currentMarker?.occurrenceID ?? items[index].id,
+              cause: error.localizedDescription)
+          }
+          throw error
+        }
         guard !closed else { throw CancellationError() }
         remeasure(decoder)
         if let decoded { tail.push(decoded) } else { ended = true }
@@ -211,6 +241,7 @@ public actor QueuePCMStream {
       }
       if let sourceFailure {
         if tail.count > 0 { return emit(tail.pop(min(blockFrames, tail.count))) }
+        endingFailure = sourceFailureSong
         throw sourceFailure
       }
       if !transitionReady {
@@ -222,8 +253,13 @@ public actor QueuePCMStream {
           } onCancel: {
             upcoming.cancel()
           }
-        } catch {
+        } catch let failure as UpcomingFailure {
           // Every remaining song was tried while the current one played.
+          try Task.checkCancellation()
+          sourceFailure = failure.error
+          sourceFailureSong = failure.song
+          continue
+        } catch {
           try Task.checkCancellation()
           sourceFailure = error
           continue
@@ -243,10 +279,16 @@ public actor QueuePCMStream {
           incomingLease = nil
           incoming = nil
           await release(source)
+          // It arrived but cannot be opened: as unplayable as one that never came.
+          let song = QueueSongFailure(
+            index: prepared.index, occurrenceID: prepared.occurrence.id,
+            cause: error.localizedDescription)
           if passOver() {
+            passedOverSongs.append(song)
             self.upcoming = Task { try await self.acquireViable() }
           } else {
             sourceFailure = error
+            sourceFailureSong = song
           }
           continue
         }
@@ -266,6 +308,9 @@ public actor QueuePCMStream {
           try Task.checkCancellation()
           guard !closed else { throw CancellationError() }
           sourceFailure = error
+          sourceFailureSong = QueueSongFailure(
+            index: prepared.index, occurrenceID: prepared.occurrence.id,
+            cause: error.localizedDescription)
           continue
         }
         guard let incoming else { throw AudioPipelineFailure.stalled }

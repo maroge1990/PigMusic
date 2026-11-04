@@ -56,14 +56,11 @@ public struct PlaybackTimeline: Sendable {
     produced += Int64(frames)
   }
 
-  /// Which songs a queue's failure belongs to. The queue passes over a
-  /// song it cannot prepare and fails only once none of the rest can be, so
-  /// those are all the songs after the last one heard that could not be
-  /// prepared. Without them, the song playing when it failed (a transfer or
-  /// decode failing mid-song), else the song the queue started with.
-  public static func failedSongs(start: Int, lastHeard: Int?, unprepared: Set<Int>) -> [Int] {
-    let after = lastHeard.map { $0 + 1 } ?? start
-    let rest = unprepared.filter { $0 >= after }.sorted()
-    return rest.isEmpty ? [lastHeard ?? start] : rest
+  /// Which songs failed in a queue that ended with a failure, from what the
+  /// queue reported (`QueuePCMStream.passedOverSongs` and `endingFailure`):
+  /// the songs it passed over and the one whose failure ended it. A queue that
+  /// reported none failed opening the song it started with.
+  public static func failedSongs(start: Int, passedOver: [Int], ending: Int?) -> [Int] {
+    Array(Set(passedOver + [ending ?? start])).sorted()
   }
 }
