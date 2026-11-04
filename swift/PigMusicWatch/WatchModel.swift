@@ -154,9 +154,12 @@ import PigPlayback
       }
     }
   }
+  /// Listens handed to the phone and not acknowledged yet go once (#97).
+  @ObservationIgnored private var listenOutbox = ListenOutbox()
   private func flushListens() async {
     guard let archive else { return }
-    for event in await archive.pendingListens().prefix(50) {
+    let pending = await archive.pendingListens()
+    for event in listenOutbox.take(pending) {
       let command = CompanionCommand("listen", account: manifest.context.account, listen: event)
       if let data = try? JSONEncoder().encode(command) { link?.message(data) }
     }
@@ -202,6 +205,8 @@ import PigPlayback
         }
         await self?.reload()
         await self?.acknowledge()
+        // A reconnect: listens not acknowledged yet go again.
+        self?.listenOutbox.reset()
         await self?.flushListens()
       }
       link?.onMessage = { [weak self] data in
