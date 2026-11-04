@@ -146,6 +146,12 @@ EDITION_PAGES = 5
 # tries (about half an hour of waiting in all), so it never blocks for good.
 RESOLUTION_ATTEMPTS = 5
 RETRY_SECONDS = 60
+# A song from an album download is never filed on a guess: its album-mates
+# may reach another edition once MusicBrainz is back (D-64, #110). It keeps
+# waiting, at most an hour between tries, for about a day; then its request
+# fails with the reason and a fresh budget, for Retry once MusicBrainz is back.
+ALBUM_RESOLUTION_ATTEMPTS = 30
+MAX_RETRY_SECONDS = 3600
 
 
 class Deferred(Exception):
@@ -154,6 +160,16 @@ class Deferred(Exception):
     def __init__(self, attempts, seconds):
         super().__init__("Edition lookup deferred")
         self.attempts, self.seconds = attempts, seconds
+
+
+class Unresolved(Exception):
+    """An album song's edition stayed unknown through a long outage."""
+
+    def __init__(self):
+        super().__init__(
+            "MusicBrainz was unavailable for about a day, so this song's album "
+            "edition is unknown. Retry this request once it is back."
+        )
 
 
 def transient(error):
@@ -178,7 +194,9 @@ class EditionResolver:
                 changes.update(await self.resolve(job) or {})
             except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
                 attempts = job.get("resolution_attempts", 0) + 1
-                if transient(error) and attempts < RESOLUTION_ATTEMPTS:
+                album = bool(job.get("musicbrainz_release_id"))
+                limit = ALBUM_RESOLUTION_ATTEMPTS if album else RESOLUTION_ATTEMPTS
+                if transient(error) and attempts < limit:
                     # Filing it under the request's own album now would bring
                     # back the duplicate and the missing cover: try later.
                     logger.info(
@@ -186,7 +204,19 @@ class EditionResolver:
                         type(error).__name__,
                         attempts,
                     )
-                    raise Deferred(attempts, RETRY_SECONDS * 2 ** (attempts - 1))
+                    raise Deferred(
+                        attempts,
+                        min(
+                            MAX_RETRY_SECONDS, RETRY_SECONDS * 2 ** min(attempts - 1, 6)
+                        ),
+                    )
+                if transient(error) and album:
+                    logger.warning(
+                        "Edition lookup gave up after %d attempts (%s)",
+                        attempts,
+                        type(error).__name__,
+                    )
+                    raise Unresolved() from error
                 logger.info("Edition lookup failed (%s)", type(error).__name__)
             changes["edition_resolved"] = True
         release = changes.get("musicbrainz_release_id") or job.get(

@@ -386,13 +386,25 @@ class Downloader:
     async def handle(self, job):
         # Quality replacements keep the file's own identity.
         if self.resolver and not job.get("library_track_id"):
-            from .editions import Deferred
+            from .editions import Deferred, Unresolved
 
             try:
                 changes = await self.resolver.prepare(job)
             except Deferred as later:
                 await asyncio.to_thread(
                     self.store.defer_request, job, later.seconds, later.attempts
+                )
+                return
+            except Unresolved as error:
+                # Never filed on a guess (#110): it fails with the reason and
+                # a fresh budget, so Retry resolves it once MusicBrainz is back.
+                await asyncio.to_thread(
+                    self.store.request_state,
+                    job["id"],
+                    "failed",
+                    _claim_token=job.get("claim_token"),
+                    error=str(error),
+                    resolution_attempts=0,
                 )
                 return
             except Exception:

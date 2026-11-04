@@ -596,3 +596,93 @@ def test_a_passing_browse_outage_defers_the_song_instead_of_splitting_the_album(
         resolve.prepare(album_request("All the Small Things", HIT, 1))
     )
     assert changes["musicbrainz_release_id"] == REISSUE
+
+
+def outage_after_first_page():
+    """A catalogue whose editions browse fails past its first page while
+    `outage` is set; the reissue (first page) holds the whole album."""
+    import httpx
+
+    songs = [(HIT, "All the Small Things"), (DEEP, "Dumpweed")]
+    reissue = holding(
+        release(REISSUE, "Enema of the State", ENEMA, date="2016"), HIT, DEEP
+    )
+
+    class Paged(FakeCatalogue):
+        outage = True
+
+        async def get(self, client, path, **params):
+            if path == "release":
+                if params["offset"] == 0:
+                    return {"release-count": 2, "releases": [reissue]}
+                if self.outage:
+                    raise httpx.ConnectError("MusicBrainz unreachable")
+                original = release(ORIGINAL, "Enema of the State", ENEMA)
+                return {"release-count": 2, "releases": [holding(original, HIT)]}
+            return await super().get(client, path, **params)
+
+    return Paged(
+        {
+            "release/" + ORIGINAL: album_detail(ORIGINAL, "1999", *songs),
+            "release/" + REISSUE: album_detail(REISSUE, "2016", *songs),
+        }
+    )
+
+
+def test_a_long_outage_never_files_an_album_song_on_its_requested_release(
+    tmp_path,
+):
+    """#110: after RESOLUTION_ATTEMPTS (about half an hour) of outage a song
+    was filed on its requested release; an album-mate resolving once
+    MusicBrainz was back reached the reissue, splitting the album (D-64)."""
+    import pytest
+
+    from server.editions import RESOLUTION_ATTEMPTS, Deferred
+
+    catalogue = outage_after_first_page()
+    resolve = EditionResolver(
+        Store(tmp_path), catalogue, FakeArtwork(jpeg(tmp_path)), None
+    )
+    late = {
+        **album_request("All the Small Things", HIT, 1),
+        "resolution_attempts": RESOLUTION_ATTEMPTS - 1,
+    }
+    with pytest.raises(Deferred) as later:
+        asyncio.run(resolve.prepare(late))
+    # The pause keeps growing but stays bounded.
+    assert 0 < later.value.seconds <= 3600
+    catalogue.outage = False
+    mate = asyncio.run(resolve.prepare(album_request("Dumpweed", DEEP, 2)))
+    first = asyncio.run(
+        resolve.prepare({**late, "resolution_attempts": later.value.attempts})
+    )
+    assert first["musicbrainz_release_id"] == mate["musicbrainz_release_id"]
+
+
+def test_an_album_song_whose_edition_stays_unknown_for_a_day_fails_visibly(
+    tmp_path,
+):
+    """#110: the song is not filed on a guess; after about a day of outage
+    its request fails with a reason and a fresh retry budget, so Retry
+    resolves it once MusicBrainz is back."""
+    from server.editions import ALBUM_RESOLUTION_ATTEMPTS
+
+    store = Store(tmp_path)
+    job = claimed(
+        store,
+        {
+            **album_request("All the Small Things", HIT, 1),
+            "year": "1999",
+            "resolution_attempts": ALBUM_RESOLUTION_ATTEMPTS - 1,
+        },
+    )
+    resolve = EditionResolver(
+        store, outage_after_first_page(), FakeArtwork(jpeg(tmp_path)), None
+    )
+    worker = Downloader(store, providers={}, resolver=resolve)
+    worker.process = lambda job: (_ for _ in ()).throw(AssertionError("searched"))
+    asyncio.run(worker.handle(job))
+    (item,) = store.queue()["items"]
+    assert item["status"] == "failed" and "MusicBrainz" in item["error"]
+    assert not item.get("edition_resolved") and item["resolution_attempts"] == 0
+    assert item["album"] == "Enema of the State" and "requested" not in item
