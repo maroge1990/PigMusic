@@ -145,6 +145,7 @@ export function SongRow({
         onAlbum={onAlbum}
         download={download}
         onRemove={onRemove}
+        onError={setError}
       >
         {menu}
       </SongMenu>
@@ -164,6 +165,7 @@ function SongMenu({
   onAlbum,
   download,
   onRemove,
+  onError,
   children,
 }: {
   song: Song;
@@ -172,6 +174,7 @@ function SongMenu({
   onAlbum: boolean;
   download: () => Promise<void>;
   onRemove?: () => void;
+  onError: (message: string) => void;
   children?: ReactNode;
 }) {
   const owner = useOwner();
@@ -253,14 +256,18 @@ function SongMenu({
           {item(
             favourite ? "Remove from favourites" : "Favourite",
             <Heart size={18} fill={favourite ? "currentColor" : "none"} />,
-            () =>
+            () => {
+              onError("");
               void api<{ favourited: boolean }>("/v1/favourites", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ track: body, favourite: !favourite }),
-              }).then(() =>
-                window.dispatchEvent(new Event("music-library-changed")),
-              ),
+              })
+                .then(() =>
+                  window.dispatchEvent(new Event("music-library-changed")),
+                )
+                .catch((e) => onError((e as Error).message));
+            },
             favourite === null,
           )}
           <PlaylistPicker

@@ -1,4 +1,4 @@
-import { apiFetch } from "./api";
+import { api } from "./api";
 import { useState } from "react";
 
 /** Owner-only: move the server's files to recoverable trash for everyone. */
@@ -25,11 +25,8 @@ export function RemoveFromServer({
     setBusy(true);
     setError("");
     try {
-      const r = await apiFetch(`/api/v1/admin/${kind}/${id}/remove`, {
-        method: "POST",
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.detail || "Removal stopped.");
+      // api() turns any error answer into a sentence, never "[object Object]".
+      await api(`/v1/admin/${kind}/${id}/remove`, { method: "POST" });
       window.dispatchEvent(new Event("music-library-changed"));
       removed?.();
     } catch (e) {
