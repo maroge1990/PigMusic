@@ -60,9 +60,14 @@ function HomeSection({ kind }: { kind: "popular" | "recommended" }) {
       api<Feed>("/v1/home/" + kind, { signal: controller.signal })
         .then((value) => {
           setFeed(value);
-          // The chart is built in the background; keep looking for two minutes.
-          if (value.state === "preparing" && attempt < 6)
-            timer = setTimeout(() => void load(attempt + 1), 20000);
+          // The chart is built in the background, and a first-ever build can
+          // take several minutes (#105): look every 20 s for two minutes,
+          // then every minute for as long as Home stays open.
+          if (value.state === "preparing")
+            timer = setTimeout(
+              () => void load(attempt + 1),
+              attempt < 6 ? 20000 : 60000,
+            );
           // Every artist here opens instantly; the first two are fully ready.
           whenIdle(() =>
             [

@@ -327,3 +327,39 @@ test("Popular songs show ten, then all on request", async ({ page }) => {
   await list.getByRole("button", { name: "Show all 12 songs" }).click();
   await expect(list.locator(".song-row")).toHaveCount(12);
 });
+
+// #105: a first-ever chart build can take several minutes; Home keeps
+// checking while it is preparing and shows the chart when it arrives.
+test("a chart that takes over two minutes still appears on an open Home", async ({
+  page,
+}) => {
+  let reads = 0;
+  await page.clock.install();
+  await mockApi(page, {
+    answers: {
+      "/v1/home/popular": (route) =>
+        ++reads <= 8
+          ? route.fulfill({
+              json: {
+                state: "preparing",
+                title: "",
+                source: "",
+                artists: [],
+                albums: [],
+                songs: [],
+              },
+            })
+          : route.fulfill({ json: feed("Popular in Australia") }),
+    },
+  });
+  await page.goto("/#/home");
+  await expect(
+    page.getByText("Finding what\u2019s popular\u2026"),
+  ).toBeVisible();
+  await page.clock.runFor(5 * 60_000);
+  await expect.poll(() => reads).toBeGreaterThan(8);
+  const popular = page
+    .locator(".home-section")
+    .filter({ hasText: "Popular in Australia" });
+  await expect(popular.getByText("Song one")).toBeVisible();
+});
