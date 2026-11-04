@@ -123,6 +123,8 @@ export function PersonalLibrary({
   const [library, setLibrary] = useState<Library | null>(null);
   const [tab, setTab] = useState<LibraryTab>("artists");
   const [detail, setDetail] = useState<{
+    /** The route this page belongs to ("album:<id>"); see openRoute. */
+    route: string;
     title: string;
     artist?: Artist;
     cover?: string | null;
@@ -160,11 +162,15 @@ export function PersonalLibrary({
   );
   const dialog = useRef<HTMLDialogElement>(null);
   const player = usePlayer();
+  /** Only the latest refresh may apply its answers (#97). */
+  const refreshes = useRef(0);
   async function refresh() {
+    const run = ++refreshes.current;
     const [summary, list] = await Promise.all([
       api<Library>("/v1/library"),
       api<{ playlists: PlaylistSummary[] }>("/v1/playlists"),
     ]);
+    if (run !== refreshes.current) return;
     setLibrary(summary);
     setPlaylists(list.playlists);
     // Library artwork is always ready, whichever tab opens next.
@@ -179,11 +185,10 @@ export function PersonalLibrary({
     const favouriteList = list.playlists.find((p) =>
       p.id.startsWith("pig-favourites:"),
     );
-    setFavouriteList(
-      favouriteList
-        ? await api<Playlist>("/v1/playlists/" + favouriteList.id)
-        : null,
-    );
+    const favourites = favouriteList
+      ? await api<Playlist>("/v1/playlists/" + favouriteList.id)
+      : null;
+    if (run === refreshes.current) setFavouriteList(favourites);
   }
   useEffect(() => {
     void refresh().catch((e) => setError(e.message));
@@ -195,6 +200,8 @@ export function PersonalLibrary({
   const routeKey = `${route.section}/${route.parts.join("/")}?${route.params}`;
   useEffect(() => {
     openRoute.current = !searching && id ? `${kind}:${id}` : "";
+    // An error belongs to the page it happened on (#97).
+    setError("");
     // A catalogue artist page: from Search, or from a library artist page
     // (then it stays under Library).
     if (id && ((searching && kind === "artist") || kind === "discography")) {
@@ -271,6 +278,7 @@ export function PersonalLibrary({
         data.tracks.find((t) => t.musicbrainz_release_id)
           ?.musicbrainz_release_id;
       setDetail({
+        route: "album:" + album.id,
         title: data.title,
         cover: data.cover_url,
         tracks: data.tracks,
@@ -287,7 +295,7 @@ export function PersonalLibrary({
       if (releaseId) void loadRelease(album.id, releaseId);
       else setRelease(null);
     } catch (e) {
-      setError((e as Error).message);
+      if (openId.current === album.id) setError((e as Error).message);
     }
   }
   async function loadRelease(albumId: string, releaseId: string) {
@@ -356,6 +364,7 @@ export function PersonalLibrary({
       );
       const order = new Map(albums.map((a, i) => [a.id, i]));
       setDetail({
+        route: "artist:" + artist.id,
         title: data.name,
         artist: data,
         quality: { scope: "artist", itemId: data.id },
@@ -380,6 +389,7 @@ export function PersonalLibrary({
       const data = await api<Playlist>("/v1/playlists/" + id);
       if (openRoute.current !== "playlist:" + id) return;
       setDetail({
+        route: "playlist:" + id,
         title: data.name,
         tracks: data.entries.map(
           (t) => t.saved_track || t.household_track || t,
@@ -518,6 +528,22 @@ export function PersonalLibrary({
         <p role={error ? "alert" : "status"}>
           {error || "Loading your library…"}
         </p>
+      </main>
+    );
+  // While the next page loads, the previous one is not shown: its Play
+  // would start the old list (#97).
+  const wanted =
+    !searching && id && ["album", "artist", "playlist"].includes(kind)
+      ? `${kind}:${id}`
+      : "";
+  const waiting = !!wanted && detail?.route !== wanted;
+  if (waiting)
+    return (
+      <main className="personal-main">
+        <button className="text-button back-link" onClick={backToLibrary}>
+          <ArrowLeft size={16} aria-hidden="true" /> Library
+        </button>
+        <p role={error ? "alert" : "status"}>{error || "Loading…"}</p>
       </main>
     );
   const counts: Record<string, number> = {
@@ -934,7 +960,9 @@ export function PersonalLibrary({
                 );
                 setUndo(r);
                 setRemoval(null);
-                setDetail(null);
+                // Leave the page the songs were removed from, address too (#97).
+                if (openRoute.current) backToLibrary();
+                else setDetail(null);
               }, "Removed from your library")
             }
           >
