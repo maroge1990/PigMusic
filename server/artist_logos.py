@@ -3,7 +3,7 @@
 import asyncio, hashlib, io, time
 from PIL import Image, ImageOps
 from .library import identifier
-from .catalogue import mbid
+from .catalogue import mbid, settled
 from .media import settings
 from .fanart import Fanart, best, download
 
@@ -28,7 +28,8 @@ class Logos:
         async with self.locks.setdefault(target.stem, asyncio.Lock()), self.slots:
             if target.exists():
                 return target
-            if self.store.read_document(key).get("retry_after", 0) > time.time():
+            missing = await asyncio.to_thread(self.store.read_document, key)
+            if missing.get("retry_after", 0) > time.time():
                 return None
             try:
                 data = await self.fanart.get(client, artist_id, token)
@@ -36,13 +37,19 @@ class Logos:
                     data.get("musiclogo"), english=True
                 )
                 if not logo:
-                    self.store.write_document(key, {"retry_after": time.time() + 86400})
+                    await settled(
+                        self.store.write_document,
+                        key,
+                        {"retry_after": time.time() + 86400},
+                    )
                     return None
                 content = await download(client, logo["url"], 3_000_000)
                 await asyncio.to_thread(self.save, content, target)
                 return target
             except Exception:
-                self.store.write_document(key, {"retry_after": time.time() + 300})
+                await settled(
+                    self.store.write_document, key, {"retry_after": time.time() + 300}
+                )
                 return None
 
     @staticmethod

@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import csv
 import io
-import json
 import re
 import time
 from urllib.parse import urlsplit
@@ -13,6 +12,7 @@ import httpx
 from PIL import Image
 
 from .artwork import quoted
+from .catalogue import settled
 from .library import identifier, normalise
 from .media import settings
 from .fanart import Fanart
@@ -28,7 +28,9 @@ class Portraits:
 
     async def artistgrid(self, client, name):
         async with self.index_lock:
-            index = self.store.read_document("artistgrid-index")
+            index = await asyncio.to_thread(
+                self.store.read_document, "artistgrid-index"
+            )
             if index.get("retry_after", 0) > time.time():
                 return None
             if time.time() - index.get("time", 0) > 604800:
@@ -46,11 +48,7 @@ class Portraits:
                     for r in csv.DictReader(io.StringIO(data.decode("utf-8-sig")))
                 ]
                 index = {"time": time.time(), "names": names}
-                with self.store.connect() as conn:
-                    conn.execute(
-                        "INSERT INTO documents VALUES (?,?) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",
-                        ("artistgrid-index", json.dumps(index)),
-                    )
+                await settled(self.store.write_document, "artistgrid-index", index)
         matches = [n for n in index["names"] if normalise(n) == normalise(name)]
         slug = re.sub("[^a-z0-9]", "", name.lower())
         # Reject punctuation collisions in the upstream filename scheme.
@@ -75,12 +73,12 @@ class Portraits:
             + key
             + (":fanart" if config.get("fanart_key") else ":grid")
         )
-        if self.store.read_document(missing).get("retry_after", 0) > time.time():
+        if await self.artwork.waiting(missing):
             return None
         async with self.locks.setdefault(key, asyncio.Lock()), self.slots:
             if target.exists():
                 return target
-            if self.store.read_document(missing).get("retry_after", 0) > time.time():
+            if await self.artwork.waiting(missing):
                 return None
             url = None
             if config.get("fanart_key"):
@@ -138,10 +136,10 @@ class Portraits:
                 Image.DecompressionBombError,
             ):
                 if not url:
-                    self.artwork.remember_missing("artistgrid-index", 300)
-                self.artwork.remember_missing(missing, 300)
+                    await self.artwork.missing("artistgrid-index", 300)
+                await self.artwork.missing(missing, 300)
                 return None
-            self.artwork.remember_missing(missing, 86400)
+            await self.artwork.missing(missing, 86400)
             return None
 
 

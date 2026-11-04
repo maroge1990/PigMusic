@@ -11,7 +11,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 import httpx
 from PIL import Image, ImageOps
 
-from .catalogue import credit, mbid
+from .catalogue import credit, mbid, settled
 from .library import normalise, identifier
 from .matching import album_title, lead_artist, strip_edition, title_key
 
@@ -81,19 +81,29 @@ class Artwork:
                 (key, json.dumps({"retry_after": time.time() + seconds})),
             )
 
+    async def missing(self, key, seconds):
+        """remember_missing off the event loop (#96); finished even if the
+        caller is cancelled, so the lock it holds covers the write."""
+        await settled(self.remember_missing, key, seconds)
+
+    async def waiting(self, key):
+        """Whether a remembered miss still holds, read off the event loop."""
+        found = await asyncio.to_thread(self.store.read_document, key)
+        return found.get("retry_after", 0) > time.time()
+
     async def cover(self, client, album):
         target = self.target(album)
         if target.exists():
             return target
         # v6: catalogue album titles (no " - EP", "Artist - ") retry every miss.
         key = "missing-artwork:v6:" + album["id"]
-        if self.store.read_document(key).get("retry_after", 0) > time.time():
+        if await self.waiting(key):
             return None
         lock = self.locks.setdefault(album["id"], asyncio.Lock())
         async with lock:
             if target.exists():
                 return target
-            if self.store.read_document(key).get("retry_after", 0) > time.time():
+            if await self.waiting(key):
                 return None
             async with self.slots:
                 try:
@@ -106,7 +116,7 @@ class Artwork:
                         kind, selected = "release", mbid(next(iter(release_ids)))
                     elif release_ids:
                         # Mixed explicit editions cannot establish one cover.
-                        self.remember_missing(key, 86400)
+                        await self.missing(key, 86400)
                         return None
                     else:
                         wanted = album_title(album["title"], album["artist"])
@@ -145,14 +155,14 @@ class Artwork:
                             # release group, on its recommended edition.
                             selected = await self.from_songs(client, album)
                             if not selected:
-                                self.remember_missing(key, 86400)
+                                await self.missing(key, 86400)
                                 return None
                             kind = "release"
                     content = await self.front(client, kind, selected)
                     await asyncio.to_thread(self.save, content, target)
                     return target
                 except httpx.HTTPStatusError as exc:
-                    self.remember_missing(
+                    await self.missing(
                         key, 86400 if exc.response.status_code == 404 else 300
                     )
                 except (
@@ -162,7 +172,7 @@ class Artwork:
                     KeyError,
                     Image.DecompressionBombError,
                 ):
-                    self.remember_missing(key, 300)
+                    await self.missing(key, 300)
                 return None
 
     async def from_songs(self, client, album):
@@ -205,7 +215,7 @@ class Artwork:
         async with lock:
             if target.exists():
                 return target
-            if self.store.read_document(key).get("retry_after", 0) > time.time():
+            if await self.waiting(key):
                 return None
             async with self.slots:
                 try:
@@ -216,7 +226,7 @@ class Artwork:
                     # A cover that does not exist is asked for again tomorrow,
                     # not on every warm pass (ART2: each retry also costs a
                     # MusicBrainz request song matching waits for).
-                    self.remember_missing(
+                    await self.missing(
                         key, 86400 if exc.response.status_code == 404 else 300
                     )
                     return None
@@ -227,7 +237,7 @@ class Artwork:
                     KeyError,
                     Image.DecompressionBombError,
                 ):
-                    self.remember_missing(key, 300)
+                    await self.missing(key, 300)
                     return None
 
     async def front(self, client, kind, item_id):

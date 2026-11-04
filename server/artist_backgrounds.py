@@ -28,19 +28,19 @@ class Backgrounds:
         async with self.locks.setdefault(key, asyncio.Lock()), self.slots:
             if target.exists():
                 return target
-            if self.store.read_document(key).get("retry_after", 0) > time.time():
+            if await self.artwork.waiting(key):
                 return None
             try:
                 data = await self.fanart.get(client, artist_id, token)
                 photo = best(data.get("artistbackground"))
                 if not photo:
-                    self.artwork.remember_missing(key, 86400)
+                    await self.artwork.missing(key, 86400)
                     return None
                 content = await download(client, photo["url"])
                 await asyncio.to_thread(self.save, content, target)
                 return target
             except Exception:
-                self.artwork.remember_missing(key, 300)
+                await self.artwork.missing(key, 300)
                 return None
 
     @staticmethod
