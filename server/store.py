@@ -429,12 +429,6 @@ class Store:
             / "staging"
             / (job["id"] + "-" + job.get("claim_token", "legacy") + ".json")
         )
-        journal.write_text(
-            json.dumps(
-                {**metadata, **({"_legacy_replacement": legacy} if legacy else {})}
-            ),
-            encoding="utf-8",
-        )
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
@@ -449,9 +443,18 @@ class Store:
                 )
             ):
                 return
+            # Written only once the claim holds (#96): a request cancelled
+            # meanwhile left a journal recovery could never use.
+            journal.write_text(
+                json.dumps(
+                    {**metadata, **({"_legacy_replacement": legacy} if legacy else {})}
+                ),
+                encoding="utf-8",
+            )
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.exists():
                 if file_sha256(target) != sha:
+                    journal.unlink(missing_ok=True)
                     raise ValueError(
                         "Import collision: an existing file has different content"
                     )
@@ -562,14 +565,23 @@ class Store:
         if stage.exists():
             for journal in stage.glob("*.json"):
                 try:
-                    metadata = json.loads(journal.read_text(encoding="utf-8"))
-                    legacy = metadata.pop("_legacy_replacement", None)
-                    target = (root / metadata["relative_path"]).resolve()
+                    try:
+                        metadata = json.loads(journal.read_text(encoding="utf-8"))
+                        legacy = metadata.pop("_legacy_replacement", None)
+                        target = (root / metadata["relative_path"]).resolve()
+                        sha = metadata["sha256"]
+                    except (ValueError, KeyError, TypeError, AttributeError):
+                        # Torn or unreadable: it can never be recovered (#96).
+                        journal.unlink(missing_ok=True)
+                        continue
                     if (
                         not target.is_relative_to(root)
                         or not target.is_file()
-                        or file_sha256(target) != metadata["sha256"]
+                        or file_sha256(target) != sha
                     ):
+                        # Its song never reached the library (or another file
+                        # holds its place): nothing to recover (#96).
+                        journal.unlink(missing_ok=True)
                         continue
                     with self.connect() as conn:
                         conn.execute("BEGIN IMMEDIATE")
@@ -629,6 +641,24 @@ class Store:
             conn.execute(
                 "UPDATE queue SET status='waiting_for_sources' WHERE status IN ('searching','downloading','validating','importing')"
             )
+        # Every interrupted request now waits for a fresh claim, so audio its
+        # transfer staged can never be published: swept, never the journals
+        # (#96). Only regular files directly in the two staging folders.
+        for folder in {stage, root.parent / "staging"}:
+            try:
+                staged = list(folder.iterdir())
+            except OSError:
+                continue
+            for path in staged:
+                try:
+                    if (
+                        path.suffix != ".json"
+                        and path.is_file()
+                        and not path.is_symlink()
+                    ):
+                        path.unlink()
+                except OSError:
+                    pass
         self.refresh_library()
         self.cleanup_replacements()
 

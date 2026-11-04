@@ -332,6 +332,41 @@ def test_publication_journal_recovers_rename_before_database_commit(tmp_path, au
     assert not journal.exists()
 
 
+def test_a_lost_claim_leaves_no_publication_journal(tmp_path, audio):
+    """#96: the staging journal was written before the claim was checked, so
+    a request cancelled meanwhile left a journal recovery never removed."""
+    store = Store(tmp_path / "data")
+    job = queued(store)
+    worker = Downloader(store)
+    store.request_state(job["id"], "validating")
+    store.cancel_request(job["id"])
+    staged = worker.staging / "staged.mp3"
+    shutil.copyfile(audio, staged)
+    probe = {"codec": "mp3", "bitrate_kbps": 320, "duration": 3}
+    target = worker.library_root / "song.mp3"
+    assert not store.commit_request(job, staged, target, probe, "sha")
+    journals = store.directory / "downloads" / "staging"
+    assert list(journals.glob("*.json")) == [] and not target.exists()
+
+
+def test_recovery_sweeps_orphan_journals_and_staged_audio(tmp_path, audio):
+    """#96: a journal whose song never reached the library, and audio staged
+    by a transfer the restart interrupted, stayed in staging for good."""
+    store = Store(tmp_path / "data")
+    job = queued(store)
+    worker = Downloader(store)
+    store.request_state(job["id"], "downloading")
+    orphan = store.directory / "downloads" / "staging" / "gone-token.json"
+    orphan.write_text(json.dumps({**job, "relative_path": "never.mp3", "sha256": "x"}))
+    torn = store.directory / "downloads" / "staging" / "torn-token.json"
+    torn.write_text('{"title": "half wri')
+    staged = worker.staging / f"{job['id']}-{job['claim_token']}.mp3"
+    shutil.copyfile(audio, staged)
+    store.recover_requests()
+    assert not orphan.exists() and not torn.exists() and not staged.exists()
+    assert store.queue()["items"][0]["status"] == "waiting_for_sources"
+
+
 def test_pausing_returns_active_request_to_waiting(tmp_path):
     store = Store(tmp_path)
     job = queued(store)
