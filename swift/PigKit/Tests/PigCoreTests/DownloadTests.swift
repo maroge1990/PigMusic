@@ -480,3 +480,15 @@ private final class Raised: @unchecked Sendable {
   var value: Bool { lock.withLock { raised } }
   func set() { lock.withLock { raised = true } }
 }
+
+/// #97: the storage check counted only plain free space, not the purgeable
+/// space the system frees for files the person asked to keep.
+@Test func theStorageCheckCountsPurgeableSpace() throws {
+  let gigabyte: Int64 = 1 << 30
+  #expect(VolumeSpace.choose(important: 5 * gigabyte, plain: gigabyte) == 5 * gigabyte)
+  // No important-usage figure (or none known): the plain one.
+  #expect(VolumeSpace.choose(important: nil, plain: gigabyte) == gigabyte)
+  #expect(VolumeSpace.choose(important: 0, plain: gigabyte) == gigabyte)
+  #expect(VolumeSpace.choose(important: nil, plain: nil) == nil)
+  #expect(try VolumeSpace.available(at: FileManager.default.temporaryDirectory) ?? 0 > 0)
+}

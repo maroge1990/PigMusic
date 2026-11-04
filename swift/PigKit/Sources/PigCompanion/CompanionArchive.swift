@@ -270,9 +270,8 @@ public actor CompanionArchive {
     let used = receipt().usedBytes
     let exists = FileManager.default.fileExists(atPath: url(ticket.checksum).path)
     guard exists || used + song.bytes <= budgetBytes else { throw CompanionFailure.quota }
-    let capacity = try directory.resourceValues(forKeys: [.volumeAvailableCapacityKey])
-      .volumeAvailableCapacity
-    guard exists || capacity == nil || Int64(capacity!) > song.bytes + 32 * 1024 * 1024 else {
+    let capacity = try VolumeSpace.available(at: directory)
+    guard exists || capacity == nil || capacity! > song.bytes + 32 * 1024 * 1024 else {
       throw CompanionFailure.quota
     }
     let handle = try FileHandle(forReadingFrom: file)

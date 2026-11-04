@@ -254,9 +254,8 @@ public actor DownloadArchive {
       Int64(0)
     ) { $0 + $1.total }
     guard usedBytes() + reserved + manifest.bytes <= budget else { throw OfflineFailure.quota }
-    if checkCapacity,
-      let capacity = try directory.resourceValues(forKeys: [.volumeAvailableCapacityKey])
-        .volumeAvailableCapacity, Int64(capacity) < manifest.bytes + 32 * 1024 * 1024
+    if checkCapacity, let capacity = try VolumeSpace.available(at: directory),
+      capacity < manifest.bytes + 32 * 1024 * 1024
     {
       throw OfflineFailure.quota
     }
