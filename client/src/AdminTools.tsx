@@ -96,9 +96,14 @@ export function AdminTools({ route }: { route: Route }) {
     api<Library>("/v1/admin/library")
       .then(setLibrary)
       .catch((e) => setError(e.message));
+  // The whole household library is large: read it only for the pages that
+  // show it, each time one opens (#97).
+  const needsLibrary = section === "overview" || section === "library";
+  useEffect(() => {
+    if (needsLibrary) void loadLibrary();
+  }, [needsLibrary]);
 
   useEffect(() => {
-    void loadLibrary();
     api<Migration>("/v1/admin/migration")
       .then(setMigration)
       .catch((e) => setError(e.message));
@@ -169,7 +174,11 @@ export function AdminTools({ route }: { route: Route }) {
         setQueue(q);
         updateArtworkRevision(q.artwork_revision);
         const signature = `${q.library_revision}:${JSON.stringify(q.media || {})}`;
-        if (queueSignature.current && signature !== queueSignature.current)
+        if (
+          needsLibrary &&
+          queueSignature.current &&
+          signature !== queueSignature.current
+        )
           void loadLibrary();
         queueSignature.current = signature;
       } catch (e) {

@@ -732,4 +732,29 @@ test("organising runs in the background with progress and can be stopped", async
   );
   await expect(panel.getByRole("status")).toHaveCount(0);
   expect(polls).toBeGreaterThan(1);
+
+// #97: the whole household library loads only for the Admin pages that show it.
+test("Admin reads the server library only where it is shown", async ({
+  page,
+}) => {
+  let reads = 0;
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/admin/queue": (route) => route.fulfill({ json: queue }),
+      "/v1/admin/library": (route) => {
+        reads += 1;
+        return route.fulfill({ status: 503, json: { detail: "x" } });
+      },
+    },
+  });
+  await page.goto("/#/admin/downloads");
+  await expect(page.getByRole("link", { name: "Queue" })).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(reads).toBe(0);
+  await page.goto("/#/admin/integrations");
+  await page.waitForTimeout(500);
+  expect(reads).toBe(0);
+  await page.goto("/#/admin");
+  await expect.poll(() => reads).toBe(1);
 });
