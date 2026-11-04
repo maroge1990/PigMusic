@@ -349,9 +349,11 @@ def test_a_lost_claim_leaves_no_publication_journal(tmp_path, audio):
     assert list(journals.glob("*.json")) == [] and not target.exists()
 
 
-def test_recovery_sweeps_orphan_journals_and_staged_audio(tmp_path, audio):
-    """#96: a journal whose song never reached the library, and audio staged
-    by a transfer the restart interrupted, stayed in staging for good."""
+def test_recovery_removes_orphan_journals_but_never_staged_audio(tmp_path, audio):
+    """#96: a journal whose song never reached the library, or a torn one,
+    stayed in staging for good. Staged audio is left alone: a staging folder
+    can be a link elsewhere, and recovery deletes only journals it can read
+    as its own (Codex round 2, high)."""
     store = Store(tmp_path / "data")
     job = queued(store)
     worker = Downloader(store)
@@ -363,8 +365,25 @@ def test_recovery_sweeps_orphan_journals_and_staged_audio(tmp_path, audio):
     staged = worker.staging / f"{job['id']}-{job['claim_token']}.mp3"
     shutil.copyfile(audio, staged)
     store.recover_requests()
-    assert not orphan.exists() and not torn.exists() and not staged.exists()
+    assert not orphan.exists() and not torn.exists() and staged.exists()
     assert store.queue()["items"][0]["status"] == "waiting_for_sources"
+
+
+def test_recovery_deletes_nothing_behind_a_linked_staging_folder(tmp_path, audio):
+    store = Store(tmp_path / "data")
+    queued(store)
+    stage = store.directory / "downloads" / "staging"
+    shutil.rmtree(stage, ignore_errors=True)
+    stage.parent.mkdir(parents=True, exist_ok=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    keep = [elsewhere / "song.mp3", elsewhere / "notes.json", elsewhere / "torn.json"]
+    shutil.copyfile(audio, keep[0])
+    keep[1].write_text(json.dumps({"relative_path": "never.mp3", "sha256": "x"}))
+    keep[2].write_text("{not json")
+    stage.symlink_to(elsewhere, target_is_directory=True)
+    store.recover_requests()
+    assert all(path.exists() for path in keep)
 
 
 def test_pausing_returns_active_request_to_waiting(tmp_path):
