@@ -167,11 +167,17 @@ class Exporter:
         if not track.get("export_relative_path"):
             return False
         source, _, target = self.paths(track)
-        return (
+        if not (
             not source.is_file()
             and target.is_file()
             and self.digest(target) == track["sha256"]
-        )
+        ):
+            return False
+        # A replacement or removal committed after records() read the song
+        # leaves the old copy matching the snapshot: count the song only if
+        # it is unchanged now, in a short read after the NAS check (#111).
+        with self.store.connect() as conn:
+            return self.current(conn, track)
 
     def current(self, conn, track):
         """The download as it stands now: still the same file, not in Trash."""

@@ -736,3 +736,37 @@ def test_checking_published_songs_never_holds_the_lifecycle_lock(tmp_path, monke
     assert "exporter.Exporter.publish" not in holders
     status = store.read_document("library-export-status")
     assert status["status"] == "completed" and status["files"] == 2
+
+
+def test_a_replacement_committed_during_the_published_check_is_not_counted(
+    tmp_path, monkeypatch
+):
+    """#111: the published check reads the NAS copy outside lifecycle_lock
+    against the pass's snapshot. A quality replacement committed meanwhile
+    (new sha256, no export location) must not be counted as exported."""
+    store, root = nas_with(tmp_path, monkeypatch, [])
+    download(store, "song")
+    exporter = Exporter(store, root)
+    exporter.process()
+    assert store.read_document("library-export-status")["files"] == 1
+    digest = exporter.digest
+
+    def replaced_meanwhile(path, this_pass=False):
+        value = digest(path, this_pass)
+        with store.connect() as conn:
+            row = conn.execute("SELECT payload FROM acquired WHERE id='song'")
+            track = json.loads(row.fetchone()[0])
+            if track.get("export_relative_path"):
+                track = {**track, "sha256": "new", "relative_path": "x/new.flac"}
+                del track["export_relative_path"]
+                conn.execute(
+                    "UPDATE acquired SET payload=? WHERE id='song'",
+                    (json.dumps(track),),
+                )
+        return value
+
+    monkeypatch.setattr(exporter, "digest", replaced_meanwhile)
+    exporter.verified_at -= 3601
+    exporter.process()
+    status = store.read_document("library-export-status")
+    assert status["files"] == 0, status
