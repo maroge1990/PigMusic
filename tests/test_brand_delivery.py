@@ -8,6 +8,8 @@ import sys
 from fastapi.testclient import TestClient
 
 from server.app import ROOT, create_app
+import pytest
+
 from source import SOURCE
 
 
@@ -43,6 +45,8 @@ def test_production_identity_routes_are_images_not_html(tmp_path):
 def test_watch_lockup_is_the_dark_background_one():
     """watchOS has no light appearance: it shows an image set's default (#112)."""
     folder = SOURCE / "swift/PigMusicWatch/Assets.xcassets/PigLockup.imageset"
+    if not folder.is_dir():
+        pytest.skip("the Watch app is not part of this checkout")
     images = json.loads((folder / "Contents.json").read_text())["images"]
     assert images == [{"filename": "lockup-horizontal-dark.svg", "idiom": "universal"}]
     assert sorted(p.name for p in folder.iterdir()) == [
