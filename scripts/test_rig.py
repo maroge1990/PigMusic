@@ -99,7 +99,17 @@ STATUS = (
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "command", choices=["up", "check", "artist", "mixes", "status", "down", "reset"]
+        "command",
+        choices=[
+            "up",
+            "check",
+            "artist",
+            "mixes",
+            "organise",
+            "status",
+            "down",
+            "reset",
+        ],
     )
     parser.add_argument("--image", help="ghcr.io/maroge1990/pig-music@sha256:…")
     parser.add_argument("--key", default=str(Path.home() / ".ssh/pig_music_unraid"))
@@ -124,7 +134,7 @@ def main():
                 remote(f"cat > {ROOT}/rig/scripts/{name}", stdin=source)
         for command in up_commands(args.image)[1:]:
             remote(command)
-    elif args.command in ("check", "artist", "mixes"):
+    elif args.command in ("check", "artist", "mixes", "organise"):
         logs = remote(f"docker logs {APP} 2>&1", capture_output=True, text=True).stdout
         lines = logs.splitlines()
         marker = next(

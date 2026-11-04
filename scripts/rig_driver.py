@@ -3,9 +3,10 @@ library and a generated owner, then runs a check or a timing scenario
 against the server on 127.0.0.1 (trusted as the HTTPS proxy) and prints one
 JSON report. Started by scripts/test_rig.py; never pointed at production.
 
-    python /rig/scripts/rig_driver.py check|artist|mixes
+    python /rig/scripts/rig_driver.py check|artist|mixes|organise
 """
 
+import hashlib
 import json
 import os
 import secrets
@@ -174,10 +175,85 @@ def mixes(client):
     return {"p50": timings[len(timings) // 2], "p95": timings[-1], "all": timings}
 
 
+def organise(client):
+    """#93: Organise existing music with consistent tags over the whole
+    disposable library through the background job, then an undo restores the
+    original bytes, and a second run stops part-way when asked."""
+    prepare(client)
+    library(client)
+    root = LIBRARY.resolve()
+    plan = client.get("/api/v1/admin/library/organisation", timeout=300).json()
+    rows = [r for r in plan["items"] if not r["conflict"] and r["tag_supported"]]
+    before = {
+        r["from"]: hashlib.sha256((root / r["from"]).read_bytes()).hexdigest()
+        for r in rows
+    }
+    tracks = client.get("/api/v1/admin/library").json().get("stats", {}).get("tracks")
+
+    def run(ids, stop_after=None):
+        started = time.monotonic()
+        response = client.post(
+            "/api/v1/admin/library/organisation",
+            json={"track_ids": ids, "tags": True},
+        )
+        response.raise_for_status()
+        while True:
+            job = client.get("/api/v1/admin/library/organisation/job").json()
+            if stop_after is not None and job.get("done", 0) >= stop_after:
+                client.post("/api/v1/admin/library/organisation/job/stop")
+                stop_after = None
+            if job["status"] not in {"running", "stopping"}:
+                return job, round(time.monotonic() - started, 1)
+            time.sleep(0.5)
+
+    job, seconds = run([r["id"] for r in rows])
+    moved = sum(
+        (root / r["to"]).is_file() and not (root / r["from"]).exists()
+        for r in rows
+        if r["rename"]
+    )
+    after = client.get("/api/v1/admin/library").json().get("stats", {}).get("tracks")
+    history = client.get("/api/v1/admin/library/organisation/history").json()
+    first = rows[0]
+    undo = (
+        client.post(f"/api/v1/admin/library/organisation/{history[-1]['id']}/undo")
+        if history
+        else None
+    )
+    undone = [
+        r["from"]
+        for r in rows
+        if (root / r["from"]).is_file()
+        and hashlib.sha256((root / r["from"]).read_bytes()).hexdigest()
+        == before[r["from"]]
+    ]
+    again = client.get("/api/v1/admin/library/organisation", timeout=300).json()
+    ids = [r["id"] for r in again["items"] if not r["conflict"] and r["tag_supported"]]
+    stopped, _ = run(ids, stop_after=SONGS) if ids else ({}, 0)
+    return {
+        "eligible": len(rows),
+        "job": job,
+        "seconds": seconds,
+        "renamed_and_moved": moved,
+        "renames_planned": sum(r["rename"] for r in rows),
+        "tracks_before_after": [tracks, after],
+        "history": len(history),
+        "undo_status": undo.status_code if undo is not None else None,
+        "originals_restored_exactly": len(undone),
+        "stop_run": stopped,
+        "first_row": {"from": first["from"], "to": first["to"]},
+    }
+
+
 def main():
     scenario = sys.argv[1] if len(sys.argv) > 1 else "check"
     with httpx.Client(base_url=BASE, headers=HEADERS, timeout=60) as client:
-        result = {"check": check, "artist": artist, "mixes": mixes}[scenario](client)
+        result = {
+            "check": check,
+            "artist": artist,
+            "mixes": mixes,
+            "organise": organise,
+        }[scenario](client)
     print(json.dumps({"scenario": scenario, **result}, indent=2))
 
 
