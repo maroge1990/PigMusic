@@ -83,15 +83,13 @@ def sync(source):
         for path in (product / "Apple/Glyphs.xcassets").glob("*.imageset/*"):
             copy(path, catalog / path.parent.name / path.name)
         imageset(catalog, "PigMark", [product / "mark.svg"], True)
-        imageset(
-            catalog,
-            "PigLockup",
-            [
-                product / "lockup-horizontal-light.svg",
-                product / "lockup-horizontal-dark.svg",
-            ],
-            True,
-        )
+        # watchOS has no light appearance and shows the default image on its
+        # black background, so the Watch gets only the dark-background lockup.
+        lockups = ["lockup-horizontal-light.svg", "lockup-horizontal-dark.svg"]
+        if app == "PigMusicWatch":
+            lockups = lockups[1:]
+            shutil.rmtree(catalog / "PigLockup.imageset", ignore_errors=True)
+        imageset(catalog, "PigLockup", [product / name for name in lockups], True)
         imageset(
             catalog,
             "PigLaunch",

@@ -40,6 +40,17 @@ def test_production_identity_routes_are_images_not_html(tmp_path):
         assert client.get("/brand/%2e%2e/index.html").status_code == 404
 
 
+def test_watch_lockup_is_the_dark_background_one():
+    """watchOS has no light appearance: it shows an image set's default (#112)."""
+    folder = SOURCE / "swift/PigMusicWatch/Assets.xcassets/PigLockup.imageset"
+    images = json.loads((folder / "Contents.json").read_text())["images"]
+    assert images == [{"filename": "lockup-horizontal-dark.svg", "idiom": "universal"}]
+    assert sorted(p.name for p in folder.iterdir()) == [
+        "Contents.json",
+        "lockup-horizontal-dark.svg",
+    ]
+
+
 def test_vendored_radiance_matches_approved_release():
     provenance = json.loads((SOURCE / "docs/brand-asset-provenance.json").read_text())
     tokens = json.loads((SOURCE / "docs/pig-family-brand-tokens.json").read_text())

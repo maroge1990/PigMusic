@@ -220,10 +220,6 @@
       "sha256": "8de1c4d91fc94d35ff8d6427ce30cde404f21d360489de2433061d54695c0110",
       "source": "assets/products/pig-music/lockup-horizontal-dark.svg"
     },
-    "swift/PigMusicWatch/Assets.xcassets/PigLockup.imageset/lockup-horizontal-light.svg": {
-      "sha256": "e66bc66156e73665c028c42b8eb502fb4513ad142421e9393b2cc7e8e4287e24",
-      "source": "assets/products/pig-music/lockup-horizontal-light.svg"
-    },
     "swift/PigMusicWatch/Assets.xcassets/PigMark.imageset/mark.svg": {
       "sha256": "63d0c501fabbef785a733ab28b72e2635b2525054bd7324ad3096f8f5e63ae04",
       "source": "assets/products/pig-music/mark.svg"
