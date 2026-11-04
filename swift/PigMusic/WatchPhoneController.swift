@@ -41,7 +41,7 @@ import SwiftUI
   @ObservationIgnored private var subscriptionsURL: URL?
   @ObservationIgnored private var generation = 0
   @ObservationIgnored private var peerRevision: Int64 = 0
-  @ObservationIgnored private var publishing = false
+  @ObservationIgnored private let publishing = WatchPublishLoop()
   /// The ready songs and their files from the last publish, with what they
   /// were built from. The two-second poll reuses them while nothing changed
   /// instead of checking every file again (RV23).
@@ -453,15 +453,16 @@ import SwiftUI
     defaults.set(context.revision, forKey: "pig.watch.revision")
     defaults.set(account, forKey: "pig.watch.account")
   }
+  /// Publishes once at a time; a request during a publish runs after it (#97).
   func publish(force: Bool = false) async {
-    guard !publishing else { return }
+    await publishing.run(force: force) { await self.publishOnce(force: $0) }
+  }
+  private func publishOnce(force: Bool) async {
     guard verified, let downloads, let namespace, let baseManifestURL = manifestURL else {
       if context.account == nil { try? link?.publish(context) }
       return
     }
     if force { sent.reset() }
-    publishing = true
-    defer { publishing = false }
     let stamp = generation
     var songs: [CompanionSong] = []
     var files: [String: URL] = [:]
