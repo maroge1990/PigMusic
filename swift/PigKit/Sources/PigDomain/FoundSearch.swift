@@ -103,6 +103,7 @@ public enum FoundItem: Sendable, Identifiable {
   case artist(Artist, inLibrary: Bool)
   case playlist(Playlist)
   case mix(PersonalMix)
+  case applePlaylist(ApplePlaylist)
   case appleSong(AppleSong)
   case appleAlbum(AppleAlbum)
   case catalogueArtist(CatalogueArtist)
@@ -113,6 +114,7 @@ public enum FoundItem: Sendable, Identifiable {
     case .artist(let artist, _): "artist:" + artist.id
     case .playlist(let playlist): "playlist:" + playlist.id
     case .mix(let mix): "mix:" + mix.id
+    case .applePlaylist(let playlist): "apple-playlist:" + playlist.id
     case .appleSong(let song): "apple-song:\(song.appleId)"
     case .appleAlbum(let album): "apple-album:\(album.appleId)"
     case .catalogueArtist(let artist): "catalogue-artist:" + artist.id
@@ -139,7 +141,8 @@ public struct FoundScreen: Sendable {
   public let songs: [FoundItem]
   public let playlists: [FoundItem]
   public init(
-    _ results: FoundResults?, online: OnlineResults? = nil, catalogue: [CatalogueArtist] = []
+    _ results: FoundResults?, online: OnlineResults? = nil, catalogue: [CatalogueArtist] = [],
+    applePlaylists: [ApplePlaylist] = []
   ) {
     let server = results ?? FoundResults()
     let songs = server.songs.map { FoundItem.song($0) }
@@ -156,9 +159,12 @@ public struct FoundScreen: Sendable {
       .map { FoundItem.catalogueArtist($0) }
     let appleSongs = (online?.songs ?? []).map { FoundItem.appleSong($0) }
     let appleAlbums = (online?.albums ?? []).map { FoundItem.appleAlbum($0) }
+    // Apple Music's playlists come from the phone (D-66), after the server's own.
+    let applePlaylists = applePlaylists.map { FoundItem.applePlaylist($0) }
     // Apple's best songs and album fill Top results after the server's own,
     // so a song nobody here has still comes up first when nothing else does.
     for item in Array(appleSongs.prefix(3)) + Array(appleAlbums.prefix(2)) + others.prefix(1)
+      + applePlaylists.prefix(1)
     where top.count < Self.topSize {
       top.append(item)
     }
@@ -166,7 +172,7 @@ public struct FoundScreen: Sendable {
     self.artists = artists + others
     self.albums = albums + appleAlbums
     self.songs = songs + appleSongs
-    self.playlists = playlists + mixes
+    self.playlists = playlists + mixes + applePlaylists
   }
   public subscript(kind: FoundKind) -> [FoundItem] {
     switch kind {

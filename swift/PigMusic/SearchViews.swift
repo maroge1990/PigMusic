@@ -524,6 +524,15 @@ private struct FoundResultsView: View {
           MixArtwork(kind: mix.kind, title: mix.title).frame(width: 44, height: 44), mix.title,
           "Mix · " + mix.reason, mark: .library)
       }
+    case .applePlaylist(let playlist):
+      NavigationLink {
+        ApplePlaylistView(model: model, playlist: playlist)
+      } label: {
+        label(
+          AppleArtwork(url: playlist.artworkURL).frame(width: 44, height: 44), playlist.name,
+          ["Apple Music playlist", playlist.curator].compactMap { $0 }.joined(separator: " · "),
+          mark: .apple)
+      }
     case .appleSong(let song):
       NavigationLink {
         AppleResultView(model: model, kind: "song", appleId: song.appleId, title: song.title)
@@ -556,7 +565,8 @@ private struct FoundResultsView: View {
       }
     }
   }
-  private enum Mark { case library, server, elsewhere }
+  /// `apple`: an Apple Music playlist, whose songs are marked one by one.
+  private enum Mark { case library, server, elsewhere, apple }
   private func label(_ thumb: some View, _ title: String, _ caption: String, mark: Mark)
     -> some View
   {
@@ -572,7 +582,7 @@ private struct FoundResultsView: View {
       Spacer(minLength: 0)
       // The same marks as songs: a cloud for your library, a faded one for
       // the server; nothing for music not on it yet.
-      if mark != .elsewhere {
+      if mark == .library || mark == .server {
         Image(systemName: "cloud").font(.system(size: 13, weight: .semibold))
           .foregroundStyle(mark == .library ? PigBrand.accent(scheme) : Color.secondary.opacity(0.5))
           .accessibilityLabel(mark == .library ? "In your library" : "On the server")
@@ -681,5 +691,174 @@ private struct RecentAlbumView: View {
       }
     }
     .task(id: album.id) { inLibrary = await model.store?.holds(albumId: album.id) ?? false }
+  }
+}
+
+/// Apple's own artwork for an Apple Music playlist or song, fetched from Apple.
+private struct AppleArtwork: View {
+  let url: URL?
+  var body: some View {
+    AsyncImage(url: url) { image in
+      image.resizable().scaledToFill()
+    } placeholder: {
+      Image(systemName: "music.note.list").foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.secondary.opacity(0.12))
+    }
+    .clipShape(RoundedRectangle(cornerRadius: 6))
+    .accessibilityHidden(true)
+  }
+}
+
+/// An Apple Music playlist (#109, D-66): its songs in Apple's order, each
+/// marked like search: in your library, on the server, or not on the server
+/// yet. Songs on the server play from it; one not on it opens its catalogue
+/// page, where it can be requested. Opening it never requests anything.
+private struct ApplePlaylistView: View {
+  let model: AppModel
+  let playlist: ApplePlaylist
+  @State private var info: ApplePlaylist?
+  @State private var songs: [ApplePlaylistSong]?
+  @State private var states: [ApplePlaylistSongState]?
+  @State private var failure: String?
+  @State private var statusFailure: String?
+  @Environment(\.colorScheme) private var scheme
+  private var shown: ApplePlaylist { info ?? playlist }
+  /// The songs on the server, in the playlist's order.
+  private var playable: [Track] { (states ?? []).compactMap(\.track) }
+  private var origin: PlayOrigin {
+    (states ?? []).contains { if case .server = $0 { true } else { false } }
+      ? .catalogue(artistId: nil) : .library
+  }
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 14) {
+        header
+        HStack(spacing: 10) {
+          PlayCapsule { model.play(playable, origin: origin) }.disabled(playable.isEmpty)
+          RoundIcon(label: "Shuffle", systemImage: "shuffle") {
+            model.play(playable.shuffled(), origin: origin)
+          }.disabled(playable.isEmpty)
+          Spacer()
+        }
+        if let songs {
+          if let summary {
+            Text(summary).font(PigType.footnote).foregroundStyle(.secondary)
+          }
+          LazyVStack(spacing: 0) {
+            ForEach(songs) { song in
+              row(song)
+              Divider()
+            }
+          }
+          if songs.isEmpty {
+            Text("This playlist has no songs PigMusic can show.").foregroundStyle(.secondary)
+          }
+        } else if let failure {
+          Text(failure).font(PigType.footnote).foregroundStyle(.secondary)
+        } else {
+          ProgressView().frame(maxWidth: .infinity)
+        }
+        if let statusFailure {
+          Text(statusFailure).font(PigType.footnote).foregroundStyle(.secondary)
+        }
+      }.padding(.horizontal).padding(.bottom, 24)
+    }
+    .pigCanvas().navigationTitle(shown.name).navigationBarTitleDisplayMode(.inline)
+    .task(id: playlist.id) { await load() }
+  }
+  private var header: some View {
+    HStack(alignment: .center, spacing: 16) {
+      AppleArtwork(url: shown.artworkURL).frame(width: 112, height: 112)
+        .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
+      VStack(alignment: .leading, spacing: 4) {
+        Text("APPLE MUSIC PLAYLIST").font(.caption.weight(.bold)).tracking(1.2)
+          .foregroundStyle(PigBrand.textAccent(scheme))
+        Text(shown.name).font(.title2.weight(.bold)).lineLimit(3)
+          .accessibilityAddTraits(.isHeader)
+        if let curator = shown.curator, !curator.isEmpty {
+          Text(curator).font(PigType.subhead).foregroundStyle(.secondary).lineLimit(2)
+        }
+      }
+      Spacer(minLength: 0)
+    }
+    .accessibilityElement(children: .combine)
+  }
+  private var summary: String? {
+    guard let states, !states.isEmpty else { return nil }
+    let here = states.filter { $0.track != nil }.count
+    return "\(here) of \(states.count) songs on the server"
+  }
+  @ViewBuilder private func row(_ song: ApplePlaylistSong) -> some View {
+    let state = states.flatMap { $0.indices.contains(song.position) ? $0[song.position] : nil }
+    if let track = state?.track {
+      SongRow(model: model, track: track) {
+        if let index = playable.firstIndex(of: track) {
+          model.play(playable, at: index, origin: origin)
+        }
+      }
+    } else if let appleId = song.appleId {
+      NavigationLink {
+        AppleResultView(model: model, kind: "song", appleId: appleId, title: song.title)
+      } label: {
+        elsewhere(song, checked: state != nil)
+      }.buttonStyle(.plain)
+    } else {
+      elsewhere(song, checked: state != nil)
+    }
+  }
+  /// A song not on the server: Apple's details, and the way to its catalogue
+  /// page. Unmarked until the server has been asked.
+  private func elsewhere(_ song: ApplePlaylistSong, checked: Bool) -> some View {
+    HStack(spacing: 12) {
+      AppleArtwork(url: song.artworkURL).frame(width: 44, height: 44)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(song.title).lineLimit(1).foregroundStyle(PigBrand.text(scheme))
+        Text(
+          [song.artist, song.album ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
+        )
+        .font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
+        if checked {
+          Text("Not on the server yet").font(PigType.caption).foregroundStyle(.secondary)
+        }
+      }
+      Spacer(minLength: 0)
+    }
+    .frame(minHeight: 48).contentShape(Rectangle())
+  }
+  private func load() async {
+    if songs == nil {
+      do {
+        guard let found = try await AppleMusicCatalogue.songs(playlistId: playlist.id) else {
+          failure = "Apple Music isn't available on this iPhone right now."
+          return
+        }
+        info = found.0
+        songs = found.1
+      } catch is CancellationError {
+        return
+      } catch {
+        failure = "Apple Music couldn't open this playlist. Try again shortly."
+        return
+      }
+    }
+    guard let songs, !songs.isEmpty else { return }
+    let key = "apple-playlist:" + playlist.id
+    if states == nil,
+      let saved = model.peekCatalogue(key: key, as: [ApplePlaylistSongState].self),
+      saved.count == songs.count
+    {
+      states = saved
+    }
+    do {
+      states = try await model.cachedCatalogue(key: key) { service in
+        try await ApplePlaylistStatuses.states(for: songs, source: service)
+      }
+      statusFailure = nil
+    } catch is CancellationError {} catch {
+      if states == nil {
+        statusFailure = "Which songs are on the server can't be checked right now."
+      }
+    }
   }
 }

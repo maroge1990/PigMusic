@@ -433,7 +433,9 @@ enum PlayOrigin: Hashable {
         restoredQueue.queue.items.map(\.track), at: restoredQueue.queue.index,
         restored: restoredQueue)
     }
-    foundSearch = FoundSearch(source: service) { [weak self] in
+    foundSearch = FoundSearch(
+      source: service, applePlaylists: AppleMusicCatalogue.playlistSearch
+    ) { [weak self] in
       self?.revoked(generation: stamp)
     }
     searchSession = SearchSession(cached: database, online: service) { [weak self] in

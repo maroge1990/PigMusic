@@ -10,20 +10,25 @@ public protocol FoundSearchSource: Sendable {
 extension NativeService: FoundSearchSource {}
 
 /// The search screen's answers (D-61): the server's ranked results first,
-/// then Apple's songs and albums and MusicBrainz artists as they arrive. A
-/// newer search drops every late answer of an older one.
+/// then Apple's songs and albums, MusicBrainz artists and Apple Music
+/// playlists (from the phone, D-66) as they arrive. A newer search drops
+/// every late answer of an older one.
 @available(macOS 14, *)
 @MainActor @Observable public final class FoundSearch {
   public private(set) var query = ""
   public private(set) var results: FoundResults?
   public private(set) var online: OnlineResults?
   public private(set) var catalogue: [CatalogueArtist] = []
+  public private(set) var applePlaylists: [ApplePlaylist] = []
   public private(set) var loading = false
   public private(set) var error: String?
   /// The server predates this search: the earlier one is used instead.
   public private(set) var unsupported = false
-  public var screen: FoundScreen { FoundScreen(results, online: online, catalogue: catalogue) }
+  public var screen: FoundScreen {
+    FoundScreen(results, online: online, catalogue: catalogue, applePlaylists: applePlaylists)
+  }
   @ObservationIgnored private let source: any FoundSearchSource
+  @ObservationIgnored private let playlistSearch: ApplePlaylistSearch?
   @ObservationIgnored private let onAuthentication: @MainActor () -> Void
   @ObservationIgnored private var generation = 0
   @ObservationIgnored private var answers: [String: Answer] = [:]
@@ -32,13 +37,16 @@ extension NativeService: FoundSearchSource {}
     var results: FoundResults?
     var online: OnlineResults?
     var catalogue: [CatalogueArtist]?
+    var applePlaylists: [ApplePlaylist]?
   }
   public static let answerLifetime: TimeInterval = 300
 
   public init(
-    source: any FoundSearchSource, onAuthentication: @escaping @MainActor () -> Void = {}
+    source: any FoundSearchSource, applePlaylists: ApplePlaylistSearch? = nil,
+    onAuthentication: @escaping @MainActor () -> Void = {}
   ) {
     self.source = source
+    self.playlistSearch = applePlaylists
     self.onAuthentication = onAuthentication
   }
 
@@ -48,6 +56,7 @@ extension NativeService: FoundSearchSource {}
     results = nil
     online = nil
     catalogue = []
+    applePlaylists = []
     loading = false
     error = nil
   }
@@ -56,6 +65,7 @@ extension NativeService: FoundSearchSource {}
     case results(FoundResults)
     case online(OnlineResults)
     case catalogue([CatalogueArtist])
+    case applePlaylists([ApplePlaylist])
     case failure(String, any Error)
   }
 
@@ -71,6 +81,7 @@ extension NativeService: FoundSearchSource {}
     // never blanks the list; Apple's and MusicBrainz's belong to their words.
     online = nil
     catalogue = []
+    applePlaylists = []
     let key = SearchText.key(query)
     if force { answers[key] = nil }
     if let answer = answers[key], now.timeIntervalSince(answer.time) > Self.answerLifetime {
@@ -80,11 +91,13 @@ extension NativeService: FoundSearchSource {}
     if let value = reuse?.results { results = value }
     if let value = reuse?.online { online = value }
     if let value = reuse?.catalogue { catalogue = value }
+    if let value = reuse?.applePlaylists { applePlaylists = value }
     let wide = query.count >= SearchText.catalogueMinimum
     let askResults = reuse?.results == nil
     let askOnline = wide && reuse?.online == nil
     let askCatalogue = wide && reuse?.catalogue == nil
-    guard askResults || askOnline || askCatalogue else { return }
+    let playlistSearch = wide && reuse?.applePlaylists == nil ? self.playlistSearch : nil
+    guard askResults || askOnline || askCatalogue || playlistSearch != nil else { return }
     loading = askResults
     let source = self.source
     await withTaskGroup(of: Delivery.self) { group in
@@ -108,6 +121,10 @@ extension NativeService: FoundSearchSource {}
             return .catalogue(try await source.catalogueArtists(query: query, offset: 0).artists)
           } catch { return .failure("catalogue", error) }
         }
+      }
+      if let playlistSearch {
+        // Never fails: without Apple Music the rest of search carries on.
+        group.addTask { .applePlaylists(await playlistSearch.playlists(query: query)) }
       }
       for await delivery in group {
         guard stamp == generation else { continue }
@@ -133,6 +150,9 @@ extension NativeService: FoundSearchSource {}
     case .catalogue(let value):
       catalogue = value
       answer.catalogue = value
+    case .applePlaylists(let value):
+      applePlaylists = value
+      answer.applePlaylists = value
     case .failure(let lane, let failure):
       if failure is SearchUnsupported {
         unsupported = true

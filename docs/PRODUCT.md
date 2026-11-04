@@ -9,6 +9,7 @@ PigMusic is a private household music-library manager with one container, one in
 - **Accounts and invites:** each person has their own account; people join by a one-use invite link or QR code created by the owner.
 - **Personal libraries over shared files:** each person's library is a set of memberships over the household's files.
 - **Finding and requesting music:** search the household library and the catalogue, then request an artist, album or song; PigMusic picks a source from seven acquisition sources, validates, tags, files and publishes the result.
+- **Apple Music playlists in iPhone search:** the iPhone app finds Apple Music catalogue playlists itself through Apple's MusicKit, once the person allows Apple Music access (D-66); opening one lists its songs marked in your library, on the server or not on the server yet, and each missing song opens its catalogue page to be requested. Opening one never requests anything; web search has no Apple Music playlists.
 - **Quality management:** system, artist and album quality defaults, explicit upgrades and downgrades by acquiring new source files, and periodic re-checks of lower-quality saves.
 - **Imports, playlists and favourites:** reviewed Apple XML playlist imports, ordered playlists and a favourites playlist.
 - **Mixes and radio:** private daily mixes per person and an endless personal radio that blend household files with discoveries prepared in a managed server cache.
@@ -40,6 +41,7 @@ PigMusic is a private household music-library manager with one container, one in
 
 - Experimental remote playback may fail or be slow; saved playback is independent of it.
 - Provider metadata and availability are external. Optional enrichment must never block browsing or expose credentials.
+- An Apple Music playlist's songs are matched to the server by title and lead artist through the ranked search, one search per song not in your library (up to 200 songs); a differently credited or titled copy can show as not on the server, and its catalogue page then shows the truth.
 - If the NAS disappears, cached browsing and settings stay available, while managed writes and transfers pause. Never create a substitute empty library or bypass the marker check.
 
 ## Set aside
