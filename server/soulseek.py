@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import stat
 import time
 import threading
 from pathlib import Path, PureWindowsPath
@@ -142,9 +143,17 @@ def candidate_for(job, response, file):
     }
 
 
+# Imports stream in pieces this size; engine leftovers older than a day are
+# swept from its own folders at most once an hour (#96).
+CHUNK = 1024 * 1024
+LEFTOVER_AGE = 86400
+SWEEP_EVERY = 3600
+
+
 class Soulseek:
     def __init__(self, store):
         self.store = store
+        self.swept_at = 0.0
         self.cache = {}
         self.search_lock = threading.Lock()
         self.peer_locks = {}
@@ -457,25 +466,116 @@ class Soulseek:
             destination.write_bytes(result.stdout)
             return
         root = Path(config["download_root"]).resolve()
-        original = PureWindowsPath(candidate["filename"])
-        matches = [
-            p
-            for p in root.rglob("*")
-            if p.name == original.name
-            and p.is_file()
-            and p.resolve().is_relative_to(root)
-            and p.stat().st_size == candidate["size"]
-            and p.parent.name == original.parent.name
-        ]
-        if len(matches) != 1:
-            raise ValueError(
-                "Completed Soulseek file could not be uniquely located in the configured download folder"
-            )
-        with matches[0].open("rb") as source:
-            data = source.read(candidate["size"] + 1)
-        if len(data) != candidate["size"]:
+        source = completed_path(root, candidate)
+        owned = engine_owned(root)
+        if owned:
+            self.sweep(root)
+        size = candidate["size"]
+        # The engine's own folder is on the work disk: a hard link imports
+        # without a copy. Otherwise the file is streamed, never held whole
+        # in memory (up to 256 MB, six at once).
+        linked = False
+        if owned:
+            try:
+                os.link(source, destination)
+                linked = True
+            except OSError:
+                pass
+        if not linked:
+            with source.open("rb") as incoming, destination.open("wb") as outgoing:
+                left = size
+                while left > 0:
+                    chunk = incoming.read(min(left, CHUNK))
+                    if not chunk:
+                        break
+                    outgoing.write(chunk)
+                    left -= len(chunk)
+                extra = incoming.read(1)
+            if left or extra:
+                destination.unlink(missing_ok=True)
+                raise ValueError("Completed Soulseek file changed during import")
+        elif destination.stat().st_size != size:
+            destination.unlink(missing_ok=True)
             raise ValueError("Completed Soulseek file changed during import")
-        destination.write_bytes(data)
-        work = os.environ.get("PIG_MUSIC_DOWNLOAD_ROOT")
-        if work and root.is_relative_to(Path(work).resolve()):
-            matches[0].unlink()
+        if owned:
+            source.unlink()
+
+    def sweep(self, root, now=None):
+        """Delete what the engine left in its own folders more than a day ago:
+        cancelled, failed or ambiguous transfers nobody will import. Only the
+        app-owned engine-downloads and engine-incomplete folders under the
+        work root are touched, at most once an hour; never a symlink."""
+        now = time.time() if now is None else now
+        if now - self.swept_at < SWEEP_EVERY or not engine_owned(root):
+            return
+        self.swept_at = now
+        folders = [root]
+        if root.name == "engine-downloads":
+            incomplete = root.parent / "engine-incomplete"
+            if incomplete.is_dir() and engine_owned(incomplete):
+                folders.append(incomplete.resolve())
+        for folder in folders:
+            for parent, directories, files in os.walk(folder, topdown=False):
+                here = Path(parent)
+                for name in files:
+                    path = here / name
+                    try:
+                        info = path.lstat()
+                        if (
+                            stat.S_ISREG(info.st_mode)
+                            and now - info.st_mtime > LEFTOVER_AGE
+                            and path.resolve().is_relative_to(folder)
+                        ):
+                            path.unlink()
+                    except OSError:
+                        pass
+                if here != folder:
+                    try:
+                        here.rmdir()  # Only when empty.
+                    except OSError:
+                        pass
+
+
+def engine_owned(folder):
+    """Whether `folder` is the embedded engine's own, under the work root."""
+    work = os.environ.get("PIG_MUSIC_DOWNLOAD_ROOT")
+    return bool(work) and folder.resolve().is_relative_to(Path(work).resolve())
+
+
+def completed_path(root, candidate):
+    """Where the engine saves a completed transfer: its remote folder's name
+    then its file name, under the download folder. A second file of that name
+    the engine saved beside it (name_<digits>) of the same size makes it
+    ambiguous: that one folder is read, never the whole tree."""
+    original = PureWindowsPath(candidate["filename"])
+    folder, name = original.parent.name, original.name
+    if name in {"", ".", ".."} or folder in {".", ".."} or "/" in name + folder:
+        raise ValueError("Completed Soulseek file has an unusable name")
+    directory = root / folder if folder else root
+    expected = directory / name
+    stem, suffix = os.path.splitext(name)
+    renamed = re.compile(re.escape(stem) + r"_[0-9]+" + re.escape(suffix))
+    size = candidate["size"]
+    matches = []
+    try:
+        entries = list(os.scandir(directory))
+    except OSError:
+        entries = []
+    for entry in entries:
+        if entry.name != name and not renamed.fullmatch(entry.name):
+            continue
+        path = Path(entry.path)
+        try:
+            if (
+                entry.is_file(follow_symlinks=False)
+                and entry.stat(follow_symlinks=False).st_size == size
+                and path.resolve().is_relative_to(root)
+            ):
+                matches.append(path)
+        except OSError:
+            pass
+    if matches != [expected]:
+        raise ValueError(
+            "Completed Soulseek file could not be uniquely located in the configured download folder"
+        )
+    return expected

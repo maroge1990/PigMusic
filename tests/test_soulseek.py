@@ -1,6 +1,8 @@
 import json
+import os
 import shutil
 import subprocess
+import time
 
 import httpx
 import pytest
@@ -196,10 +198,93 @@ def test_completed_file_lookup_rejects_ambiguity_and_outside_files(tmp_path):
     (root / "Studio" / "01 Song.mp3").write_bytes(b"1" * 10000)
     candidate = candidate_for(song(), {"username": "peer"}, file())
     adapter.copy_completed(candidate, tmp_path / "copy.mp3")
-    (root / "other" / "Studio").mkdir(parents=True)
-    (root / "other" / "Studio" / "01 Song.mp3").write_bytes(b"2" * 10000)
+    assert (tmp_path / "copy.mp3").read_bytes() == b"1" * 10000
+    # The engine saved a second file of that name beside it: ambiguous.
+    (root / "Studio" / "01 Song_638650000000000000.mp3").write_bytes(b"2" * 10000)
     with pytest.raises(ValueError, match="uniquely"):
         adapter.copy_completed(candidate, tmp_path / "copy.mp3")
+    (root / "Studio" / "01 Song_638650000000000000.mp3").unlink()
+    # A link out of the download folder is never read.
+    outside = tmp_path / "outside.mp3"
+    outside.write_bytes(b"3" * 10000)
+    (root / "Studio" / "01 Song.mp3").unlink()
+    (root / "Studio" / "01 Song.mp3").symlink_to(outside)
+    with pytest.raises(ValueError, match="uniquely"):
+        adapter.copy_completed(candidate, tmp_path / "copy.mp3")
+    # A remote name climbing out of the folder is refused.
+    climbing = {**candidate, "filename": "Music\\..\\01 Song.mp3"}
+    with pytest.raises(ValueError):
+        adapter.copy_completed(climbing, tmp_path / "copy.mp3")
+
+
+def test_completed_files_are_found_without_walking_and_streamed(tmp_path, monkeypatch):
+    """#96: the import walked the engine's whole download tree and read the
+    file (up to 256 MB, six at once) into memory."""
+    import pathlib
+    import tracemalloc
+
+    adapter = Soulseek(configured(tmp_path / "data"))
+    root = tmp_path / "data" / "engine"
+    (root / "Studio").mkdir(parents=True)
+    size = 24_000_000
+    with (root / "Studio" / "01 Song.mp3").open("wb") as handle:
+        handle.truncate(size)
+    candidate = {
+        **candidate_for(song(), {"username": "peer"}, file()),
+        "size": size,
+    }
+    monkeypatch.setattr(
+        pathlib.Path, "rglob", lambda *_: pytest.fail("walked the whole tree")
+    )
+    monkeypatch.setattr(os, "walk", lambda *_: pytest.fail("walked the tree"))
+    tracemalloc.start()
+    try:
+        adapter.copy_completed(candidate, tmp_path / "copy.mp3")
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert (tmp_path / "copy.mp3").stat().st_size == size
+    assert peak < 8_000_000, peak
+    # Outside the engine's own folder nothing is deleted.
+    assert (root / "Studio" / "01 Song.mp3").exists()
+
+
+def test_engine_imports_link_and_old_leftovers_are_swept_from_its_own_folders(
+    tmp_path, monkeypatch
+):
+    work = tmp_path / "work"
+    downloads, incomplete = work / "engine-downloads", work / "engine-incomplete"
+    monkeypatch.setenv("PIG_MUSIC_DOWNLOAD_ROOT", str(work))
+    store = configured(tmp_path / "data")
+    connection = tmp_path / "data" / "slskd-connection.json"
+    config = json.loads(connection.read_text())
+    connection.write_text(json.dumps({**config, "download_root": str(downloads)}))
+    adapter = Soulseek(store)
+    old = time.time() - 2 * 86400
+    leftovers = [downloads / "Gone" / "cancelled.mp3", incomplete / "x" / "part.mp3"]
+    for path in leftovers:
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"x")
+        os.utime(path, (old, old))
+    fresh = downloads / "Other" / "transferring.mp3"
+    fresh.parent.mkdir(parents=True)
+    fresh.write_bytes(b"y")
+    outside = tmp_path / "keep.mp3"
+    outside.write_bytes(b"z")
+    os.utime(outside, (old, old))
+    (downloads / "Other" / "link.mp3").symlink_to(outside)
+    (downloads / "Studio").mkdir()
+    (downloads / "Studio" / "01 Song.mp3").write_bytes(b"1" * 10000)
+    candidate = candidate_for(song(), {"username": "peer"}, file())
+    destination = work / "import.mp3"
+    adapter.copy_completed(candidate, destination)
+    # Imported by a hard link (no copy), and the engine's file is gone.
+    assert destination.read_bytes() == b"1" * 10000
+    assert not (downloads / "Studio" / "01 Song.mp3").exists()
+    assert not any(path.exists() for path in leftovers)
+    assert not (downloads / "Gone").exists()
+    assert fresh.exists() and outside.exists()
+    assert (downloads / "Other" / "link.mp3").is_symlink()
 
 
 def fallback_adapter(tmp_path, album_only_responses, primary_responses):
