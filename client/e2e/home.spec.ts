@@ -356,8 +356,17 @@ test("a chart that takes over two minutes still appears on an open Home", async 
   await expect(
     page.getByText("Finding what\u2019s popular\u2026"),
   ).toBeVisible();
-  await page.clock.runFor(5 * 60_000);
-  await expect.poll(() => reads).toBeGreaterThan(8);
+  // Each check waits for its answer before the next is timed, so the clock
+  // moves a minute at a time until the ninth check has been made.
+  await expect
+    .poll(
+      async () => {
+        await page.clock.runFor(60_000);
+        return reads;
+      },
+      { intervals: [100], timeout: 20_000 },
+    )
+    .toBeGreaterThan(8);
   const popular = page
     .locator(".home-section")
     .filter({ hasText: "Popular in Australia" });

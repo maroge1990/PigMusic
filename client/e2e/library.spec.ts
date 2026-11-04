@@ -367,8 +367,12 @@ test("a catalogue album with pending songs backs off its checks", async ({
   );
   await expect(page.getByText("Still coming").first()).toBeVisible();
   const first = reads;
-  await page.clock.runFor(60_000);
-  await expect.poll(() => reads - first).toBeGreaterThan(2);
+  // A minute, a second at a time, letting each check's answer arrive.
+  for (let i = 0; i < 60; i++) {
+    await page.clock.runFor(1_000);
+    await page.waitForTimeout(40);
+  }
+  expect(reads - first).toBeGreaterThan(2);
   // Every 3 s would be 20 checks a minute.
   expect(reads - first).toBeLessThanOrEqual(8);
 });
