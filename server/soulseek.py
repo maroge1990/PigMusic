@@ -3,7 +3,6 @@
 import json
 import os
 import re
-import stat
 import time
 import threading
 from pathlib import Path, PureWindowsPath
@@ -143,17 +142,13 @@ def candidate_for(job, response, file):
     }
 
 
-# Imports stream in pieces this size; engine leftovers older than a day are
-# swept from its own folders at most once an hour (#96).
+# Imports stream in pieces this size (#96).
 CHUNK = 1024 * 1024
-LEFTOVER_AGE = 86400
-SWEEP_EVERY = 3600
 
 
 class Soulseek:
     def __init__(self, store):
         self.store = store
-        self.swept_at = 0.0
         self.cache = {}
         self.search_lock = threading.Lock()
         self.peer_locks = {}
@@ -468,8 +463,6 @@ class Soulseek:
         root = Path(config["download_root"]).resolve()
         source = completed_path(root, candidate)
         owned = engine_owned(root)
-        if owned:
-            self.sweep(root)
         size = candidate["size"]
         # The engine's own folder is on the work disk: a hard link imports
         # without a copy. Otherwise the file is streamed, never held whole
@@ -499,41 +492,6 @@ class Soulseek:
             raise ValueError("Completed Soulseek file changed during import")
         if owned:
             source.unlink()
-
-    def sweep(self, root, now=None):
-        """Delete what the engine left in its own folders more than a day ago:
-        cancelled, failed or ambiguous transfers nobody will import. Only the
-        app-owned engine-downloads and engine-incomplete folders under the
-        work root are touched, at most once an hour; never a symlink."""
-        now = time.time() if now is None else now
-        if now - self.swept_at < SWEEP_EVERY or not engine_owned(root):
-            return
-        self.swept_at = now
-        folders = [root]
-        if root.name == "engine-downloads":
-            incomplete = root.parent / "engine-incomplete"
-            if incomplete.is_dir() and engine_owned(incomplete):
-                folders.append(incomplete.resolve())
-        for folder in folders:
-            for parent, directories, files in os.walk(folder, topdown=False):
-                here = Path(parent)
-                for name in files:
-                    path = here / name
-                    try:
-                        info = path.lstat()
-                        if (
-                            stat.S_ISREG(info.st_mode)
-                            and now - info.st_mtime > LEFTOVER_AGE
-                            and path.resolve().is_relative_to(folder)
-                        ):
-                            path.unlink()
-                    except OSError:
-                        pass
-                if here != folder:
-                    try:
-                        here.rmdir()  # Only when empty.
-                    except OSError:
-                        pass
 
 
 def engine_owned(folder):

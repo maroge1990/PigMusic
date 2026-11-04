@@ -249,9 +249,7 @@ def test_completed_files_are_found_without_walking_and_streamed(tmp_path, monkey
     assert (root / "Studio" / "01 Song.mp3").exists()
 
 
-def test_engine_imports_link_and_old_leftovers_are_swept_from_its_own_folders(
-    tmp_path, monkeypatch
-):
+def test_engine_imports_link_and_leave_other_engine_files_alone(tmp_path, monkeypatch):
     work = tmp_path / "work"
     downloads, incomplete = work / "engine-downloads", work / "engine-incomplete"
     monkeypatch.setenv("PIG_MUSIC_DOWNLOAD_ROOT", str(work))
@@ -281,8 +279,10 @@ def test_engine_imports_link_and_old_leftovers_are_swept_from_its_own_folders(
     # Imported by a hard link (no copy), and the engine's file is gone.
     assert destination.read_bytes() == b"1" * 10000
     assert not (downloads / "Studio" / "01 Song.mp3").exists()
-    assert not any(path.exists() for path in leftovers)
-    assert not (downloads / "Gone").exists()
+    # Nothing else is deleted, however old: age alone never shows a transfer
+    # is abandoned (a stalled one can resume), so leftovers wait for a sweep
+    # that asks the engine (#96).
+    assert all(path.exists() for path in leftovers)
     assert fresh.exists() and outside.exists()
     assert (downloads / "Other" / "link.mp3").is_symlink()
 
