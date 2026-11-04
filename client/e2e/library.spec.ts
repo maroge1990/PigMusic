@@ -327,3 +327,48 @@ test("empty member pages show the pig, not bare text", async ({ page }) => {
     await expect(empty.locator("img.empty-pig")).toHaveCount(1);
   }
 });
+
+// #97: an album whose songs are still downloading is checked less and less
+// often, not every 3 seconds for as long as it stays open.
+test("a catalogue album with pending songs backs off its checks", async ({
+  page,
+}) => {
+  let reads = 0;
+  await page.clock.install();
+  await mockApi(page, {
+    answers: {
+      "/v1/catalogue/releases/r-1": (route) => {
+        reads += 1;
+        return route.fulfill({
+          json: {
+            id: "r-1",
+            title: "Waiting album",
+            date: "2025",
+            description: "",
+            tracks: [
+              {
+                id: "t-wait",
+                title: "Still coming",
+                artist: artist.name,
+                duration: 180,
+                track_number: 1,
+                disc_number: 1,
+                server_state: "requested",
+                download_status: "searching",
+              },
+            ],
+          },
+        });
+      },
+    },
+  });
+  await page.goto(
+    `/#/library/discography/mb-1?name=${encodeURIComponent(artist.name)}&release=r-1`,
+  );
+  await expect(page.getByText("Still coming").first()).toBeVisible();
+  const first = reads;
+  await page.clock.runFor(60_000);
+  await expect.poll(() => reads - first).toBeGreaterThan(2);
+  // Every 3 s would be 20 checks a minute.
+  expect(reads - first).toBeLessThanOrEqual(8);
+});

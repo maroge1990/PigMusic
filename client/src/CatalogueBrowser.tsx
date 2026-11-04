@@ -281,17 +281,28 @@ export function CatalogueBrowser({
     if (!release || !release.tracks.some(pending)) return;
     const id = release.id;
     let active = true;
-    const timer = setInterval(() => {
-      if (document.hidden) return;
-      void request<Release>(`releases/${id}`)
-        .then((data) => {
-          if (active) setRelease(data);
-        })
-        .catch(() => {});
-    }, 3000);
+    let timer: ReturnType<typeof setTimeout>;
+    // Start at 3 s, then wait half as long again each time, up to 30 s; a
+    // song finishing restarts this effect and the quick checks (#97).
+    let delay = 3000;
+    const check = () => {
+      timer = setTimeout(() => {
+        delay = Math.min(30000, delay * 1.5);
+        if (document.hidden) return check();
+        void request<Release>(`releases/${id}`)
+          .then((data) => {
+            if (active) setRelease(data);
+          })
+          .catch(() => {})
+          .finally(() => {
+            if (active) check();
+          });
+      }, delay);
+    };
+    check();
     return () => {
       active = false;
-      clearInterval(timer);
+      clearTimeout(timer);
     };
   }, [release?.id, release?.tracks.filter(pending).length]);
   useEffect(() => {
