@@ -732,6 +732,7 @@ test("organising runs in the background with progress and can be stopped", async
   );
   await expect(panel.getByRole("status")).toHaveCount(0);
   expect(polls).toBeGreaterThan(1);
+});
 
 // #97: the whole household library loads only for the Admin pages that show it.
 test("Admin reads the server library only where it is shown", async ({
