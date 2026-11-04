@@ -541,3 +541,90 @@ def test_popular_chart_keeps_up_to_100_songs_and_retries_a_flaky_feed(tmp_path):
     assert chart["state"] == "ready"
     assert len(chart["songs"]) == 100
     assert seen.count(seen[0]) == 2  # The 502 was asked again.
+
+
+def recommended_app(tmp_path, home):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from server.routes.home import home_router
+
+    app = FastAPI()
+    app.state.http = None
+    app.include_router(home_router(Store(tmp_path), None, home))
+    return TestClient(app)
+
+
+def test_home_recommended_serves_the_last_good_feed_while_it_rebuilds(
+    tmp_path, monkeypatch
+):
+    """#96: Recommended was built inside each request (up to 25 s, then an
+    empty 'unavailable' feed). It is built in the background now: a request
+    gets the last good feed at once, and a failed rebuild never replaces it."""
+    import threading
+    import time
+
+    import server.routes.home as module
+
+    rebuilt = threading.Event()
+    good = {
+        "artists": [
+            {
+                "id": "a",
+                "artist_id": "a",
+                "name": "Similar",
+                "artist": "Similar",
+                "kind": "artists",
+            }
+        ],
+        "albums": [],
+        "songs": [],
+        "source": "Similar to artists in your library",
+        "unavailable": False,
+        "state": "ready",
+    }
+
+    class Home:
+        calls = 0
+
+        async def recommended(self, client, projection):
+            Home.calls += 1
+            if Home.calls == 1:
+                return good
+            rebuilt.set()
+            return {**good, "artists": [], "unavailable": True, "state": "unavailable"}
+
+    clock = [1000.0]
+    monkeypatch.setattr(module, "monotonic", lambda: clock[0], raising=False)
+    with recommended_app(tmp_path, Home()) as client:
+        assert client.get("/api/v1/home/recommended").json()["state"] == "ready"
+        # Within the hour the saved feed is served without building.
+        assert client.get("/api/v1/home/recommended").json()["artists"]
+        assert Home.calls == 1
+        # Past it, the request still gets the saved feed; the rebuild runs
+        # in the background, and its failure keeps the last good one.
+        clock[0] += 3601
+        assert client.get("/api/v1/home/recommended").json()["artists"]
+        assert rebuilt.wait(5)
+        time.sleep(0.05)
+        served = client.get("/api/v1/home/recommended").json()
+        assert served["state"] == "ready" and served["artists"]
+
+
+def test_home_recommended_never_holds_a_request_for_a_slow_first_build(
+    tmp_path, monkeypatch
+):
+    import time
+
+    import server.routes.home as module
+
+    class Home:
+        async def recommended(self, client, projection):
+            await asyncio.sleep(30)
+
+    monkeypatch.setattr(module, "FIRST_WAIT", 0.1, raising=False)
+    with recommended_app(tmp_path, Home()) as client:
+        started = time.monotonic()
+        served = client.get("/api/v1/home/recommended").json()
+        assert time.monotonic() - started < 5
+        assert served["state"] == "preparing"
