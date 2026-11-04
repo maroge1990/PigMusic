@@ -518,3 +518,5 @@ def test_the_image_does_not_run_as_root():
     final = dockerfile.rsplit("\nFROM ", 1)[1]
     users = re.findall(r"^USER\s+(\S+)", final, re.M)
     assert users and users[-1] == "99:100"
+    # Without a mount the default data folder must still be writable by it.
+    assert re.search(r"chown 99:100 /data", final)

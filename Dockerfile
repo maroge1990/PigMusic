@@ -34,6 +34,8 @@ ENV PIG_MUSIC_DATA=/data
 ENV PIG_MUSIC_REVISION=$VCS_REF PIG_MUSIC_VERSION=$VERSION
 EXPOSE 8765
 # The template also runs it as 99:100 (nobody:users); the image no longer relies on that (#86).
+# /data is a mount in production; without one (CI, tools) it must still be writable.
+RUN mkdir -p /data && chown 99:100 /data
 USER 99:100
 # Every 2 minutes: each check starts a process in the container, about 0.9
 # CPU-s with Docker's exec, which was 3% of a core at 30 s while idle (#63).
