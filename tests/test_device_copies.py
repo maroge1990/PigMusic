@@ -414,3 +414,45 @@ def test_copies_finishing_together_stay_within_the_quota(tmp_path, monkeypatch):
     # The first evicts nothing and fits; the second evicts the first.
     assert sum(j["bytes"] for j in ready) <= copies.quota
     assert len(ready) == 1 and sorted(results) == ["ready", "ready"]
+
+
+def test_handing_out_a_copy_never_hashes_under_the_copy_lock(tmp_path, monkeypatch):
+    """#96: acquire() held the global copy lock while manifest() hashed the
+    source (seconds for a large file), stalling every other copy meanwhile."""
+    import threading
+
+    source, copies = audio_fixture(tmp_path, monkeypatch)
+    held = []
+
+    def hashing(path):
+        probe = threading.Thread(
+            target=lambda: held.append(not copies.lock.acquire(blocking=False))
+            or copies.lock.release()
+        )
+        probe.start()
+        probe.join(5)
+        return checksum(path)
+
+    monkeypatch.setattr("server.device_copies.checksum", hashing)
+    path, value = copies.acquire("song", "original")
+    copies.release(value["key"])
+    assert path == source and held == [False]
+
+
+def test_source_hashes_survive_a_restart(tmp_path, monkeypatch):
+    """#96: the hash cache lived only in memory, so after every restart each
+    copy request read its whole source again."""
+    source, copies = audio_fixture(tmp_path, monkeypatch)
+    first = copies.manifest("song", "original")
+    restarted = DeviceCopies(copies.store)
+    monkeypatch.setattr(
+        "server.device_copies.checksum",
+        lambda path: pytest.fail("hashed an unchanged source again"),
+    )
+    assert restarted.manifest("song", "original")["sha256"] == first["sha256"]
+    # A changed source is read again.
+    monkeypatch.setattr("server.device_copies.checksum", checksum)
+    source.write_bytes(b"replaced-source")
+    assert DeviceCopies(copies.store).manifest("song", "original")["sha256"] == (
+        checksum(source)
+    )

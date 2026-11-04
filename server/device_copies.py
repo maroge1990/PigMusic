@@ -87,9 +87,20 @@ class DeviceCopies:
         with self.lock:
             digest = self.hashes.get(signature)
         if digest is None:
-            digest = checksum(path)
-            if source_stamp(path.stat()) != source_stamp(stat):
-                raise ValueError("The source changed. Request it again after scanning.")
+            # Remembered across restarts by path and file identity (#96).
+            name = "device-copy-hash:" + hashlib.sha256(str(path).encode()).hexdigest()
+            saved = self.store.read_document(name)
+            if saved.get("stamp") == list(source_stamp(stat)):
+                digest = saved.get("sha256")
+            if digest is None:
+                digest = checksum(path)
+                if source_stamp(path.stat()) != source_stamp(stat):
+                    raise ValueError(
+                        "The source changed. Request it again after scanning."
+                    )
+                self.store.write_document(
+                    name, {"stamp": list(source_stamp(stat)), "sha256": digest}
+                )
             with self.lock:
                 self.hashes[signature] = digest
                 self.hashes.move_to_end(signature)
@@ -113,8 +124,8 @@ class DeviceCopies:
                 (job["id"], json.dumps(job)),
             )
 
-    def manifest(self, track_id, quality, create=False):
-        path, sha, stat, key = self.source(track_id, quality)
+    def manifest(self, track_id, quality, create=False, source=None):
+        path, sha, stat, key = source or self.source(track_id, quality)
         if quality == "original":
             return {
                 "state": "ready",
@@ -322,8 +333,11 @@ class DeviceCopies:
                 raise ValueError("Device-copy cache is full")
 
     def acquire(self, track_id, quality):
+        # The source is hashed before the copy lock is taken: hashing a large
+        # file under it stalled every other copy (#96).
+        source = self.source(track_id, quality)
         with self.lock:
-            value = self.manifest(track_id, quality)
+            value = self.manifest(track_id, quality, source=source)
             if value["state"] != "ready":
                 raise LookupError("Copy is not ready")
             path = (
