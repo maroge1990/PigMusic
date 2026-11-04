@@ -471,3 +471,46 @@ def test_relayed_remote_audio_uses_a_signed_link_bound_to_its_listener(
             bare, headers={"Authorization": "Bearer " + owner_token}
         )
         assert owner_view.status_code == 404
+
+
+def test_member_account_paths_match_exactly_not_by_prefix():
+    from server.security import personal_account_path
+
+    for path in (
+        "/api/v1/me",
+        "/api/v1/me/sessions",
+        "/api/v1/me/sessions/abc",
+        "/api/v1/me/password",
+        "/api/v1/auth/logout",
+    ):
+        assert personal_account_path(path), path
+    # A future owner route sharing the letters must not open to members (#86).
+    for path in (
+        "/api/v1/media",
+        "/api/v1/media/files",
+        "/api/v1/meta",
+        "/api/v1/mentions",
+        "/api/v1/auth/logout-everyone",
+        "/api/v1/auth/logoutx",
+    ):
+        assert not personal_account_path(path), path
+
+
+def test_the_legacy_test_switch_is_closed_outside_pytest():
+    from server.security import legacy_test_enabled
+
+    on = {"PIG_MUSIC_TEST_LEGACY_API": "1"}
+    assert legacy_test_enabled(on, {"pytest": object()})
+    # A directly started server with the switch set stays protected (#86).
+    assert not legacy_test_enabled(on, {})
+    assert not legacy_test_enabled({}, {"pytest": object()})
+    assert not legacy_test_enabled({"PIG_MUSIC_TEST_LEGACY_API": "true"}, {"pytest": 1})
+
+
+def test_the_image_does_not_run_as_root():
+    from pathlib import Path
+
+    dockerfile = (Path(__file__).parents[1] / "Dockerfile").read_text()
+    final = dockerfile.rsplit("\nFROM ", 1)[1]
+    users = re.findall(r"^USER\s+(\S+)", final, re.M)
+    assert users and users[-1] == "99:100"

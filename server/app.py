@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -22,7 +23,7 @@ from .auth import Auth
 from .auth_logging import install_validation_redaction
 from .routes.auth import auth_router, set_cookie
 from .routes.personal import personal_router
-from .security import Security, audit_routes
+from .security import Security, audit_routes, legacy_test_enabled
 from .request_limits import JsonBodyLimit
 from .request_timing import (
     RequestTiming,
@@ -238,9 +239,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             await asyncio.to_thread(store.prune_artwork)
 
     auth = Auth(store)
-    security = Security(
-        auth, legacy_test=os.environ.get("PIG_MUSIC_TEST_LEGACY_API") == "1"
-    )
+    security = Security(auth, legacy_test=legacy_test_enabled(os.environ, sys.modules))
     guard = security.current_user
     app = FastAPI(
         title="PigMusic",

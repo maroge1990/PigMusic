@@ -43,7 +43,23 @@ async def session_thread(function, *args):
     return await asyncio.get_running_loop().run_in_executor(SESSION_THREADS, call)
 
 
-PERSONAL_ACCOUNT_PREFIXES = ("/api/v1/me", "/api/v1/auth/logout")
+PERSONAL_ACCOUNT_PATHS = ("/api/v1/me", "/api/v1/auth/logout")
+
+
+def personal_account_path(path):
+    """A member's own account routes: these paths and anything below them,
+    never a longer name that only starts with the same letters (#86)."""
+    return any(
+        path == base or path.startswith(base + "/") for base in PERSONAL_ACCOUNT_PATHS
+    )
+
+
+def legacy_test_enabled(environ, modules):
+    """The test-only switch that turns off every check. It counts only inside
+    a pytest run, so a server started directly with it set stays closed (#86)."""
+    return environ.get("PIG_MUSIC_TEST_LEGACY_API") == "1" and "pytest" in modules
+
+
 # Paths an audio element may open with a signed, expiring query instead of a session.
 SIGNED_PREFIXES = ("/api/v1/playback/files/", "/api/v1/remote-playback/streams/")
 
@@ -229,7 +245,7 @@ class Security:
         if (
             person["role"] != "owner"
             and not scoped
-            and not request.url.path.startswith(PERSONAL_ACCOUNT_PREFIXES)
+            and not personal_account_path(request.url.path)
         ):
             raise HTTPException(403, "owner_only")
         request.state.user, request.state.session = person, session
