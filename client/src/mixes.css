@@ -89,8 +89,28 @@
 .mix-options {
   margin-block: 16px;
 }
+/* A mix card plays on a click; its ⋯ sits over the cover's corner (#56). */
+.mix-card-wrap {
+  position: relative;
+  flex: 0 0 170px;
+  min-width: 0;
+  scroll-snap-align: start;
+}
+.mix-card-wrap > .mix-card {
+  width: 100%;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+.mix-card-wrap > .mix-more {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  color: var(--text);
+}
 @media (max-width: 600px) {
-  .mix-card {
+  .mix-card,
+  .mix-card-wrap {
     flex-basis: 150px;
   }
   .mix-dialog {

@@ -134,31 +134,109 @@ for (const appearance of ["light", "dark"]) {
     await expect(
       cards.filter({ hasText: "Your 1990s" }).locator("svg text"),
     ).toHaveText("90s");
-    await cards.first().click();
-    const dialog = page.getByRole("dialog", { name: "Daily blend" });
-    await expect(dialog).toBeVisible();
-    await dialog.getByRole("button", { name: "Save this edition" }).click();
-    await expect(dialog.getByRole("status")).toContainText("Playlist saved");
+    // #56: a click plays the mix at once; its songs are one option away.
     const playback = page.waitForRequest(
       (request) =>
         request.url().includes("/v1/playback/") && request.method() === "POST",
     );
-    await dialog.getByRole("button", { name: "Play mix" }).click();
+    await page.getByRole("button", { name: "Play Daily blend" }).click();
     expect(decodeURIComponent((await playback).url())).toContain(
       "mix:edition-0:0/url",
     );
-    await expect(dialog).not.toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     expect(
       mock.unknown.filter((path) => path.includes("remote-playback")),
     ).toEqual([]);
-    await cards.nth(1).click();
-    const hidden = page.getByRole("dialog", { name: "Mix 1" });
-    await hidden.getByText("Mix options", { exact: true }).click();
-    await hidden.getByRole("button", { name: "Hide this edition" }).click();
+    await page.getByRole("button", { name: "Options for Daily blend" }).click();
+    const menu = page.getByRole("menu", { name: "Daily blend" });
+    await expect(menu.getByRole("menuitem")).toHaveText([
+      "Show songs",
+      "Shuffle",
+      "Save this edition",
+      "Hide this edition",
+    ]);
+    // The menu takes focus and the arrow keys move through it.
+    await expect(
+      menu.getByRole("menuitem", { name: "Show songs" }),
+    ).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(menu.getByRole("menuitem", { name: "Shuffle" })).toBeFocused();
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "Daily blend" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Save this edition" }).click();
+    await expect(dialog.getByRole("status")).toContainText("Playlist saved");
+    await dialog.getByRole("button", { name: "Close mix" }).click();
+    await expect(dialog).not.toBeVisible();
+    // A right-click opens the same options: save without opening the songs.
+    await page
+      .getByRole("button", { name: "Play Daily blend" })
+      .click({ button: "right" });
+    await menu.getByRole("menuitem", { name: "Save this edition" }).click();
+    await expect(
+      page.getByRole("region", { name: "Your mixes" }).getByRole("status"),
+    ).toContainText("Playlist saved");
+    await page.getByRole("button", { name: "Options for Mix 1" }).click();
+    await page
+      .getByRole("menu", { name: "Mix 1" })
+      .getByRole("menuitem", { name: "Hide this edition" })
+      .click();
     await expect(cards).toHaveCount(9);
-    await expect(hidden).not.toBeVisible();
   });
 }
+
+// #56: on a touchscreen, holding a mix opens its options instead of playing it.
+test("A long press on a mix opens its options; Shuffle plays it", async ({
+  page,
+}) => {
+  const tracks = [0, 1, 2].map((i) => ({
+    ...album.tracks[0],
+    id: `mix:edition-0:${i}`,
+    title: "Mix song " + i,
+    server_state: "not_in_library",
+  }));
+  const played: string[] = [];
+  await mockApi(page, {
+    answers: {
+      "/v1/home/mixes": (route) =>
+        route.fulfill({
+          json: {
+            mixes: [
+              {
+                id: "edition-0",
+                kind: "daily",
+                title: "Daily blend",
+                day: "2026-10-16",
+                reason: "Music close to your taste",
+                tracks,
+              },
+            ],
+            preparing: false,
+          },
+        }),
+    },
+  });
+  await page.route("**/api/v1/playback/*/url", (route) => {
+    played.push(decodeURIComponent(route.request().url()));
+    return route.fulfill({
+      json: { url: "/api/v1/playback/files/prepared", expires_in: 21600 },
+    });
+  });
+  await page.goto("/#/home");
+  const card = page.getByRole("button", { name: "Play Daily blend" });
+  await card.dispatchEvent("pointerdown", { pointerType: "touch" });
+  const menu = page.getByRole("menu", { name: "Daily blend" });
+  await expect(menu).toBeVisible();
+  // The finger lifting is not a tap: nothing plays.
+  await card.dispatchEvent("pointerup", { pointerType: "touch" });
+  await card.dispatchEvent("click");
+  await page.waitForTimeout(300);
+  expect(played).toEqual([]);
+  await menu.getByRole("menuitem", { name: "Shuffle" }).click();
+  await expect.poll(() => played.length).toBeGreaterThan(0);
+  expect(played[0]).toMatch(/mix:edition-0:\d\/url/);
+});
 
 test("Radio starts from Home, refills before it runs out and reports skips", async ({
   page,
