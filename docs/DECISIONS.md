@@ -137,3 +137,9 @@ The rules these decisions produce, as they stand today, are in [PRODUCT.md](PROD
 **D-64 (1 Nov 2026)** — One album download lands on one edition (#106). Mark has no preference between an original release and a later reissue; what matters is that asking for one album never splits its songs across two. The existing edition ranking stays. Reason: blink‐182's *Enema of the State* and *Dude Ranch* each landed half on the original and half on a reissue.
 
 **D-65 (1 Nov 2026)** — The full player shows the song name and the artist name on one line each (#108). A name too long for the width scrolls, like Apple Music: after a short pause it slides to show the rest, then returns; with Reduce Motion it stays still and ends in "…". Mark chose this over shrinking the text and over cutting it off.
+
+**D-66 (5 Nov 2026)** — Apple Music catalogue playlists in search (#109 stage B) come from the iPhone app through Apple's MusicKit framework, not from a server-held MusicKit key. Mark turns on the MusicKit service for the app's identifier once; nobody else needs a key, a developer account or setup, on any server, and each person allows Apple Music access once on their phone. Reason: a server key would tie the feature to Mark's developer account and his server only; other households could not use it. The web app does not show Apple Music playlists. Opening one still never downloads anything.
+
+**D-67 (5 Nov 2026)** — Claude may apply the consistent-tag changes from Organise existing music to the live library (#93) on 5 Nov, once the safe version passes its tests on a disposable copy and a backup of the affected tags has been taken; then spot-check the result. Reason: nobody uses the server that day.
+
+**D-68 (5 Nov 2026)** — TestFlight uploads keep asking for Mark's Mac password at each upload for now; the separate build keychain (D-63) is not set up yet.
