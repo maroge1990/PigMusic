@@ -2,7 +2,7 @@
 
 from .lifecycle import coordinated
 
-import json, os, shutil, uuid
+import json, logging, os, shutil, threading, uuid
 from pathlib import Path
 from .library import load_json
 from .media import saved_track, track_file
@@ -21,6 +21,8 @@ ALBUM_FIELDS = (
     "musicbrainz_release_id",
 )
 TAG_SUFFIXES = {".mp3", ".flac", ".m4a"}
+
+log = logging.getLogger(__name__)
 
 
 def file_name(raw, suffix):
@@ -45,6 +47,10 @@ class Organisation:
     def __init__(self, store, recovery):
         self.store = store
         self.recovery = recovery
+        self.job_lock = threading.Lock()
+        self.job = None
+        self.stopping = threading.Event()
+        self.worker = None
 
     def plan(self):
         rows = []
@@ -91,6 +97,88 @@ class Organisation:
             "items": rows,
             "note": "Existing album folders and release identities are retained. Tags use the current library metadata. Originals are preserved for recovery.",
         }
+
+    def check(self, ids, tags=False):
+        """Refuse the whole selection before anything changes when any song
+        needs review; returns the IDs in album order."""
+        rows = {r["id"]: r for r in self.plan()["items"]}
+        for identity in ids:
+            row = rows.get(identity)
+            if not row or row["conflict"]:
+                raise ValueError("A selected destination needs review.")
+            if tags and not row["tag_supported"]:
+                raise ValueError("This audio format needs a separate tag review.")
+        albums = {}
+        for album in self.store.library["albums"]:
+            for track in album["tracks"]:
+                albums.setdefault(track["id"], album["id"])
+        chunks = {}
+        for identity in dict.fromkeys(ids):
+            chunks.setdefault(albums.get(identity, identity), []).append(identity)
+        return list(chunks.values())
+
+    def start(self, ids, tags, gate):
+        """Apply a reviewed selection in the background, one album at a time
+        (#93). Each album takes the lifecycle lock on its own, so downloads and
+        playback carry on between albums. `gate(stopped)` waits until the
+        library is free (no scan or download) and returns the release for the
+        lock it took, or None once a stop was asked for. The first problem
+        stops the job; files already done stay done and can be undone."""
+        chunks = self.check(ids, tags)
+        with self.job_lock:
+            if self.job and self.job["status"] in {"running", "stopping"}:
+                raise RuntimeError("Organisation is already running.")
+            self.stopping.clear()
+            self.job = {
+                "status": "running",
+                "total": sum(len(c) for c in chunks),
+                "done": 0,
+                "message": None,
+            }
+            job = dict(self.job)
+        self.worker = threading.Thread(
+            target=self.run, args=(chunks, tags, gate), daemon=True
+        )
+        self.worker.start()
+        return job
+
+    def run(self, chunks, tags, gate):
+        status, message = "completed", None
+        try:
+            for chunk in chunks:
+                release = None if self.stopping.is_set() else gate(self.stopping.is_set)
+                if release is None:
+                    status, message = (
+                        "stopped",
+                        "Stopped; songs already done can be undone.",
+                    )
+                    break
+                try:
+                    self.apply(chunk, tags)
+                finally:
+                    release()
+                with self.job_lock:
+                    self.job["done"] += len(chunk)
+        except (ValueError, OSError) as error:
+            log.warning("Organisation stopped: %s", error)
+            status = "stopped"
+            message = "Stopped at a song that needs review; its original is retained. Songs already done can be undone."
+        except Exception:
+            log.exception("Organisation failed")
+            status = "stopped"
+            message = "Organisation stopped unexpectedly; originals are retained."
+        with self.job_lock:
+            self.job.update(status=status, message=message)
+
+    def stop(self):
+        with self.job_lock:
+            if self.job and self.job["status"] == "running":
+                self.job["status"] = "stopping"
+                self.stopping.set()
+            return self.status()
+
+    def status(self):
+        return dict(self.job) if self.job else {"status": "idle"}
 
     @coordinated
     def apply(self, ids, tags=False):

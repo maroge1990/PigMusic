@@ -653,3 +653,83 @@ test("Reset password and Disable ask first, naming the person", async ({
   await disable.click();
   await expect.poll(() => calls).toEqual(["reset", "disable"]);
 });
+
+test("organising runs in the background with progress and can be stopped", async ({
+  page,
+}) => {
+  const item = (id: string) => ({
+    id,
+    title: "Song " + id,
+    artist: "A",
+    from: `A/X/${id}.mp3`,
+    to: `A/X/01 ${id}.mp3`,
+    rename: true,
+    tag_supported: true,
+    conflict: false,
+  });
+  let sent: unknown = null;
+  let polls = 0;
+  let stopped = false;
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/admin/library/trash": (route) => route.fulfill({ json: [] }),
+      "/v1/admin/library/organisation/history": (route) =>
+        route.fulfill({ json: [] }),
+      "/v1/admin/unassigned": (route) =>
+        route.fulfill({ json: { albums: [], next_offset: null } }),
+      "/v1/admin/library/organisation": (route) => {
+        if (route.request().method() === "POST") {
+          sent = route.request().postDataJSON();
+          return route.fulfill({
+            json: { status: "running", total: 2, done: 0, message: null },
+          });
+        }
+        return route.fulfill({
+          json: { items: [item("s1"), item("s2")], note: "" },
+        });
+      },
+      "/v1/admin/library/organisation/job": (route) => {
+        polls += 1;
+        return route.fulfill({
+          json: !sent
+            ? { status: "idle" }
+            : stopped
+              ? {
+                  status: "stopped",
+                  total: 2,
+                  done: 1,
+                  message: "Stopped; songs already done can be undone.",
+                }
+              : { status: "running", total: 2, done: 1, message: null },
+        });
+      },
+      "/v1/admin/library/organisation/job/stop": (route) => {
+        stopped = true;
+        return route.fulfill({
+          json: { status: "stopping", total: 2, done: 1, message: null },
+        });
+      },
+    },
+  });
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.goto("/#/admin/library");
+  const panel = page.locator(".system-panel").filter({
+    has: page.getByRole("heading", { name: "Organise existing music" }),
+  });
+  await panel.getByRole("button", { name: "Review library" }).click();
+  await panel.getByRole("button", { name: "Select eligible changes" }).click();
+  await panel
+    .getByRole("button", { name: "Apply reviewed changes · 2" })
+    .click();
+  await expect(panel.getByRole("status")).toContainText(
+    "Organising 1 of 2 songs",
+  );
+  expect(sent).toEqual({ track_ids: ["s1", "s2"], tags: false });
+  await panel.getByRole("button", { name: "Stop" }).click();
+  await expect(panel.getByRole("alert")).toContainText(
+    "songs already done can be undone",
+  );
+  await expect(panel.getByRole("status")).toHaveCount(0);
+  expect(polls).toBeGreaterThan(1);
+});

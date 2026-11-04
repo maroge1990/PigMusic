@@ -487,34 +487,48 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     async def organisation_plan():
         return await asyncio.to_thread(organisation.plan)
 
-    @app.post("/api/v1/admin/library/organisation")
-    async def organisation_apply(body: OrganiseRequest):
+    def library_busy():
         if scan_task and not scan_task.done():
-            raise HTTPException(
-                409, "Wait for the library scan before organising files."
-            )
+            return "Wait for the library scan before organising files."
         if any(
             i["status"] in {"searching", "downloading", "validating", "importing"}
             for i in store.queue()["items"]
         ):
-            raise HTTPException(
-                409, "Wait for active downloads before organising files."
-            )
-        if not scanner.lock.acquire(blocking=False):
-            raise HTTPException(
-                409, "Wait for the library scan before organising files."
-            )
+            return "Wait for active downloads before organising files."
+        return None
+
+    def organisation_gate(stopped):
+        # Between albums: wait for scans and downloads, then hold the scan lock
+        # for one album only (#93).
+        while not stopped():
+            if not library_busy() and scanner.lock.acquire(blocking=False):
+                return scanner.lock.release
+            time.sleep(5)
+        return None
+
+    @app.post("/api/v1/admin/library/organisation")
+    async def organisation_apply(body: OrganiseRequest):
+        """Starts applying the reviewed changes in the background, an album at
+        a time; progress is at .../organisation/job."""
+        busy = await asyncio.to_thread(library_busy)
+        if busy:
+            raise HTTPException(409, busy)
         try:
             return await asyncio.to_thread(
-                organisation.apply, body.track_ids, body.tags
+                organisation.start, body.track_ids, body.tags, organisation_gate
             )
-        except (ValueError, OSError):
-            raise HTTPException(
-                409,
-                "Organisation stopped; originals and recovery records are retained. Review the selected files.",
-            )
-        finally:
-            scanner.lock.release()
+        except ValueError as error:
+            raise HTTPException(409, str(error))
+        except RuntimeError:
+            raise HTTPException(409, "Organisation is already running.")
+
+    @app.get("/api/v1/admin/library/organisation/job")
+    def organisation_job():
+        return organisation.status()
+
+    @app.post("/api/v1/admin/library/organisation/job/stop")
+    def organisation_stop():
+        return organisation.stop()
 
     @app.get("/api/v1/admin/library/trash")
     def removed_music():

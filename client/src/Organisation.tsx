@@ -1,12 +1,65 @@
 import { apiFetch } from "./api";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+type Job = {
+  status: "idle" | "running" | "stopping" | "completed" | "stopped";
+  total?: number;
+  done?: number;
+  message?: string | null;
+};
+const JOB = "/api/v1/admin/library/organisation/job";
+const active = (job: Job | null) =>
+  job?.status === "running" || job?.status === "stopping";
+
 export function Organisation({ notify }: { notify: (s: string) => void }) {
   const [history, setHistory] = useState<{ id: string; title: string }[]>([]);
+  const [job, setJob] = useState<Job | null>(null);
+  const watching = useRef(false);
   useEffect(() => {
     void apiFetch("/api/v1/admin/library/organisation/history")
       .then((r) => r.json())
       .then(setHistory);
+    // A job started earlier (or from another device) keeps showing its progress.
+    void apiFetch(JOB)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: Job | null) => {
+        if (active(j)) {
+          watching.current = true;
+          setJob(j);
+        }
+      })
+      .catch(() => undefined);
   }, []);
+  useEffect(() => {
+    if (!active(job)) return;
+    // The server applies an album at a time in the background (#93).
+    const timer = window.setTimeout(() => {
+      void apiFetch(JOB)
+        .then((r) => r.json())
+        .then((next: Job) => {
+          setJob(next);
+          if (!active(next) && watching.current) {
+            watching.current = false;
+            void finished(next);
+          }
+        })
+        .catch(() => setJob((old) => (old ? { ...old } : old)));
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [job]);
+  async function finished(result: Job) {
+    if (result.status === "completed")
+      notify(`${result.done ?? 0} songs organised.`);
+    else setError(result.message || "Organisation stopped.");
+    window.dispatchEvent(new Event("music-library-changed"));
+    setHistory(
+      await apiFetch("/api/v1/admin/library/organisation/history").then((r) =>
+        r.json(),
+      ),
+    );
+    setItems([]);
+    setSelected([]);
+  }
   const [items, setItems] = useState<
     {
       id: string;
@@ -43,6 +96,7 @@ export function Organisation({ notify }: { notify: (s: string) => void }) {
     )
       return;
     setBusy(true);
+    setError("");
     try {
       const r = await apiFetch("/api/v1/admin/library/organisation", {
         method: "POST",
@@ -50,15 +104,12 @@ export function Organisation({ notify }: { notify: (s: string) => void }) {
         body: JSON.stringify({ track_ids: selected, tags }),
       });
       const d = await r.json();
-      if (!r.ok) throw new Error(d.detail || "Organisation stopped.");
-      notify(`${d.applied} songs organised.`);
-      window.dispatchEvent(new Event("music-library-changed"));
-      await review();
-      setHistory(
-        await apiFetch("/api/v1/admin/library/organisation/history").then((r) =>
-          r.json(),
-        ),
-      );
+      if (!r.ok)
+        throw new Error(
+          typeof d.detail === "string" ? d.detail : "Organisation stopped.",
+        );
+      watching.current = true;
+      setJob(d);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -74,12 +125,32 @@ export function Organisation({ notify }: { notify: (s: string) => void }) {
       </p>
       <button
         className="secondary-button"
-        disabled={busy}
+        disabled={busy || active(job)}
         onClick={() => void review()}
       >
         Review library
       </button>
-      {!!items.length && (
+      {active(job) && (
+        <div className="result-row" role="status">
+          <strong>
+            {job?.status === "stopping"
+              ? "Stopping after this album…"
+              : `Organising ${job?.done ?? 0} of ${job?.total ?? 0} songs…`}
+          </strong>
+          <button
+            className="secondary-button"
+            disabled={job?.status === "stopping"}
+            onClick={() =>
+              void apiFetch(JOB + "/stop", { method: "POST" })
+                .then((r) => r.json())
+                .then(setJob)
+            }
+          >
+            Stop
+          </button>
+        </div>
+      )}
+      {!!items.length && !active(job) && (
         <>
           <label className="download-option">
             <input
