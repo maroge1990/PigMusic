@@ -109,6 +109,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
+  /** Moves playback and shows the new position at once. */
+  function seek(seconds: number) {
+    if (!audio.current) return;
+    audio.current.currentTime = seconds;
+    setPosition(seconds);
+  }
   const [muted, setMuted] = useState(false);
   const [queueVersion, setQueueVersion] = useState(0);
   /** Where a restored queue resumes once its song loads. */
@@ -759,12 +765,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 type="range"
                 min="0"
                 max={duration || 1}
-                step="0.1"
+                step="1"
                 value={Math.min(position, duration || 1)}
+                aria-valuetext={`${time(position)} of ${time(duration)}`}
                 disabled={!song.url}
-                onChange={(e) => {
-                  if (audio.current)
-                    audio.current.currentTime = Number(e.target.value);
+                onChange={(e) => seek(Number(e.target.value))}
+                onKeyDown={(e) => {
+                  // Arrow keys move five seconds, like most players (#97).
+                  const by = {
+                    ArrowRight: 5,
+                    ArrowUp: 5,
+                    ArrowLeft: -5,
+                    ArrowDown: -5,
+                  }[e.key];
+                  if (!by) return;
+                  e.preventDefault();
+                  seek(Math.max(0, Math.min(duration || 0, position + by)));
                 }}
               />
               <span>{time(position)}</span>

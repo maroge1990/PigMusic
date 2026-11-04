@@ -63,6 +63,8 @@ export function AppShell() {
   const [ready, setReady] = useState(false);
   const [firstRun, setFirstRun] = useState(false);
   const [error, setError] = useState("");
+  /** A refused action; the notice belongs to the page it happened on (#97). */
+  const [denied, setDenied] = useState(false);
   const [route, setRoute] = useState<Route>(() => parseRoute());
   const [hint, setHint] = useState(false);
   // Remounts the sign-in form when an invite link opens in an existing tab.
@@ -199,7 +201,7 @@ export function AppShell() {
       setUser(null);
       clearSessionReads();
     };
-    const forbidden = () => setError("You do not have access to that action.");
+    const forbidden = () => setDenied(true);
     window.addEventListener("music-auth-required", expired);
     window.addEventListener("music-forbidden", forbidden);
     return () => {
@@ -215,6 +217,7 @@ export function AppShell() {
       location.replace("#/home");
     }
   }, [user, route]);
+  useEffect(() => setDenied(false), [user, route]);
 
   async function signOut() {
     // The server may be unreachable: this device is cleared anyway (#80).
@@ -329,9 +332,9 @@ export function AppShell() {
             </button>
           </div>
         )}
-        {error && (
+        {(error || denied) && (
           <p className="personal-notice" role="alert">
-            {error}
+            {error || "You do not have access to that action."}
           </p>
         )}
         {section === "home" ? (

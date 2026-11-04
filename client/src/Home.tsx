@@ -158,7 +158,9 @@ function HomeSection({ kind }: { kind: "popular" | "recommended" }) {
                     }
                   />
                   <strong>{item.name}</strong>
-                  <p>{collection !== "artists" && item.artist}</p>
+                  <span className="card-caption">
+                    {collection !== "artists" && item.artist}
+                  </span>
                   {item.reason && <small>{item.reason}</small>}
                 </button>
               ))}

@@ -112,6 +112,12 @@
   gap: 20px;
   margin: 20px 0;
 }
+/* Home cards are buttons, so their lines are spans made block (#97). */
+.home-grid .album-card > strong,
+.home-grid .album-card > .card-caption,
+.home-grid .album-card > small {
+  display: block;
+}
 .full-album-grid > button {
   min-width: 0;
   max-width: 240px;

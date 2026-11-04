@@ -16,6 +16,7 @@ import { Cover } from "./Cover";
 import { PlaylistPicker } from "./PlaylistPicker";
 import { usePlayer } from "./Player";
 import { RemoveFromServer } from "./Recovery";
+import { focusMenuItem, menuKeys } from "./menuKeys";
 import { useOwner } from "./person";
 import {
   goToAlbum,
@@ -197,6 +198,7 @@ function SongMenu({
         : { top: rect.bottom + 4 }),
     });
     popup.current?.showPopover();
+    focusMenuItem(popup.current, 0);
     setFavourite(null);
     void api<{ favourited: boolean }>("/v1/favourites", {
       method: "POST",
@@ -243,6 +245,7 @@ function SongMenu({
         role="menu"
         aria-label={song.title}
         style={position}
+        onKeyDown={menuKeys}
       >
         <div className="song-menu-group">
           {item("Play next", <ListStart size={18} />, () =>
