@@ -28,6 +28,7 @@ let package = Package(
     .target(
       name: "PigAPI",
       dependencies: [
+        "PigDomain",
         .product(name: "HTTPTypes", package: "swift-http-types"),
         .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
         .product(name: "OpenAPIURLSession", package: "swift-openapi-urlsession"),

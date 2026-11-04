@@ -1,6 +1,7 @@
 import Foundation
 import HTTPTypes
 import OpenAPIRuntime
+import PigDomain
 
 /// Retries a request that never got an answer because the connection dropped,
 /// such as a reused connection the server or tunnel had already closed. Only
@@ -39,11 +40,7 @@ extension Error {
     return nil
   }
   var isTransientNetworkFailure: Bool {
-    switch networkFailure?.code {
-    case .networkConnectionLost, .timedOut, .cannotConnectToHost, .secureConnectionFailed:
-      true
-    default: false
-    }
+    networkFailure?.code.isTransientConnectionFailure ?? false
   }
   /// A short message for people; connection problems never show system detail.
   public var userMessage: String {

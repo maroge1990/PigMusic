@@ -17,14 +17,17 @@ private final class SlowMedia: @unchecked Sendable {
   private var stallAfter: Int?
   /// Requests starting here or later run past the range, then stall.
   private var oversendFrom: Int?
+  /// Connections refused before the server answers (#115).
+  private var refusals = 0
   private var ranges: [String] = []
   /// Ranges of requests the client cancelled before they finished.
   private var cancelled: [String] = []
   func set(
     _ data: Data, type: String = "audio/mpeg", chunk: Int = 32768, pause: TimeInterval = 0.01,
-    stallAfter: Int? = nil, oversendFrom: Int? = nil
+    stallAfter: Int? = nil, oversendFrom: Int? = nil, refusing: Int = 0
   ) {
     lock.withLock {
+      refusals = refusing
       self.data = data
       self.type = type
       self.chunk = chunk
@@ -36,6 +39,15 @@ private final class SlowMedia: @unchecked Sendable {
     }
   }
   func requested() -> [String] { lock.withLock { ranges } }
+  /// Whether this connection is refused, as by a server out of reach.
+  fileprivate func refuse(_ range: String?) -> Bool {
+    lock.withLock {
+      guard refusals > 0 else { return false }
+      refusals -= 1
+      ranges.append(range ?? "")
+      return true
+    }
+  }
   func cancelledRequests() -> [String] { lock.withLock { cancelled } }
   fileprivate func requestCancelled(_ range: String) { lock.withLock { cancelled.append(range) } }
   fileprivate func plan(_ range: String?) -> (
@@ -62,6 +74,11 @@ private final class SlowProtocol: URLProtocol, @unchecked Sendable {
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
   override func startLoading() {
     let ranged = request.value(forHTTPHeaderField: "Range")
+    if SlowMedia.shared.refuse(ranged) {
+      finished.stop()
+      client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
+      return
+    }
     let (data, start, end, type, chunk, pause, stallAfter, oversend) = SlowMedia.shared.plan(
       ranged)
     let headers = [
@@ -165,6 +182,37 @@ private final class CompletedOn: NSObject, URLSessionDataDelegate, @unchecked Se
     #expect(download.phase == .complete)
     await owner.release(source)
     #expect(!FileManager.default.fileExists(atPath: source.file.path))
+  }
+
+  /// One refused connection once failed the song: the engine gave up and the
+  /// app streamed instead (#115, 4 Nov diagnostics). The first request is
+  /// tried again, on new connections, and the song plays.
+  @Test func aSongStartsAfterOneRefusedConnection() async throws {
+    let root = try directory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let data = Data((0..<300_000).map { UInt8(truncatingIfNeeded: $0 &* 7) })
+    SlowMedia.shared.set(data, refusing: 1)
+    let owner = try preparer(root)
+    let source = try await owner.prepare { url }
+    #expect(try await readAll(source) == data)
+    #expect(Array(SlowMedia.shared.requested().prefix(2)) == ["bytes=0-", "bytes=0-"])
+    await owner.release(source)
+  }
+
+  /// A server out of reach still fails the song, after a few quick tries.
+  @Test func aServerOutOfReachFailsTheSongWithinSeconds() async throws {
+    let root = try directory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    SlowMedia.shared.set(Data(repeating: 1, count: 100_000), refusing: 100)
+    let owner = try preparer(root)
+    let started = ContinuousClock.now
+    await #expect {
+      _ = try await owner.prepare { url }
+    } throws: {
+      ($0 as? URLError)?.code == .cannotConnectToHost
+    }
+    #expect(ContinuousClock.now - started < .seconds(5))
+    #expect(SlowMedia.shared.requested().count == 3)
   }
 
   @Test func aStoppedReaderStopsWaitingAtOnce() async throws {

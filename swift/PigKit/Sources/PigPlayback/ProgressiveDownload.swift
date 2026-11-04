@@ -188,7 +188,7 @@ public final class ProgressiveDownload: AudioBytes, @unchecked Sendable {
     predecessor: ProgressiveDownload?, resolve: @escaping @Sendable () async throws -> URL
   ) async throws -> ProgressiveDownload {
     let started = ContinuousClock.now
-    let first = try await Request.open(sessions: sessions, url: url, from: 0, to: nil)
+    let first = try await openFirst(sessions: sessions, url: url)
     do {
       let response = try first.validated(limit: limit, start: 0)
       if response.total < 0 {
@@ -209,6 +209,34 @@ public final class ProgressiveDownload: AudioBytes, @unchecked Sendable {
     } catch {
       first.cancel()
       throw error
+    }
+  }
+
+  /// Waits before the first request is tried again after a connection failure.
+  static let connectRetryDelays: [Duration] = [.milliseconds(250), .seconds(1)]
+  /// No new try starts this long after the first: a connect that timed out
+  /// has already taken the time a person waits for a song.
+  static let connectRetryWindow: Duration = .seconds(10)
+
+  /// The first request, tried again on new connections when the connection
+  /// failed before any answer, as API requests are (#115: one refused connect
+  /// failed the song, and the stream that replaced it waited 89 s).
+  private static func openFirst(sessions: RenewableSession, url: URL) async throws -> Request {
+    let began = ContinuousClock.now
+    var attempt = 0
+    while true {
+      do {
+        return try await Request.open(sessions: sessions, url: url, from: 0, to: nil)
+      } catch let failure as URLError {
+        guard failure.code.isTransientConnectionFailure, attempt < connectRetryDelays.count,
+          ContinuousClock.now - began < connectRetryWindow
+        else { throw failure }
+        DiagnosticsLog.shared.record(
+          "playback", "source connection failed (\(failure.code.rawValue)), trying again")
+        try await Task.sleep(for: connectRetryDelays[attempt])
+        attempt += 1
+        sessions.renew()
+      }
     }
   }
 
