@@ -587,12 +587,14 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     class TidyRequest(BaseModel):
         fingerprint: str = Field(max_length=64)
 
-    def files_settled(action):
+    async def files_settled(action):
         if scan_task and not scan_task.done():
             raise HTTPException(409, f"Wait for the library scan before {action}.")
+        # The whole queue is read off the event loop (#96).
+        queue = await asyncio.to_thread(store.queue)
         if any(
             i["status"] in {"searching", "downloading", "validating", "importing"}
-            for i in store.queue()["items"]
+            for i in queue["items"]
         ):
             raise HTTPException(409, f"Wait for active downloads before {action}.")
         if not scanner.lock.acquire(blocking=False):
@@ -600,7 +602,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
 
     @app.post("/api/v1/admin/library/tidy/{album_id}")
     async def tidy_album(album_id: str, body: TidyRequest):
-        files_settled("tidying albums")
+        await files_settled("tidying albums")
         try:
             record = await asyncio.to_thread(tidy.apply, album_id, body.fingerprint)
             return {"id": record["id"], "status": record["status"]}
@@ -614,7 +616,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
 
     @app.post("/api/v1/admin/library/tidy/history/{identity}/undo")
     async def undo_tidy(identity: str):
-        files_settled("undoing a tidy-up")
+        await files_settled("undoing a tidy-up")
         try:
             record = await asyncio.to_thread(tidy.undo, identity)
         except (ValueError, OSError) as error:
@@ -702,9 +704,15 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             raise HTTPException(409, "A library scan is already running.")
         if scanner.lock.locked():
             raise HTTPException(409, "Wait for library organisation before scanning.")
-        scanner.report(status="scanning", files=0)
-        scan_task = asyncio.create_task(asyncio.to_thread(scanner.run))
-        return scanner.status()
+        status = {"status": "scanning", "files": 0}
+
+        def scan():
+            # The status write and the scan both run off the event loop (#96).
+            scanner.report(**status)
+            return scanner.run()
+
+        scan_task = asyncio.create_task(asyncio.to_thread(scan))
+        return status
 
     class PlaylistName(BaseModel):
         name: str = Field(min_length=1, max_length=100)
@@ -760,7 +768,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         }
 
     async def image_response(target, w=0, soft=False):
-        if not target or not target.is_file():
+        if not target or not await asyncio.to_thread(target.is_file):
             return Response(status_code=404, headers={"Cache-Control": "no-store"})
         async with image_slots:
             target = await asyncio.to_thread(public_image, store, target)

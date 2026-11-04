@@ -15,7 +15,9 @@ def artwork_router(store, image_slots, enrichment, image_response):
     @router.get("/api/v1/covers/{filename}/metadata")
     async def artwork_metadata(request: Request, filename: str):
         sha = filename.removesuffix(".jpg")
-        if filename != sha + ".jpg" or not store.covers.path(sha):
+        if filename != sha + ".jpg" or not await asyncio.to_thread(
+            store.covers.path, sha
+        ):
             raise HTTPException(404, "Artwork not found.")
         headers = {
             "Cache-Control": "private, max-age=31536000, immutable",
@@ -39,7 +41,8 @@ def artwork_router(store, image_slots, enrichment, image_response):
             if Path(filename).name != filename or not filename.endswith(".jpg"):
                 raise HTTPException(404, "Artwork not found.")
             return await image_response(store.cover_dir / filename, w, soft)
-        target = store.covers.path(filename[:-4])
+        # Even a stat of appdata runs off the event loop (#96).
+        target = await asyncio.to_thread(store.covers.path, filename[:-4])
         if not target:
             raise HTTPException(404, "Artwork not found.")
 

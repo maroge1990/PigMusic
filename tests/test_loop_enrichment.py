@@ -81,3 +81,59 @@ def test_enrichment_caches_use_the_database_off_the_event_loop(tmp_path, monkeyp
     asyncio.run(run())
     assert store.read_document("artistgrid-index")["names"] == ["Someone Else"]
     assert calls == [], calls
+
+
+def test_admin_file_checks_scans_and_artwork_stats_run_off_the_event_loop(
+    tmp_path, monkeypatch
+):
+    """#96: Tidy's pre-checks read the whole queue, a scan request wrote its
+    status, and artwork routes stat appdata, all on the event loop."""
+    import pathlib
+
+    from fastapi.testclient import TestClient
+
+    from server.app import create_app
+
+    app = create_app(tmp_path)
+    store = app.state.store
+    calls = on_loop(store, monkeypatch)
+    queue, path = store.queue, store.covers.path
+
+    def loop_name(name):
+        try:
+            asyncio.get_running_loop()
+            calls.append(name)
+        except RuntimeError:
+            pass
+
+    def watched_queue(*args, **kwargs):
+        loop_name("queue")
+        return queue(*args, **kwargs)
+
+    def watched_path(sha):
+        loop_name("covers.path")
+        return path(sha)
+
+    is_file = pathlib.Path.is_file
+
+    def watched_is_file(self):
+        if self.parent == store.cover_dir:
+            loop_name("is_file")
+        return is_file(self)
+
+    monkeypatch.setattr(store, "queue", watched_queue)
+    monkeypatch.setattr(store.covers, "path", watched_path)
+    monkeypatch.setattr(pathlib.Path, "is_file", watched_is_file)
+    with TestClient(app) as client:
+        sha = "0" * 64
+        calls.clear()  # Starting up reads on the loop; only requests count.
+        client.post("/api/v1/admin/library/tidy/album", json={"fingerprint": "x"})
+        client.post("/api/v1/admin/library/tidy/history/x/undo")
+        assert client.get(f"/api/v1/covers/{sha}.jpg").status_code == 404
+        assert client.get(f"/api/v1/covers/{sha}.jpg/metadata").status_code == 404
+        assert client.get("/api/v1/covers/old.jpg").status_code == 404
+        started = client.post("/api/v1/admin/library/scan")
+        assert started.status_code == 200
+        assert started.json()["status"] == "scanning"
+        on_requests = list(calls)
+    assert on_requests == [], on_requests
