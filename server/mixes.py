@@ -1455,19 +1455,22 @@ class Mixes:
         return {"mixes": result, "preparing": preparing, "radio": card}
 
     def track_dto(self, identity, index, track, members):
-        """A playable mix entry, or None while its audio is unavailable."""
-        try:
-            self.cache.available(track)
-        except FileNotFoundError:
-            return None
+        """A playable mix entry, or None while its audio is unavailable.
+        The library file is checked once (a path resolve over the NAS for each
+        song, twice per song before #22); without one, the mix cache's copy."""
         library_id = None
         match = self.store.index.match(track).track
         if match:
             try:
                 track_file(self.store, match["id"])
                 library_id = match["id"]
-            except FileNotFoundError:
+            except (FileNotFoundError, ValueError, OSError):
                 pass
+        if not library_id:
+            try:
+                self.cache.file(song_key(track))
+            except FileNotFoundError:
+                return None
         return TrackDTO(
             **{
                 **track,

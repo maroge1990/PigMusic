@@ -434,6 +434,43 @@ def test_owned_mix_rows_keep_library_actions_separate_from_private_playback(
     assert mixes.playback(owner, row.id).read_bytes() == b"fixture audio"
 
 
+def test_home_mixes_check_each_library_file_once(tmp_path, monkeypatch):
+    """#22: listing Home mixes checked every song's NAS file twice (once to
+    see that it plays, again for its library ID), each a path resolve over
+    the network: ~1.5 s for 208 songs on the live server."""
+    nas = tmp_path / "nas"
+    nas.mkdir()
+    (nas / "song.mp3").write_bytes(b"fixture audio")
+    owned = track(id="owned", relative_path="song.mp3")
+    gone = track(2, id="gone", relative_path="gone.mp3")
+    private = track(3)
+    (tmp_path / "library-snapshot.json").write_text(
+        json.dumps({"tracks": [owned, gone]})
+    )
+    app, owner = protected(tmp_path, monkeypatch)
+    mixes = app.state.store.mixes
+    cached(mixes, gone)
+    cached(mixes, private)
+    identity = ready(mixes, owner, [owned, gone, private])
+    checks = []
+    real = mix_module.track_file
+
+    def counted(store, track_id):
+        checks.append(track_id)
+        return real(store, track_id)
+
+    monkeypatch.setattr(mix_module, "track_file", counted)
+    monkeypatch.setattr("server.mix_cache.track_file", counted)
+    rows = mixes.list(owner)["mixes"][0]["tracks"]
+    assert sorted(checks) == ["gone", "owned"]
+    states = {r.title: (r.library_track_id, r.server_state) for r in rows}
+    assert states == {
+        "Song 1": ("owned", "in_library"),
+        "Song 2": (None, "not_in_library"),
+        "Song 3": (None, "not_in_library"),
+    }
+
+
 def test_yesterdays_mix_queue_still_plays_after_rotation(tmp_path, monkeypatch):
     """26 Oct: a daily-mix queue paused at 22:08 and resumed at 08:35. The
     edition rotated overnight and its play lease ran out, so every song
