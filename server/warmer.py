@@ -284,18 +284,19 @@ class Warmer:
             )
         )
         for index, artist_id in enumerate(artists[:12]):
-            self.submit(
-                artist_id,
-                full=index < 2,
-                priority=HOME,
-                covers=covers if index == 0 else (),
-            )
+            self.submit(artist_id, full=index < 2, priority=HOME)
+            # The covers are their own job, right after the first artist:
+            # riding on its job, they were dropped whenever that artist was
+            # already queued (#97).
+            if index == 0 and covers:
+                self.queue_covers(covers)
         if not artists and covers:
-            self.serial += 1
-            self.queue.put_nowait(
-                (HOME, self.serial, None, False, tuple(covers), False)
-            )
+            self.queue_covers(covers)
         self.prepare_albums(feed)
+
+    def queue_covers(self, covers):
+        self.serial += 1
+        self.queue.put_nowait((HOME, self.serial, None, False, tuple(covers), False))
 
     async def album(self, group_id):
         if self.warm_album is None:

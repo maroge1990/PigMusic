@@ -116,6 +116,26 @@ def test_pass_covers_home_and_library_artists(tmp_path):
     assert ("release-group", "group") in covers and ("release", "release") in covers
 
 
+def test_home_covers_survive_their_first_artist_already_being_queued(tmp_path):
+    # #97: the covers rode on the first artist's job, so an artist already
+    # queued (by a search, say) dropped the whole feed's covers.
+    feed = {
+        "albums": [{"id": "group", "artist_id": B}],
+        "songs": [{"id": "rec", "artist_id": B, "release_id": "release"}],
+    }
+    w, calls, covers = warmer(tmp_path, feed)
+
+    async def run():
+        w.submit(B, full=True, priority=SEARCH)
+        w.queue_feed(feed)
+        await drain(w)
+
+    asyncio.run(run())
+    assert calls == [(B, True)]
+    assert ("release-group", "group") in covers
+    assert ("release", "release") in covers
+
+
 def test_warming_renews_catalogue_answers_before_they_expire(tmp_path):
     store = Store(tmp_path)
     key = "catalogue:artist/" + A + "[]"
