@@ -520,3 +520,66 @@ def test_server_info_is_for_signed_in_apps(tmp_path, monkeypatch):
         assert info["revision"] == "0123456789ab"
         assert info["api_level"] >= 2
         assert "household_playlist_tracks" in info["capabilities"]
+
+
+def test_server_matches_find_household_songs_but_never_another_recording(
+    tmp_path, monkeypatch
+):
+    """#109: an Apple Music playlist's songs are checked against the whole
+    server at once, under the same rule as the library: a live copy (by its
+    title or its "Live at ..." album) never stands in for the studio song."""
+    live = {
+        "id": "live",
+        "title": "Two",
+        "artist": "Artist",
+        "album_artist": "Artist",
+        "album": "Live at Wembley",
+        "duration": 240,
+        "relative_path": "private/live.mp3",
+    }
+    tracks = [
+        {
+            "id": "song",
+            "title": "One",
+            "artist": "Artist",
+            "album_artist": "Artist",
+            "album": "Studio",
+            "duration": 200,
+            "relative_path": "private/song.mp3",
+        },
+        live,
+    ]
+    (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": tracks}))
+    app, owner = protected(tmp_path, monkeypatch)
+    code = app.state.auth.setup_code(owner, "member", "Member")
+    app.state.auth.activate(code["code"], PASSWORD, "fixture")
+    token = app.state.auth.login(
+        "member", PASSWORD, "device", "phone", "ios", "fixture"
+    )["token"]
+    songs = [
+        {"title": "One", "artist": "Artist", "album": "Studio", "duration": 201},
+        {"title": "Two", "artist": "Artist", "album": "Two (Single)"},
+        {"title": "Two", "artist": "Artist", "album": "Live at Wembley"},
+        {"title": "Two (Live)", "artist": "Artist"},
+        {"title": "Missing", "artist": "Artist"},
+    ]
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token, "X-Pig-Request": "1"},
+    ) as client:
+        response = client.post("/api/v1/server/matches", json={"songs": songs})
+    assert response.status_code == 200
+    found = [m["track"] for m in response.json()["matches"]]
+    assert found[0]["id"] == "song"
+    assert found[0]["server_state"] == "household_available"
+    assert found[1] is None  # the studio single is not the live recording
+    assert found[2]["id"] == "live"
+    # The shared policy keeps "(Live)" in the title, so this one errs towards
+    # "not on the server" rather than a wrong recording.
+    assert found[3] is None
+    assert found[4] is None
+    assert "relative_path" not in json.dumps(found)
+    # The owner has both in their own library.
+    mine = app.state.store.user_libraries.server_matches(owner, songs[:1])
+    assert mine[0]["id"] == "song" and mine[0]["server_state"] == "in_library"

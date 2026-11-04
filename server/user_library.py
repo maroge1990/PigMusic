@@ -509,6 +509,7 @@ class UserLibrary:
         self.artwork_cache = {}
         self.index_cache = {}
         self.lookup_cache = {}
+        self.household_cache = None
 
     def artwork_access(self, user_id):
         """Artwork a person may load, indexed once per projection revision."""
@@ -1010,6 +1011,50 @@ class UserLibrary:
                 None,
             )
             found.append(track_dto(track) if track else None)
+        return found
+
+    def server_matches(self, user_id, songs):
+        """For each song (an Apple Music playlist's, say): the person's own
+        copy, else a household copy anyone may play, else None. One shared
+        policy (`matching.compatible`): a live, remix or demo recording never
+        stands in for the studio song, an album's own words count ("Live at
+        ..."), and lengths must agree when both are known (#109)."""
+        from .matching import compatible
+
+        own = self.lookup(user_id, songs)
+        revision = self.store.library_revision
+        if not self.household_cache or self.household_cache[0] != revision:
+            with self.store.library_lock:
+                albums = list(self.store.library["albums"])
+            names = defaultdict(list)
+            for album in albums:
+                for track in album["tracks"]:
+                    if track.get("available", True) is False:
+                        continue
+                    filed = {**track, "album": album.get("title") or track.get("album")}
+                    key = (
+                        normalise(track["title"]),
+                        normalise(track.get("artist", "")),
+                    )
+                    names[key].append((filed, track))
+            self.household_cache = (revision, names)
+        names = self.household_cache[1]
+        found = []
+        for song, mine in zip(songs, own):
+            if mine:
+                found.append({**mine, "server_state": "in_library"})
+                continue
+            track = next(
+                (
+                    track
+                    for filed, track in names.get(
+                        (normalise(song["title"]), normalise(song["artist"])), ()
+                    )
+                    if compatible(song, filed)
+                ),
+                None,
+            )
+            found.append(household_track(track) if track else None)
         return found
 
     def recently_added(self, user_id, limit=12):

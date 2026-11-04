@@ -90,6 +90,8 @@ class LookupSong(BaseModel):
     musicbrainz_recording_id: str | None = Field(default=None, max_length=36)
     duration: float = Field(default=0, ge=0, le=86400)
     recording_kind: list[RecordingKind] = Field(default_factory=list, max_length=8)
+    # The album it appears on: "Live at ..." makes a live recording (#109).
+    album: str | None = Field(default=None, max_length=500)
 
 
 class Lookup(BaseModel):
@@ -407,6 +409,18 @@ def personal_router(store, artist_jobs, recovery, mixes=None):
             "matches": [
                 {"track": track}
                 for track in await run(users.lookup, identity(request), songs)
+            ]
+        }
+
+    @router.post("/server/matches", response_model=LookupResultDTO)
+    async def server_matches(body: Lookup, request: Request):
+        """Up to 200 songs at once: the person's copy, else one on the server
+        they may play, else none (an Apple Music playlist's songs, #109)."""
+        songs = [s.model_dump() for s in body.songs]
+        return {
+            "matches": [
+                {"track": track}
+                for track in await run(users.server_matches, identity(request), songs)
             ]
         }
 
