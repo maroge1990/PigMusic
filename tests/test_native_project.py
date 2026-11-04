@@ -17,20 +17,25 @@ GENERATOR = ROOT / "scripts/generate_native_project.py"
 @pytest.mark.skipif(
     not GENERATOR.exists(), reason="native project sources are not in this image"
 )
-def test_local_network_description_survives_regeneration():
+def test_privacy_descriptions_survive_regeneration():
     spec = importlib.util.spec_from_file_location("generate_native_project", GENERATOR)
     generator = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(generator)
     IPHONE_INFO = generator.IPHONE_INFO
     project = (ROOT / "swift/PigMusic.xcodeproj/project.pbxproj").read_text()
     info = plistlib.loads((ROOT / "swift/PigMusic/Info.plist").read_bytes())
-    key = "INFOPLIST_KEY_NSLocalNetworkUsageDescription"
-    assert IPHONE_INFO[key]
-    # Debug and Release of the iPhone target carry the generator's value.
-    found = re.findall(re.escape(key) + r' = "([^"]*)";', project)
-    assert found == [IPHONE_INFO[key]] * 2
-    # One source only: the hand-written Info.plist does not repeat it.
-    assert "NSLocalNetworkUsageDescription" not in info
+    # Local network, and Apple Music for its playlists in search (D-66).
+    keys = [
+        "INFOPLIST_KEY_NSLocalNetworkUsageDescription",
+        "INFOPLIST_KEY_NSAppleMusicUsageDescription",
+    ]
+    for key in keys:
+        assert IPHONE_INFO[key]
+        # Debug and Release of the iPhone target carry the generator's value.
+        found = re.findall(re.escape(key) + r' = "([^"]*)";', project)
+        assert found == [IPHONE_INFO[key]] * 2
+        # One source only: the hand-written Info.plist does not repeat it.
+        assert key.removeprefix("INFOPLIST_KEY_") not in info
     assert info["UIBackgroundModes"] == ["audio"]
 
 

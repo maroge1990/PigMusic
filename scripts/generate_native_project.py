@@ -17,6 +17,8 @@ XCODE_VERSION = "2710"
 # generated Info.plist), not in PigMusic/Info.plist; tests check both agree.
 IPHONE_INFO = {
     "INFOPLIST_KEY_NSLocalNetworkUsageDescription": "PigMusic connects to your private music server to browse and play your library.",
+    # Apple Music playlists in search come from MusicKit on the phone (D-66).
+    "INFOPLIST_KEY_NSAppleMusicUsageDescription": "PigMusic shows Apple Music playlists in search so you can find their songs on your server.",
 }
 RECOMMENDED = {
     "ALWAYS_SEARCH_USER_PATHS": "NO",
