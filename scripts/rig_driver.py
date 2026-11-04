@@ -192,11 +192,19 @@ def organise(client):
 
     def run(ids, stop_after=None):
         started = time.monotonic()
-        response = client.post(
-            "/api/v1/admin/library/organisation",
-            json={"track_ids": ids, "tags": True},
-        )
-        response.raise_for_status()
+        # The scan library() starts may still be running: Apply refuses then.
+        while True:
+            response = client.post(
+                "/api/v1/admin/library/organisation",
+                json={"track_ids": ids, "tags": True},
+            )
+            if response.status_code != 409 or "scan" not in response.text:
+                break
+            if time.monotonic() - started > 300:
+                break
+            time.sleep(2)
+        if response.status_code != 200:
+            raise SystemExit(f"apply refused: {response.status_code} {response.text}")
         while True:
             job = client.get("/api/v1/admin/library/organisation/job").json()
             if stop_after is not None and job.get("done", 0) >= stop_after:
