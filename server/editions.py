@@ -26,6 +26,7 @@ from .catalogue import (
     group_kinds,
     mbid,
     release_tracks,
+    unavailable,
 )
 from .matching import (
     album_title,
@@ -172,12 +173,7 @@ class Unresolved(Exception):
         )
 
 
-def transient(error):
-    """A network failure or a 429/5xx answer, not a missing or bad entry."""
-    if isinstance(error, httpx.HTTPStatusError):
-        code = error.response.status_code
-        return code == 429 or code >= 500
-    return isinstance(error, httpx.TransportError)
+transient = unavailable
 
 
 class EditionResolver:

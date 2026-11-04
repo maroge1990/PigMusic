@@ -48,6 +48,38 @@ def test_a_persistent_outage_still_fails(tmp_path):
         fetch(Store(tmp_path), handler, "artist/" + OLD)
 
 
+def cached_answer(store, path, age):
+    key = "catalogue:" + path + repr([])
+    store.write_document(key, {"time": time.time() - age, "data": {"id": "old"}})
+
+
+@pytest.mark.parametrize(
+    "outage",
+    [
+        lambda request: httpx.Response(503, headers={"Retry-After": "0"}),
+        lambda request: httpx.Response(500),
+        lambda request: (_ for _ in ()).throw(httpx.ConnectError("down")),
+    ],
+)
+def test_an_outage_serves_an_expired_answer_up_to_thirty_days_old(tmp_path, outage):
+    """#96 (owner's choice): a page whose cached answer is over 24 hours old
+    became an error while MusicBrainz was down; it is served up to 30 days."""
+    store = Store(tmp_path)
+    cached_answer(store, "artist/" + OLD, 3 * 86400)
+    assert fetch(store, outage, "artist/" + OLD) == {"id": "old"}
+    # Older than that, the outage is reported.
+    cached_answer(store, "artist/" + NEW, 31 * 86400)
+    with pytest.raises(httpx.HTTPError):
+        fetch(store, outage, "artist/" + NEW)
+
+
+def test_a_missing_entry_is_not_hidden_by_an_expired_answer(tmp_path):
+    store = Store(tmp_path)
+    cached_answer(store, "artist/" + OLD, 3 * 86400)
+    with pytest.raises(httpx.HTTPStatusError):
+        fetch(store, lambda request: httpx.Response(404), "artist/" + OLD)
+
+
 def test_a_merged_entry_follows_musicbrainz_redirect_and_is_cached(tmp_path):
     calls = []
 

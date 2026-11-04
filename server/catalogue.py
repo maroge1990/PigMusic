@@ -4,10 +4,15 @@ import asyncio
 from contextlib import asynccontextmanager
 from urllib.parse import parse_qsl, urljoin, urlsplit
 from contextvars import ContextVar
+import logging
 import time
 from uuid import UUID
 
+import httpx
+
 from .library import normalise
+
+logger = logging.getLogger(__name__)
 
 
 def mbid(value):
@@ -97,6 +102,18 @@ deferred_metadata = ContextVar("deferred_metadata", default=False)
 # now, so nobody ever waits on an expired cache.
 warming = ContextVar("warming", default=False)
 RENEW = 4 * 3600
+LIFETIME = 86400
+# While MusicBrainz is down (a network failure or a 429/5xx answer), an
+# expired answer up to this old is served rather than an error (#96).
+OUTAGE_LIFETIME = 30 * 86400
+
+
+def unavailable(error):
+    """A network failure or a 429/5xx answer, not a missing or bad entry."""
+    if isinstance(error, httpx.HTTPStatusError):
+        code = error.response.status_code
+        return code == 429 or code >= 500
+    return isinstance(error, httpx.TransportError)
 
 
 def still_fresh(age, lifetime, margin=RENEW):
@@ -155,18 +172,31 @@ class Catalogue:
         key = "catalogue:" + path + repr(sorted(params.items()))
         # SQLite can wait on another writer, so the cache is used off the loop.
         cached = await asyncio.to_thread(self.store.read_document, key)
-        if cached and still_fresh(time.time() - cached["time"], 86400):
+        if cached and still_fresh(time.time() - cached["time"], LIFETIME):
             return cached["data"]
         priority = (
             2 if deferred_metadata.get() else (1 if background_metadata.get() else 0)
         )
         async with self.turn(priority):
             cached = await asyncio.to_thread(self.store.read_document, key)
-            if cached and still_fresh(time.time() - cached["time"], 86400):
+            if cached and still_fresh(time.time() - cached["time"], LIFETIME):
                 return cached["data"]
-            response = await self.fetch(
-                client, "https://musicbrainz.org/ws/2/" + path, params
-            )
+            try:
+                response = await self.fetch(
+                    client, "https://musicbrainz.org/ws/2/" + path, params
+                )
+            except httpx.HTTPError as error:
+                if (
+                    cached
+                    and unavailable(error)
+                    and time.time() - cached["time"] < OUTAGE_LIFETIME
+                ):
+                    logger.info(
+                        "MusicBrainz unavailable (%s): serving an expired answer",
+                        type(error).__name__,
+                    )
+                    return cached["data"]
+                raise
             data = response.json()
             await settled(
                 self.store.write_document, key, {"time": time.time(), "data": data}
@@ -177,7 +207,7 @@ class Catalogue:
         """A fresh cached answer, or None; never a request."""
         key = "catalogue:" + path + repr(sorted(params.items()))
         cached = await asyncio.to_thread(self.store.read_document, key)
-        if cached and still_fresh(time.time() - cached["time"], 86400):
+        if cached and still_fresh(time.time() - cached["time"], LIFETIME):
             return cached["data"]
         return None
 
