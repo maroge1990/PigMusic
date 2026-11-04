@@ -187,3 +187,61 @@ private final class AudioSessionProbe: @unchecked Sendable {
     #expect(ticks == 0)
   }
 }
+
+/// A stream that wants to play and never moves is renewed once, then fails,
+/// instead of waiting silently (#115: 89 s with no sound).
+struct StreamWatchTests {
+  let start = ContinuousClock.now
+  func at(_ seconds: Double) -> ContinuousClock.Instant {
+    start + .milliseconds(Int(seconds * 1000))
+  }
+
+  @Test func aStalledStreamIsRenewedOnceThenFails() {
+    var watch = StreamWatch()
+    let song = UUID()
+    watch.started(song)
+    #expect(watch.observe(position: 0, at: at(0)) == .fine)
+    #expect(watch.observe(position: 0, at: at(14)) == .fine)
+    #expect(watch.observe(position: 0, at: at(15)) == .renew)
+    // The renewal starts a new item for the same song.
+    watch.started(song)
+    #expect(watch.observe(position: 0, at: at(16)) == .fine)
+    #expect(watch.observe(position: 0, at: at(30)) == .fine)
+    #expect(watch.observe(position: 0, at: at(31)) == .fail)
+  }
+
+  @Test func progressKeepsAStreamFineAndEarnsANewRenewal() {
+    var watch = StreamWatch()
+    let song = UUID()
+    watch.started(song)
+    _ = watch.observe(position: 0, at: at(0))
+    #expect(watch.observe(position: 0, at: at(15)) == .renew)
+    watch.started(song)
+    _ = watch.observe(position: 0, at: at(15))
+    // It plays: a stall later in the song (rebuffering) gets its own renewal.
+    for second in 16...60 {
+      #expect(watch.observe(position: Double(second - 15), at: at(Double(second))) == .fine)
+    }
+    #expect(watch.observe(position: 45, at: at(74)) == .fine)
+    #expect(watch.observe(position: 45, at: at(75)) == .renew)
+  }
+
+  @Test func aNewSongStartsWithItsOwnRenewal() {
+    var watch = StreamWatch()
+    watch.started(UUID())
+    _ = watch.observe(position: 0, at: at(0))
+    #expect(watch.observe(position: 0, at: at(15)) == .renew)
+    watch.started(UUID())
+    _ = watch.observe(position: 0, at: at(20))
+    #expect(watch.observe(position: 0, at: at(35)) == .renew)
+  }
+
+  /// #97: after a failed preparation Play showed Pause and played nothing.
+  @Test func playPreparesAgainAfterAFailure() {
+    #expect(StreamWatch.playNeedsPreparation(hasItem: false, itemFailed: false, preparing: false))
+    #expect(StreamWatch.playNeedsPreparation(hasItem: true, itemFailed: true, preparing: false))
+    #expect(!StreamWatch.playNeedsPreparation(hasItem: true, itemFailed: false, preparing: false))
+    // A preparation still running plays when it ends.
+    #expect(!StreamWatch.playNeedsPreparation(hasItem: false, itemFailed: false, preparing: true))
+  }
+}

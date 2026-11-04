@@ -584,7 +584,28 @@ import PigSync
       clock.stop()
       return
     }
+    streamWatch.started(queue.current?.id)
     clock.start { [weak self] in self?.updateStreamingProgress() }
+  }
+  /// Renews, then fails, a stream that wants to play and does not move (#115).
+  @ObservationIgnored private var streamWatch = StreamWatch()
+  /// The stream stopped moving: start it again from there on a new item.
+  private func renewStalledStream() {
+    DiagnosticsLog.shared.record("playback", "stream stalled, starting it again")
+    queueStart.seek(queue, to: elapsed)
+    prepareStreaming()
+  }
+  /// The stream stalled again after its renewal: stop and say why. Play
+  /// prepares it again from here.
+  private func failStalledStream() {
+    DiagnosticsLog.shared.record("playback", "stream stalled again, stopped")
+    error = URLError(.timedOut).userMessage
+    preparing = false
+    intent.pause()
+    suspend()
+    preparation?.cancel()
+    player.replaceCurrentItem(with: nil)
+    checkpoint(force: true)
   }
   private func updateStreamingProgress() {
     let time = player.currentTime().seconds
@@ -607,6 +628,13 @@ import PigSync
       suspend()
       checkpoint(force: true)
       return
+    }
+    if intent.canPlay {
+      switch streamWatch.observe(position: elapsed, at: .now) {
+      case .fine: break
+      case .renew: return renewStalledStream()
+      case .fail: return failStalledStream()
+      }
     }
     measureListen()
     checkpoint()
@@ -734,6 +762,16 @@ import PigSync
           resolve: resolve)
       }
       return
+    }
+    // A failed preparation leaves nothing to play: prepare the song again,
+    // where it stopped (#97: Play showed Pause and played nothing).
+    if !usingEngine,
+      StreamWatch.playNeedsPreparation(
+        hasItem: player.currentItem != nil, itemFailed: player.currentItem?.status == .failed,
+        preparing: preparing)
+    {
+      queueStart.seek(queue, to: atEnd ? 0 : elapsed)
+      return prepareStreaming()
     }
     if !usingEngine, atEnd { seek(0) }
     guard intent.canPlay else { return }
