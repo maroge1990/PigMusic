@@ -731,13 +731,7 @@ def mp3_frame(data, at):
 
 
 def mp3_head(data, size):
-    """The playing time an MP3's first bytes prove (see mp3_proof)."""
-    proof = mp3_proof(data, size)
-    return proof and proof[0]
-
-
-def mp3_proof(data, size):
-    """(seconds, end of the proving frame): the playing time an MP3's first bytes prove for a file of `size` bytes,
+    """The playing time an MP3's first bytes prove for a file of `size` bytes,
     from its Xing/Info or VBRI frame count: None when more bytes are needed;
     NotProgressive when the head cannot prove it. Matching early frames never
     prove a constant bitrate, so a file without such a header arrives whole."""
@@ -778,12 +772,11 @@ def mp3_proof(data, size):
         seconds = frames * first["samples"] / first["rate"]
     else:
         raise NotProgressive("No length header.")
-    checked = start + first["length"]
     # The header's own byte count, when given, must match the declared size
     # (trailing tags allowed).
     if stated is not None and abs(stated - audio) > max(4096, audio // 100):
         raise NotProgressive("A length header for another size.")
-    return seconds, checked
+    return seconds
 
 
 class RelayTransfer:
@@ -796,8 +789,6 @@ class RelayTransfer:
         self.ready = self.loop.create_future()
         self.size = 0
         self.arrived = 0
-        # Bytes 0 to the end of the frame that proved the length.
-        self.checked = 0
         self.complete = False
         self.error = None
         self.media_type = MEDIA_TYPES[".mp3"]
@@ -835,19 +826,18 @@ class RelayTransfer:
         with open(self.path, "rb") as head:
             data = head.read(min(arrived, HEAD_BYTES))
         try:
-            proof = mp3_proof(data, total)
+            seconds = mp3_head(data, total)
         except NotProgressive:
             self.decided = True
             return
-        if proof is None:
+        if seconds is None:
             self.decided = arrived >= HEAD_BYTES
             return
-        seconds, checked = proof
         self.decided = True
         if self.expected and abs(seconds - self.expected) > 5:
             raise ValueError("The remote file was not the expected recording.")
         self.playing = True
-        self._post(self._started, total, arrived, checked)
+        self._post(self._started, total, arrived)
 
     def _post(self, callback, *args):
         try:
@@ -872,9 +862,8 @@ class RelayTransfer:
 
     # Event loop.
 
-    def _started(self, size, arrived, checked):
+    def _started(self, size, arrived):
         self.size = size
-        self.checked = checked
         self._grew(arrived)
         if not self.ready.done():
             self.ready.set_result(None)
@@ -905,10 +894,10 @@ class RelayTransfer:
     def limit(self, end):
         """Bytes a response ending at byte `end` may send. Until the whole
         file is validated and published, a response holds back its own last
-        byte, so no body completes for audio later rejected; only a range
-        within the frame that proved the length (a player's `bytes=0-1`
-        probe) completes at once."""
-        if self.complete or end < self.checked:
+        byte, so no body completes for audio later rejected. Only a player's
+        two-byte probe (`bytes=0-1`, a range ending by byte 1) completes at
+        once: no header byte count is trusted to say where audio begins."""
+        if self.complete or end <= 1:
             return min(self.servable, end + 1)
         return min(self.servable, end)
 

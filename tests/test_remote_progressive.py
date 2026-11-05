@@ -231,12 +231,11 @@ def test_ranges_are_served_as_far_as_the_relay_has_arrived(tmp_path, monkeypatch
         # HEAD: the length and range support, without waiting for anything.
         head = await transfer.response("HEAD", None)
         results["head"] = (head.status_code, dict(head.headers))
-        # A player's probe inside the frame that proved the length: whole at once.
-        assert 100 < transfer.checked < 2000
+        # A player's two-byte probe: whole at once.
         probed = time.monotonic()
         results["probe"] = await listen(await transfer.response("GET", "bytes=0-1"))
         results["probe_seconds"] = time.monotonic() - probed
-        # Arrived but beyond that frame: served, except its own last byte,
+        # Any other arrived range: served, except its own last byte,
         # which waits for the validated file (here, out of time: ends short).
         results["inside"] = await listen(
             await transfer.response("GET", "bytes=1000-1099")
@@ -431,8 +430,7 @@ def test_the_last_byte_waits_for_the_validated_file(tmp_path, monkeypatch, caplo
         whole, tail, inside = await asyncio.gather(
             listen(await transfer.response("GET", None)),
             listen(await transfer.response("GET", f"bytes={len(data) - 10}-")),
-            # Beyond the proving frame (Codex #23: a bounded range completed
-            # before a rejection).
+            # Codex #23: a bounded range completed before a rejection.
             listen(await transfer.response("GET", "bytes=0-2999")),
         )
         await settled(resolver)
@@ -451,6 +449,36 @@ def test_the_last_byte_waits_for_the_validated_file(tmp_path, monkeypatch, caplo
     assert not completed and len(body(chunks)) < 10
     assert resolver.relay(found["relay"], "member") is None
     assert list((tmp_path / "relay").iterdir()) == []
+
+
+def test_an_inflated_header_frame_earns_no_early_completion(tmp_path, monkeypatch):
+    """Codex #23: a first frame claiming 320 kbps (1044 bytes) let a range
+    inside it complete before the file was validated."""
+    from server import audio
+
+    frames = round(30 * 44100 / 1152)
+    header = bytes([0xFF, 0xFB, 0xE0, 0x00]) + bytes(32)
+    header += b"Xing" + (1).to_bytes(4, "big") + frames.to_bytes(4, "big")
+    data = header + bytes(1044 - len(header)) + mp3(tmp_path)
+    resolver, source = relayed(tmp_path, monkeypatch, data, pause=0.02)
+
+    def rejecting_probe(path, check=lambda: None):
+        time.sleep(0.3)
+        return None
+
+    monkeypatch.setattr(audio, "probe_file", rejecting_probe)
+
+    async def run():
+        found, _ = await play(resolver)
+        transfer = resolver.relay(found["relay"], "member")
+        probe = await listen(await transfer.response("GET", "bytes=0-1"))
+        inside = await listen(await transfer.response("GET", "bytes=64-1000"))
+        await settled(resolver)
+        return probe, inside
+
+    probe, (status, _, chunks, completed) = asyncio.run(run())
+    assert probe[3] and body(probe[2]) == data[:2]
+    assert status == 206 and not completed and body(chunks) == data[64:1000]
 
 
 def test_a_source_sending_more_than_it_declared_fails_the_transfer(
@@ -550,9 +578,9 @@ def test_a_growing_relay_is_served_through_its_signed_link(tmp_path, monkeypatch
         )
         assert played.status_code == 200, played.text
         url = played.json()["url"]
-        early = client.get(url, headers={"Range": "bytes=0-99"})
-        assert early.status_code == 206 and early.content == data[:100]
-        assert early.headers["content-range"] == f"bytes 0-99/{len(data)}"
+        early = client.get(url, headers={"Range": "bytes=0-1"})
+        assert early.status_code == 206 and early.content == data[:2]
+        assert early.headers["content-range"] == f"bytes 0-1/{len(data)}"
         late = client.get(url, headers={"Range": f"bytes={len(data) - 100}-"})
         assert late.status_code == 503
         # Signed-link checks are unchanged for a growing relay.
