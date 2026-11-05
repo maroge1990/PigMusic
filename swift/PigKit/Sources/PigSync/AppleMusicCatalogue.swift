@@ -32,6 +32,19 @@
       }
     }
 
+    /// An Apple Music song by its id, for a song shared from Apple Music
+    /// (D-70); nil unless the person already allowed Apple Music access.
+    public static func song(appleId: Int) async throws -> ShazamSong? {
+      guard await authorized(asking: false) else { return nil }
+      let request = MusicCatalogResourceRequest<MusicKit.Song>(
+        matching: \.id, equalTo: MusicItemID(String(appleId)))
+      guard let song = try await request.response().items.first else { return nil }
+      return ShazamSong(
+        shazamId: "apple:\(appleId)", appleId: appleId, title: song.title,
+        artist: song.artistName, album: song.albumTitle, duration: song.duration,
+        artworkURL: song.artwork?.url(width: 300, height: 300))
+    }
+
     /// A playlist and its songs, in Apple's order (music videos left out), up
     /// to the most a playlist screen checks.
     public static func songs(playlistId: String) async throws -> (

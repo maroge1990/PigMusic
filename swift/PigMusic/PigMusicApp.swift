@@ -32,6 +32,8 @@ import UIKit
           if value == .active { DiagnosticsLog.shared.foreground() }
           if value == .background { DiagnosticsLog.shared.background() }
           Task { await model.sceneActive(value == .active, background: value == .background) }
+          // Songs shared from the Shazam app while PigMusic was away (D-70).
+          if value == .active { Task { await model.receiveShazamShares() } }
         }
     }
   }

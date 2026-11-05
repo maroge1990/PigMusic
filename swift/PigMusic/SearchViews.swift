@@ -1100,7 +1100,9 @@ private struct ShazamInboxView: View {
       if songs.isEmpty {
         ContentUnavailableView(
           "Nothing Shazamed yet", systemImage: "shazam.logo",
-          description: Text("Songs you identify with What's playing? in Search appear here."))
+          description: Text(
+            "Songs you identify with What's playing? in Search, or share to PigMusic from the Shazam app, appear here."
+          ))
       } else {
         Section {
           if requesting {
@@ -1151,6 +1153,7 @@ private struct ShazamInboxView: View {
       }
     }
     .pigCanvas().navigationTitle("Shazamed")
+    .task { await model.receiveShazamShares() }
     .task(id: ApplePlaylistStates.fingerprint(asked)) { await load(asked) }
   }
   private func row(_ song: ShazamSong, state: ApplePlaylistSongState?) -> some View {

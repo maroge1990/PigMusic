@@ -62,24 +62,26 @@ public struct ShazamSong: Codable, Sendable, Hashable, Identifiable {
 
 /// The "Shazamed" list: songs identified in PigMusic, newest first.
 public enum ShazamInbox {
-  /// One row per song (by Shazam id): the first copy's details, which the
+  /// One row per song (by Shazam id, or Apple id, so a song shared from
+  /// Apple Music joins its Shazam row): the first copy's details, which the
   /// caller puts first (this session's, with album and length), and the
   /// latest date any copy was found; newest first, undated last.
   public static func merge(_ songs: [ShazamSong]) -> [ShazamSong] {
-    var order: [String] = []
-    var kept: [String: ShazamSong] = [:]
+    var merged: [ShazamSong] = []
+    var index: [String: Int] = [:]
     for song in songs {
-      let key = song.shazamId
-      guard let earlier = kept[key] else {
-        order.append(key)
-        kept[key] = song
+      let keys = ["shazam:" + song.shazamId] + (song.appleId.map { ["apple:\($0)"] } ?? [])
+      guard let at = keys.lazy.compactMap({ index[$0] }).first else {
+        for key in keys { index[key] = merged.count }
+        merged.append(song)
         continue
       }
+      for key in keys where index[key] == nil { index[key] = at }
+      let earlier = merged[at]
       if let date = song.found, earlier.found.map({ date > $0 }) ?? true {
-        kept[key] = earlier.found(date)
+        merged[at] = earlier.found(date)
       }
     }
-    let merged = order.compactMap { kept[$0] }
     // Sorting by place breaks date ties in the given order.
     return merged.indices.sorted { a, b in
       switch (merged[a].found, merged[b].found) {

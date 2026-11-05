@@ -133,6 +133,28 @@ def generate():
         watch_sources.append(
             add("watch-build-" + path.name, "PBXBuildFile", fileRef=ref)
         )
+    # The share extension (D-70): Share → PigMusic in the Shazam app or Apple
+    # Music queues the song for the "Shazamed" list.
+    share_sources = []
+    for path in sorted((SWIFT / "PigMusicShare").glob("*.swift")):
+        ref = add(
+            "share-" + path.name,
+            "PBXFileReference",
+            lastKnownFileType="sourcecode.swift",
+            path=f"PigMusicShare/{path.name}",
+            sourceTree="<group>",
+        )
+        files.append(ref)
+        share_sources.append(
+            add("share-build-" + path.name, "PBXBuildFile", fileRef=ref)
+        )
+    share_product = add(
+        "share-product",
+        "PBXFileReference",
+        explicitFileType="wrapper.app-extension",
+        path="PigMusicShare.appex",
+        sourceTree="BUILT_PRODUCTS_DIR",
+    )
     watch_product = add(
         "watch-product",
         "PBXFileReference",
@@ -195,7 +217,7 @@ def generate():
     products = add(
         "products",
         "PBXGroup",
-        children=[product, watch_product],
+        children=[product, watch_product, share_product],
         name="Products",
         sourceTree="<group>",
     )
@@ -317,7 +339,53 @@ def generate():
             runOnlyForDeploymentPostprocessing="0",
         )
     )
+    share_domain = add(
+        "share-PigDomain",
+        "XCSwiftPackageProductDependency",
+        package=package,
+        productName="PigDomain",
+    )
+    share_phases = [
+        add(
+            "share-sources",
+            "PBXSourcesBuildPhase",
+            buildActionMask="2147483647",
+            files=share_sources,
+            runOnlyForDeploymentPostprocessing="0",
+        ),
+        add(
+            "share-frameworks",
+            "PBXFrameworksBuildPhase",
+            buildActionMask="2147483647",
+            files=[
+                add(
+                    "share-framework-PigDomain", "PBXBuildFile", productRef=share_domain
+                )
+            ],
+            runOnlyForDeploymentPostprocessing="0",
+        ),
+    ]
+    phases.append(
+        add(
+            "embed-share",
+            "PBXCopyFilesBuildPhase",
+            buildActionMask="2147483647",
+            dstPath="",
+            dstSubfolderSpec="13",
+            files=[
+                add(
+                    "embed-share-file",
+                    "PBXBuildFile",
+                    fileRef=share_product,
+                    settings={"ATTRIBUTES": ["RemoveHeadersOnCopy"]},
+                )
+            ],
+            name="Embed Foundation Extensions",
+            runOnlyForDeploymentPostprocessing="0",
+        )
+    )
     watch_configs = []
+    share_configs = []
     project_configs = []
     target_configs = []
     for name in ("Debug", "Release"):
@@ -351,6 +419,8 @@ def generate():
             "IPHONEOS_DEPLOYMENT_TARGET": "26.0",
             "TARGETED_DEVICE_FAMILY": "1,2",
             "CODE_SIGN_STYLE": "Automatic",
+            # The App Group the share extension queues shared songs in (D-70).
+            "CODE_SIGN_ENTITLEMENTS": "PigMusic/PigMusic.entitlements",
             "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
             "INFOPLIST_KEY_CFBundleDisplayName": "PigMusic",
             # HTTPS only: no export-compliance question on each upload.
@@ -379,6 +449,32 @@ def generate():
             # HTTPS only: no export-compliance question on each upload.
             "INFOPLIST_KEY_ITSAppUsesNonExemptEncryption": "NO",
         }
+        share_settings = {
+            "PRODUCT_NAME": "$(TARGET_NAME)",
+            "PRODUCT_BUNDLE_IDENTIFIER": "au.com.pig.music.share",
+            "GENERATE_INFOPLIST_FILE": "YES",
+            "INFOPLIST_FILE": "PigMusicShare/Info.plist",
+            "MARKETING_VERSION": "0.2.0",
+            "CURRENT_PROJECT_VERSION": "20",
+            "SDKROOT": "iphoneos",
+            "SUPPORTED_PLATFORMS": "iphoneos iphonesimulator",
+            "IPHONEOS_DEPLOYMENT_TARGET": "26.0",
+            "TARGETED_DEVICE_FAMILY": "1,2",
+            "CODE_SIGN_STYLE": "Automatic",
+            "CODE_SIGN_ENTITLEMENTS": "PigMusicShare/PigMusicShare.entitlements",
+            "SKIP_INSTALL": "YES",
+            "APPLICATION_EXTENSION_API_ONLY": "YES",
+            "LD_RUNPATH_SEARCH_PATHS": "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks",
+            "INFOPLIST_KEY_CFBundleDisplayName": "PigMusic",
+        }
+        share_configs.append(
+            add(
+                f"share-target-{name}",
+                "XCBuildConfiguration",
+                buildSettings=share_settings,
+                name=name,
+            )
+        )
         watch_configs.append(
             add(
                 f"watch-target-{name}",
@@ -416,6 +512,39 @@ def generate():
         defaultConfigurationIsVisible="0",
         defaultConfigurationName="Release",
     )
+    share_list = add(
+        "share-list",
+        "XCConfigurationList",
+        buildConfigurations=share_configs,
+        defaultConfigurationIsVisible="0",
+        defaultConfigurationName="Release",
+    )
+    share_target = add(
+        "share-target",
+        "PBXNativeTarget",
+        buildConfigurationList=share_list,
+        buildPhases=share_phases,
+        buildRules=[],
+        dependencies=[],
+        name="PigMusicShare",
+        productName="PigMusicShare",
+        productReference=share_product,
+        productType="com.apple.product-type.app-extension",
+        packageProductDependencies=[share_domain],
+    )
+    share_dependency = add(
+        "share-target-dependency",
+        "PBXTargetDependency",
+        target=share_target,
+        targetProxy=add(
+            "share-proxy",
+            "PBXContainerItemProxy",
+            containerPortal=identity("project"),
+            proxyType="1",
+            remoteGlobalIDString=share_target,
+            remoteInfo="PigMusicShare",
+        ),
+    )
     watch_target = add(
         "watch-target",
         "PBXNativeTarget",
@@ -449,7 +578,7 @@ def generate():
         buildConfigurationList=target_list,
         buildPhases=phases,
         buildRules=[],
-        dependencies=[watch_dependency],
+        dependencies=[watch_dependency, share_dependency],
         name="PigMusic",
         productName="PigMusic",
         productReference=product,
@@ -471,7 +600,7 @@ def generate():
         productRefGroup=products,
         projectDirPath="",
         projectRoot="",
-        targets=[target, watch_target],
+        targets=[target, watch_target, share_target],
         packageReferences=[package],
     )
     directory = SWIFT / "PigMusic.xcodeproj"

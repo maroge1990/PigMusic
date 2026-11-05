@@ -65,3 +65,43 @@ def test_both_apps_are_ready_for_app_store_upload():
         assert f"{path} in Resources */," in project and path in generator
     assert project.count("INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;") == 4
     assert generator.count('"INFOPLIST_KEY_ITSAppUsesNonExemptEncryption": "NO"') == 2
+
+
+@pytest.mark.skipif(
+    not GENERATOR.exists(), reason="native project sources are not in this image"
+)
+def test_the_share_extension_is_embedded_with_the_app_group():
+    """Share → PigMusic (D-70): the extension target the generator makes is
+    in the committed project under the generator's ids, embedded in the app,
+    and both carry the App Group the shared songs wait in."""
+    spec = importlib.util.spec_from_file_location("generate_native_project", GENERATOR)
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    project = (ROOT / "swift/PigMusic.xcodeproj/project.pbxproj").read_text()
+    source = GENERATOR.read_text()
+    target = generator.identity("share-target")
+    assert f"{target} /* PigMusicShare */ = {{" in project
+    assert f"{target} /* PigMusicShare */," in project  # in the project's targets
+    embed = generator.identity("embed-share")
+    assert f"{embed} /* Embed Foundation Extensions */," in project  # an app phase
+    assert "PigMusicShare.appex in Embed Foundation Extensions */," in project
+    bundles = re.findall(r"PRODUCT_BUNDLE_IDENTIFIER = ([\w.]+);", project)
+    assert bundles.count("au.com.pig.music.share") == 2
+    assert '"PRODUCT_BUNDLE_IDENTIFIER": "au.com.pig.music.share"' in source
+    for entitlements in (
+        "PigMusic/PigMusic.entitlements",
+        "PigMusicShare/PigMusicShare.entitlements",
+    ):
+        assert project.count(f"CODE_SIGN_ENTITLEMENTS = {entitlements};") == 2
+        assert f'"CODE_SIGN_ENTITLEMENTS": "{entitlements}"' in source
+        groups = plistlib.loads((ROOT / "swift" / entitlements).read_bytes())
+        assert groups == {
+            "com.apple.security.application-groups": ["group.au.com.pig.music"]
+        }
+    info = plistlib.loads((ROOT / "swift/PigMusicShare/Info.plist").read_bytes())
+    extension = info["NSExtension"]
+    assert extension["NSExtensionPointIdentifier"] == "com.apple.share-services"
+    assert extension["NSExtensionPrincipalClass"].endswith(".ShareViewController")
+    # The extension's version follows the app's, as App Store uploads require.
+    versions = re.findall(r"CURRENT_PROJECT_VERSION = (\w+);", project)
+    assert len(versions) == 6 and len(set(versions)) == 1

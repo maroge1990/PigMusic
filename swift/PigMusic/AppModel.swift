@@ -688,6 +688,17 @@ enum PlayOrigin: Hashable {
     }
   }
 
+  /// Songs shared to PigMusic from the Shazam app or Apple Music (D-70):
+  /// into the "Shazamed" list, an Apple song looked up through the server
+  /// while signed in. Nothing is requested.
+  func receiveShazamShares() async {
+    var server: (@Sendable (Int) async throws -> ResolvedApple?)?
+    if let service {
+      server = { try await service.resolveApple(kind: "song", appleId: $0) }
+    }
+    await ShazamListener.shared.receiveShares(server: server)
+  }
+
   func readCatalogue<T: Sendable>(
     _ fetch: @Sendable (NativeService) async throws -> T
   ) async throws -> T {

@@ -46,9 +46,19 @@
 		D06A8515EF6B16AEDBF53B6E /* PigCompanion in Frameworks */ = {isa = PBXBuildFile; productRef = B88DDB08F3A708A6F841624B /* PigCompanion */; };
 		DDDBAD510B79BD372EED54BE /* PigMusic/AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D22B132149A025610642FD1F /* PigMusic/AppModel.swift */; };
 		F3910666C99B0BDB82CFED01 /* PigPlayback in Frameworks */ = {isa = PBXBuildFile; productRef = C226B3C1D6E007FFC9C4684D /* PigPlayback */; };
+		524CEA5D3A342FACBD450094 /* PigMusicShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1C782D80251759B09BC5604E /* PigMusicShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A2CDA85C490B0C46943AB369 /* PigDomain in Frameworks */ = {isa = PBXBuildFile; productRef = 682ADBBC9E95AF4D65C138C1 /* PigDomain */; };
+		A47C7D846F77D0FB559E9CE2 /* PigMusicShare/ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9F3778B9C7BFA91269B219A /* PigMusicShare/ShareViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		00F17A1B4ABC327006D52C8D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 244210E48437B6556980A702 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 874F91A01A64B6A30CDAB3C3;
+			remoteInfo = PigMusicShare;
+		};
 		6DA3A5F43DBBB6CB2B7F6881 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 244210E48437B6556980A702 /* Project object */;
@@ -68,6 +78,17 @@
 				CBC51237EFD13DD9204DA95C /* PigMusicWatch.app in Embed Watch Content */,
 			);
 			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		37B361C851F0D40A3802CA8F /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				524CEA5D3A342FACBD450094 /* PigMusicShare.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -100,9 +121,19 @@
 		E1FCF4E41C3297002D6DE44C /* PigMusic/Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PigMusic/Components.swift; sourceTree = "<group>"; };
 		E7AC8EBAAFC801058038B823 /* PigMusic/CatalogueViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PigMusic/CatalogueViews.swift; sourceTree = "<group>"; };
 		EEE8C1DD6D13E0EB78367D33 /* Shared/CompanionLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shared/CompanionLink.swift; sourceTree = "<group>"; };
+		1C782D80251759B09BC5604E /* PigMusicShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = PigMusicShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		D9F3778B9C7BFA91269B219A /* PigMusicShare/ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PigMusicShare/ShareViewController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		981D2EAF64742EC6FC4D8D03 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A2CDA85C490B0C46943AB369 /* PigDomain in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E2AA269EB967A8853A258BFA /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -137,6 +168,7 @@
 			children = (
 				A8792157CB4F27FB949C035F /* PigMusic.app */,
 				2826DC5ECF3BB7F4B4281097 /* PigMusicWatch.app */,
+				1C782D80251759B09BC5604E /* PigMusicShare.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -164,6 +196,7 @@
 				EEE8C1DD6D13E0EB78367D33 /* Shared/CompanionLink.swift */,
 				519F6ED6640D2BDCF9D8B812 /* PigMusicWatch/PigMusicWatchApp.swift */,
 				AE9C6781043C9BA90D15DE45 /* PigMusicWatch/WatchModel.swift */,
+				D9F3778B9C7BFA91269B219A /* PigMusicShare/ShareViewController.swift */,
 				8BF729FFE074CAEE622C0292 /* PigMusic/Assets.xcassets */,
 				C2B2032B9CC90C24C7DD6942 /* PigMusic/AppIcon.icon */,
 				03914DE00F5E94D49B8B2742 /* PigMusic/LaunchScreen.storyboard */,
@@ -184,11 +217,13 @@
 				41D311A605520FC7B8B9A980 /* Resources */,
 				E2AA269EB967A8853A258BFA /* Frameworks */,
 				1A26739A0F9559E250038211 /* Embed Watch Content */,
+				37B361C851F0D40A3802CA8F /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				97C6F8C73087B2EB6C978F32 /* PBXTargetDependency */,
+				88576F82FD31F9C020EF55F2 /* PBXTargetDependency */,
 			);
 			name = PigMusic;
 			packageProductDependencies = (
@@ -204,6 +239,25 @@
 			productName = PigMusic;
 			productReference = A8792157CB4F27FB949C035F /* PigMusic.app */;
 			productType = "com.apple.product-type.application";
+		};
+		874F91A01A64B6A30CDAB3C3 /* PigMusicShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7D7215FB7121B676214F7C1E /* Build configuration list for PBXNativeTarget "PigMusicShare" */;
+			buildPhases = (
+				CB6E60202D32613DBBC6D1A6 /* Sources */,
+				981D2EAF64742EC6FC4D8D03 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PigMusicShare;
+			packageProductDependencies = (
+				682ADBBC9E95AF4D65C138C1 /* PigDomain */,
+			);
+			productName = PigMusicShare;
+			productReference = 1C782D80251759B09BC5604E /* PigMusicShare.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 		99C65A8E528B73AF22CB1BB1 /* PigMusicWatch */ = {
 			isa = PBXNativeTarget;
@@ -255,6 +309,7 @@
 			targets = (
 				34A04005BCAF206EEC990BD9 /* PigMusic */,
 				99C65A8E528B73AF22CB1BB1 /* PigMusicWatch */,
+				874F91A01A64B6A30CDAB3C3 /* PigMusicShare */,
 			);
 		};
 /* End PBXProject section */
@@ -317,6 +372,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CB6E60202D32613DBBC6D1A6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A47C7D846F77D0FB559E9CE2 /* PigMusicShare/ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -325,9 +388,37 @@
 			target = 99C65A8E528B73AF22CB1BB1 /* PigMusicWatch */;
 			targetProxy = 6DA3A5F43DBBB6CB2B7F6881 /* PBXContainerItemProxy */;
 		};
+		88576F82FD31F9C020EF55F2 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 874F91A01A64B6A30CDAB3C3 /* PigMusicShare */;
+			targetProxy = 00F17A1B4ABC327006D52C8D /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		310050DE7F9FFFA44BE8A7F1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = PigMusicShare/PigMusicShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 20;
+				DEVELOPMENT_TEAM = 6CUZWP49QT;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PigMusicShare/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = PigMusic;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = au.com.pig.music.share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		35B1014F135DE9B45529B733 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -465,6 +556,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = PigMusic/PigMusic.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 20;
 				DEVELOPMENT_TEAM = 6CUZWP49QT;
@@ -484,6 +576,29 @@
 				PRODUCT_BUNDLE_IDENTIFIER = au.com.pig.music;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C9A06DE90C2FF9DE04FEEBD4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = PigMusicShare/PigMusicShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 20;
+				DEVELOPMENT_TEAM = 6CUZWP49QT;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PigMusicShare/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = PigMusic;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = au.com.pig.music.share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -515,6 +630,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = PigMusic/PigMusic.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 20;
 				DEVELOPMENT_TEAM = 6CUZWP49QT;
@@ -542,6 +658,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		7D7215FB7121B676214F7C1E /* Build configuration list for PBXNativeTarget "PigMusicShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C9A06DE90C2FF9DE04FEEBD4 /* Debug */,
+				310050DE7F9FFFA44BE8A7F1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		9C5B038A078AB1DFD15318F0 /* Build configuration list for PBXNativeTarget "PigMusic" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -603,6 +728,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = BC4A71180870F7945155FBB0 /* XCLocalSwiftPackageReference "PigKit" */;
 			productName = PigSync;
+		};
+		682ADBBC9E95AF4D65C138C1 /* PigDomain */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BC4A71180870F7945155FBB0 /* XCLocalSwiftPackageReference "PigKit" */;
+			productName = PigDomain;
 		};
 		86D83E4BA85444945E94FF6A /* PigDomain */ = {
 			isa = XCSwiftPackageProductDependency;
