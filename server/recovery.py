@@ -1,6 +1,6 @@
 """Hash-guarded, recoverable removal on the existing SMB filesystem."""
 
-import hashlib, json, os, threading, uuid
+import hashlib, json, os, stat, threading, time, uuid
 from .lifecycle import coordinated
 from pathlib import Path
 from .media import saved_track, track_file
@@ -69,6 +69,7 @@ class Recovery:
             "trash": trash,
             "sha256": self.digest(path),
             "status": "removing",
+            "removed_at": int(time.time()),
             "shared": any(
                 t["id"] != track_id
                 and (t.get("export_relative_path") or t.get("relative_path"))
@@ -166,6 +167,8 @@ class Recovery:
             record = self.store.read_document("removed:" + identity)
             if record.get("status") not in {"removed", "removing"}:
                 raise ValueError("Removed song not found.")
+            if record.get("purged_at"):
+                raise ValueError("This song was deleted from Trash for good.")
             _, root = saved_track(self.store, record["track_id"])
             self.check_mount(root)
             if str(root.resolve()) != record["root"]:
@@ -236,6 +239,103 @@ class Recovery:
                 else:
                     self.finish(record, root)
             return record.get("status")
+
+    def purge_plan(self, days):
+        """What a purge of Trash would delete: every removed song whose file
+        went to Trash at least `days` days ago, with its size, and a
+        fingerprint of exactly that set (the owner confirms it, as Tidy's
+        review). Songs with no Trash file there, a linked or escaping path,
+        or a changed library mount are left out. A removal from before
+        removal times were kept counts from its Trash file's last status
+        change (made when it was linked into Trash, or later), so it is
+        never counted older than it is."""
+        now = time.time()
+        items, rows = [], []
+        for record in self.list():
+            if record.get("status") != "removed" or record.get("purged_at"):
+                continue
+            # Only this removal's own Trash folder, never anywhere else.
+            if not str(record.get("trash", "")).startswith(
+                ".pig-music-trash/" + str(record.get("id")) + "/"
+            ):
+                continue
+            try:
+                _, root = saved_track(self.store, record["track_id"])
+                self.check_mount(root)
+                if str(root.resolve()) != record["root"]:
+                    continue
+                info = os.lstat(contained(root, record["trash"]))
+            except (OSError, ValueError, KeyError):
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                continue
+            removed_at = record.get("removed_at") or info.st_ctime
+            if now - removed_at < days * 86400:
+                continue
+            track = record.get("track") or {}
+            items.append(
+                {
+                    "id": record["id"],
+                    "title": track.get("title") or "",
+                    "artist": track.get("artist") or "",
+                    "album": track.get("album") or "",
+                    "removed_at": int(removed_at),
+                    "size_bytes": info.st_size,
+                }
+            )
+            rows.append([record["id"], record["trash"], record["sha256"], info.st_size])
+        items.sort(key=lambda i: (i["removed_at"], i["id"]))
+        fingerprint = hashlib.sha256(
+            json.dumps([days, sorted(rows)]).encode()
+        ).hexdigest()
+        return {
+            "days": days,
+            "items": items,
+            "total_bytes": sum(i["size_bytes"] for i in items),
+            "fingerprint": fingerprint,
+        }
+
+    @coordinated
+    def purge(self, days, fingerprint):
+        """Delete for good exactly the Trash files the owner reviewed: the
+        plan is made again and must match `fingerprint`, and each file must
+        still hold the content its removal recorded. Nothing else in Trash
+        (Tidy's moves, replaced originals) and nothing outside it is
+        touched. The record stays, marked purged, so the song stays removed
+        and its requests stay excluded."""
+        with self.lock:
+            plan = self.purge_plan(days)
+            if plan["fingerprint"] != fingerprint:
+                raise ValueError("Trash changed since the review; review it again.")
+            purged, kept = 0, 0
+            for item in plan["items"]:
+                record = self.store.read_document("removed:" + item["id"])
+                try:
+                    _, root = saved_track(self.store, record["track_id"])
+                    trash = contained(root, record["trash"])
+                    if (
+                        not stat.S_ISREG(os.lstat(trash).st_mode)
+                        or self.digest(trash) != record["sha256"]
+                    ):
+                        kept += 1
+                        continue
+                    os.unlink(trash)
+                except (OSError, ValueError, KeyError):
+                    kept += 1
+                    continue
+                record["purged_at"] = int(time.time())
+                self.save("removed:" + record["id"], record)
+                purged += 1
+                # Its now-empty folders inside this removal's Trash folder.
+                try:
+                    top = contained(root, ".pig-music-trash/" + record["id"])
+                    folder = trash.parent
+                    while folder.is_relative_to(top):
+                        folder.rmdir()  # Only when empty.
+                        folder = folder.parent
+                except (OSError, ValueError):
+                    pass
+            return {"purged": purged, "kept": kept}
 
     @coordinated
     def recover(self):

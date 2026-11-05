@@ -547,8 +547,26 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                 if k not in {"root", "original", "trash", "sha256"}
             }
             for record in recovery.list()
-            if record["status"] != "restored"
+            if record["status"] != "restored" and not record.get("purged_at")
         ]
+
+    @app.get("/api/v1/admin/library/trash/purge")
+    async def trash_purge_plan(days: int = Query(30, ge=1, le=3650)):
+        try:
+            return await asyncio.to_thread(recovery.purge_plan, days)
+        except (ValueError, OSError):
+            raise HTTPException(409, "Trash can't be read; check the library mount.")
+
+    class TrashPurge(BaseModel):
+        days: int = Field(ge=1, le=3650)
+        fingerprint: str = Field(max_length=64)
+
+    @app.post("/api/v1/admin/library/trash/purge")
+    async def purge_trash(body: TrashPurge):
+        try:
+            return await asyncio.to_thread(recovery.purge, body.days, body.fingerprint)
+        except (ValueError, OSError) as error:
+            raise HTTPException(409, f"Nothing was deleted: {error}")
 
     @app.post("/api/v1/admin/tracks/{track_id}/remove")
     async def remove_song(track_id: str):

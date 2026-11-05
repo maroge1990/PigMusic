@@ -100,6 +100,7 @@ ADMIN_READS = [
     "/api/v1/admin/access",
     "/api/v1/admin/settings/media",
     "/api/v1/admin/library/trash",
+    "/api/v1/admin/library/trash/purge?days=30",
     "/api/v1/admin/library/tidy",
     "/api/v1/people",
     "/api/v1/people/activity",
@@ -184,3 +185,19 @@ def test_interface_uses_the_system_typeface_and_a_static_sign_in():
     assert shell.count("pig-splash") == 1
     assert shell.index("pig-splash") < shell.index("if (!user && firstRun)")
     assert "pig-splash" not in (CLIENT / "SignIn.tsx").read_text()
+
+
+def test_trash_purge_needs_the_reviewed_list(tmp_path, monkeypatch):
+    app = household(tmp_path, monkeypatch)
+    with TestClient(app, base_url="https://private.ts.net") as client:
+        sign_in(client, "mark")
+        plan = client.get("/api/v1/admin/library/trash/purge?days=30").json()
+        assert plan["items"] == [] and plan["days"] == 30
+        purge = "/api/v1/admin/library/trash/purge"
+        wrong = {"days": 30, "fingerprint": "0" * 64}
+        assert client.post(purge, headers=WRITE, json=wrong).status_code == 409
+        right = {"days": 30, "fingerprint": plan["fingerprint"]}
+        reply = client.post(purge, headers=WRITE, json=right)
+        assert reply.json() == {"purged": 0, "kept": 0}
+        sign_in(client, "member")
+        assert client.post(purge, headers=WRITE, json=right).status_code == 403

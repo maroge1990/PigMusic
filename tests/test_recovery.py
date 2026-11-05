@@ -1,4 +1,5 @@
 import json
+import time
 import pytest
 from server.store import Store
 from server.recovery import Recovery
@@ -79,3 +80,108 @@ def test_removal_rejects_changed_library_mount(tmp_path, monkeypatch):
     with pytest.raises(ValueError):
         Recovery(store).remove("saved")
     assert path.read_bytes() == b"original music" and not Recovery(store).list()
+
+
+def two_removed(tmp_path, monkeypatch):
+    """Two songs in Trash: "old" removed 40 days ago, "new" 5 days ago."""
+    store, root, path, track = setup(tmp_path, monkeypatch)
+    other = root / "Artist" / "Album" / "Other.mp3"
+    other.write_bytes(b"other music!")
+    second = {
+        **track,
+        "id": "other",
+        "title": "Other",
+        "track_number": 2,
+        "relative_path": "Artist/Album/Other.mp3",
+    }
+    (store.directory / "library-snapshot.json").write_text(
+        json.dumps({"tracks": [track, second]})
+    )
+    store.refresh_library()
+    recovery = Recovery(store)
+    old = recovery.remove("saved")
+    new = recovery.remove("other")
+    now = time.time()
+    for record, age in ((old, 40), (new, 5)):
+        record["removed_at"] = int(now - age * 86400)
+        recovery.save("removed:" + record["id"], record)
+    return store, root, recovery, old, new
+
+
+def test_purge_lists_exactly_what_it_would_delete(tmp_path, monkeypatch):
+    """#96 (owner choice): Trash was kept for good; the owner purges what
+    has been there longer than N days, from a list."""
+    store, root, recovery, old, new = two_removed(tmp_path, monkeypatch)
+    plan = recovery.purge_plan(30)
+    assert [(i["id"], i["title"], i["size_bytes"]) for i in plan["items"]] == [
+        (old["id"], "Song", len(b"original music"))
+    ]
+    assert plan["total_bytes"] == len(b"original music")
+    assert {i["id"] for i in recovery.purge_plan(1)["items"]} == {old["id"], new["id"]}
+
+
+def test_purge_deletes_only_the_listed_files_and_keeps_the_song_removed(
+    tmp_path, monkeypatch
+):
+    store, root, recovery, old, new = two_removed(tmp_path, monkeypatch)
+    keep = root / "Artist" / "Album" / "Kept.mp3"
+    keep.write_bytes(b"still in the library")
+    elsewhere = root / ".pig-music-trash" / "organisation" / "x" / "song.mp3"
+    elsewhere.parent.mkdir(parents=True)
+    elsewhere.write_bytes(b"tidy original")
+    plan = recovery.purge_plan(30)
+    assert recovery.purge(30, plan["fingerprint"]) == {"purged": 1, "kept": 0}
+    assert not (root / old["trash"]).exists()
+    assert not (root / ".pig-music-trash" / old["id"]).exists()
+    assert (root / new["trash"]).exists() and keep.exists() and elsewhere.exists()
+    record = store.read_document("removed:" + old["id"])
+    assert record["status"] == "removed" and record["purged_at"]
+    with pytest.raises(ValueError):
+        recovery.restore(old["id"])
+    # Still excluded: a purge never brings a removed song back.
+    result = store.submit_catalogue([{**old["track"], "status": "missing"}])
+    assert result["created"] == 0
+    assert recovery.purge_plan(30)["items"] == []
+
+
+def test_purge_refuses_a_changed_set(tmp_path, monkeypatch):
+    store, root, recovery, old, new = two_removed(tmp_path, monkeypatch)
+    plan = recovery.purge_plan(30)
+    new["removed_at"] = int(time.time() - 60 * 86400)
+    recovery.save("removed:" + new["id"], new)
+    with pytest.raises(ValueError):
+        recovery.purge(30, plan["fingerprint"])
+    with pytest.raises(ValueError):
+        recovery.purge(1, plan["fingerprint"])
+    assert (root / old["trash"]).exists() and (root / new["trash"]).exists()
+
+
+def test_purge_keeps_a_changed_file_and_never_leaves_trash(tmp_path, monkeypatch):
+    store, root, recovery, old, new = two_removed(tmp_path, monkeypatch)
+    # A record pointing outside its Trash folder is never listed.
+    library = root / "Artist" / "Album" / "Library.mp3"
+    library.write_bytes(b"library file")
+    new.update(trash="Artist/Album/Library.mp3", removed_at=0)
+    recovery.save("removed:" + new["id"], new)
+    trash = root / old["trash"]
+    trash.write_bytes(b"replaced content")  # Same name, other content.
+    plan = recovery.purge_plan(30)
+    assert [i["id"] for i in plan["items"]] == [old["id"]]
+    assert recovery.purge(30, plan["fingerprint"]) == {"purged": 0, "kept": 1}
+    assert trash.exists() and library.exists()
+
+
+def test_purge_never_follows_a_linked_trash_path(tmp_path, monkeypatch):
+    store, root, recovery, old, new = two_removed(tmp_path, monkeypatch)
+    trash = root / old["trash"]
+    outside = tmp_path / "outside.mp3"
+    outside.write_bytes(trash.read_bytes())
+    trash.unlink()
+    trash.symlink_to(outside)
+    assert recovery.purge_plan(30)["items"] == []
+    folder = root / ".pig-music-trash" / new["id"]
+    moved = tmp_path / "moved"
+    folder.rename(moved)
+    folder.symlink_to(moved, target_is_directory=True)
+    assert recovery.purge_plan(1)["items"] == []
+    assert outside.exists() and any(moved.rglob("*.mp3"))

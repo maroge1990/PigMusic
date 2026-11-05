@@ -14,7 +14,7 @@ PigMusic is a private household music-library manager with one container, one in
 - **Imports, playlists and favourites:** reviewed Apple XML playlist imports, ordered playlists and a favourites playlist.
 - **Mixes and radio:** private daily mixes per person and an endless personal radio that blend household files with discoveries prepared in a managed server cache.
 - **Playback everywhere:** web, iPhone/iPad and Apple Watch players, offline device downloads, and Watch music prepared by the paired phone. Experimental remote playback plays songs the household does not have, without adding them.
-- **Administration (web only):** library scan, album-edition tidying, Trash and recovery, export to the NAS, provider access, people and sessions, and diagnostics.
+- **Administration (web only):** library scan, album-edition tidying, Trash and recovery (Trash is emptied only by the owner: Removed music lists the songs in Trash longer than a chosen number of days, and deletes exactly that reviewed list; nothing is deleted automatically), export to the NAS, provider access, people and sessions, and diagnostics.
 
 ## Rules PigMusic keeps
 

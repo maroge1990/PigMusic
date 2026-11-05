@@ -935,3 +935,66 @@ test("Admin reads the server library only where it is shown", async ({
   await page.goto("/#/admin");
   await expect.poll(() => reads).toBe(1);
 });
+
+test("the owner reviews Trash and deletes exactly the listed songs for good", async ({
+  page,
+}) => {
+  const plan = {
+    days: 45,
+    items: [
+      {
+        id: "r1",
+        title: "Dreams",
+        artist: "Fleetwood Mac",
+        album: "Rumours",
+        removed_at: 1780000000,
+        size_bytes: 8_400_000,
+      },
+    ],
+    total_bytes: 8_400_000,
+    fingerprint: "abc",
+  };
+  let reviewed = "";
+  let purged: unknown = null;
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/admin/library/trash": (route) =>
+        route.fulfill({
+          json: purged
+            ? []
+            : [
+                {
+                  id: "r1",
+                  track: { title: "Dreams", artist: "Fleetwood Mac" },
+                  status: "removed",
+                },
+              ],
+        }),
+      "/v1/admin/library/trash/purge": (route) => {
+        if (route.request().method() === "POST") {
+          purged = route.request().postDataJSON();
+          return route.fulfill({ json: { purged: 1, kept: 0 } });
+        }
+        reviewed = new URL(route.request().url()).searchParams.get("days")!;
+        return route.fulfill({ json: plan });
+      },
+      "/v1/admin/library/organisation/history": (route) =>
+        route.fulfill({ json: [] }),
+      "/v1/admin/unassigned": (route) =>
+        route.fulfill({ json: { albums: [], next_offset: null } }),
+    },
+  });
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.goto("/#/admin/library");
+  const panel = page
+    .locator(".system-panel")
+    .filter({ has: page.getByRole("heading", { name: "Removed music" }) });
+  await panel.getByLabel("In Trash longer than (days)").fill("45");
+  await panel.getByRole("button", { name: "Review" }).click();
+  await expect(panel).toContainText("Fleetwood Mac · Rumours · removed");
+  expect(reviewed).toBe("45");
+  await panel.getByRole("button", { name: "Delete 1 for good · 8 MB" }).click();
+  await expect(panel).toContainText("No removed music.");
+  expect(purged).toEqual({ days: 45, fingerprint: "abc" });
+});
