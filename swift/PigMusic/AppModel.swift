@@ -717,6 +717,11 @@ enum PlayOrigin: Hashable {
     }
   }
 
+  /// A check for a multi-step operation: whether the account it started
+  /// under is still signed in (the generation it captured).
+  func isCurrent(_ stamp: Int) -> Bool { generation == stamp }
+  var currentGeneration: Int { generation }
+
   func performPersonal<T: Sendable>(
     _ operation: @Sendable (NativeService) async throws -> T
   ) async throws -> T {

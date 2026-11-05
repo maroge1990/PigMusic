@@ -28,16 +28,27 @@ public enum ShazamRequests {
   /// guessed, two Shazams of one recording asked once. Every song is
   /// resolved before anything is requested, so a failed lookup requests
   /// nothing.
-  public static func requestMissing(_ songs: [ShazamSong], source: any ShazamRequestSource)
+  /// `current` says whether the account that confirmed is still the one
+  /// signed in: it is asked after every lookup and right before each
+  /// request, so a sign-out (and another sign-in on the same server) while
+  /// lookups run never requests songs for someone who didn't confirm them.
+  public static func requestMissing(
+    _ songs: [ShazamSong], source: any ShazamRequestSource,
+    current: @Sendable () async -> Bool = { true }
+  )
     async throws -> ShazamRequestOutcome
   {
     var outcome = ShazamRequestOutcome()
     var tracks: [Track] = []
     var seen = Set<String>()
     for song in songs {
-      guard let appleId = song.appleId,
-        let resolved = try await source.resolveApple(kind: "song", appleId: appleId)
-      else {
+      guard let appleId = song.appleId else {
+        outcome.unmatched.append(song.shazamId)
+        continue
+      }
+      let resolved = try await source.resolveApple(kind: "song", appleId: appleId)
+      guard await current() else { throw CancellationError() }
+      guard let resolved else {
         outcome.unmatched.append(song.shazamId)
         continue
       }
@@ -45,6 +56,8 @@ public enum ShazamRequests {
       tracks.append(song.requestTrack(resolved))
     }
     for start in stride(from: 0, to: tracks.count, by: 500) {
+      try Task.checkCancellation()
+      guard await current() else { throw CancellationError() }
       let result = try await source.requestMusic(
         Array(tracks[start..<min(start + 500, tracks.count)]))
       outcome.created += result.created

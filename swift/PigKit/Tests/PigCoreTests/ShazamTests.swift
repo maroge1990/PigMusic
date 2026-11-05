@@ -160,3 +160,34 @@ private struct Server: ApplePlaylistStatusSource, ShazamRequestSource {
   let second = attempts.begin()
   #expect(attempts.isCurrent(second) && !attempts.isCurrent(first))
 }
+
+
+private actor Account {
+  var signedIn = true
+  func switchAccounts() { signedIn = false }
+}
+
+private struct SwitchingServer: ShazamRequestSource {
+  let calls: Calls
+  let account: Account
+  func resolveApple(kind: String, appleId: Int) async throws -> ResolvedApple? {
+    // The person signs out and someone else signs in while a lookup runs.
+    await account.switchAccounts()
+    return try await Server(calls: calls).resolveApple(kind: kind, appleId: appleId)
+  }
+  func requestMusic(_ tracks: [Track]) async throws -> AcquisitionResult {
+    try await Server(calls: calls).requestMusic(tracks)
+  }
+}
+
+@Test func anAccountChangeWhileLookingUpRequestsNothing() async throws {
+  let calls = Calls()
+  let account = Account()
+  await #expect(throws: CancellationError.self) {
+    _ = try await ShazamRequests.requestMissing(
+      [shazam("7", "Fix You", appleId: 15, album: "Live")],
+      source: SwitchingServer(calls: calls, account: account)
+    ) { await account.signedIn }
+  }
+  #expect(await calls.requested.isEmpty)
+}

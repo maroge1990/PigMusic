@@ -1338,8 +1338,11 @@ private struct ShazamInboxView: View {
     message = nil
     defer { requesting = false }
     do {
-      let outcome = try await model.performPersonal { service in
-        try await ShazamRequests.requestMissing(songs, source: service)
+      let stamp = model.currentGeneration
+      let outcome = try await model.performPersonal { [model] service in
+        try await ShazamRequests.requestMissing(songs, source: service) {
+          await model.isCurrent(stamp)
+        }
       }
       // Marked only when sent: an unmatched song stays missing.
       requested.formUnion(songs.map(\.shazamId).filter { !outcome.unmatched.contains($0) })
