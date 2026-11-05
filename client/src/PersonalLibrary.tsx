@@ -11,9 +11,7 @@ import { PageHeader } from "./PageHeader";
 import { PersonalQuality } from "./PersonalQuality";
 import { SearchPage } from "./SearchPage";
 import { Cover } from "./Cover";
-import { CollectionPages } from "./CollectionPages";
-import { SongRow } from "./SongRow";
-import { fromTrack, playlistSongs, songBody, type Song } from "./songs";
+import { fromTrack, playlistSongs, songBody } from "./songs";
 import { albumSummary, mergeAlbumTracks } from "./albumTracks";
 import { warmCovers, whenIdle } from "./prefetch";
 import { usePlayer } from "./Player";
@@ -25,6 +23,7 @@ import {
   type LibraryTab,
 } from "./LibraryCollections";
 import type { Playlist, PlaylistSummary } from "./libraryTypes";
+import { LibrarySongs } from "./LibrarySongs";
 import { go, type Route } from "./routes";
 import { OwnerAlbumTools, OwnerArtistTools } from "./OwnerTools";
 
@@ -374,94 +373,46 @@ export function PersonalLibrary({
     }
   }
   function songs(tracks: Track[], playlist?: Playlist) {
-    const albumArtist =
-      detail?.quality?.scope === "album" && tracks[0]?.album_artist;
-    const artistName = detail?.artist?.name;
-    const list: Song[] = playlist
-      ? playlistSongs(playlist.entries, detail?.cover)
-      : tracks.map((t) => fromTrack(t, detail?.cover));
     return (
-      <CollectionPages key={detail?.title || tab} items={list} label="Songs">
-        {(items) => (
-          <div className="song-list">
-            {items.map((song) => {
-              const i = list.indexOf(song);
-              const t = tracks[i];
-              const entry = playlist?.entries[i];
-              return (
-                <SongRow
-                  key={song.key}
-                  song={song}
-                  queue={list}
-                  index={i}
-                  numbered={!!albumArtist}
-                  onAlbum={!!albumArtist}
-                  onArtist={
-                    !!(albumArtist || artistName) &&
-                    t.artist.toLocaleLowerCase() ===
-                      String(albumArtist || artistName).toLocaleLowerCase()
-                  }
-                  onRemove={
-                    playlist || song.state !== "saved"
-                      ? undefined
-                      : () => void preview([t.id])
-                  }
-                  menu={
-                    playlist &&
-                    !playlist.favourites &&
-                    entry && (
-                      <>
-                        <button
-                          role="menuitem"
-                          disabled={entry.position === 0}
-                          onClick={() =>
-                            void action(async () => {
-                              await api(`/v1/playlists/${playlist.id}`, {
-                                method: "PATCH",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                  revision: playlist.revision,
-                                  order: playlist.entries
-                                    .map((e) => e.position)
-                                    .map((p) =>
-                                      p === entry.position
-                                        ? p - 1
-                                        : p === entry.position - 1
-                                          ? p + 1
-                                          : p,
-                                    ),
-                                }),
-                              });
-                              await openPlaylist(playlist.id);
-                            })
-                          }
-                        >
-                          <span>Move up</span>
-                        </button>
-                        <button
-                          role="menuitem"
-                          className="danger"
-                          onClick={() =>
-                            void action(async () => {
-                              await api(
-                                `/v1/playlists/${playlist.id}/songs/${entry.position}?revision=${playlist.revision}`,
-                                { method: "DELETE" },
-                              );
-                              await openPlaylist(playlist.id);
-                            })
-                          }
-                        >
-                          <span>Remove from playlist</span>
-                        </button>
-                      </>
-                    )
-                  }
-                />
-              );
-            })}
-          </div>
-        )}
-      </CollectionPages>
+      <LibrarySongs
+        key={detail?.title || tab}
+        tracks={tracks}
+        playlist={playlist}
+        cover={detail?.cover}
+        albumPage={detail?.quality?.scope === "album"}
+        artistName={detail?.artist?.name}
+        remove={(id) => void preview([id])}
+        moveUp={(playlist, entry) =>
+          void action(async () => {
+            await api(`/v1/playlists/${playlist.id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                revision: playlist.revision,
+                order: playlist.entries
+                  .map((e) => e.position)
+                  .map((p) =>
+                    p === entry.position
+                      ? p - 1
+                      : p === entry.position - 1
+                        ? p + 1
+                        : p,
+                  ),
+              }),
+            });
+            await openPlaylist(playlist.id);
+          })
+        }
+        removeFromPlaylist={(playlist, entry) =>
+          void action(async () => {
+            await api(
+              `/v1/playlists/${playlist.id}/songs/${entry.position}?revision=${playlist.revision}`,
+              { method: "DELETE" },
+            );
+            await openPlaylist(playlist.id);
+          })
+        }
+      />
     );
   }
   if (catalogue)
