@@ -204,3 +204,45 @@ private final class FakeSession: ShazamListeningSession, @unchecked Sendable {
 @Test func aTimeoutSaysTheSongCouldNotBeIdentified() {
   #expect(ShazamFailure.timedOut.message.hasPrefix("Couldn't identify the song"))
 }
+
+/// A managed session whose preparation finishes only when released.
+@MainActor private final class SlowPrepareSession: ShazamListeningSession {
+  private var waiting: CheckedContinuation<Void, Never>?
+  private(set) var asked = false
+  private(set) var prepared = false
+  func prepare() async {
+    await withCheckedContinuation { waiting = $0 }
+    prepared = true
+  }
+  func finishPreparing() {
+    waiting?.resume()
+    waiting = nil
+  }
+  func result() async -> FakeSession.Outcome {
+    asked = true
+    return .match
+  }
+  nonisolated func cancel() {}
+  var stateName: String { "idle" }
+}
+
+@MainActor @Test func aPreparationEndingAfterTheLimitNeverStartsRecording() async {
+  for closing in [false, true] {
+    let session = SlowPrepareSession()
+    let probe = Probe()
+    let task = Task { @MainActor in
+      await ShazamListening.listen(
+        session, audio: probe.hooks, limit: .milliseconds(closing ? 60_000 : 100),
+        log: probe.log)
+    }
+    if closing {
+      try? await Task.sleep(for: .milliseconds(50))
+      task.cancel()
+    }
+    _ = await task.value
+    session.finishPreparing()
+    while !session.prepared { await Task.yield() }
+    for _ in 0..<20 { await Task.yield() }
+    #expect(!session.asked)
+  }
+}

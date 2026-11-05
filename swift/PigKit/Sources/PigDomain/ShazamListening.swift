@@ -111,6 +111,12 @@ public protocol ListeningAudioSession: Sendable {
     let work = Task { @MainActor in
       log("prepare (state \(session.stateName))")
       await session.prepare()
+      // Preparation may end after the time limit or the screen closed:
+      // then the microphone must not start recording (Codex, #124).
+      guard !Task.isCancelled, !race.isFinished else {
+        log("prepared after listening ended")
+        return
+      }
       log("prepared (state \(session.stateName))")
       let outcome = await session.result()
       race.finish(.finished(outcome))
@@ -159,6 +165,7 @@ public protocol ListeningAudioSession: Sendable {
 @MainActor private final class ShazamRace<Outcome: Sendable> {
   private var end: ShazamListenEnd<Outcome>?
   private var waiter: CheckedContinuation<ShazamListenEnd<Outcome>, Never>?
+  var isFinished: Bool { end != nil }
 
   func finish(_ end: ShazamListenEnd<Outcome>) {
     guard self.end == nil else { return }
