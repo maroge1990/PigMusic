@@ -9,9 +9,11 @@ kept copy is as good), or replaces the kept copy (it is better: the file
 moves into the kept album's folder, retagged to it, and the kept copy goes to
 Trash). Songs only another edition has stay where they are, listed for
 review. An album split across editions, each song on one of them, is joined
-instead: an edition none of whose songs the kept album has, each filling a
-free place on the kept album's track list, moves into the kept album's folder,
-retagged to it with its own track numbers. Nothing changes until the owner applies an album from a plan whose
+instead: an edition none of whose songs the kept album has, each song the
+one the kept release's catalogue tracklist names at a place the kept album
+has free, moves into the kept album's folder, retagged to it with its own
+track numbers. Without that tracklist, or when it names other songs there,
+the edition stays for review. Nothing changes until the owner applies an album from a plan whose
 files are unchanged since it was made, and every step can be undone.
 """
 
@@ -24,7 +26,7 @@ import uuid
 from collections import defaultdict
 from pathlib import Path
 
-from .catalogue import cached_release
+from .catalogue import cached_release, mbid, release_tracks
 from .library import normalise, year_order
 from .lifecycle import coordinated
 from .matching import compatible, primary_artist, strip_edition
@@ -152,7 +154,9 @@ class Tidy:
                 }
         return found
 
-    def plan(self):
+    def plan(self, wanted=None):
+        """The review. Kept releases whose catalogue tracklist would decide a
+        join, and which this server has not read, are added to `wanted`."""
         files = self.files()
         groups = defaultdict(list)
         for album in self.store.library["albums"]:
@@ -167,13 +171,13 @@ class Tidy:
         items = []
         for editions in groups.values():
             if len(editions) > 1:
-                item = self.review(editions, files)
+                item = self.review(editions, files, wanted)
                 if item:
                     items.append(item)
         items.sort(key=lambda i: (i["artist"].casefold(), i["keep"]["title"]))
         return {"albums": items}
 
-    def review(self, editions, files):
+    def review(self, editions, files, wanted=None):
         editions.sort(
             key=lambda e: (-len(e[1]), year_order(e[0].get("year")) or 9999, e[0]["id"])
         )
@@ -207,8 +211,11 @@ class Tidy:
                     matches[found[track["id"]][0]["id"]].append((album, track))
                 else:
                     leftovers.append(summary(track, album))
-        join, joined = self.joins(keeper, kept, separate, files)
-        if not others and not joined:
+        join, joined, unsure, waiting = self.joins(
+            keeper, kept, separate, files, wanted
+        )
+        leftovers += unsure
+        if not others and not joined and not waiting:
             return None
         remove, replace = [], []
         for k in kept:
@@ -259,11 +266,15 @@ class Tidy:
         involved = [t["id"] for t in kept] + [
             t["id"]
             for album, tracks in editions[1:]
-            if album in others or album in joined
+            if album in others or album in joined or album in waiting
             for t in tracks
         ]
+        # The joins themselves too: a tracklist read since the review must
+        # not join songs the owner was not shown.
         fingerprint = hashlib.sha256(
-            json.dumps(sorted([i, files[i]] for i in involved), sort_keys=True).encode()
+            json.dumps(
+                [sorted([i, files[i]] for i in involved), join], sort_keys=True
+            ).encode()
         ).hexdigest()
         return {
             "id": keeper["id"],
@@ -283,7 +294,7 @@ class Tidy:
                         [t for t in a["tracks"] if t.get("available") is not False]
                     ),
                 }
-                for a in others + joined
+                for a in others + joined + waiting
             ],
             "remove": remove,
             "replace": replace,
@@ -300,65 +311,75 @@ class Tidy:
         }
         return folders.pop() if len(folders) == 1 else None
 
-    def joins(self, keeper, kept, separate, files):
-        """The editions whose songs fill free places on the kept album's track
-        list: every song with a track number, on a disc and number the kept
-        album has free and its track list covers (the catalogue's tracklist
-        for its release when this server has read it, else the highest
-        number on that disc the kept album has). One song that does not fit
-        leaves its whole edition alone: never a guess."""
+    def tracklist(self, keeper):
+        """{(disc, track): catalogue track} of the kept album's release, from
+        the catalogue answer this server has read; None when it has none."""
+        try:
+            release = mbid(keeper.get("musicbrainz_release_id") or "")
+        except ValueError:
+            return None
+        data = cached_release(self.store, release)
+        if not data or not data.get("media"):
+            return None
+        return {(t["disc_number"], t["track_number"]): t for t in release_tracks(data)}
+
+    def joins(self, keeper, kept, separate, files, wanted=None):
+        """The editions whose songs are the other half of the kept album:
+        every song has a track number free on the kept album, and the kept
+        release's catalogue tracklist names that very song (`compatible`)
+        there. An edition that fits the free places but cannot be confirmed
+        stays for review with the reason; one that does not fit them (taken
+        or missing track numbers) is another album and is left alone. Never
+        a guess."""
+        none = [], [], [], []
         if not separate or self.folder(kept, files) is None:
-            return [], []
-        release = keeper.get("musicbrainz_release_id")
-        release = cached_release(self.store, release) if release else None
-        listed = (
-            {
-                (medium.get("position", 1), track.get("position", 0))
-                for medium in release.get("media") or []
-                for track in medium.get("tracks") or []
-            }
-            if release
-            else None
-        )
-        last = defaultdict(int)
-        for k in kept:
-            if position(k):
-                disc, number = position(k)
-                last[disc] = max(last[disc], number)
+            return none
+        listed = self.tracklist(keeper)
         taken = {position(k) for k in kept}
-        join, joined = [], []
+        join, joined, unsure, waiting = [], [], [], []
         for album, tracks in separate:
-            rows, places = [], set()
-            for track in tracks:
-                place = position(track)
-                known = files[track["id"]]
-                if (
-                    not place
-                    or place in taken
-                    or place in places
-                    or not (
-                        place in listed
-                        if listed is not None
-                        else place[1] <= last[place[0]]
-                    )
-                    or not known["nas"]
-                    or Path(known["path"]).suffix.lower() not in TAG_SUFFIXES
-                ):
-                    break
-                places.add(place)
-                rows.append(
-                    summary(track, album)
+            places = [position(t) for t in tracks]
+            if (
+                None in places
+                or len(set(places)) < len(places)
+                or set(places) & taken
+                or not all(
+                    files[t["id"]]["nas"]
+                    and Path(files[t["id"]]["path"]).suffix.lower() in TAG_SUFFIXES
+                    for t in tracks
+                )
+            ):
+                continue
+            if listed is None:
+                reason = (
+                    "track list not known yet"
+                    if keeper.get("musicbrainz_release_id")
+                    else "the kept album's release is not known"
+                )
+                if keeper.get("musicbrainz_release_id") and wanted is not None:
+                    wanted.add(keeper["musicbrainz_release_id"])
+            elif all(
+                place in listed
+                and compatible({**t, "album": keeper["title"]}, listed[place])
+                for t, place in zip(tracks, places)
+            ):
+                taken |= set(places)
+                joined.append(album)
+                join += [
+                    summary(t, album)
                     | {
                         "album_id": album["id"],
                         "to": {"track_number": place[1], "disc_number": place[0]},
                     }
-                )
+                    for t, place in zip(tracks, places)
+                ]
+                continue
             else:
-                taken |= places
-                join += rows
-                joined.append(album)
+                reason = "not on the kept album's track list"
+            waiting.append(album)
+            unsure += [summary(t, album) | {"reason": reason} for t in tracks]
         join.sort(key=lambda r: (r["to"]["disc_number"], r["to"]["track_number"]))
-        return join, joined
+        return join, joined, unsure, waiting
 
     def unchanged(self, files, ids):
         """Every file still as PigMusic last saw it (else rescan first)."""

@@ -55,6 +55,7 @@ from .downloader import Downloader
 from .providers.runtime import Runtime as SourceRuntime
 from .routes.download_sources import download_sources_router
 from .catalogue import (
+    RELEASE_INC,
     Catalogue,
     mbid,
     release_tracks,
@@ -88,6 +89,8 @@ from .recovery import Recovery
 from .organisation import Organisation
 
 ROOT = Path(__file__).resolve().parent.parent
+# Kept releases whose tracklist one Album editions review reads (#120).
+TIDY_TRACKLISTS = 20
 
 
 def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
@@ -575,7 +578,20 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
 
     @app.get("/api/v1/admin/library/tidy")
     async def tidy_plan():
-        plan = await asyncio.to_thread(tidy.plan)
+        wanted = set()
+        plan = await asyncio.to_thread(tidy.plan, wanted)
+        if wanted:
+            # A join needs the kept release's tracklist: read the ones this
+            # server lacks (a bounded few, paced and cached like any catalogue
+            # read), then review again. One that fails stays "not known yet".
+            for release in sorted(wanted)[:TIDY_TRACKLISTS]:
+                try:
+                    await music_catalogue.get(
+                        app.state.http, "release/" + mbid(release), inc=RELEASE_INC
+                    )
+                except (httpx.HTTPError, ValueError, KeyError):
+                    pass
+            plan = await asyncio.to_thread(tidy.plan)
         history = await asyncio.to_thread(tidy.history)
         return {
             **plan,

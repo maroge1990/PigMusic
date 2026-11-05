@@ -33,12 +33,14 @@ def song(title, album, number, codec="mp3", bitrate=320, **extra):
     }
 
 
-def planned(tmp_path, tracks, monkeypatch):
+def planned(tmp_path, tracks, monkeypatch, releases=()):
     monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(tmp_path / "music"))
     data = tmp_path / "data"
     data.mkdir()
     (data / "library-snapshot.json").write_text(json.dumps({"tracks": tracks}))
     store = Store(data)
+    for release in releases:
+        remember(store, release)
     recovery = Recovery(store)
     return Tidy(store, recovery, Organisation(store, recovery)).plan()["albums"]
 
@@ -816,6 +818,10 @@ SPLITS = {
 }
 
 
+def release_id(year):
+    return f"00000000-0000-0000-0000-00000000{year}"
+
+
 def blink(title, album, number, year, **extra):
     return song(
         title,
@@ -825,7 +831,7 @@ def blink(title, album, number, year, **extra):
             "artist": "blink-182",
             "album_artist": "blink-182",
             "year": year,
-            "musicbrainz_release_id": f"release-{year}",
+            "musicbrainz_release_id": release_id(year),
             "id": f"{year}/{title}",
             "relative_path": f"blink-182/{album} ({year})/{number:02} {title}.mp3",
         }
@@ -841,14 +847,53 @@ def split(shape):
     ]
 
 
+def tracklist(album, year, titles, recordings=None):
+    """A release as the catalogue answers it: these titles in order."""
+    return {
+        "id": release_id(year),
+        "title": album,
+        "artist-credit": [{"name": "blink-182"}],
+        "media": [
+            {
+                "position": 1,
+                "tracks": [
+                    {
+                        "id": f"{year}-{n}",
+                        "position": n,
+                        "title": title,
+                        "length": 3000,
+                        "recording": {"id": (recordings or {}).get(n)},
+                    }
+                    for n, title in enumerate(titles, 1)
+                ],
+            }
+        ],
+    }
+
+
+def reissue(shape):
+    album, titles, _, _, year = SPLITS[shape]
+    return tracklist(album, year, titles)
+
+
+def remember(store, release):
+    """The catalogue answer, as this server stores it once read."""
+    from server.catalogue import RELEASE_INC
+
+    store.write_document(
+        "catalogue:release/" + release["id"] + repr([("inc", RELEASE_INC)]),
+        {"time": 0, "data": release},
+    )
+
+
 @pytest.mark.parametrize("shape", SPLITS)
 def test_an_album_split_across_two_editions_is_offered_as_a_join(
     tmp_path, monkeypatch, shape
 ):
-    album, titles, original, numbers, reissue = SPLITS[shape]
-    (item,) = planned(tmp_path, split(shape), monkeypatch)
+    album, titles, original, numbers, kept = SPLITS[shape]
+    (item,) = planned(tmp_path, split(shape), monkeypatch, [reissue(shape)])
     assert (item["keep"]["year"], item["keep"]["songs"]) == (
-        reissue,
+        kept,
         len(titles) - len(numbers),
     )
     assert [(e["title"], e["year"]) for e in item["editions"]] == [(album, original)]
@@ -858,17 +903,69 @@ def test_an_album_split_across_two_editions_is_offered_as_a_join(
     ]
 
 
+def test_without_the_kept_tracklist_a_split_album_waits(tmp_path, monkeypatch):
+    (item,) = planned(tmp_path, split("dude ranch"), monkeypatch)
+    assert item["join"] == []
+    assert [(r["title"], r["reason"]) for r in item["leftovers"]] == [
+        ("Dammit", "track list not known yet"),
+        ("Josie", "track list not known yet"),
+    ]
+
+
+def test_wanted_names_the_tracklist_a_join_needs(tmp_path, monkeypatch):
+    planned(tmp_path, split("dude ranch"), monkeypatch)
+    store = Store(tmp_path / "data")
+    recovery = Recovery(store)
+    tidy = Tidy(store, recovery, Organisation(store, recovery))
+    wanted = set()
+    tidy.plan(wanted)
+    assert wanted == {release_id(2008)}
+    remember(store, reissue("dude ranch"))
+    wanted = set()
+    (item,) = tidy.plan(wanted)["albums"]
+    assert wanted == set() and len(item["join"]) == 2
+
+
+def test_an_unrelated_song_filling_a_hole_is_not_joined(tmp_path, monkeypatch):
+    tracks = split("dude ranch")
+    # Track 3 of the other edition is not Dammit: the tracklist says so.
+    tracks[2] = blink("Something Else", "Dude Ranch", 3, 1997)
+    (item,) = planned(tmp_path, tracks, monkeypatch, [reissue("dude ranch")])
+    assert item["join"] == []
+    assert {r["reason"] for r in item["leftovers"]} == {
+        "not on the kept album's track list"
+    }
+
+
+def test_a_tracklist_naming_another_recording_blocks_the_join(tmp_path, monkeypatch):
+    tracks = split("dude ranch")
+    tracks[2] |= {"musicbrainz_recording_id": "recording-a"}
+    release = tracklist("Dude Ranch", 2008, DUDE_RANCH, recordings={3: "recording-b"})
+    (item,) = planned(tmp_path, tracks, monkeypatch, [release])
+    assert item["join"] == []
+
+
+def test_a_reordered_edition_is_not_joined(tmp_path, monkeypatch):
+    tracks = split("dude ranch")
+    # Both songs are on the kept release, but each at the other's place.
+    tracks[2] |= {"track_number": 11}
+    tracks[10] |= {"track_number": 3}
+    (item,) = planned(tmp_path, tracks, monkeypatch, [reissue("dude ranch")])
+    assert item["join"] == []
+    assert len(item["leftovers"]) == 2
+
+
 def test_a_join_never_takes_a_kept_track_number(tmp_path, monkeypatch):
     tracks = split("dude ranch")
     # "Josie" also claims track 4, which the kept release has.
     tracks[10] |= {"track_number": 4}
-    assert planned(tmp_path, tracks, monkeypatch) == []
+    assert planned(tmp_path, tracks, monkeypatch, [reissue("dude ranch")]) == []
 
 
 def test_a_join_needs_every_songs_track_number(tmp_path, monkeypatch):
     tracks = split("dude ranch")
     tracks[10] |= {"track_number": 0}
-    assert planned(tmp_path, tracks, monkeypatch) == []
+    assert planned(tmp_path, tracks, monkeypatch, [reissue("dude ranch")]) == []
 
 
 def test_another_album_sharing_only_the_title_is_not_joined(tmp_path, monkeypatch):
@@ -876,35 +973,55 @@ def test_another_album_sharing_only_the_title_is_not_joined(tmp_path, monkeypatc
         blink("Something Else", "Dude Ranch", 1, 1997),
         blink("Another Song", "Dude Ranch", 2, 1997),
     ]
-    assert planned(tmp_path, tracks, monkeypatch) == []
+    assert planned(tmp_path, tracks, monkeypatch, [reissue("dude ranch")]) == []
 
 
-def test_a_join_past_the_kept_track_list_needs_the_catalogue(tmp_path, monkeypatch):
-    from server.catalogue import RELEASE_INC
-
-    # The original has the last two songs; nothing on the reissue shows the
-    # album runs to 15 tracks unless the catalogue knows its tracklist.
+def test_a_join_past_the_kept_track_list_is_not_offered(tmp_path, monkeypatch):
+    # The original has the last two songs; the kept release's tracklist
+    # must name them there.
     tracks = [
         blink(t, "Dude Ranch", n, 1997 if n > 13 else 2008)
         for n, t in enumerate(DUDE_RANCH, 1)
     ]
-    assert planned(tmp_path, tracks, monkeypatch) == []
-    key = "catalogue:release/release-2008" + repr([("inc", RELEASE_INC)])
-    positions = [{"id": str(n), "position": n} for n in range(1, 16)]
-    release = {
-        "id": "release-2008",
-        "title": "Dude Ranch",
-        "media": [{"position": 1, "tracks": positions}],
-    }
+    (item,) = planned(tmp_path, tracks, monkeypatch, [reissue("dude ranch")])
+    assert [r["to"]["track_number"] for r in item["join"]] == [14, 15]
     store = Store(tmp_path / "data")
-    store.write_document(key, {"time": 0, "data": release})
+    remember(store, tracklist("Dude Ranch", 2008, DUDE_RANCH[:14]))
     recovery = Recovery(store)
     (item,) = Tidy(store, recovery, Organisation(store, recovery)).plan()["albums"]
-    assert [r["to"]["track_number"] for r in item["join"]] == [14, 15]
-    # A release with a shorter tracklist does not cover them.
-    release["media"][0]["tracks"] = positions[:14]
-    store.write_document(key, {"time": 0, "data": release})
-    assert Tidy(store, recovery, Organisation(store, recovery)).plan()["albums"] == []
+    assert item["join"] == []
+    assert {r["reason"] for r in item["leftovers"]} == {
+        "not on the kept album's track list"
+    }
+
+
+def test_the_review_reads_the_tracklist_a_join_needs(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from server.catalogue import Catalogue
+    from test_security import protected
+    from test_ui_contract import sign_in
+
+    (tmp_path / "library-snapshot.json").write_text(
+        json.dumps({"tracks": split("dude ranch")})
+    )
+    app, _ = protected(tmp_path, monkeypatch)
+    read = []
+
+    async def get(self, client, path, **params):
+        read.append(path)
+        remember(self.store, reissue("dude ranch"))
+        return reissue("dude ranch")
+
+    monkeypatch.setattr(Catalogue, "get", get)
+    with TestClient(app, base_url="https://private.ts.net") as client:
+        sign_in(client, "mark")
+        (item,) = client.get("/api/v1/admin/library/tidy").json()["albums"]
+        assert read == ["release/" + release_id(2008)]
+        assert [r["title"] for r in item["join"]] == ["Dammit", "Josie"]
+        # Read once: the next review uses the stored answer.
+        client.get("/api/v1/admin/library/tidy")
+        assert len(read) == 1
 
 
 def split_library(tmp_path, monkeypatch, shape):
@@ -934,6 +1051,7 @@ def split_library(tmp_path, monkeypatch, shape):
     member = auth.activate(code["code"], "tidy fixture password", "f")["id"]
     original = SPLITS[shape][2]
     store.user_libraries.add(member, [t["id"] for t in tracks if t["year"] == original])
+    remember(store, reissue(shape))
     recovery = Recovery(store)
     return Tidy(store, recovery, Organisation(store, recovery)), root, member
 
@@ -978,7 +1096,7 @@ def test_apply_joins_the_split_album_and_undo_restores_it(tmp_path, monkeypatch,
         tags = FLAC(moved)
         assert tags["TITLE"] == [titles[n - 1]]
         assert tags["ALBUM"] == [album] and tags["DATE"] == [str(reissue)]
-        assert tags["MUSICBRAINZ_ALBUMID"] == [f"release-{reissue}"]
+        assert tags["MUSICBRAINZ_ALBUMID"] == [release_id(reissue)]
         assert inspect_file(moved, "x")[0]["track_number"] == n
     assert not list((root / "blink-182" / f"{album} ({original})").glob("*.flac"))
     # Nothing went to Trash, and the member still has the same songs.
