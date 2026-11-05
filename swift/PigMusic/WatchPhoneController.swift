@@ -581,32 +581,24 @@ import SwiftUI
     }
     // Manifest files stay a few versions longer than their transfers, so a
     // transfer the system is still finishing never loses its file.
-    let retained = Set(outstanding.map(\.context.revision))
-    for file
-      in (try? FileManager.default.contentsOfDirectory(
-        at: folder, includingPropertiesForKeys: nil)) ?? []
-    where file.lastPathComponent.hasPrefix("watch-manifest-") && file != manifestURL {
-      let revision = Int64(
-        file.deletingPathExtension().lastPathComponent.replacingOccurrences(
-          of: "watch-manifest-", with: ""))
-      if let revision, !retained.contains(revision), revision < context.revision - 3 {
-        try? FileManager.default.removeItem(at: file)
-      }
-    }
+    let stale = WatchDelivery.staleManifests(
+      (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil))
+        ?? [], current: manifestURL, revision: context.revision,
+      retained: Set(outstanding.map(\.context.revision)))
+    for file in stale { try? FileManager.default.removeItem(at: file) }
     // Do not send audio until the Watch has applied this manifest and acknowledged its budget.
     guard let receipt, receipt.context == context, receipt.manifestApplied else { return }
-    let inFlight = Set(outstanding.compactMap { $0.file.map { "\($0.songId):\($0.checksum)" } })
-    var remaining = receipt.budgetBytes - receipt.usedBytes
-    for song in songs where receipt.ready[song.id] != song.checksum {
-      guard song.bytes <= remaining else {
-        let full = "Watch storage budget is full. Remove Watch songs before adding more."
-        if message != full { message = full }
-        continue
-      }
-      remaining -= song.bytes
-      let identity = "\(song.id):\(song.checksum)"
-      guard !inFlight.contains(identity), due("audio:" + identity), let file = files[song.id]
-      else { continue }
+    let audio = WatchDelivery.audio(
+      songs: songs, receipt: receipt,
+      inFlight: Set(outstanding.compactMap { $0.file.map { "\($0.songId):\($0.checksum)" } }),
+      hasFile: { files[$0] != nil }, due: due)
+    if audio.budgetFull {
+      let full = "Watch storage budget is full. Remove Watch songs before adding more."
+      if message != full { message = full }
+    }
+    for song in audio.send {
+      guard let file = files[song.id] else { continue }
+      let identity = WatchDelivery.identity(song)
       let ticket = CompanionFile(context: context, songId: song.id, checksum: song.checksum)
       let envelope = CompanionEnvelope(kind: "audio", context: context, file: ticket)
       if let data = try? JSONEncoder().encode(envelope) {
