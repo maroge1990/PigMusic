@@ -17,9 +17,41 @@ public struct ApplePlaylistSearch: Sendable {
     self.authorize = authorize
     self.find = search
   }
-  public func playlists(query: String) async -> [ApplePlaylist] {
-    guard await authorize() else { return [] }
-    return (try? await find(query)) ?? []
+  public func playlists(query: String) async -> ApplePlaylistAnswer {
+    guard await authorize() else { return .notAuthorized }
+    do {
+      return .found(try await find(query))
+    } catch {
+      if error is CancellationError || Task.isCancelled { return .cancelled }
+      let error = error as NSError
+      return .failed("\(error.domain) \(error.code)")
+    }
+  }
+}
+
+/// One Apple Music playlist search. Only playlists found are kept for the
+/// words: none, a refusal or a failure is asked again next time (#125: a
+/// failed or cancelled answer hid "rock"'s playlists for minutes).
+public enum ApplePlaylistAnswer: Sendable, Hashable {
+  case found([ApplePlaylist])
+  case notAuthorized
+  case failed(String)
+  case cancelled
+  public var playlists: [ApplePlaylist] {
+    if case .found(let playlists) = self { playlists } else { [] }
+  }
+  /// Worth reusing for the same words.
+  public var keep: Bool { !playlists.isEmpty }
+  /// For the diagnostics: never the words themselves, only their length.
+  public func diagnostics(termLength: Int) -> String {
+    let outcome =
+      switch self {
+      case .found(let playlists): "\(playlists.count) found"
+      case .notAuthorized: "Apple Music not allowed"
+      case .failed(let error): "failed: \(error)"
+      case .cancelled: "cancelled"
+      }
+    return "apple playlists, \(termLength) characters: \(outcome)"
   }
 }
 

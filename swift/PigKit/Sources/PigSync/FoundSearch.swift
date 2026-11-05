@@ -65,7 +65,7 @@ extension NativeService: FoundSearchSource {}
     case results(FoundResults)
     case online(OnlineResults)
     case catalogue([CatalogueArtist])
-    case applePlaylists([ApplePlaylist])
+    case applePlaylists(ApplePlaylistAnswer)
     case failure(String, any Error)
   }
 
@@ -127,6 +127,12 @@ extension NativeService: FoundSearchSource {}
         group.addTask { .applePlaylists(await playlistSearch.playlists(query: query)) }
       }
       for await delivery in group {
+        if case .applePlaylists(let answer) = delivery {
+          DiagnosticsLog.shared.record(
+            "search",
+            answer.diagnostics(termLength: query.count)
+              + (stamp == generation ? "" : " (a newer search is showing)"))
+        }
         guard stamp == generation else { continue }
         accept(delivery, key: key, now: now)
         // Without the ranked results the earlier search takes over: it must
@@ -151,8 +157,9 @@ extension NativeService: FoundSearchSource {}
       catalogue = value
       answer.catalogue = value
     case .applePlaylists(let value):
-      applePlaylists = value
-      answer.applePlaylists = value
+      applePlaylists = value.playlists
+      // None found, a refusal or a failure is asked again next time (#125).
+      if value.keep { answer.applePlaylists = value.playlists }
     case .failure(let lane, let failure):
       if failure is SearchUnsupported {
         unsupported = true

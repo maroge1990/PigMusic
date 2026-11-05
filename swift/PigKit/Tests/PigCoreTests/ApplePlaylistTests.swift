@@ -262,3 +262,134 @@ private struct FakeImport: AppleImportSource {
   }
   #expect(await imports.sent.count == 2)
 }
+
+// #125: "rock" showed Apple playlists, later none. A failed, cancelled or
+// empty MusicKit answer was kept for the words for five minutes.
+
+/// MusicKit's search: each call takes the next answer; nil throws.
+private actor Answers {
+  private var answers: [[ApplePlaylist]?]
+  private(set) var calls = 0
+  init(_ answers: [[ApplePlaylist]?]) { self.answers = answers }
+  func next() throws -> [ApplePlaylist] {
+    calls += 1
+    struct Unavailable: Error {}
+    guard !answers.isEmpty, let answer = answers.removeFirst() else { throw Unavailable() }
+    return answer
+  }
+}
+
+@MainActor @Test func aFailedAppleAnswerIsAskedAgainForTheSameWords() async {
+  let answers = Answers([nil, [chill]])
+  let search = FoundSearch(
+    source: ServerOnly(),
+    applePlaylists: ApplePlaylistSearch(
+      authorize: { true }, search: { _ in try await answers.next() }))
+  await search.search("rock")
+  #expect(search.applePlaylists.isEmpty)
+  await search.search("rock")
+  #expect(search.applePlaylists == [chill])
+  #expect(await answers.calls == 2)
+  // Found playlists are kept for the words.
+  await search.search("rock")
+  #expect(await answers.calls == 2)
+}
+
+@MainActor @Test func anEmptyOrCancelledAppleAnswerIsNeverKept() async {
+  let answers = Answers([[], [chill]])
+  let search = FoundSearch(
+    source: ServerOnly(),
+    applePlaylists: ApplePlaylistSearch(
+      authorize: { true }, search: { _ in try await answers.next() }))
+  await search.search("rock")
+  #expect(search.applePlaylists.isEmpty)
+  await search.search("rock")
+  #expect(search.applePlaylists == [chill])
+
+  // Leaving search mid-answer cancels MusicKit's request.
+  let cancelling = FoundSearch(
+    source: ServerOnly(),
+    applePlaylists: ApplePlaylistSearch(
+      authorize: { true },
+      search: { _ in
+        if await answers.calls < 3 {
+          _ = try? await answers.next()
+          throw CancellationError()
+        }
+        return [chill]
+      }))
+  await cancelling.search("rock")
+  #expect(cancelling.applePlaylists.isEmpty)
+  await cancelling.search("rock")
+  #expect(cancelling.applePlaylists == [chill])
+}
+
+@MainActor @Test func aRefusalIsAskedAgainOnceAppleMusicIsAllowed() async {
+  let allowed = Allowed()
+  let search = FoundSearch(
+    source: ServerOnly(),
+    applePlaylists: ApplePlaylistSearch(
+      authorize: { await allowed.value }, search: { _ in [chill] }))
+  await search.search("rock")
+  #expect(search.applePlaylists.isEmpty)
+  await allowed.allow()
+  await search.search("rock")
+  #expect(search.applePlaylists == [chill])
+}
+
+private actor Allowed {
+  var value = false
+  func allow() { value = true }
+}
+
+/// Holds "rock"'s MusicKit answer until released.
+private actor Gate {
+  private var waiting: CheckedContinuation<Void, Never>?
+  private var open = false
+  func wait() async {
+    if open { return }
+    await withCheckedContinuation { waiting = $0 }
+  }
+  func release() {
+    open = true
+    waiting?.resume()
+    waiting = nil
+  }
+}
+
+@MainActor @Test func aLateAppleAnswerForEarlierWordsNeverReplacesTheCurrentOnes() async {
+  let gate = Gate()
+  let calls = Calls()
+  let rock = ApplePlaylist(id: "pl.rock", name: "Rock Hits", curator: "Apple Music")
+  let pop = ApplePlaylist(id: "pl.pop", name: "Pop Hits", curator: "Apple Music")
+  let search = FoundSearch(
+    source: ServerOnly(),
+    applePlaylists: ApplePlaylistSearch(
+      authorize: { true },
+      search: { query in
+        await calls.add(query)
+        if query == "rock" {
+          await gate.wait()
+          return [rock]
+        }
+        return [pop]
+      }))
+  let slow = Task { @MainActor in await search.search("rock") }
+  while await calls.queries.isEmpty { await Task.yield() }
+  await search.search("pop")
+  #expect(search.applePlaylists == [pop])
+  await gate.release()
+  await slow.value
+  #expect(search.query == "pop")
+  #expect(search.applePlaylists == [pop])
+  // "rock"'s late answer wasn't kept for it either: it is asked again.
+  await search.search("rock")
+  #expect(search.applePlaylists == [rock])
+  #expect(await calls.queries == ["rock", "pop", "rock"])
+}
+
+@Test func theAppleLaneIsLoggedWithoutTheWords() {
+  let line = ApplePlaylistAnswer.failed("MKErrorDomain 5").diagnostics(termLength: 4)
+  #expect(line == "apple playlists, 4 characters: failed: MKErrorDomain 5")
+  #expect(ApplePlaylistAnswer.found([chill]).diagnostics(termLength: 4).hasSuffix("1 found"))
+}
