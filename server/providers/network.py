@@ -187,6 +187,9 @@ def transfer(url, hosts, path, context):
                         if size > context.max_bytes:
                             raise ProviderError("limit")
                         output.write(chunk)
+                        # Progress means the bytes are in the file: a relay serves
+                        # them while the rest arrives (#23).
+                        output.flush()
                         context.progress(size, expected)
                 if not size or expected and size != expected:
                     raise ProviderError("invalid_response")

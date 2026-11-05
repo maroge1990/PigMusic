@@ -1,6 +1,7 @@
 """Optional remote listening; matching never removes version descriptions."""
 
 import asyncio
+import contextvars
 import hashlib
 import json
 import logging
@@ -12,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
+from starlette.responses import Response, StreamingResponse
 
 from .request_timing import add_phase, phase
 from .library import normalise
@@ -46,6 +48,14 @@ FAILURE_SECONDS = 2 * 60
 SEARCH_SECONDS = 8
 SOURCE_FAILURE_LIMIT = 2
 SOURCE_COOLDOWN_SECONDS = 120
+# A relayed MP3 plays while it arrives once its first bytes prove its length
+# (#23). The head must do that within this many bytes (cover art included);
+# a listener waits at most this long for bytes that have not arrived yet.
+HEAD_BYTES = 1_000_000
+WAIT_SECONDS = 20
+CHUNK_BYTES = 65536
+# The transfer a relay download may serve while it arrives (set per task).
+LIVE = contextvars.ContextVar("pig_music_relay_live", default=None)
 
 
 async def shared_result(task, timeout=None):
@@ -76,6 +86,9 @@ class RemoteAudio:
         self.relay_search = relay_search
         self.relayed = {}
         self.inflight = {}
+        # Event-loop owned: {name: RelayTransfer} still arriving and already
+        # playing; another play of the recording joins it.
+        self.transfers = {}
         # Event-loop owned: {(source, operation): (failure streak, cooldown expiry)}.
         # A successful search proves nothing about transfer access, and a
         # successful transfer must not reset another search's newer failures.
@@ -152,7 +165,11 @@ class RemoteAudio:
         if "url" in found:
             return found
         token = secrets.token_urlsafe(24)
-        self.relayed[token] = (time.monotonic() + TOKEN_SECONDS, found["path"], user_id)
+        self.relayed[token] = (
+            time.monotonic() + TOKEN_SECONDS,
+            found.get("transfer") or found["path"],
+            user_id,
+        )
         return {"relay": token, "source": found["source"]}
 
     def prepare(self, client, tracks):
@@ -222,6 +239,10 @@ class RemoteAudio:
                 found = await asyncio.to_thread(self.cached, track)
             if found:
                 return {"path": found[0], "source": found[1]}
+            live = self.transfers.get(self.name(track))
+            if live is not None and live.error is None and not live.complete:
+                add_phase("relay-joined", 0)
+                return {"transfer": live, "source": live.source}
         began = time.monotonic()
         # Where the time went, for the server log: playback waits for all of it.
         steps = []
@@ -254,7 +275,10 @@ class RemoteAudio:
         # remembered long); a timeout, a provider error or a failed transfer
         # leaves it uncertain (503, remembered briefly).
         uncertain = isinstance(failure, (httpx.HTTPError, TimeoutError, ProviderError))
-        async with self.relay_slots:
+        # A transfer that plays while it arrives keeps its slot until it ends.
+        await self.relay_slots.acquire()
+        handed_off = False
+        try:
             # Every source searches at once; the best in priority order wins
             # and only it is transferred.
             searched = time.monotonic()
@@ -284,10 +308,32 @@ class RemoteAudio:
                     continue
                 step(source, "found", searched)
                 fetched = time.monotonic()
+                live = RelayTransfer(source)
+                context = LIVE.set(live)
                 try:
-                    path = await asyncio.to_thread(
-                        self.download, source, track, candidate
+                    transfer = asyncio.ensure_future(
+                        asyncio.to_thread(self.download, source, track, candidate)
                     )
+                finally:
+                    LIVE.reset(context)
+                transfer.add_done_callback(lambda t: t.cancelled() or t.exception())
+                await asyncio.wait(
+                    {transfer, live.ready}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if not transfer.done():
+                    # Its head proved the recording and its length: it plays
+                    # while the rest arrives (#23).
+                    step(source, "streaming", fetched)
+                    self.timing(track, source, began, steps)
+                    handed_off = True
+                    name = self.name(track)
+                    self.transfers[name] = live
+                    transfer.add_done_callback(
+                        lambda t: self.relay_finished(t, live, track, name, fetched)
+                    )
+                    return {"transfer": live, "source": source}
+                try:
+                    path = transfer.result()
                 except Exception as exc:
                     self.source_failed(source, "transfer", exc)
                     step(source, "transfer failed", fetched)
@@ -297,10 +343,47 @@ class RemoteAudio:
                 self.source_answered(source, "transfer", fetched)
                 self.timing(track, source, began, steps)
                 return {"path": path, "source": source}
+        finally:
+            if not handed_off:
+                self.relay_slots.release()
         self.timing(track, None, began, steps)
         if uncertain:
             raise TimeoutError("A source did not answer. Try again shortly.")
         raise ValueError("No source has this recording.")
+
+    def relay_finished(self, task, live, track, name, fetched):
+        """A transfer that was already playing ended: its health counts as
+        any transfer's, and its listeners learn how it ended."""
+        self.relay_slots.release()
+        if self.transfers.get(name) is live:
+            del self.transfers[name]
+        seconds = time.monotonic() - fetched
+        exc = (
+            ConnectionError("The relay transfer stopped.")
+            if task.cancelled()
+            else task.exception()
+        )
+        if exc is None:
+            self.source_answered(live.source, "transfer", fetched)
+            live.finish(task.result())
+            log.info(
+                "Remote relay: %s - %s from %s arrived in %.1f s",
+                track.get("artist"),
+                track.get("title"),
+                live.source,
+                seconds,
+            )
+            return
+        self.source_failed(live.source, "transfer", exc)
+        live.fail(exc)
+        log.warning(
+            "Remote relay: %s - %s from %s failed while playing after %.1f s (%s)",
+            track.get("artist"),
+            track.get("title"),
+            live.source,
+            seconds,
+            exc.code if isinstance(exc, ProviderError) else type(exc).__name__,
+        )
 
     @staticmethod
     def timing(track, source, began, steps):
@@ -349,6 +432,12 @@ class RemoteAudio:
         if not entry or entry[0] <= time.monotonic() or entry[2] != user_id:
             return None
         path = entry[1]
+        if isinstance(path, RelayTransfer):
+            if path.error is not None:
+                return None
+            if not path.complete:
+                return path
+            path = path.final
         return (path, MEDIA_TYPES[path.suffix]) if path.is_file() else None
 
     def fetch(self, source, track):
@@ -407,6 +496,13 @@ class RemoteAudio:
         # Fetched under a private name, then published under the recording's.
         path = self.directory / ("." + secrets.token_hex(16) + extension)
         final = self.directory / f"{self.name(track)}.{source}{extension}"
+        expected = float(track.get("duration") or 0)
+        live = LIVE.get()
+        if live is not None and extension == ".mp3":
+            live.arriving(path, final, expected)
+            context.progress = live.progress
+        else:
+            live = None
         try:
             if REGISTRY[source].adapter:
                 self.runtime.transfer(source, candidate, path, context)
@@ -418,10 +514,11 @@ class RemoteAudio:
                     context,
                 )
             probe = probe_file(path)
-            expected = float(track.get("duration") or 0)
             if not probe or (expected and abs(probe["duration"] - expected) > 5):
                 raise ValueError("The remote file was not the expected recording.")
-            if extension == ".mp3":
+            # A file already playing keeps its bytes: its head carried the
+            # length, and a listener's next range must find the same audio.
+            if extension == ".mp3" and not (live and live.playing):
                 add_length_header(path)
             path.replace(final)
         except Exception:
@@ -585,3 +682,295 @@ def add_length_header(path):
         pass
     finally:
         fixed.unlink(missing_ok=True)
+
+
+# Layer III bitrates (kbps) by MPEG version, and sample rates by version bits.
+MP3_BITRATES = {
+    1: (0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320),
+    2: (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160),
+}
+MP3_RATES = {
+    3: (44100, 48000, 32000),
+    2: (22050, 24000, 16000),
+    0: (11025, 12000, 8000),
+}
+# Frames a header-less file must show at one bitrate to count as constant.
+CBR_FRAMES = 8
+
+
+class NotProgressive(Exception):
+    """The head cannot prove the file's length; it arrives whole first."""
+
+
+def mp3_frame(data, at):
+    """An MPEG Layer III frame header at `at`, or None if more bytes are needed."""
+    if at + 4 > len(data):
+        return None
+    b = data[at : at + 4]
+    version, layer = (b[1] >> 3) & 3, (b[1] >> 1) & 3
+    bitrate_index, rate_index = b[2] >> 4, (b[2] >> 2) & 3
+    if (
+        b[0] != 0xFF
+        or b[1] & 0xE0 != 0xE0
+        or version == 1
+        or layer != 1
+        or bitrate_index in (0, 15)
+        or rate_index == 3
+    ):
+        raise NotProgressive("No MP3 frame where one was expected.")
+    mpeg1 = version == 3
+    bitrate = MP3_BITRATES[1 if mpeg1 else 2][bitrate_index] * 1000
+    rate = MP3_RATES[version][rate_index]
+    samples = 1152 if mpeg1 else 576
+    mono = b[3] >> 6 == 3
+    return {
+        "bitrate": bitrate,
+        "rate": rate,
+        "samples": samples,
+        "length": samples // 8 * bitrate // rate + ((b[2] >> 1) & 1),
+        "side": (17 if mono else 32) if mpeg1 else (9 if mono else 17),
+    }
+
+
+def mp3_head(data, size):
+    """The playing time an MP3's first bytes prove for a file of `size` bytes:
+    from its Xing/Info or VBRI header, or from a constant bitrate. None when
+    more bytes are needed; NotProgressive when the head cannot prove it."""
+    start = 0
+    if data[:3] == b"ID3":
+        if len(data) < 10:
+            return None
+        tag = data[6:10]
+        if any(byte & 0x80 for byte in tag):
+            raise NotProgressive("Malformed ID3 tag.")
+        start = 10 + (tag[0] << 21 | tag[1] << 14 | tag[2] << 7 | tag[3])
+        if data[5] & 0x10:
+            start += 10
+    first = mp3_frame(data, start)
+    if first is None or len(data) < start + 64:
+        return None
+    xing = start + 4 + first["side"]
+    if data[xing : xing + 4] in (b"Xing", b"Info"):
+        if not data[xing + 7] & 1:
+            raise NotProgressive("Length header without a frame count.")
+        frames = int.from_bytes(data[xing + 8 : xing + 12], "big")
+        return frames * first["samples"] / first["rate"]
+    if data[start + 36 : start + 40] == b"VBRI":
+        frames = int.from_bytes(data[start + 50 : start + 54], "big")
+        return frames * first["samples"] / first["rate"]
+    # No header: only a constant bitrate makes the size give the length.
+    at = start
+    for _ in range(CBR_FRAMES):
+        frame = mp3_frame(data, at)
+        if frame is None:
+            return None
+        if (frame["bitrate"], frame["rate"]) != (first["bitrate"], first["rate"]):
+            raise NotProgressive("A variable bitrate without a length header.")
+        at += frame["length"]
+    return (size - start) * 8 / first["bitrate"]
+
+
+class RelayTransfer:
+    """A relay download that plays while it arrives (#23). The worker thread
+    only reports progress; every listener-facing field is owned by the loop."""
+
+    def __init__(self, source):
+        self.source = source
+        self.loop = asyncio.get_running_loop()
+        self.ready = self.loop.create_future()
+        self.size = 0
+        self.arrived = 0
+        self.complete = False
+        self.error = None
+        self.media_type = MEDIA_TYPES[".mp3"]
+        self._changed = asyncio.Event()
+        # Worker-thread fields, set before the transfer starts.
+        self.path = self.final = None
+        self.expected = 0
+        self.playing = False
+        self.decided = False
+
+    # Worker thread.
+
+    def arriving(self, path, final, expected):
+        self.path, self.final, self.expected = path, final, expected
+
+    def progress(self, received, total):
+        """After each written chunk. The head is checked once, before any
+        byte is served: a recording of another length stops the transfer."""
+        try:
+            arrived = os.stat(self.path).st_size
+        except OSError:
+            return
+        if self.playing:
+            self._post(self._grew, arrived)
+            return
+        if self.decided:
+            return
+        if not total:
+            self.decided = True  # No declared size, so no Content-Length to give.
+            return
+        with open(self.path, "rb") as head:
+            data = head.read(min(arrived, HEAD_BYTES))
+        try:
+            seconds = mp3_head(data, total)
+        except NotProgressive:
+            self.decided = True
+            return
+        if seconds is None:
+            self.decided = arrived >= HEAD_BYTES
+            return
+        self.decided = True
+        if self.expected and abs(seconds - self.expected) > 5:
+            raise ValueError("The remote file was not the expected recording.")
+        self.playing = True
+        self._post(self._started, total, arrived)
+
+    def _post(self, callback, *args):
+        try:
+            self.loop.call_soon_threadsafe(callback, *args)
+        except RuntimeError:  # The server is stopping.
+            pass
+
+    def read(self, position, count):
+        """Bytes already written. Each read opens the file afresh, so a
+        cancelled response holds no descriptor; a finished transfer has moved
+        to its published name (the same file, so the same bytes)."""
+        for path in (self.path, self.final):
+            try:
+                descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            except FileNotFoundError:
+                continue
+            try:
+                return os.pread(descriptor, count, position)
+            finally:
+                os.close(descriptor)
+        return b""
+
+    # Event loop.
+
+    def _started(self, size, arrived):
+        self.size = size
+        self._grew(arrived)
+        if not self.ready.done():
+            self.ready.set_result(None)
+
+    def _grew(self, arrived):
+        self.arrived = max(self.arrived, min(arrived, self.size))
+        self._changed.set()
+        self._changed = asyncio.Event()
+
+    def finish(self, final):
+        self.final = final
+        self.complete = True
+        self._grew(self.size)
+
+    def fail(self, exc):
+        self.error = exc
+        self._grew(0)
+
+    async def until(self, position, seconds):
+        """Whether byte `position` arrived within `seconds`; never once the
+        transfer has failed."""
+        deadline = self.loop.time() + seconds
+        while self.error is None and self.arrived <= position and not self.complete:
+            remaining = deadline - self.loop.time()
+            if remaining <= 0:
+                return False
+            try:
+                await asyncio.wait_for(self._changed.wait(), remaining)
+            except TimeoutError:
+                return False
+        return self.error is None and self.arrived > position
+
+    async def response(self, method, range_header):
+        size = self.size
+        try:
+            span = byte_range(range_header, size)
+        except NotProgressive:
+            return Response(
+                status_code=416, headers={"Content-Range": f"bytes */{size}"}
+            )
+        start, end = span or (0, size - 1)
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "private, no-store",
+            "Content-Length": str(end - start + 1),
+            "Content-Type": self.media_type,
+        }
+        status = 200
+        if span:
+            status = 206
+            headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        if method == "HEAD":
+            return Response(status_code=status, headers=headers)
+        # A range past what has arrived waits for its first byte before any
+        # header is sent, so running out of time is a clean, retryable answer.
+        if not await self.until(start, WAIT_SECONDS):
+            if self.error is not None:
+                return Response(status_code=404, headers={"Cache-Control": "no-store"})
+            return Response(
+                status_code=503,
+                headers={"Retry-After": "2", "Cache-Control": "no-store"},
+            )
+        return GrowingResponse(self, start, end, status, headers)
+
+
+def byte_range(header, size):
+    """One `bytes=` range as (first, last); None for the whole file (several
+    ranges or a malformed header are answered whole, as HTTP allows)."""
+    if not header:
+        return None
+    unit, _, spec = header.partition("=")
+    first, dash, last = spec.strip().partition("-")
+    first, last = first.strip(), last.strip()
+    if (
+        unit.strip().lower() != "bytes"
+        or not dash
+        or "," in spec
+        or not (first or last)
+        or (first and not first.isdigit())
+        or (last and not last.isdigit())
+    ):
+        return None
+    if not first:
+        if int(last) == 0:
+            raise NotProgressive("Empty suffix range.")
+        return max(0, size - int(last)), size - 1
+    start = int(first)
+    end = min(int(last), size - 1) if last else size - 1
+    if start >= size or end < start:
+        raise NotProgressive("Range outside the file.")
+    return start, end
+
+
+class GrowingResponse(StreamingResponse):
+    """A range of a relay file served as its bytes arrive, never past them.
+    A failed or stalled transfer ends the body short of its length, which
+    closes the connection rather than presenting a whole song."""
+
+    def __init__(self, transfer, start, end, status, headers):
+        self.transfer, self.start, self.end = transfer, start, end
+        super().__init__(iter(()), status_code=status, headers=headers)
+
+    async def stream_response(self, send):
+        await send(
+            {
+                "type": "http.response.start",
+                "status": self.status_code,
+                "headers": self.raw_headers,
+            }
+        )
+        transfer, position = self.transfer, self.start
+        while position <= self.end:
+            if not await transfer.until(position, WAIT_SECONDS):
+                return
+            count = min(
+                CHUNK_BYTES, self.end + 1 - position, transfer.arrived - position
+            )
+            data = await asyncio.to_thread(transfer.read, position, count)
+            if not data or transfer.error is not None:
+                return
+            position += len(data)
+            await send({"type": "http.response.body", "body": data, "more_body": True})
+        await send({"type": "http.response.body", "body": b"", "more_body": False})

@@ -80,7 +80,7 @@ from .media import (
     saved_track_ids,
     settings as private_media_settings,
 )
-from .remote import LABELS, RemoteAudio
+from .remote import LABELS, RelayTransfer, RemoteAudio
 from .scanner import LibraryScanner
 from .playlists import Playlists
 from .exporter import Exporter
@@ -1325,10 +1325,15 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
 
     @app.get("/api/v1/remote-playback/streams/{token}", tags=["personal-library"])
     @app.head("/api/v1/remote-playback/streams/{token}", tags=["personal-library"])
-    def playback_relayed(token: str, request: Request):
-        found = remote_audio.relay(token, request.state.user["id"])
+    async def playback_relayed(token: str, request: Request):
+        found = await asyncio.to_thread(
+            remote_audio.relay, token, request.state.user["id"]
+        )
         if not found:
             raise HTTPException(404, "This stream has expired. Play the song again.")
+        if isinstance(found, RelayTransfer):
+            # Still arriving: served as far as it has arrived (#23).
+            return await found.response(request.method, request.headers.get("range"))
         return FileResponse(
             found[0],
             media_type=found[1],
