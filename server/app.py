@@ -544,8 +544,18 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             {
                 k: v
                 for k, v in record.items()
-                if k not in {"root", "original", "trash", "sha256"}
+                if k
+                not in {
+                    "root",
+                    "original",
+                    "trash",
+                    "sha256",
+                    "quarantine",
+                    "quarantine_folder",
+                }
             }
+            # A purge stopped part-way that recovery could not settle.
+            | {"needs_review": bool(record.get("quarantine"))}
             for record in recovery.list()
             if record["status"] != "restored" and not record.get("purged_at")
         ]

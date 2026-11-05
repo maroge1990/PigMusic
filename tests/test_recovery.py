@@ -350,3 +350,36 @@ def test_a_stopped_purge_whose_name_was_taken_stays_restorable(tmp_path, monkeyp
     assert trash.read_bytes() == b"someone else's file"
     restarted.restore(old["id"])
     assert (root / "Artist" / "Album" / "Song.mp3").read_bytes() == b"original music"
+
+
+def test_a_stopped_purge_whose_trash_folder_was_replaced_is_never_marked_purged(
+    tmp_path, monkeypatch
+):
+    """D-71 round: after the private rename another writer moves the Trash
+    folder away and makes an empty one in its place; both names missing
+    there proved nothing, yet the song was marked purged for good."""
+    import server.recovery as module
+
+    store, root, recovery, old, new = two_removed(tmp_path, monkeypatch)
+    trash = root / old["trash"]
+    moved = trash.parent.with_name("Album-moved")
+    plan = recovery.purge_plan(30)
+
+    def stop():
+        trash.parent.rename(moved)
+        trash.parent.mkdir()
+        raise Stop
+
+    monkeypatch.setattr(module, "hashlib", SwapAfterHashing(stop))
+    with pytest.raises(Stop):
+        recovery.purge(30, plan["fingerprint"])
+    monkeypatch.undo()
+    monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(root))
+    restarted = Recovery(Store(store.directory))
+    restarted.recover()
+    record = store.read_document("removed:" + old["id"])
+    assert not record.get("purged_at") and record.get("quarantine")
+    assert list(moved.glob(".pig-music-purge-*"))  # The song is still there.
+    assert old["id"] not in [i["id"] for i in restarted.purge_plan(1)["items"]]
+    with pytest.raises(ValueError, match="needs review"):
+        restarted.restore(old["id"])

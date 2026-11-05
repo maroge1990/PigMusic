@@ -998,3 +998,34 @@ test("the owner reviews Trash and deletes exactly the listed songs for good", as
   await expect(panel).toContainText("No removed music.");
   expect(purged).toEqual({ days: 45, fingerprint: "abc" });
 });
+
+test("a song whose Trash deletion stopped part-way shows it needs review", async ({
+  page,
+}) => {
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/admin/library/trash": (route) =>
+        route.fulfill({
+          json: [
+            {
+              id: "r1",
+              track: { title: "Dreams", artist: "Fleetwood Mac" },
+              status: "removed",
+              needs_review: true,
+            },
+          ],
+        }),
+      "/v1/admin/library/organisation/history": (route) =>
+        route.fulfill({ json: [] }),
+      "/v1/admin/unassigned": (route) =>
+        route.fulfill({ json: { albums: [], next_offset: null } }),
+    },
+  });
+  await page.goto("/#/admin/library");
+  const panel = page
+    .locator(".system-panel")
+    .filter({ has: page.getByRole("heading", { name: "Removed music" }) });
+  await expect(panel).toContainText("Needs review");
+  await expect(panel.getByRole("button", { name: "Restore" })).toHaveCount(0);
+});

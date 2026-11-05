@@ -21,7 +21,12 @@ const megabytes = (bytes: number) =>
 
 export function RemovedMusic({ notify }: { notify: (s: string) => void }) {
   const [items, setItems] = useState<
-    { id: string; track: { title: string; artist: string }; status: string }[]
+    {
+      id: string;
+      track: { title: string; artist: string };
+      status: string;
+      needs_review?: boolean;
+    }[]
   >([]);
   const [busy, setBusy] = useState(false);
   const [days, setDays] = useState(30);
@@ -112,13 +117,21 @@ export function RemovedMusic({ notify }: { notify: (s: string) => void }) {
               <strong>{item.track.title}</strong>
               <span>{item.track.artist}</span>
             </div>
-            <button
-              className="secondary-button"
-              disabled={busy}
-              onClick={() => void restore(item.id)}
-            >
-              Restore
-            </button>
+            {item.needs_review ? (
+              <span>
+                Needs review: deleting it from Trash stopped part-way and its
+                Trash folder changed. Check .pig-music-trash on the library
+                share.
+              </span>
+            ) : (
+              <button
+                className="secondary-button"
+                disabled={busy}
+                onClick={() => void restore(item.id)}
+              >
+                Restore
+              </button>
+            )}
           </div>
         ))
       )}
