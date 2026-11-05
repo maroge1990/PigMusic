@@ -41,7 +41,7 @@ PigMusic is a private household music-library manager with one container, one in
 
 - Experimental remote playback may fail or be slow; saved playback is independent of it.
 - Provider metadata and availability are external. Optional enrichment must never block browsing or expose credentials.
-- An Apple Music playlist's songs are matched to the server by title and lead artist through the ranked search, one search per song not in your library (up to 200 songs); a differently credited or titled copy can show as not on the server, and its catalogue page then shows the truth.
+- An Apple Music playlist screen shows and checks its first 200 songs, in one server request (`/server/matches`, the shared matching policy). A copy the policy can't confidently match shows as not on the server; its catalogue page then shows the truth.
 - If the NAS disappears, cached browsing and settings stay available, while managed writes and transfers pause. Never create a substitute empty library or bypass the marker check.
 
 ## Set aside

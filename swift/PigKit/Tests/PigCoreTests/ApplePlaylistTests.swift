@@ -20,9 +20,9 @@ private let serverJSON = #"""
 
 private actor Calls {
   var queries: [String] = []
-  var lookups: [[String]] = []
+  var asked: [[Track]] = []
   func add(_ query: String) { queries.append(query) }
-  func lookup(_ titles: [String]) { lookups.append(titles) }
+  func ask(_ tracks: [Track]) { asked.append(tracks) }
 }
 
 private struct ServerOnly: FoundSearchSource {
@@ -82,60 +82,87 @@ private let chill = ApplePlaylist(id: "pl.1", name: "Yellow Hits", curator: "App
   #expect(await calls.queries == ["Yellow"])
 }
 
-private struct StatusSource: ApplePlaylistStatusSource {
+/// The server's answer (`/server/matches`), in the order asked: the person's
+/// copy of "Clocks", a household copy of "Yellow", nothing for the rest. The
+/// server, not the phone, decides that a live copy is no match.
+private struct ServerMatches: ApplePlaylistStatusSource {
   let calls: Calls
-  func lookupSongs(_ tracks: [Track]) async throws -> [Track?] {
-    await calls.lookup(tracks.map(\.title))
-    return tracks.map { track in
-      guard track.title == "Clocks" else { return nil }
-      var mine = Track(id: "t-clocks", title: "Clocks", artist: "Coldplay")
-      mine.serverState = "in_library"
-      return mine
+  var short = false
+  func serverMatches(_ tracks: [Track]) async throws -> [Track?] {
+    await calls.ask(tracks)
+    let answer = tracks.map { track -> Track? in
+      var copy = Track(id: "s-" + track.title, title: track.title, artist: track.artist)
+      switch track.title {
+      case "Clocks": copy.serverState = "in_library"
+      case "Yellow": copy.serverState = "household_available"
+      default: return nil
+      }
+      return copy
     }
-  }
-  func foundResults(query: String) async throws -> FoundResults {
-    await calls.add(query)
-    return decode(
-      #"{"top":[],"albums":[],"artists":[],"playlists":[],"songs":["#
-        + #"{"id":"s-yellow","title":"Yellow","artist":"Coldplay","server_state":"household_available"},"#
-        + #"{"id":"s-fix","title":"Fix You (Live)","artist":"Coldplay","server_state":"household_available"},"#
-        + #"{"id":"s-viva","title":"Viva la Vida","artist":"Coldplay","server_state":"in_library"}]}"#)
+    return short ? Array(answer.dropLast()) : answer
   }
 }
 
-@Test func aPlaylistsSongsAreMarkedLibraryServerOrNotOnTheServer() async throws {
-  let songs = [
-    ApplePlaylistSong(position: 0, appleId: 1, title: "Clocks", artist: "Coldplay"),
-    ApplePlaylistSong(
-      position: 1, appleId: 2, title: "Yellow (Remastered 2020)", artist: "Coldplay & Friends"),
-    // The studio song: the server has only the live one.
-    ApplePlaylistSong(position: 2, appleId: 3, title: "Fix You", artist: "Coldplay"),
-    // Found by the ranked search though the library matches missed it.
-    ApplePlaylistSong(position: 3, appleId: 4, title: "Viva La Vida", artist: "Coldplay"),
-    ApplePlaylistSong(position: 4, appleId: 5, title: "Paradise", artist: "Coldplay"),
-  ]
+private func song(_ position: Int, _ title: String, artist: String = "Coldplay") -> ApplePlaylistSong
+{
+  ApplePlaylistSong(
+    // Apple's id belongs to the song, wherever it sits in the playlist.
+    position: position, appleId: title.utf8.reduce(7) { abs($0 &* 31 &+ Int($1)) % 1_000_000 },
+    title: title, artist: artist,
+    album: title + " album", duration: 240)
+}
+
+@Test func aPlaylistsSongsTakeTheServersAnswerInOrder() async throws {
+  let songs = [song(0, "Clocks"), song(1, "Yellow"), song(2, "Fix You"), song(3, "Lost", artist: " ")]
   let calls = Calls()
-  let states = try await ApplePlaylistStatuses.states(
-    for: songs, source: StatusSource(calls: calls), concurrency: 2)
-  #expect(states.map(\.track?.id) == ["t-clocks", "s-yellow", nil, "s-viva", nil])
+  let found = try await ApplePlaylistStatuses.states(
+    for: songs, source: ServerMatches(calls: calls))
+  let states = try #require(found.states(for: songs))
+  #expect(states.map(\.track?.id) == ["s-Clocks", "s-Yellow", nil, nil])
   guard case .library = states[0], case .server = states[1], case .elsewhere = states[2],
-    case .library = states[3], case .elsewhere = states[4]
+    case .elsewhere = states[3]
   else {
     Issue.record("wrong states: \(states)")
     return
   }
-  // One library call for the whole playlist; the server search only for the rest.
-  #expect(await calls.lookups.count == 1)
-  #expect(await calls.queries.count == 4)
-  #expect(!(await calls.queries).contains { $0.hasPrefix("Clocks") })
+  // One call, with each song's title, artist, album and length; a song the
+  // server would refuse (no artist) isn't sent.
+  let asked = await calls.asked
+  #expect(asked.count == 1)
+  #expect(asked.first?.map(\.title) == ["Clocks", "Yellow", "Fix You"])
+  #expect(asked.first?.first?.album == "Clocks album")
+  #expect(asked.first?.first?.duration == 240)
+
+  // Over 200 songs: one call per 200, answers still in place.
+  let long = (0..<250).map { song($0, $0 == 210 ? "Yellow" : "Song \($0)") }
+  let many = Calls()
+  let longStates = try #require(
+    try await ApplePlaylistStatuses.states(for: long, source: ServerMatches(calls: many))
+      .states(for: long))
+  #expect(await many.asked.map(\.count) == [200, 50])
+  #expect(longStates.indices.filter { longStates[$0].track != nil } == [210])
+
+  // An answer that doesn't line up is never used.
+  await #expect(throws: (any Error).self) {
+    _ = try await ApplePlaylistStatuses.states(
+      for: songs, source: ServerMatches(calls: Calls(), short: true))
+  }
 }
 
-@Test func titlesMatchAcrossEditionsButNotAcrossRecordings() {
-  #expect(ApplePlaylistMatching.titleKey("Song (feat. Someone)") == "song")
-  #expect(ApplePlaylistMatching.titleKey("Song - Remastered 2009") == "song")
-  #expect(ApplePlaylistMatching.titleKey("Without You (With Strings)") == "without you")
-  #expect(ApplePlaylistMatching.titleKey("Without Me") == "without me")
-  #expect(ApplePlaylistMatching.titleKey("Song (Live)") != ApplePlaylistMatching.titleKey("Song"))
-  #expect(ApplePlaylistMatching.titleKey("Song (Remix)") != "song")
-  #expect(ApplePlaylistMatching.artistKeys("Simon & Garfunkel").contains("simon garfunkel"))
+@Test func aChangedPlaylistNeverReusesOldStatuses() async throws {
+  let before = [song(0, "Clocks"), song(1, "Yellow")]
+  let saved = try await ApplePlaylistStatuses.states(
+    for: before, source: ServerMatches(calls: Calls()))
+  #expect(saved.states(for: before) != nil)
+  // Reordered, replaced, longer or shorter: the saved states are not shown.
+  let reordered = [song(0, "Yellow"), song(1, "Clocks")]
+  #expect(saved.states(for: reordered) == nil)
+  #expect(saved.states(for: [song(0, "Clocks"), song(1, "Paradise")]) == nil)
+  #expect(saved.states(for: before + [song(2, "Fix You")]) == nil)
+  #expect(saved.states(for: [song(0, "Clocks")]) == nil)
+  // Kept on the device and read back, it still belongs only to its songs.
+  let stored = try JSONDecoder().decode(
+    ApplePlaylistStates.self, from: JSONEncoder().encode(saved))
+  #expect(stored.states(for: before) == saved.states)
+  #expect(stored.states(for: reordered) == nil)
 }

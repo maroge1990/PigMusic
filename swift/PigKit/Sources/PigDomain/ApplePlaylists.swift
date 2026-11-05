@@ -40,14 +40,14 @@ public struct ApplePlaylistSong: Codable, Sendable, Hashable, Identifiable {
     self.duration = duration
     self.artworkURL = artworkURL
   }
-  /// The song as asked of the person's library (`/library/matches`).
+  /// The song as asked of the server (`/server/matches`): title, artist,
+  /// album and length, so the server's shared policy keeps live, remix and
+  /// demo recordings apart from the studio one.
   public var lookupTrack: Track {
     Track(
       id: "apple:\(appleId ?? position)", title: title, artist: artist, album: album,
       duration: duration)
   }
-  /// The words the server's ranked search is asked for this song.
-  public var serverQuery: String { SearchText.clean(title + " " + artist) }
 }
 
 /// Where one Apple playlist song is: in the person's library, elsewhere on
@@ -62,54 +62,34 @@ public enum ApplePlaylistSongState: Codable, Sendable, Hashable {
     case .elsewhere: nil
     }
   }
+  /// The server's answer for one song (`/server/matches`): the person's
+  /// copy, a household copy, or none.
+  public init(match: Track?) {
+    guard let match else {
+      self = .elsewhere
+      return
+    }
+    self = match.serverState == "household_available" ? .server(match) : .library(match)
+  }
 }
 
-public enum ApplePlaylistMatching {
-  /// The library's own match wins; otherwise a server song with the same
-  /// edition-free title and lead artist. Live, remix and demo words stay in
-  /// the title, so such a recording never stands in for the studio one.
-  public static func state(
-    for song: ApplePlaylistSong, libraryMatch: Track?, serverResults: FoundResults?
-  ) -> ApplePlaylistSongState {
-    if let libraryMatch { return .library(libraryMatch) }
-    let title = titleKey(song.title)
-    let artists = artistKeys(song.artist)
-    guard
-      let found = serverResults?.songs.first(where: {
-        titleKey($0.title) == title && !artists.isDisjoint(with: artistKeys($0.artist))
-      })
-    else { return .elsewhere }
-    switch found.serverState {
-    case nil, "in_library": return .library(found)
-    case "household_available": return .server(found)
-    default: return .elsewhere
-    }
+/// A playlist's song states for exactly the songs they were found for:
+/// Apple may replace or reorder a playlist's songs, and a state is by place.
+public struct ApplePlaylistStates: Codable, Sendable, Hashable {
+  public let fingerprint: String
+  public let states: [ApplePlaylistSongState]
+  public init(songs: [ApplePlaylistSong], states: [ApplePlaylistSongState]) {
+    self.fingerprint = Self.fingerprint(songs)
+    self.states = states
   }
-
-  /// Folded, punctuation-free words, without featured artists or remaster
-  /// notes (the same recording on another edition).
-  public static func titleKey(_ title: String) -> String {
-    var text = title
-    // "Song (feat. X)", "Song [Remastered 2011]", "Song - Remastered 2009".
-    let segments = #"\s*[\(\[]((feat|ft|featuring|with)\b|[^\)\]]*remaster)[^\)\]]*[\)\]]"#
-    text = text.replacingOccurrences(
-      of: segments, with: "", options: [.regularExpression, .caseInsensitive])
-    text = text.replacingOccurrences(
-      of: #"\s+-\s+[^-]*remaster[^-]*$"#, with: "", options: [.regularExpression, .caseInsensitive])
-    return words(text)
+  /// The ordered Apple ids (title and artist for a song without one).
+  public static func fingerprint(_ songs: [ApplePlaylistSong]) -> String {
+    songs.map { song in
+      song.appleId.map { String($0) } ?? "?" + song.title + "\u{1F}" + song.artist
+    }.joined(separator: "\u{1E}")
   }
-
-  /// The whole credit and its lead artist ("A & B" → "a b", "a").
-  public static func artistKeys(_ artist: String) -> Set<String> {
-    let lead = artist.replacingOccurrences(
-      of: #"\s*(,|&|\b(feat|ft|featuring|with)\b).*$"#, with: "",
-      options: [.regularExpression, .caseInsensitive])
-    return Set([words(artist), words(lead)].filter { !$0.isEmpty })
-  }
-
-  private static func words(_ text: String) -> String {
-    let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
-    return folded.components(separatedBy: CharacterSet.alphanumerics.inverted)
-      .filter { !$0.isEmpty }.joined(separator: " ")
+  /// The states when they belong to these songs, else nil.
+  public func states(for songs: [ApplePlaylistSong]) -> [ApplePlaylistSongState]? {
+    states.count == songs.count && fingerprint == Self.fingerprint(songs) ? states : nil
   }
 }

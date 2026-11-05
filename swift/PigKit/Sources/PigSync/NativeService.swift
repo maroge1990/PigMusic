@@ -294,6 +294,33 @@ public actor NativeService: LibrarySource {
     default: throw NativeFailure.unavailable("Library matches are unavailable.")
     }
   }
+  /// Each song's copy on the whole server, in order (#109): the person's
+  /// (`in_library`), else a household one (`household_available`), else nil.
+  public func serverMatches(_ tracks: [Track]) async throws -> [Track?] {
+    guard !tracks.isEmpty else { return [] }
+    guard tracks.count <= 200 else {
+      throw NativeFailure.unavailable("Too many songs to check at once.")
+    }
+    let songs = tracks.map {
+      Components.Schemas.LookupSong(
+        album: $0.album.map { String($0.prefix(500)) },
+        artist: String($0.artist.prefix(500)),
+        duration: $0.duration.map { min(max($0, 0), 86400) },
+        musicbrainz_recording_id: $0.musicbrainzRecordingId, title: String($0.title.prefix(500)))
+    }
+    switch try await client.server_matches_api_v1_server_matches_post(
+      .init(body: .json(.init(songs: songs))))
+    {
+    case .ok(let value):
+      return try value.body.json.matches.map { item in
+        try item.track.map { try LibraryCodec.convert($0, to: Track.self) }
+      }
+    case .unauthorized: throw NativeFailure.authentication
+    case .notFound:
+      throw NativeFailure.unavailable("Update the server to see which of these songs it has.")
+    default: throw NativeFailure.unavailable("Song matches are unavailable right now.")
+    }
+  }
   public func artistArtwork(id: String, request: ArtworkRequest) async throws -> Data {
     guard let uuid = UUID(uuidString: id) else { throw ArtworkFailure.invalidRequest }
     return try await artworkTransport.fetch(request, alias: .artist(uuid))

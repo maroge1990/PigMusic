@@ -844,17 +844,23 @@ private struct ApplePlaylistView: View {
     }
     guard let songs, !songs.isEmpty else { return }
     let key = "apple-playlist:" + playlist.id
+    // A saved answer is used only for exactly these songs in this order:
+    // Apple may have changed the playlist since (Codex).
     if states == nil,
-      let saved = model.peekCatalogue(key: key, as: [ApplePlaylistSongState].self),
-      saved.count == songs.count
+      let saved = model.peekCatalogue(key: key, as: ApplePlaylistStates.self)?.states(for: songs)
     {
       states = saved
     }
     do {
-      states = try await model.cachedCatalogue(key: key) { service in
+      let found = try await model.cachedCatalogue(key: key) { service in
         try await ApplePlaylistStatuses.states(for: songs, source: service)
       }
-      statusFailure = nil
+      if let fresh = found.states(for: songs) {
+        states = fresh
+        statusFailure = nil
+      } else if states == nil {
+        statusFailure = "Which songs are on the server can't be checked right now."
+      }
     } catch is CancellationError {} catch {
       if states == nil {
         statusFailure = "Which songs are on the server can't be checked right now."

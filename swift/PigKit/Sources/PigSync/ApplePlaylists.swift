@@ -23,55 +23,42 @@ public struct ApplePlaylistSearch: Sendable {
   }
 }
 
-/// What the server is asked about an Apple playlist's songs: no new
-/// endpoints, only the library matches and the ranked search.
+/// What the server is asked about an Apple playlist's songs: whether each is
+/// in the person's library, elsewhere on the server, or not there, decided
+/// by the server's shared matching policy (`/server/matches`).
 public protocol ApplePlaylistStatusSource: Sendable {
-  func lookupSongs(_ tracks: [Track]) async throws -> [Track?]
-  func foundResults(query: String) async throws -> FoundResults
+  func serverMatches(_ tracks: [Track]) async throws -> [Track?]
 }
 extension NativeService: ApplePlaylistStatusSource {}
 
 public enum ApplePlaylistStatuses {
-  /// The most songs a playlist screen checks against the server.
+  /// The most songs a playlist screen shows and checks.
   public static let limit = 200
-  /// Each song's place, in order: one library-matches call per 200 songs,
-  /// then the ranked search for each song not in the library, a few at a
-  /// time. Opening a playlist only reads; it never requests anything.
+  /// The server's answer per request (`/server/matches` takes 1–200 songs).
+  public static let chunk = 200
+  /// Each song's state, in order, from one server call per 200 songs, kept
+  /// with the songs they belong to. Opening a playlist only reads; it never
+  /// requests anything.
   public static func states(
-    for songs: [ApplePlaylistSong], source: any ApplePlaylistStatusSource, concurrency: Int = 4
-  ) async throws -> [ApplePlaylistSongState] {
-    let songs = Array(songs.prefix(limit))
-    var library: [Track?] = []
-    for start in stride(from: 0, to: songs.count, by: 200) {
-      let chunk = songs[start..<min(start + 200, songs.count)].map(\.lookupTrack)
-      let found = try await source.lookupSongs(chunk)
-      library += (0..<chunk.count).map { found.indices.contains($0) ? found[$0] : nil }
+    for songs: [ApplePlaylistSong], source: any ApplePlaylistStatusSource
+  ) async throws -> ApplePlaylistStates {
+    // The server refuses an empty title or artist: such a song isn't asked.
+    let asked = songs.indices.filter {
+      !songs[$0].title.trimmingCharacters(in: .whitespaces).isEmpty
+        && !songs[$0].artist.trimmingCharacters(in: .whitespaces).isEmpty
     }
-    var states = songs.indices.map { index in
-      library[index].map { ApplePlaylistSongState.library($0) }
-    }
-    let rest = songs.indices.filter { states[$0] == nil }
-    try await withThrowingTaskGroup(of: (Int, ApplePlaylistSongState).self) { group in
-      var next = 0
-      func add() {
-        guard next < rest.count else { return }
-        let index = rest[next]
-        next += 1
-        let song = songs[index]
-        group.addTask {
-          let results = try await source.foundResults(query: song.serverQuery)
-          return (
-            index,
-            ApplePlaylistMatching.state(for: song, libraryMatch: nil, serverResults: results)
-          )
-        }
+    var states = [ApplePlaylistSongState](repeating: .elsewhere, count: songs.count)
+    for start in stride(from: 0, to: asked.count, by: chunk) {
+      let indices = Array(asked[start..<min(start + chunk, asked.count)])
+      let found = try await source.serverMatches(indices.map { songs[$0].lookupTrack })
+      // A short or long answer is not trusted to line up with the songs.
+      guard found.count == indices.count else {
+        throw NativeFailure.unavailable("The server's song matches didn't line up.")
       }
-      for _ in 0..<max(1, concurrency) { add() }
-      while let (index, state) = try await group.next() {
-        states[index] = state
-        add()
+      for (index, match) in zip(indices, found) {
+        states[index] = ApplePlaylistSongState(match: match)
       }
     }
-    return states.map { $0 ?? .elsewhere }
+    return ApplePlaylistStates(songs: songs, states: states)
   }
 }
