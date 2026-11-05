@@ -24,15 +24,14 @@ import {
 } from "./LibraryCollections";
 import type { Playlist, PlaylistSummary } from "./libraryTypes";
 import { LibrarySongs } from "./LibrarySongs";
+import {
+  RemovalDialog,
+  UndoRemoval,
+  type Removal,
+  type RemovalPreview,
+} from "./RemoveFromLibrary";
 import { go, type Route } from "./routes";
 import { OwnerAlbumTools, OwnerArtistTools } from "./OwnerTools";
-
-type Preview = {
-  confirmation: string;
-  delete_count: number;
-  keep_count: number;
-  items: { track_id: string; delete_file: boolean; kept_for: string[] }[];
-};
 
 function albumMeta(info: {
   artist?: string;
@@ -112,14 +111,10 @@ export function PersonalLibrary({
   const [favouriteList, setFavouriteList] = useState<Playlist | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const [removal, setRemoval] = useState<{
-    preview: Preview;
-    ids: string[];
-  } | null>(null);
+  const [removal, setRemoval] = useState<Removal | null>(null);
   const [undo, setUndo] = useState<{ id: string; undo_until: number } | null>(
     null,
   );
-  const dialog = useRef<HTMLDialogElement>(null);
   const player = usePlayer();
   /** Only the latest refresh may apply its answers (#97). */
   const refreshes = useRef(0);
@@ -205,9 +200,6 @@ export function PersonalLibrary({
       .querySelector(".personal-tabs [aria-current]")
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [tab, !!library]);
-  useEffect(() => {
-    if (removal) dialog.current?.showModal();
-  }, [removal]);
   useEffect(() => {
     if (!undo) return;
     const timer = setTimeout(
@@ -362,7 +354,7 @@ export function PersonalLibrary({
   }
   async function preview(ids: string[]) {
     try {
-      const data = await api<Preview>("/v1/library/removal-preview", {
+      const data = await api<RemovalPreview>("/v1/library/removal-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ track_ids: ids }),
@@ -505,22 +497,17 @@ export function PersonalLibrary({
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
       {undo && (
-        <p className="personal-status" role="status">
-          Removed from your library.{" "}
-          <button
-            onClick={() =>
-              void action(async () => {
-                await api(`/v1/library/removals/${undo.id}/undo`, {
-                  method: "POST",
-                });
-                setUndo(null);
-                backToLibrary();
-              }, "Restored")
-            }
-          >
-            Undo
-          </button>
-        </p>
+        <UndoRemoval
+          undo={() =>
+            void action(async () => {
+              await api(`/v1/library/removals/${undo.id}/undo`, {
+                method: "POST",
+              });
+              setUndo(null);
+              backToLibrary();
+            }, "Restored")
+          }
+        />
       )}
       {searching ? (
         <SearchPage
@@ -699,46 +686,30 @@ export function PersonalLibrary({
         />
       )}
       {removal && (
-        <dialog ref={dialog} onCancel={() => setRemoval(null)}>
-          <h2>Remove from your library?</h2>
-          <p>
-            {removal.preview.delete_count
-              ? `${removal.preview.delete_count} music files will move to recoverable trash on the server.`
-              : "The music files will stay on the server."}
-          </p>
-          {removal.preview.items
-            .filter((i) => !i.delete_file)
-            .map((i) => (
-              <p key={i.track_id}>
-                Kept for {i.kept_for.join(", ") || "another pending request"}.
-              </p>
-            ))}
-          <button onClick={() => setRemoval(null)}>Cancel</button>
-          <button
-            onClick={() =>
-              void action(async () => {
-                const r = await api<{ id: string; undo_until: number }>(
-                  "/v1/library/remove",
-                  {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      track_ids: removal.ids,
-                      confirmation: removal.preview.confirmation,
-                    }),
-                  },
-                );
-                setUndo(r);
-                setRemoval(null);
-                // Leave the page the songs were removed from, address too (#97).
-                if (openRoute.current) backToLibrary();
-                else setDetail(null);
-              }, "Removed from your library")
-            }
-          >
-            Remove
-          </button>
-        </dialog>
+        <RemovalDialog
+          removal={removal}
+          cancel={() => setRemoval(null)}
+          confirm={() =>
+            void action(async () => {
+              const r = await api<{ id: string; undo_until: number }>(
+                "/v1/library/remove",
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    track_ids: removal.ids,
+                    confirmation: removal.preview.confirmation,
+                  }),
+                },
+              );
+              setUndo(r);
+              setRemoval(null);
+              // Leave the page the songs were removed from, address too (#97).
+              if (openRoute.current) backToLibrary();
+              else setDetail(null);
+            }, "Removed from your library")
+          }
+        />
       )}
     </main>
   );
