@@ -46,9 +46,9 @@
     }
 
     /// A playlist and its songs, in Apple's order (music videos left out), up
-    /// to the most a playlist screen checks.
+    /// to the most a playlist screen checks, and whether Apple lists more.
     public static func songs(playlistId: String) async throws -> (
-      ApplePlaylist, [ApplePlaylistSong]
+      ApplePlaylist, [ApplePlaylistSong], more: Bool
     )? {
       guard await authorized(asking: false) else { return nil }
       let request = MusicCatalogResourceRequest<MusicKit.Playlist>(
@@ -57,11 +57,17 @@
       let playlist = try await found.with([.tracks])
       var tracks: [MusicKit.Track] = []
       var batch = playlist.tracks
+      var more = false
       while let current = batch {
         tracks += current
-        guard current.hasNextBatch, tracks.count < ApplePlaylistStatuses.limit else { break }
+        guard current.hasNextBatch else { break }
+        guard tracks.count < ApplePlaylistStatuses.limit else {
+          more = true
+          break
+        }
         batch = try await current.nextBatch()
       }
+      more = more || tracks.count > ApplePlaylistStatuses.limit
       var songs: [ApplePlaylistSong] = []
       for track in tracks.prefix(ApplePlaylistStatuses.limit) {
         guard case .song(let song) = track else { continue }
@@ -74,7 +80,7 @@
       let info = ApplePlaylist(
         id: playlist.id.rawValue, name: playlist.name, curator: playlist.curatorName,
         artworkURL: playlist.artwork?.url(width: 600, height: 600))
-      return (info, songs)
+      return (info, songs, more)
     }
   }
 #endif

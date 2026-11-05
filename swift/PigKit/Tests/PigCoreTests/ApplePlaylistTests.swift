@@ -166,3 +166,99 @@ private func song(_ position: Int, _ title: String, artist: String = "Coldplay")
   #expect(stored.states(for: before) == saved.states)
   #expect(stored.states(for: reordered) == nil)
 }
+
+// #121 (D-69): "Add to my playlists" makes the person's own exact copy.
+
+private actor Imports {
+  var sent: [AppleImportRequest] = []
+  func add(_ request: AppleImportRequest) { sent.append(request) }
+}
+
+private struct FakeImport: AppleImportSource {
+  let imports: Imports
+  var counts = AppleImportCounts(inLibrary: 1, household: 1, missing: 2, requested: 0)
+  func importApplePlaylist(_ request: AppleImportRequest) async throws -> (
+    Playlist, AppleImportCounts
+  ) {
+    await imports.add(request)
+    var counts = counts
+    if !request.downloadMissing { counts.requested = 0 }
+    let playlist: Playlist = decode(
+      #"{"id":"copy-1","name":"Yellow Hits","revision":0,"track_count":4}"#)
+    return (playlist, counts)
+  }
+}
+
+@Test func addingAnApplePlaylistSendsItsSongsInApplesOrder() async throws {
+  let imports = Imports()
+  // Out of order on the way in, as a view might hold them; Apple's order wins.
+  let songs = [
+    song(1, "Yellow"), song(0, "Clocks"), song(3, "Lost", artist: " "), song(2, "Fix You"),
+  ]
+  let result = try await AppleImports.add(
+    chill, songs: songs, downloadMissing: false, source: FakeImport(imports: imports))
+  let sent = try #require(await imports.sent.first)
+  #expect(sent.applePlaylistId == "pl.1" && sent.name == "Yellow Hits")
+  #expect(sent.curator == "Apple Music")
+  #expect(!sent.downloadMissing && !sent.capped)
+  // A song without an artist can't be matched and is left out.
+  #expect(sent.songs.map(\.title) == ["Clocks", "Yellow", "Fix You"])
+  #expect(sent.songs.map(\.album) == ["Clocks album", "Yellow album", "Fix You album"])
+  #expect(sent.songs.allSatisfy { $0.duration == 240 })
+  #expect(sent.songs.first?.appleId == songs[1].appleId.map { String($0) })
+  #expect(result.playlist.id == "copy-1")
+  #expect(
+    result.counts == AppleImportCounts(inLibrary: 1, household: 1, missing: 2, requested: 0))
+  #expect(
+    AppleImport.summary(result)
+      == "Added to your playlists: 1 song in your library, 1 song from the server, 2 songs not on the server yet. The missing songs join the playlist if they are downloaded later."
+  )
+}
+
+@Test func addAndDownloadAsksForTheMissingSongsAndSaysHowMany() async throws {
+  let imports = Imports()
+  let source = FakeImport(
+    imports: imports,
+    counts: AppleImportCounts(inLibrary: 0, household: 3, missing: 2, requested: 2))
+  let result = try await AppleImports.add(
+    chill, songs: [song(0, "Clocks")], downloadMissing: true, source: source)
+  #expect(await imports.sent.first?.downloadMissing == true)
+  #expect(
+    AppleImport.summary(result)
+      == "Added to your playlists: 3 songs from the server, 2 songs not on the server yet. 2 songs requested; they join the playlist once downloaded."
+  )
+  // The sheet's offer, before adding: on the server, and to download.
+  let states: [ApplePlaylistSongState] = [
+    .library(Track(id: "a", title: "A", artist: "B")),
+    .server(Track(id: "c", title: "C", artist: "D")), .elsewhere, .elsewhere, .elsewhere,
+  ]
+  let choice = AppleImport.choice(states)
+  #expect(choice.onServer == 2 && choice.toDownload == 3)
+}
+
+@Test func onePressAddsAtMostTwoHundredSongsAndSaysSo() async throws {
+  let imports = Imports()
+  let many = (0..<250).map { song($0, "Song \($0)") }
+  let result = try await AppleImports.add(
+    chill, songs: many, downloadMissing: false, source: FakeImport(imports: imports))
+  let sent = try #require(await imports.sent.first)
+  #expect(sent.songs.count == 200)
+  #expect(sent.songs.last?.title == "Song 199")
+  #expect(sent.capped && result.capped)
+  #expect(AppleImport.summary(result).hasSuffix("Only the first 200 songs were added."))
+  // Apple listing more than the screen fetched is capped too.
+  let fetched = try await AppleImports.add(
+    chill, songs: [song(0, "Clocks")], moreThanShown: true, downloadMissing: false,
+    source: FakeImport(imports: imports))
+  #expect(fetched.capped)
+  // The sheet counts only the songs one press adds.
+  let choice = AppleImport.choice(Array(repeating: .elsewhere, count: 250))
+  #expect(choice.onServer == 0 && choice.toDownload == 200)
+  // A playlist with nothing to add asks nothing of the server.
+  await #expect(throws: (any Error).self) {
+    _ = try await AppleImports.add(
+      chill, songs: [song(0, "Lost", artist: "")], downloadMissing: false,
+      source: FakeImport(imports: imports))
+  }
+  #expect(await imports.sent.count == 2)
+}

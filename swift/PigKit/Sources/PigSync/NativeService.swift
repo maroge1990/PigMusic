@@ -321,6 +321,36 @@ public actor NativeService: LibrarySource {
     default: throw NativeFailure.unavailable("Song matches are unavailable right now.")
     }
   }
+  /// An Apple Music playlist as the person's own exact copy (#121, D-69);
+  /// adding the same one again updates that copy.
+  public func importApplePlaylist(_ request: AppleImportRequest) async throws -> (
+    Playlist, AppleImportCounts
+  ) {
+    let body = Components.Schemas.AppleMusicPlaylist(
+      apple_playlist_id: request.applePlaylistId, curator: request.curator,
+      download_missing: request.downloadMissing, name: request.name,
+      songs: request.songs.map {
+        Components.Schemas.AppleMusicSong(
+          album: $0.album, apple_id: $0.appleId, artist: $0.artist, duration: $0.duration,
+          title: $0.title)
+      })
+    switch try await client.import_apple_music_api_v1_imports_apple_music_post(
+      .init(body: .json(body)))
+    {
+    case .ok(let value):
+      let added = try value.body.json
+      return (
+        try LibraryCodec.convert(added.playlist, to: Playlist.self),
+        try LibraryCodec.convert(added.counts, to: AppleImportCounts.self)
+      )
+    case .unauthorized: throw NativeFailure.authentication
+    case .notFound:
+      throw NativeFailure.unavailable("Update the server to add Apple Music playlists.")
+    default:
+      throw NativeFailure.unavailable(
+        "Adding the playlist could not be confirmed. Check your playlists before trying again.")
+    }
+  }
   public func artistArtwork(id: String, request: ArtworkRequest) async throws -> Data {
     guard let uuid = UUID(uuidString: id) else { throw ArtworkFailure.invalidRequest }
     return try await artworkTransport.fetch(request, alias: .artist(uuid))

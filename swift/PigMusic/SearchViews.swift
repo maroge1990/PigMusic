@@ -723,6 +723,11 @@ private struct ApplePlaylistView: View {
   @State private var states: [ApplePlaylistSongState]?
   @State private var failure: String?
   @State private var statusFailure: String?
+  /// Apple lists more songs than the screen shows (and one press adds).
+  @State private var moreThanShown = false
+  @State private var adding = false
+  @State private var opened: Playlist?
+  @State private var toOpen: Playlist?
   @Environment(\.colorScheme) private var scheme
   private var shown: ApplePlaylist { info ?? playlist }
   /// The songs on the server, in the playlist's order.
@@ -742,6 +747,12 @@ private struct ApplePlaylistView: View {
           }.disabled(playable.isEmpty)
           Spacer()
         }
+        // One label: the playlist list doesn't say which Apple playlist a
+        // copy came from, so the app can't offer "Update my copy". Adding it
+        // again updates the copy on the server (D-69).
+        Button("Add to my playlists", systemImage: "plus") { adding = true }
+          .buttonStyle(.bordered).buttonBorderShape(.capsule)
+          .disabled((songs ?? []).isEmpty || !model.canMutate)
         if let songs {
           if let summary {
             Text(summary).font(PigType.footnote).foregroundStyle(.secondary)
@@ -767,6 +778,23 @@ private struct ApplePlaylistView: View {
     }
     .pigCanvas().navigationTitle(shown.name).navigationBarTitleDisplayMode(.inline)
     .task(id: playlist.id) { await load() }
+    .sheet(
+      isPresented: $adding,
+      onDismiss: {
+        // The new playlist opens once the sheet has gone.
+        opened = toOpen
+        toOpen = nil
+      }
+    ) {
+      AppleImportSheet(
+        model: model, playlist: shown, songs: songs ?? [], states: states,
+        moreThanShown: moreThanShown
+      ) { added in
+        toOpen = added
+        adding = false
+      }
+    }
+    .navigationDestination(item: $opened) { PlaylistView(model: model, playlist: $0) }
   }
   private var header: some View {
     HStack(alignment: .center, spacing: 16) {
@@ -836,6 +864,7 @@ private struct ApplePlaylistView: View {
         }
         info = found.0
         songs = found.1
+        moreThanShown = found.more
       } catch is CancellationError {
         return
       } catch {
@@ -867,6 +896,111 @@ private struct ApplePlaylistView: View {
         statusFailure = "Which songs are on the server can't be checked right now."
       }
     }
+  }
+}
+
+/// "Add to my playlists" for an Apple playlist (#121, D-69): how many songs
+/// are on the server and how many would download, then Add only, or Add and
+/// download after a confirmation. The copy is the person's own and doesn't
+/// follow Apple's later changes; adding it again updates it.
+private struct AppleImportSheet: View {
+  let model: AppModel
+  let playlist: ApplePlaylist
+  let songs: [ApplePlaylistSong]
+  let states: [ApplePlaylistSongState]?
+  let moreThanShown: Bool
+  let open: (Playlist) -> Void
+  @State private var confirming = false
+  @State private var working = false
+  @State private var result: AppleImportResult?
+  @State private var message: String?
+  @Environment(\.dismiss) private var dismiss
+  private var capped: Bool { moreThanShown || songs.count > AppleImport.limit }
+  var body: some View {
+    let choice = states.map(AppleImport.choice)
+    let missing = choice?.toDownload ?? 0
+    let songsLabel = "\(missing) song\(missing == 1 ? "" : "s")"
+    NavigationStack {
+      List {
+        Section {
+          Text(playlist.name).font(.headline)
+          if let result {
+            Text(AppleImport.summary(result))
+          } else {
+            if let choice {
+              Text("\(choice.onServer) on the server, \(choice.toDownload) to download")
+            } else {
+              Text("Which songs are on the server isn't known yet.")
+                .foregroundStyle(.secondary)
+            }
+            if capped {
+              Text(
+                "This playlist has more than \(AppleImport.limit) songs: the first \(AppleImport.limit) are added."
+              )
+              .font(PigType.footnote).foregroundStyle(.secondary)
+            }
+            Text(
+              "It becomes your own playlist in Apple's order. Adding it again later updates your copy."
+            )
+            .font(PigType.footnote).foregroundStyle(.secondary)
+          }
+          if let message { Text(message).font(PigType.footnote) }
+        }
+        Section {
+          if working {
+            ProgressView("Adding…")
+          } else if let result {
+            Button("Open playlist", systemImage: "music.note.list") {
+              open(model.playlists.first { $0.id == result.playlist.id } ?? result.playlist)
+            }
+          } else {
+            Button("Add only", systemImage: "plus") { Task { await add(download: false) } }
+              .disabled(!model.canMutate)
+            if missing > 0 {
+              Button("Add and download \(songsLabel)", systemImage: "arrow.down.circle") {
+                confirming = true
+              }
+              .disabled(!model.canMutate)
+              .confirmationDialog(
+                "Download \(songsLabel)?", isPresented: $confirming, titleVisibility: .visible
+              ) {
+                Button("Add and download \(songsLabel)") { Task { await add(download: true) } }
+              } message: {
+                Text(
+                  "Your server finds and downloads the songs that aren't on it yet; they join the playlist once downloaded."
+                )
+              }
+            }
+          }
+        }
+      }
+      .navigationTitle(result == nil ? "Add to my playlists" : "Added")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button(result == nil ? "Cancel" : "Done") { dismiss() }
+        }
+      }
+    }
+    .presentationDetents([.medium, .large])
+    .interactiveDismissDisabled(working)
+  }
+  private func add(download: Bool) async {
+    guard !working else { return }
+    working = true
+    message = nil
+    defer { working = false }
+    let playlist = playlist
+    let songs = songs
+    let moreThanShown = moreThanShown
+    do {
+      // performPersonal refreshes the person's playlists once it succeeds.
+      result = try await model.performPersonal { service in
+        try await AppleImports.add(
+          playlist, songs: songs, moreThanShown: moreThanShown, downloadMissing: download,
+          source: service)
+      }
+    } catch is CancellationError {} catch { message = error.userMessage }
   }
 }
 

@@ -62,3 +62,31 @@ public enum ApplePlaylistStatuses {
     return ApplePlaylistStates(songs: songs, states: states)
   }
 }
+
+/// Where "Add to my playlists" goes (#121): the server's Apple Music import,
+/// which makes or updates the person's own copy (D-69).
+public protocol AppleImportSource: Sendable {
+  func importApplePlaylist(_ request: AppleImportRequest) async throws -> (
+    Playlist, AppleImportCounts
+  )
+}
+extension NativeService: AppleImportSource {}
+
+public enum AppleImports {
+  /// Adds the playlist as shown (at most `AppleImport.limit` songs, in
+  /// Apple's order). Missing songs are requested only with `downloadMissing`,
+  /// which the screen asks the person to confirm first.
+  public static func add(
+    _ playlist: ApplePlaylist, songs: [ApplePlaylistSong], moreThanShown: Bool = false,
+    downloadMissing: Bool, source: any AppleImportSource
+  ) async throws -> AppleImportResult {
+    let request = AppleImport.request(
+      playlist: playlist, songs: songs, moreThanShown: moreThanShown,
+      downloadMissing: downloadMissing)
+    guard !request.songs.isEmpty else {
+      throw NativeFailure.unavailable("This playlist has no songs PigMusic can add.")
+    }
+    let (added, counts) = try await source.importApplePlaylist(request)
+    return AppleImportResult(playlist: added, counts: counts, capped: request.capped)
+  }
+}
