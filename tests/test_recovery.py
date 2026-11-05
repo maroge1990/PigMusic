@@ -419,3 +419,58 @@ def test_a_stopped_purge_whose_folder_was_replaced_with_a_same_named_file_needs_
     assert old["id"] not in [i["id"] for i in restarted.purge_plan(1)["items"]]
     with pytest.raises(ValueError, match="needs review"):
         restarted.restore(old["id"])
+
+
+def test_a_trash_folder_moved_while_recovery_hashes_keeps_the_intent(
+    tmp_path, monkeypatch
+):
+    """D-71 round: recovery's checks went through its held folder; a folder
+    moved and recreated while it hashed left the record pointing at the
+    replacement with its intent cleared, so Restore failed and Needs review
+    was gone."""
+    import server.recovery as module
+
+    store, root, recovery, old, new = two_removed(tmp_path, monkeypatch)
+    trash = root / old["trash"]
+    moved = trash.parent.with_name("Album-moved")
+    plan = recovery.purge_plan(30)
+
+    def stop():
+        raise Stop
+
+    monkeypatch.setattr(module, "hashlib", SwapAfterHashing(stop))
+    with pytest.raises(Stop):
+        recovery.purge(30, plan["fingerprint"])
+
+    def move():
+        trash.parent.rename(moved)
+        trash.parent.mkdir()
+
+    monkeypatch.setattr(module, "hashlib", SwapAfterHashing(move))
+    restarted = Recovery(Store(store.directory))
+    restarted.recover()
+    record = store.read_document("removed:" + old["id"])
+    assert record.get("quarantine") and record.get("quarantine_folder")
+    assert not record.get("purged_at")
+    assert (moved / "Song.mp3").exists()  # Put back, in the moved folder.
+    with pytest.raises(ValueError, match="needs review"):
+        restarted.restore(old["id"])
+
+
+def test_a_trash_folder_moved_while_the_purge_hashes_is_never_recorded_purged(
+    tmp_path, monkeypatch
+):
+    import server.recovery as module
+
+    store, root, recovery, old, new = two_removed(tmp_path, monkeypatch)
+    trash = root / old["trash"]
+    plan = recovery.purge_plan(30)
+
+    def move():
+        trash.parent.rename(trash.parent.with_name("Album-moved"))
+        trash.parent.mkdir()
+
+    monkeypatch.setattr(module, "hashlib", SwapAfterHashing(move))
+    assert recovery.purge(30, plan["fingerprint"]) == {"purged": 0, "kept": 1}
+    record = store.read_document("removed:" + old["id"])
+    assert record.get("quarantine") and not record.get("purged_at")

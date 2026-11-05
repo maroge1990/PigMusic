@@ -365,6 +365,11 @@ class Recovery:
                     except (OSError, ValueError):
                         pass  # The intent stays for the next start.
                     continue
+                if not self.folder_still(root, parts[:-1], record):
+                    # Deleted in a folder no longer at the recorded path:
+                    # the intent stays, and the song needs review.
+                    kept += 1
+                    continue
                 record["purged_at"] = int(time.time())
                 record.pop("quarantine")
                 record.pop("quarantine_folder")
@@ -425,6 +430,23 @@ class Recovery:
         finally:
             os.close(folder)
 
+    @staticmethod
+    def folder_still(root, folders, record):
+        """Whether the recorded Trash folder path, opened afresh without
+        following a link, is still the folder the purge recorded (device,
+        inode) before its rename. Checked last, before a purge or its
+        settlement is recorded: work done through a held descriptor proves
+        nothing about the path once that folder has moved."""
+        try:
+            folder = open_owned_folder(root, *folders)
+        except OSError:
+            return False
+        try:
+            info = os.fstat(folder)
+        finally:
+            os.close(folder)
+        return [info.st_dev, info.st_ino] == list(record.get("quarantine_folder") or [])
+
     def settle_purge(self, record, root, verify=True):
         """Bring a purge that kept or was interrupted with its file under the
         private name to rest, then clear the recorded intent. The file is
@@ -476,6 +498,10 @@ class Recovery:
             # Otherwise the private name holds something else: left alone.
         finally:
             os.close(folder)
+        if not self.folder_still(root, folders, record):
+            # The folder worked in was moved from the recorded path while
+            # settling: what the record would say proves nothing there.
+            raise ValueError("The Trash folder changed; needs review.")
         record.pop("quarantine")
         record.pop("quarantine_folder", None)
         self.save("removed:" + record["id"], record)
