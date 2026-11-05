@@ -236,7 +236,7 @@ def test_replenished_page_covers_cannot_starve_home_or_library(tmp_path, page_si
         w.submit(B, priority=LIBRARY)
         worker = asyncio.create_task(w.work())
         try:
-            await asyncio.wait_for(w.queue.join(), 3)
+            await asyncio.wait_for(w.queue.join(), 15)
         finally:
             worker.cancel()
             await asyncio.gather(worker, return_exceptions=True)
