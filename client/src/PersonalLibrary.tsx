@@ -24,6 +24,7 @@ import {
 } from "./LibraryCollections";
 import type { Playlist, PlaylistSummary } from "./libraryTypes";
 import { LibrarySongs } from "./LibrarySongs";
+import { ArtistAlbums } from "./ArtistAlbums";
 import { PlaylistOptions } from "./PlaylistOptions";
 import {
   RemovalDialog,
@@ -568,30 +569,10 @@ export function PersonalLibrary({
             </div>
           )}
           {detail.albums && (
-            <>
-              {detail.albums.length > 0 && <h2>Albums</h2>}
-              <div className="personal-grid">
-                {detail.albums.map((a) => (
-                  <button
-                    key={a.id}
-                    onClick={() => go("/library/album/" + a.id)}
-                  >
-                    <Cover title={a.title} src={a.cover_url} />
-                    {/* A button holds phrasing content only (#97). */}
-                    <strong className="grid-card-title">{a.title}</strong>
-                    <span className="grid-card-detail">
-                      {[
-                        a.year ? String(a.year) : "",
-                        `${a.track_count} ${a.track_count === 1 ? "song" : "songs"}`,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </span>
-                  </button>
-                ))}
-              </div>
-              {!!detail.tracks?.length && <h2>Songs</h2>}
-            </>
+            <ArtistAlbums
+              albums={detail.albums}
+              hasSongs={!!detail.tracks?.length}
+            />
           )}
           {albumRows && (
             <p className="muted album-summary">
