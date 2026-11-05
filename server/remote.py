@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import shutil
 import time
@@ -27,6 +28,18 @@ log = logging.getLogger("pig_music.remote")
 
 # After JioSaavn's direct stream, in coverage order (14 October 2026 test).
 # Lossless sources are never streamed.
+# Speed- and effect-altered uploads are other recordings even when only the
+# album says so ("Song (Slowed)"); remote playback alone checks these (the
+# shared song rule does not know them).
+ALTERED = re.compile(
+    r"\b(sped|speed(?:ed)? up|slowed|nightcore|reverb|8d|daycore)\b", re.I
+)
+
+
+def altered(*texts):
+    return bool(ALTERED.search(" ".join(t or "" for t in texts)))
+
+
 RELAYED = ("zvu4no", "freemp3cloud")
 LABELS = {
     "jiosaavn": "JioSaavn",
@@ -586,8 +599,12 @@ class RemoteAudio:
                 # "Demos", "Live at Leeds" are those recordings even when the
                 # song title says nothing) as the request.
                 and flavour(c.get("album")) == recording_kind(track)
+                and altered(c.get("title"), c.get("album"))
+                == altered(track.get("title"), track.get("album"))
                 and (
-                    not track.get("explicit_edition")
+                    # Without a known length nothing proves another release
+                    # holds the same recording: the album must agree.
+                    (not track.get("explicit_edition") and track.get("duration"))
                     or normalise(c.get("album", "")) == normalise(track["album"])
                 )
                 and (
@@ -651,9 +668,13 @@ class RemoteAudio:
         for c in results[:8]:
             if not matches(track, c):
                 why = "not the recording"
-            elif track.get("explicit_edition") and normalise(
-                c.get("album", "")
-            ) != normalise(track["album"]):
+            elif flavour(c.get("album")) != recording_kind(track) or altered(
+                c.get("title"), c.get("album")
+            ) != altered(track.get("title"), track.get("album")):
+                why = "another recording (album " + repr(c.get("album", "")) + ")"
+            elif (
+                track.get("explicit_edition") or not track.get("duration")
+            ) and normalise(c.get("album", "")) != normalise(track["album"]):
                 why = "album " + repr(c.get("album", ""))
             elif (
                 track.get("isrcs") and c.get("isrc") and c["isrc"] not in track["isrcs"]

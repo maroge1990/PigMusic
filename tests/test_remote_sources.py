@@ -933,3 +933,22 @@ def test_a_cached_answer_never_serves_a_stricter_request():
                 await resolver.resolve(client, {**target, "isrcs": ["MINE"]})
 
     asyncio.run(run())
+
+
+def test_jiosaavn_never_takes_a_sped_up_or_slowed_upload():
+    """Codex round 2 (5 Nov): 'Song (Slowed)' or a sped-up album passed the
+    relaxed rule; without a requested length any speed change would."""
+    target = {"artist": "CYRIL", "title": "Breathless", "duration": 171}
+    target["album"] = "Breathless - Single"
+    for album in ("Breathless (Slowed)", "Breathless (Sped Up)", "Nightcore Hits"):
+        with pytest.raises(ValueError):
+            resolved(target, [saavn(album, "x", duration=174)])
+    # Among several copies an altered one is never the pick.
+    copies = [saavn("Breathless (Slowed)", "a"), saavn("Summer Hits 2026", "s")]
+    assert resolved(target, copies).endswith("/s.m4a")
+    # No requested length: only the requested album itself.
+    unknown = {k: v for k, v in target.items() if k != "duration"}
+    with pytest.raises(ValueError):
+        resolved(unknown, [saavn("Summer Hits 2026", "s", duration=240)])
+    same = saavn("Breathless - Single", "b", duration=240)
+    assert resolved(unknown, [same]).endswith("/b.m4a")
