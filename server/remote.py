@@ -608,10 +608,24 @@ class RemoteAudio:
                 and altered(c.get("title"), c.get("album"))
                 == altered(track.get("title"), track.get("album"))
                 and (
-                    # Without a known length nothing proves another release
-                    # holds the same recording: the album must agree.
-                    (not track.get("explicit_edition") and track.get("duration"))
+                    # Only a plain studio song with a known length may come
+                    # from another release. A live, demo, remix, session or
+                    # altered recording is one performance (another concert
+                    # is another recording), so it must be the requested
+                    # album or carry one of its ISRCs; so must a song with no
+                    # known length or an edition chosen explicitly.
+                    (
+                        not track.get("explicit_edition")
+                        and track.get("duration")
+                        and not recording_kind(track)
+                        and not altered(track.get("title"), track.get("album"))
+                    )
                     or normalise(c.get("album", "")) == normalise(track["album"])
+                    or bool(
+                        track.get("isrcs")
+                        and c.get("isrc")
+                        and c["isrc"] in track["isrcs"]
+                    )
                 )
                 and (
                     not track.get("isrcs")
@@ -679,7 +693,10 @@ class RemoteAudio:
             ) != altered(track.get("title"), track.get("album")):
                 why = "another recording (album " + repr(c.get("album", "")) + ")"
             elif (
-                track.get("explicit_edition") or not track.get("duration")
+                track.get("explicit_edition")
+                or not track.get("duration")
+                or recording_kind(track)
+                or altered(track.get("title"), track.get("album"))
             ) and normalise(c.get("album", "")) != normalise(track["album"]):
                 why = "album " + repr(c.get("album", ""))
             elif (

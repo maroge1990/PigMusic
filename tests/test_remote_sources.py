@@ -910,6 +910,12 @@ def test_jiosaavn_never_takes_a_remix_or_demo_album_for_the_studio_song():
             resolved(target, [saavn(album, "x")])
     live = {**target, "album": "Live at Wembley"}
     assert resolved(live, [saavn("Live at Wembley", "l")]).endswith("/l.m4a")
+    # Another concert is another recording, however close its length.
+    with pytest.raises(ValueError):
+        resolved(live, [saavn("Live at Leeds", "k", duration=173)])
+    # Unless an ISRC proves it is the same performance.
+    proven = {**saavn("Live at Leeds", "k"), "isrc": "LIVE1"}
+    assert resolved({**live, "isrcs": ["LIVE1"]}, [proven]).endswith("/k.m4a")
 
 
 def test_a_cached_answer_never_serves_a_stricter_request():
@@ -962,6 +968,7 @@ def test_one_alteration_is_never_another():
     for album in ("Breathless (8D)", "Breathless (Slowed + Reverb)", "Breathless"):
         with pytest.raises(ValueError):
             resolved(target, [saavn(album, "x")])
-    assert resolved(target, [saavn("Reverb Hits", "r")]).endswith("/r.m4a")
-    sped = {**target, "album": "Breathless (Sped Up)"}
-    assert resolved(sped, [saavn("Breathless (Speed Up)", "s")]).endswith("/s.m4a")
+    # An altered version is one upload: only the requested album itself.
+    with pytest.raises(ValueError):
+        resolved(target, [saavn("Reverb Hits", "r")])
+    assert resolved(target, [saavn("Breathless (Reverb)", "r")]).endswith("/r.m4a")
