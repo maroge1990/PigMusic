@@ -39,13 +39,16 @@ def test_fast_remote_requires_release_context_and_caches_verified_urls():
             assert await resolver.resolve(client, target) == candidate["source_url"]
             resolver.cache.clear()
             for change in [
-                {"album": "Different album"},
                 {"isrc": "WRONG"},
                 {"source_url": "https://127.0.0.1/private"},
             ]:
                 resolver.search = lambda *_: [{**candidate, **change}]
                 with pytest.raises(ValueError):
                     await resolver.resolve(client, target)
+            # Another album is refused only for an edition chosen explicitly.
+            resolver.search = lambda *_: [{**candidate, "album": "Different album"}]
+            with pytest.raises(ValueError):
+                await resolver.resolve(client, {**target, "explicit_edition": True})
 
     asyncio.run(run())
     assert calls == ["search", "probe"]
@@ -424,6 +427,7 @@ def test_a_jiosaavn_lookup_never_waits_behind_relays():
 def test_jiosaavn_rejections_are_logged_with_their_reasons(caplog):
     target = {"artist": "Tame Impala", "title": "The Less I Know the Better"}
     target["album"] = "Currents"
+    target["explicit_edition"] = True
     results = [
         {
             "channel": "Tame Impala",
@@ -834,3 +838,63 @@ def test_old_search_success_cannot_clear_a_newer_cooldown(monkeypatch, late_outc
             await asyncio.gather(old, return_exceptions=True)
 
     asyncio.run(run())
+
+
+def resolved(target, results):
+    async def run():
+        def transport(request):
+            return httpx.Response(206, headers={"content-type": "audio/mp4"})
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(transport)
+        ) as client:
+            return await RemoteAudio(lambda *_: results).resolve(client, target)
+
+    return asyncio.run(run())
+
+
+def saavn(album, url, duration=170, title="Breathless", channel="Cyril"):
+    return {
+        "channel": channel,
+        "title": title,
+        "album": album,
+        "duration": duration,
+        "source_url": f"https://aac.saavncdn.com/{url}.m4a",
+    }
+
+
+def test_jiosaavn_plays_the_same_recording_from_another_release():
+    """5 Nov 2026 (Mark's remote plays): JioSaavn had the recording, filed as
+    the single or another release, and the exact-album rule refused it
+    (CYRIL, Gracie Abrams, Olivia Rodrigo and more)."""
+    single = {"artist": "CYRIL", "title": "Breathless", "duration": 171}
+    single["album"] = "Breathless - Single"
+    assert resolved(single, [saavn("Breathless", "a")]).endswith("/a.m4a")
+    deluxe = {**single, "album": "Daughter from Hell (Deluxe)"}
+    assert resolved(deluxe, [saavn("Breathless", "a")]).endswith("/a.m4a")
+    # Still never a different recording: live, too long, or another artist.
+    for wrong in (
+        saavn("Breathless (Live)", "b", title="Breathless (Live)"),
+        saavn("Breathless", "c", duration=230),
+        saavn("Breathless", "d", channel="Someone Else"),
+    ):
+        with pytest.raises(ValueError):
+            resolved(single, [wrong])
+
+
+def test_jiosaavn_picks_one_copy_when_several_match():
+    """Patient Zero and Nicole Kidman each matched two identical copies and
+    the 'exactly one' rule refused both."""
+    target = {"artist": "CYRIL", "title": "Breathless", "duration": 171}
+    target["album"] = "Breathless - Single"
+    copies = [
+        saavn("Summer Hits 2026", "z"),
+        saavn("Breathless", "m"),
+        saavn("Dance Party", "a"),
+    ]
+    # The same album first (without " - Single"), then a fixed order.
+    assert resolved(target, copies).endswith("/m.m4a")
+    assert resolved(target, list(reversed(copies))).endswith("/m.m4a")
+    others = [c for c in copies if c["album"] != "Breathless"]
+    assert resolved(target, others).endswith("/a.m4a")
+    assert resolved(target, list(reversed(others))).endswith("/a.m4a")

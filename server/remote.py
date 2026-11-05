@@ -19,6 +19,7 @@ from .request_timing import add_phase, phase
 from .library import normalise
 from .providers.process import run_checked
 from .downloader import FREEMP3CLOUD_RETRY_PAUSE, matches
+from .matching import album_title
 from .providers.contracts import ProviderError
 from .vendor.jiosaavn import search_jiosaavn
 
@@ -568,24 +569,43 @@ class RemoteAudio:
                 # The vendored search wraps any failure, a network error
                 # included: JioSaavn is uncertain, the relays still answer.
                 raise TimeoutError("JioSaavn search unavailable.") from exc
+            # The shared song rule (`matches`: lead artist, title, live/remix/
+            # demo words in title and album, length within 5 s, agreeing IDs)
+            # decides; a song is the same on any edition (PRODUCT), so the
+            # album must agree only for an edition chosen explicitly.
             candidates = [
                 c
                 for c in results
                 if matches(track, c)
-                and normalise(c.get("album", "")) == normalise(track["album"])
+                and (
+                    not track.get("explicit_edition")
+                    or normalise(c.get("album", "")) == normalise(track["album"])
+                )
                 and (
                     not track.get("isrcs")
                     or not c.get("isrc")
                     or c["isrc"] in track["isrcs"]
                 )
             ]
-            urls = {c.get("source_url"): c for c in candidates}
-            if len(urls) != 1:
-                self.rejected(track, results, len(urls))
+            urls = {c.get("source_url"): c for c in candidates if c.get("source_url")}
+            if not urls:
+                self.rejected(track, results, 0)
                 raise ValueError(
-                    "No unique remote recording matched this release. Downloading remains available."
+                    "No remote recording matched this song. Downloading remains available."
                 )
-            url = next(iter(urls))
+            # Several copies of the recording: the same album first (without
+            # " - Single" and edition words), then a matching ISRC, then a
+            # fixed order, so the same song picks the same copy every time.
+            wanted = album_title(track.get("album") or "", track.get("artist"))
+            url = min(
+                urls,
+                key=lambda u: (
+                    album_title(urls[u].get("album") or "", urls[u].get("channel"))
+                    != wanted,
+                    not (track.get("isrcs") and urls[u].get("isrc") in track["isrcs"]),
+                    u,
+                ),
+            )
             parsed = urlsplit(url)
             if (
                 parsed.scheme != "https"
@@ -622,7 +642,9 @@ class RemoteAudio:
         for c in results[:8]:
             if not matches(track, c):
                 why = "not the recording"
-            elif normalise(c.get("album", "")) != normalise(track["album"]):
+            elif track.get("explicit_edition") and normalise(
+                c.get("album", "")
+            ) != normalise(track["album"]):
                 why = "album " + repr(c.get("album", ""))
             elif (
                 track.get("isrcs") and c.get("isrc") and c["isrc"] not in track["isrcs"]
