@@ -898,3 +898,38 @@ def test_jiosaavn_picks_one_copy_when_several_match():
     others = [c for c in copies if c["album"] != "Breathless"]
     assert resolved(target, others).endswith("/a.m4a")
     assert resolved(target, list(reversed(others))).endswith("/a.m4a")
+
+
+def test_jiosaavn_never_takes_a_remix_or_demo_album_for_the_studio_song():
+    """Codex round 1 (5 Nov): with the album rule relaxed, an unchanged title
+    on 'The Remixes' or 'Demos' passed (matches() knows only the singular)."""
+    target = {"artist": "CYRIL", "title": "Breathless", "duration": 171}
+    target["album"] = "Breathless - Single"
+    for album in ("The Remixes", "Demos", "Live at Wembley", "Acoustic Sessions"):
+        with pytest.raises(ValueError):
+            resolved(target, [saavn(album, "x")])
+    live = {**target, "album": "Live at Wembley"}
+    assert resolved(live, [saavn("Live at Wembley", "l")]).endswith("/l.m4a")
+
+
+def test_a_cached_answer_never_serves_a_stricter_request():
+    target = {"artist": "CYRIL", "title": "Breathless", "duration": 171}
+    target["album"] = "Breathless - Single"
+    other_album = saavn("Summer Hits 2026", "s")
+
+    async def run():
+        def transport(request):
+            return httpx.Response(206, headers={"content-type": "audio/mp4"})
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(transport)
+        ) as client:
+            resolver = RemoteAudio(lambda *_: [other_album])
+            assert (await resolver.resolve(client, target)).endswith("/s.m4a")
+            with pytest.raises(ValueError):
+                await resolver.resolve(client, {**target, "explicit_edition": True})
+            resolver.search = lambda *_: [{**other_album, "isrc": "OTHER"}]
+            with pytest.raises(ValueError):
+                await resolver.resolve(client, {**target, "isrcs": ["MINE"]})
+
+    asyncio.run(run())

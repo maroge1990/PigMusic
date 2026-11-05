@@ -19,7 +19,7 @@ from .request_timing import add_phase, phase
 from .library import normalise
 from .providers.process import run_checked
 from .downloader import FREEMP3CLOUD_RETRY_PAUSE, matches
-from .matching import album_title
+from .matching import album_title, flavour, recording_kind
 from .providers.contracts import ProviderError
 from .vendor.jiosaavn import search_jiosaavn
 
@@ -157,6 +157,11 @@ class RemoteAudio:
             track["title"],
             track["album"],
             track.get("duration"),
+            # Every constraint resolution applies, so a cached answer for an
+            # ordinary request never serves a stricter one (Codex, 5 Nov).
+            bool(track.get("explicit_edition")),
+            tuple(sorted(track.get("isrcs") or [])),
+            tuple(sorted(recording_kind(track))),
         )
 
     async def stream(self, client, track, user_id):
@@ -577,6 +582,10 @@ class RemoteAudio:
                 c
                 for c in results
                 if matches(track, c)
+                # The album names the same kind of recording ("The Remixes",
+                # "Demos", "Live at Leeds" are those recordings even when the
+                # song title says nothing) as the request.
+                and flavour(c.get("album")) == recording_kind(track)
                 and (
                     not track.get("explicit_edition")
                     or normalise(c.get("album", "")) == normalise(track["album"])
