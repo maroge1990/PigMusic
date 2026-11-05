@@ -5,31 +5,25 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 5 Nov 2026 (afternoon, Melbourne).*
+*Overwritten at the end of every session. 5 Nov 2026 (evening, Melbourne).*
 
-- **Live:** server `418bca0` (`matches-20261105-v1`, 01:07 UTC 5 Nov).
-  Released today under Mark's go-ahead (no activity): `idle-20261105-v1` (c56bc1a: #106, #107, #17, #109 stage A,
-  idle loops #63), `batch-20261105-v3` (#93 background tag job, #86 hardening and USER 99:100, #110, #111, #96 items,
-  #22, web #56/#97/#105), `matches-20261105-v1` (`/api/v1/server/matches` for #109 stage B). Rollback containers
-  `PigMusic-before-<version>` kept.
-- **Tag job (#93) done live:** Mark pressed Apply; 1,518 songs retagged/renamed in ~45 min, no errors, spot-checked.
-  Originals stay in `.pig-music-trash/organisation/` until Mark cleans them.
-- **Idle CPU (#63):** 5.7% of a core ~45 min after the release (7.3–7.8% before; the rig idles at 1%). py-spy on the
-  live process (Mark's OK, 5 Nov) found the cause: every `documents WHERE name LIKE 'x:%'` read scans 22,381 rows
-  (140 ms); the export pass does it per song, partly under the lifecycle lock. Fixed locally as #122 (0.08 ms).
-- **Mark's checks on build 20 (5 Nov):** Apple Music playlists in search work (MusicKit enabled; ShazamKit also
-  enabled). Asked for next: add an Apple Music playlist as his own and download its songs (#121); Album editions
-  misses the split Blink-182 albums (#120); Organise still lists ~1,500 songs after the tag job (#119).
-- **iPhone/Watch:** **0.2.0 (20)** uploaded to TestFlight on 5 Nov: #115 songs retry a failed first connection and a
-  stalled stream recovers or stops with a message (from Mark's 4 Nov diagnostics), #109 stage B Apple Music playlists
-  in search (D-66; needs MusicKit ticked for the app identifier), #25, #112 Watch logo, three #97 iPhone/Watch fixes.
-  Builds 18–19's changes and #114 still wait for Mark's device check.
-- **T3 rig (#15) runs** (`scripts/test_rig.py`: check, artist, mixes, organise); 60-song library, too small for #22 timings.
-- **Codex findings open:** #116, #117 (stream recovery edge cases), #118 (remastered titles miss the server's copy),
-  #104, #101. Withdrawn in review and still to design: the Soulseek leftover sweep and the staged-audio sweep (#96).
+- **Live:** server `d8029ca` (`tools-20261105-v1`): #122 prefix reads by index, mix-cache cleanup per edition (#63),
+  #118 matching by `song_key`, #119 Review lists only real tag changes, #120 Album editions joins split albums (only
+  where the kept release's tracklist confirms each song), #121 Apple Music import (server). Earlier today:
+  `idle-20261105-v1`, `batch-20261105-v3` (#93 tag job ran live: 1,518 songs), `matches-20261105-v1`.
+- **Pushed, not live:** journal ownership guard for publication and recovery (#96; Codex-confirmed per D-71).
+- **iPhone/Watch:** **0.2.0 (21)** uploaded to TestFlight on 5 Nov: Shazam A (What's playing?), B (Shazamed inbox) and
+  C (Share → PigMusic from the Shazam app; App Group set up by Mark), #121 Add to my playlists, #116, #117, #97
+  Download button. Build 20's #115 and #112 wait for Mark's device check.
+- **Idle CPU (#63):** 3.9% of a core after `tools-20261105-v1` (5.7% → 7.8% earlier); the server's own Python is
+  ~7× quieter; the rest is mostly the embedded slskd. Small tails left: `Exporter.relative`, mix-cache cleanup.
+- **Reviews (D-71, 5 Nov):** every fix for a Codex finding is confirmed by Codex before it ships; our own tests never
+  stand in for it.
+- **Mark's pending checks:** Album editions joins for *Dude Ranch* and *Enema of the State* (#120); Organise Review
+  with tags (#119); build 21 on the phone.
 - **Parked by Mark (31 Oct):** the four-mockup screen redesign and the brand audit.
-- **Ways of working:** area batches, Codex rounds per D-59, Claude pushes (D-50); releases under D-52; D-58 closing.
-- **Household details** live only in the gitignored `.private/` (D-45).
+- **Ways of working:** area batches (D-50), Codex rounds per D-59 and D-71, Claude pushes; releases under D-52;
+  D-58 closing. Household details live only in the gitignored `.private/` (D-45).
 
 ## Now
 
