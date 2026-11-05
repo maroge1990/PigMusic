@@ -23,14 +23,18 @@ _HEADERS = {
     "Referer": _BASE_URL + "/",
 }
 
-_RE_BLOCK = re.compile(r'<div class="f-table">.*?(?=<div class="f-table">|<div id="queries"|</div>\s*</div>\s*<div id="amp-player")', re.DOTALL)
+# Each result is one f-table; the last one runs to the end of the page (the
+# old closing markers went in a November 2026 redesign).
+_RE_BLOCK = re.compile(r'<div class="f-table">.*?(?=<div class="f-table">|<div id="queries"|</div>\s*</div>\s*<div id="amp-player"|\Z)', re.DOTALL)
 _RE_ARTIST = re.compile(r'<div class="artist-name">\s*<a [^>]*>(.*?)</a>\s*</div>', re.DOTALL)
 _RE_TITLE = re.compile(r'<div class="track-name">(.*?)</div>', re.DOTALL)
 _RE_DUR = re.compile(r'<div class="time-text">(.*?)</div>', re.DOTALL)
 # Domain-agnostic: the site rebranded from zvu4no.org to zvu4it.org under our
 # feet, so match whichever CDN host serves the links rather than duplicating
 # the current hostname here.
-_RE_HREF = re.compile(r'<a class="mp3" href="(//data\.[a-z0-9.-]+/download-track/[^"]+\.mp3)"', re.DOTALL)
+# Links moved from //data.<host>/download-track/ to //hybrid.<host>/mp3-download/
+# in November 2026; either is accepted (is_zvu4no_url still checks the host).
+_RE_HREF = re.compile(r'<a class="mp3" href="(//[a-z0-9-]+\.[a-z0-9.-]+/(?:download-track|mp3-download)/[^"]+\.mp3)"', re.DOTALL)
 _RE_IMG = re.compile(r'<img src="(//img\.[a-z0-9.-]+/[^"]+)"', re.DOTALL)
 _RE_TAGS = re.compile(r"<[^>]+>")
 
@@ -79,7 +83,9 @@ def search_zvu4no(query: str, limit: int) -> list[dict]:
             title = _clean_text(title_m.group(1))
             dur = _clean_text(dur_m.group(1)) if dur_m else ""
             href = "https:" + html.unescape(href_m.group(1))
-            if href in seen_urls:
+            # Only the provider's own hosts: the pattern accepts any host so a
+            # rebrand still parses, but a link elsewhere is never offered.
+            if not is_zvu4no_url(href) or href in seen_urls:
                 continue
             seen_urls.add(href)
 
