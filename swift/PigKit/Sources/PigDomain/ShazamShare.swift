@@ -95,6 +95,15 @@ public struct ShazamShare: Codable, Sendable, Hashable {
   /// An Apple Music song link: `music.apple.com/au/album/yellow/1122782080?i=1122782283`
   /// (a song on its album) or `music.apple.com/au/song/yellow/1122782283`.
   static func appleSongId(_ url: URL) -> Int? {
+    // Newer Shazam song pages, `shazam.com/song/1122782283/yellow`, carry
+    // the Apple Music song id.
+    if host(url, is: "shazam.com") {
+      let parts = url.pathComponents.filter { $0 != "/" }
+      guard let at = parts.firstIndex(of: "song"), parts.indices.contains(at + 1),
+        parts[at + 1].allSatisfy({ $0.isASCII && $0.isNumber })
+      else { return nil }
+      return Int(parts[at + 1])
+    }
     guard host(url, is: "music.apple.com") || host(url, is: "itunes.apple.com") else {
       return nil
     }

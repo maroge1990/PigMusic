@@ -167,3 +167,16 @@ private actor Lookups {
   #expect(merged.map(\.shazamId) == ["1", "apple:12"])
   #expect(merged[0].found == Date(timeIntervalSince1970: 30 * 60))
 }
+
+@Test func aNewerShazamSongLinkGivesItsAppleId() throws {
+  let share = try #require(
+    ShazamShare.parse(
+      urls: [URL(string: "https://www.shazam.com/song/1122782283/yellow?referrer=share")!],
+      texts: ["I used Shazam to discover Yellow by Coldplay."], at: shared))
+  #expect(share.appleId == 1_122_782_283)
+  #expect(share.inboxId == "apple:1122782283")
+  #expect(
+    ShazamShare.parse(
+      urls: [URL(string: "https://www.shazam.com/song/not-a-number")!], texts: [], at: shared)
+      == nil)
+}
