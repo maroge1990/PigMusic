@@ -1130,28 +1130,9 @@ enum PlayOrigin: Hashable {
     flushingHistory = true
     defer { flushingHistory = false }
     do {
-      let pending = try await database.pendingListens()
-      var valid: [ListeningEvent] = []
-      var discarded: [String] = []
-      let now = Int(Date().timeIntervalSince1970)
-      for event in pending {
-        let exists: Bool
-        if event.trackId.hasPrefix("mix:") {
-          exists = true
-        } else {
-          exists = try await database.track(id: event.trackId) != nil
-        }
-        if event.playedAt < now - 30 * 86400 || event.playedAt > now + 300 || !exists {
-          discarded.append(event.id)
-        } else {
-          valid.append(event)
-        }
-      }
-      try await database.acknowledgeListens(discarded)
-      guard account.isCurrent(stamp) else { return }
-      try await service.recordListens(valid)
-      guard account.isCurrent(stamp) else { return }
-      try await database.acknowledgeListens(valid.map(\.id))
+      try await HistoryUpload.send(
+        store: database, isCurrent: { [account] in account.isCurrent(stamp) }
+      ) { try await service.recordListens($0) }
     } catch NativeFailure.authentication { revoked(generation: stamp) } catch {
       // Durable events remain queued until the next confirmed connection.
     }
