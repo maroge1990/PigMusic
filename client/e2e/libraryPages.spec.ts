@@ -152,3 +152,145 @@ test("removing a song returns to the library's address", async ({ page }) => {
   await expect(page).not.toHaveURL(/album/);
   await expect(page).toHaveURL(/#\/library\/[a-z]+$/);
 });
+
+// A playlist's song menu moves a song up or takes it out, against the
+// playlist's revision, then reads the playlist again.
+test("a playlist song moves up and leaves the playlist", async ({ page }) => {
+  const calls: string[] = [];
+  const playlist = {
+    id: "p1",
+    name: "Road trip",
+    revision: 4,
+    entries: album.tracks.map((t, position) => ({
+      ...t,
+      entry_id: "e" + position,
+      position,
+    })),
+  };
+  await mockApi(page, {
+    answers: {
+      "/v1/playlists": (route: Route) =>
+        route.fulfill({
+          json: {
+            playlists: [{ id: "p1", name: "Road trip", track_count: 2 }],
+          },
+        }),
+      "/v1/playlists/p1": (route: Route) => {
+        const request = route.request();
+        if (request.method() === "PATCH")
+          calls.push("PATCH " + request.postData());
+        return route.fulfill({ json: playlist });
+      },
+      "/v1/playlists/p1/songs/1": (route: Route) => {
+        const url = new URL(route.request().url());
+        calls.push(`${route.request().method()} 1${url.search}`);
+        return route.fulfill({ json: {} });
+      },
+    },
+  });
+  await page.goto("/#/library/playlist/p1");
+  await expect(page.getByRole("heading", { name: "Road trip" })).toBeVisible();
+  // The first song can't move up.
+  await page
+    .getByRole("button", { name: "More options for Von dutch" })
+    .click();
+  await expect(page.getByRole("menuitem", { name: "Move up" })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "More options for 360" }).click();
+  await page.getByRole("menuitem", { name: "Move up" }).click();
+  await expect.poll(() => calls.length).toBe(1);
+  expect(JSON.parse(calls[0].slice("PATCH ".length))).toEqual({
+    revision: 4,
+    order: [1, 0],
+  });
+  await page.getByRole("button", { name: "More options for 360" }).click();
+  await page.getByRole("menuitem", { name: "Remove from playlist" }).click();
+  await expect.poll(() => calls.length).toBe(2);
+  expect(calls[1]).toBe("DELETE 1?revision=4");
+});
+
+// Removing a song offers Undo, which puts it back and leaves the page.
+test("Undo puts a removed song back", async ({ page }) => {
+  const calls: string[] = [];
+  await mockApi(page, {
+    answers: {
+      "/v1/library/removal-preview": (route) =>
+        route.fulfill({
+          json: {
+            confirmation: "c",
+            delete_count: 0,
+            keep_count: 1,
+            items: [{ track_id: "t1", delete_file: false, kept_for: ["Sam"] }],
+          },
+        }),
+      "/v1/library/remove": (route) => {
+        calls.push("remove " + route.request().postData());
+        return route.fulfill({
+          json: { id: "removal-1", undo_until: Date.now() / 1000 + 60 },
+        });
+      },
+      "/v1/library/removals/removal-1/undo": (route) => {
+        calls.push("undo " + route.request().method());
+        return route.fulfill({ json: {} });
+      },
+    },
+  });
+  await page.goto(`/#/library/album/${album.id}`);
+  await page
+    .getByRole("button", { name: "More options for Von dutch" })
+    .click();
+  await page.getByRole("menuitem", { name: "Remove from my library" }).click();
+  const dialog = page.getByRole("dialog");
+  // Files someone else still wants stay on the server, and the dialog says so.
+  await expect(dialog).toContainText(
+    "The music files will stay on the server.",
+  );
+  await expect(dialog).toContainText("Kept for Sam.");
+  await dialog.getByRole("button", { name: "Remove" }).click();
+  await expect.poll(() => calls.length).toBe(1);
+  expect(JSON.parse(calls[0].slice("remove ".length))).toEqual({
+    track_ids: ["t1"],
+    confirmation: "c",
+  });
+  const undo = page.getByRole("button", { name: "Undo" });
+  await undo.click();
+  await expect.poll(() => calls).toContain("undo POST");
+  await expect(page.getByRole("status").first()).toContainText("Restored");
+  await expect(undo).toHaveCount(0);
+  await expect(page).toHaveURL(/#\/library\/[a-z]+$/);
+});
+
+// Cancel leaves the song where it was.
+test("cancelling a removal keeps the song", async ({ page }) => {
+  const calls: string[] = [];
+  await mockApi(page, {
+    answers: {
+      "/v1/library/removal-preview": (route) =>
+        route.fulfill({
+          json: {
+            confirmation: "c",
+            delete_count: 1,
+            keep_count: 0,
+            items: [{ track_id: "t1", delete_file: true, kept_for: [] }],
+          },
+        }),
+      "/v1/library/remove": (route) => {
+        calls.push("remove");
+        return route.fulfill({ json: { id: "r", undo_until: 0 } });
+      },
+    },
+  });
+  await page.goto(`/#/library/album/${album.id}`);
+  await page
+    .getByRole("button", { name: "More options for Von dutch" })
+    .click();
+  await page.getByRole("menuitem", { name: "Remove from my library" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText(
+    "1 music files will move to recoverable trash on the server.",
+  );
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page).toHaveURL(/album\/album-1$/);
+  expect(calls).toEqual([]);
+});
