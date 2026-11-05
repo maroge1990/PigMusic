@@ -278,6 +278,36 @@ struct StreamWatchTests {
     #expect(!failed && !deadline.isActive)
   }
 
+  /// #116: renewed at 2:00, the person seeks back to 0:00; the stream then
+  /// plays normally from there and must never fail for being below 2:00.
+  @MainActor @Test func aBackwardSeekDuringRecoveryRecoversFromTheSeek() async throws {
+    let deadline = StreamRecoveryDeadline(limit: .milliseconds(150))
+    var failed = false
+    deadline.start(from: 120) { failed = true }
+    deadline.progressed(elapsed: 120, playing: false)  // Still preparing.
+    deadline.seeked(to: 0)
+    #expect(deadline.baseline == 0 && deadline.isActive)
+    // At the seek target, not yet moving: not recovered.
+    deadline.progressed(elapsed: 0, playing: true)
+    #expect(deadline.isActive)
+    // Normal playback from 0:00, still far below 2:00.
+    deadline.progressed(elapsed: 0.25, playing: true)
+    #expect(!deadline.isActive)
+    try await Task.sleep(for: .milliseconds(400))
+    #expect(!failed)
+
+    // A forward seek moves the baseline the same way; a seek with no
+    // recovery running changes nothing.
+    deadline.start(from: 30) {}
+    deadline.seeked(to: 90)
+    deadline.progressed(elapsed: 60, playing: true)
+    #expect(deadline.isActive)
+    deadline.progressed(elapsed: 90.5, playing: true)
+    #expect(!deadline.isActive)
+    deadline.seeked(to: 10)
+    #expect(deadline.baseline == 90)
+  }
+
   /// #97: after a failed preparation Play showed Pause and played nothing.
   @Test func playPreparesAgainAfterAFailure() {
     #expect(StreamWatch.playNeedsPreparation(hasItem: false, itemFailed: false, preparing: false))

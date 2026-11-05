@@ -66,15 +66,20 @@ public struct StreamWatch: Sendable {
 /// to where the song stopped, and its first progress. The progress ticks stop
 /// while the new item is prepared, and a seek the item can never complete
 /// would otherwise wait for ever (Codex, #115). A new song, a pause or a stop
-/// cancels it; so does the first progress.
+/// cancels it; so does the first progress past where it is measured from.
 @MainActor public final class StreamRecoveryDeadline {
   private let limit: Duration
   private var task: Task<Void, Never>?
   public init(limit: Duration = StreamWatch.stallLimit) { self.limit = limit }
   public var isActive: Bool { task != nil }
-  /// Runs `expired` after the limit unless `cancel()` comes first.
-  public func start(_ expired: @escaping @MainActor () -> Void) {
+  /// Where recovery is measured from: the position the stream was renewed
+  /// from, or the latest seek since (#116).
+  public private(set) var baseline: Double = 0
+  /// Runs `expired` after the limit unless the stream recovers or `cancel()`
+  /// comes first. `position` is where the renewed stream starts again.
+  public func start(from position: Double = 0, _ expired: @escaping @MainActor () -> Void) {
     cancel()
+    baseline = position
     let limit = limit
     task = Task { [weak self] in
       do { try await Task.sleep(for: limit) } catch { return }
@@ -82,6 +87,16 @@ public struct StreamWatch: Sendable {
       self.task = nil
       expired()
     }
+  }
+  /// A seek during recovery (#116): progress counts from where it went, so a
+  /// seek back from 2:00 to 0:00 recovers once the stream plays from 0:00.
+  public func seeked(to position: Double) {
+    guard isActive else { return }
+    baseline = position
+  }
+  /// One progress tick: the stream recovered once it plays past the baseline.
+  public func progressed(elapsed: Double, playing: Bool) {
+    if isActive, playing, elapsed > baseline { cancel() }
   }
   public func cancel() {
     task?.cancel()

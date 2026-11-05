@@ -602,14 +602,12 @@ import PigSync
     // The new item, its seek and its first progress share one deadline: the
     // progress ticks stop meanwhile, and a seek may never complete.
     let stamp = generation
-    recoveryFrom = from
-    recovery.start { [weak self] in
+    recovery.start(from: from) { [weak self] in
       guard let self, generation == stamp, intent.canPlay else { return }
       failStalledStream()
     }
   }
   @ObservationIgnored private let recovery = StreamRecoveryDeadline()
-  @ObservationIgnored private var recoveryFrom: Double = 0
   /// The stream stalled again after its renewal: stop and say why. Play
   /// prepares it again from here.
   private func failStalledStream() {
@@ -648,8 +646,9 @@ import PigSync
       checkpoint(force: true)
       return
     }
-    // The renewed stream plays on from where it stopped: recovered.
-    if recovery.isActive, playing, elapsed > recoveryFrom { recovery.cancel() }
+    // The renewed stream plays on from where it stopped, or from a seek
+    // made meanwhile: recovered.
+    recovery.progressed(elapsed: elapsed, playing: playing)
     if intent.canPlay {
       switch streamWatch.observe(position: elapsed, at: .now) {
       case .fine: break
@@ -937,6 +936,8 @@ import PigSync
     guard seconds.isFinite else { return }
     let position = PlaybackSeek.target(
       seconds, duration: duration, isEstimate: durationIsEstimate)
+    // A recovering stream is measured from here on (#116).
+    recovery.seeked(to: position)
     if queueStart.waiting {
       queueStart.seek(queue, to: position)
       elapsed = position
