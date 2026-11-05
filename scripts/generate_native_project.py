@@ -19,6 +19,8 @@ IPHONE_INFO = {
     "INFOPLIST_KEY_NSLocalNetworkUsageDescription": "PigMusic connects to your private music server to browse and play your library.",
     # Apple Music playlists in search come from MusicKit on the phone (D-66).
     "INFOPLIST_KEY_NSAppleMusicUsageDescription": "PigMusic shows Apple Music playlists in search so you can find their songs on your server.",
+    # "What's playing?" in search identifies a song with ShazamKit (D-70).
+    "INFOPLIST_KEY_NSMicrophoneUsageDescription": "PigMusic listens only when you tap What's playing? in Search, to identify the song that is playing.",
 }
 RECOMMENDED = {
     "ALWAYS_SEARCH_USER_PATHS": "NO",

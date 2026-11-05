@@ -79,6 +79,7 @@ private struct SearchResultsView: View {
   var body: some View {
     List {
       if session.query.isEmpty {
+        ShazamSection(model: model)
         if model.recentSearches.picks.isEmpty {
           ContentUnavailableView(
             "Find music", systemImage: "magnifyingglass",
@@ -866,5 +867,355 @@ private struct ApplePlaylistView: View {
         statusFailure = "Which songs are on the server can't be checked right now."
       }
     }
+  }
+}
+
+/// Shazam in search (D-70): "What's playing?" identifies a song, and the
+/// "Shazamed" list keeps every song identified here. Neither downloads
+/// anything by itself.
+private struct ShazamSection: View {
+  let model: AppModel
+  @State private var listening = false
+  var body: some View {
+    Section {
+      Button {
+        listening = true
+      } label: {
+        Label("What's playing?", systemImage: "shazam.logo")
+      }
+      NavigationLink {
+        ShazamInboxView(model: model)
+      } label: {
+        LabeledContent {
+          let count = ShazamListener.shared.inbox.count
+          if count > 0 { Text("\(count)") }
+        } label: {
+          Label("Shazamed", systemImage: "music.note.list")
+        }
+      }
+    }
+    .sheet(isPresented: $listening) { ShazamListenView(model: model) }
+  }
+}
+
+/// Listens once on opening; the microphone permission is asked on the
+/// first try only. A failure says why and offers another try.
+private struct ShazamListenView: View {
+  let model: AppModel
+  @Environment(\.dismiss) private var dismiss
+  @State private var attempt = 0
+  @State private var found: ShazamSong?
+  @State private var failure: ShazamFailure?
+  var body: some View {
+    NavigationStack {
+      Group {
+        if let found {
+          ShazamFoundView(model: model, song: found, close: close) { attempt += 1 }
+        } else if let failure {
+          ContentUnavailableView {
+            Label("No song found", systemImage: "shazam.logo")
+          } description: {
+            Text(failure.message)
+          } actions: {
+            Button("Try again") { attempt += 1 }.pigPrimaryAction()
+          }
+        } else {
+          VStack(spacing: 16) {
+            ProgressView().controlSize(.large)
+            Text("Listening…").font(.headline)
+            Text("Hold your iPhone near the music.").font(PigType.footnote)
+              .foregroundStyle(.secondary)
+          }
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .accessibilityElement(children: .combine)
+        }
+      }
+      .pigCanvas().navigationTitle("What's playing?").navigationBarTitleDisplayMode(.inline)
+      .toolbar { Button("Done", action: close) }
+    }
+    .task(id: attempt) {
+      found = nil
+      failure = nil
+      switch await ShazamListener.shared.identify() {
+      case .success(let song): found = song
+      case .failure(.cancelled): break
+      case .failure(let reason): failure = reason
+      }
+    }
+    .onDisappear { ShazamListener.shared.cancel() }
+  }
+  private func close() {
+    ShazamListener.shared.cancel()
+    dismiss()
+  }
+}
+
+/// Where a Shazam song is, as the server's matching policy decides.
+private enum ShazamStatus {
+  static func caption(_ state: ApplePlaylistSongState?) -> String? {
+    switch state {
+    case .library?: "In your library"
+    case .server?: "On the server"
+    case .elsewhere?: "Not on the server yet"
+    case nil: nil
+    }
+  }
+  static func origin(_ state: ApplePlaylistSongState?) -> PlayOrigin {
+    if case .server? = state { .catalogue(artistId: nil) } else { .library }
+  }
+}
+
+/// The identified song: Apple's artwork and names, where it is, and what
+/// can be done: play it, add it to the library, or open its catalogue page,
+/// where it can be requested.
+private struct ShazamFoundView: View {
+  let model: AppModel
+  let song: ShazamSong
+  let close: () -> Void
+  let again: () -> Void
+  @State private var state: ApplePlaylistSongState?
+  @State private var checkFailure: String?
+  @State private var message: String?
+  @State private var adding = false
+  @Environment(\.colorScheme) private var scheme
+  var body: some View {
+    ScrollView {
+      VStack(spacing: 14) {
+        AppleArtwork(url: song.artworkURL).frame(width: 200, height: 200)
+          .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
+        VStack(spacing: 4) {
+          Text(song.title.isEmpty ? "Unknown song" : song.title)
+            .font(.title2.weight(.bold)).multilineTextAlignment(.center)
+            .accessibilityAddTraits(.isHeader)
+          Text([song.artist, song.album ?? ""].filter { !$0.isEmpty }.joined(separator: " · "))
+            .font(PigType.subhead).foregroundStyle(.secondary).multilineTextAlignment(.center)
+          if let caption = ShazamStatus.caption(state) {
+            Text(caption).font(PigType.footnote.weight(.semibold))
+              .foregroundStyle(PigBrand.textAccent(scheme))
+          } else if checkFailure == nil {
+            ProgressView().padding(.top, 4)
+          }
+        }
+        actions
+        if let checkFailure {
+          Text(checkFailure).font(PigType.footnote).foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+        }
+        if let message { Text(message).font(PigType.footnote) }
+        if ShazamListener.shared.saveFailed {
+          Text("This song couldn't be added to Shazamed.").font(PigType.footnote)
+            .foregroundStyle(.secondary)
+        }
+        Button("Listen again", systemImage: "shazam.logo", action: again).padding(.top, 8)
+      }
+      .padding(.horizontal).padding(.vertical, 24).frame(maxWidth: .infinity)
+    }
+    .task(id: song.id) { await check() }
+  }
+  @ViewBuilder private var actions: some View {
+    if let track = state?.track {
+      HStack(spacing: 10) {
+        PlayCapsule {
+          model.play([track], origin: ShazamStatus.origin(state))
+          close()
+        }
+        if case .server = state {
+          Button("Add to library", systemImage: "plus") { Task { await add(track) } }
+            .buttonStyle(.bordered).buttonBorderShape(.capsule)
+            .disabled(adding || !model.canMutate)
+        }
+      }
+    } else if case .elsewhere = state {
+      if let appleId = song.appleId {
+        NavigationLink {
+          AppleResultView(model: model, kind: "song", appleId: appleId, title: song.title)
+        } label: {
+          Label("Open in the catalogue", systemImage: "music.note")
+        }
+        .pigPrimaryAction().buttonBorderShape(.capsule)
+        Text("Request it from its catalogue page.").font(PigType.footnote)
+          .foregroundStyle(.secondary)
+      } else {
+        Text("Apple Music doesn't list this song, so PigMusic can't look it up.")
+          .font(PigType.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+      }
+    }
+  }
+  private func check() async {
+    checkFailure = nil
+    guard song.askable else {
+      state = .elsewhere
+      return
+    }
+    let songs = [song.playlistSong(position: 0)]
+    do {
+      let found = try await model.readCatalogue { service in
+        try await ApplePlaylistStatuses.states(for: songs, source: service)
+      }
+      state = found.states(for: songs)?.first
+      if state == nil { checkFailure = "Whether the server has it can't be checked right now." }
+    } catch is CancellationError {} catch {
+      checkFailure = error.userMessage
+    }
+  }
+  private func add(_ track: Track) async {
+    guard !adding else { return }
+    adding = true
+    defer { adding = false }
+    do {
+      let count = try await model.performPersonal {
+        try await $0.addMembership(trackIds: [track.id])
+      }
+      message = count > 0 ? "Added to your library." : "Already in your library."
+      await check()
+    } catch is CancellationError {} catch { message = error.userMessage }
+  }
+}
+
+/// The "Shazamed" list (D-70): songs identified in PigMusic, newest first,
+/// each marked like an Apple playlist song. "Download all missing" requests
+/// the ones not on the server only after the person confirms.
+private struct ShazamInboxView: View {
+  let model: AppModel
+  @State private var states: ApplePlaylistStates?
+  @State private var statusFailure: String?
+  @State private var confirming = false
+  @State private var requesting = false
+  @State private var requested: Set<String> = []
+  @State private var message: String?
+  @Environment(\.colorScheme) private var scheme
+  private static let key = "shazam-inbox"
+  var body: some View {
+    let songs = Array(ShazamListener.shared.inbox.prefix(ApplePlaylistStatuses.limit))
+    let asked = ShazamInbox.playlistSongs(songs)
+    let current = states?.states(for: asked)
+    let missing = ShazamInbox.missing(songs, states: states).filter {
+      !requested.contains($0.shazamId)
+    }
+    let playable = (current ?? []).compactMap(\.track)
+    let origin: PlayOrigin =
+      (current ?? []).contains { if case .server = $0 { true } else { false } }
+      ? .catalogue(artistId: nil) : .library
+    List {
+      if songs.isEmpty {
+        ContentUnavailableView(
+          "Nothing Shazamed yet", systemImage: "shazam.logo",
+          description: Text("Songs you identify with What's playing? in Search appear here."))
+      } else {
+        Section {
+          if requesting {
+            ProgressView("Sending requests…")
+          } else {
+            Button("Download all missing (\(missing.count))", systemImage: "arrow.down.circle") {
+              confirming = true
+            }
+            .disabled(missing.isEmpty || !model.canMutate)
+            .confirmationDialog(
+              "Download \(missing.count) song\(missing.count == 1 ? "" : "s")?",
+              isPresented: $confirming, titleVisibility: .visible
+            ) {
+              Button("Download \(missing.count) song\(missing.count == 1 ? "" : "s")") {
+                Task { await request(missing) }
+              }
+            } message: {
+              Text(
+                "Your server finds and downloads the songs that aren't on it yet. A song with no exact match in the catalogue is left out."
+              )
+            }
+          }
+          if let message { Text(message).font(PigType.footnote) }
+          if let statusFailure {
+            Text(statusFailure).font(PigType.footnote).foregroundStyle(.secondary)
+          }
+        }
+        Section {
+          ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
+            let state = current.flatMap { $0.indices.contains(index) ? $0[index] : nil }
+            if let track = state?.track {
+              SongRow(model: model, track: track) {
+                if let at = playable.firstIndex(of: track) {
+                  model.play(playable, at: at, origin: origin)
+                }
+              }
+            } else if let appleId = song.appleId {
+              NavigationLink {
+                AppleResultView(model: model, kind: "song", appleId: appleId, title: song.title)
+              } label: {
+                row(song, state: state)
+              }
+            } else {
+              row(song, state: state)
+            }
+          }
+        }
+      }
+    }
+    .pigCanvas().navigationTitle("Shazamed")
+    .task(id: ApplePlaylistStates.fingerprint(asked)) { await load(asked) }
+  }
+  private func row(_ song: ShazamSong, state: ApplePlaylistSongState?) -> some View {
+    HStack(spacing: 12) {
+      AppleArtwork(url: song.artworkURL).frame(width: 44, height: 44)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(song.title.isEmpty ? "Unknown song" : song.title).lineLimit(1)
+          .foregroundStyle(PigBrand.text(scheme))
+        Text(song.artist).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
+        if requested.contains(song.shazamId) {
+          Text("Requested").font(PigType.caption).foregroundStyle(.secondary)
+        } else if let caption = ShazamStatus.caption(state) {
+          Text(caption).font(PigType.caption).foregroundStyle(.secondary)
+        }
+      }
+      Spacer(minLength: 0)
+    }
+    .frame(minHeight: 48).contentShape(Rectangle())
+  }
+  private func load(_ songs: [ApplePlaylistSong]) async {
+    guard !songs.isEmpty else { return }
+    // A saved answer is used only for exactly these songs in this order.
+    if states?.states(for: songs) == nil,
+      let saved = model.peekCatalogue(key: Self.key, as: ApplePlaylistStates.self),
+      saved.states(for: songs) != nil
+    {
+      states = saved
+    }
+    do {
+      let found = try await model.cachedCatalogue(key: Self.key) { service in
+        try await ApplePlaylistStatuses.states(for: songs, source: service)
+      }
+      if found.states(for: songs) != nil {
+        states = found
+        statusFailure = nil
+      } else if states?.states(for: songs) == nil {
+        statusFailure = "Which songs are on the server can't be checked right now."
+      }
+    } catch is CancellationError {} catch {
+      if states?.states(for: songs) == nil {
+        statusFailure = "Which songs are on the server can't be checked right now."
+      }
+    }
+  }
+  private func request(_ songs: [ShazamSong]) async {
+    guard !requesting, !songs.isEmpty else { return }
+    requesting = true
+    message = nil
+    defer { requesting = false }
+    do {
+      let outcome = try await model.performPersonal { service in
+        try await ShazamRequests.requestMissing(songs, source: service)
+      }
+      // Marked only when sent: an unmatched song stays missing.
+      requested.formUnion(songs.map(\.shazamId).filter { !outcome.unmatched.contains($0) })
+      let sent = outcome.created + outcome.existing
+      let unmatched = outcome.unmatched.count
+      message =
+        [
+          sent > 0 ? "Requested \(sent) song\(sent == 1 ? "" : "s")." : nil,
+          unmatched > 0
+            ? "\(unmatched) had no exact match in the catalogue: open \(unmatched == 1 ? "it" : "them") to choose a version."
+            : nil,
+          outcome.downloadsEnabled ? nil : "Server downloads are disabled; requests will wait.",
+        ].compactMap { $0 }.joined(separator: " ")
+    } catch is CancellationError {} catch { message = error.userMessage }
   }
 }

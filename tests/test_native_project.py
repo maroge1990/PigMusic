@@ -24,10 +24,12 @@ def test_privacy_descriptions_survive_regeneration():
     IPHONE_INFO = generator.IPHONE_INFO
     project = (ROOT / "swift/PigMusic.xcodeproj/project.pbxproj").read_text()
     info = plistlib.loads((ROOT / "swift/PigMusic/Info.plist").read_bytes())
-    # Local network, and Apple Music for its playlists in search (D-66).
+    # Local network, Apple Music for its playlists in search (D-66), and the
+    # microphone for "What's playing?" (D-70).
     keys = [
         "INFOPLIST_KEY_NSLocalNetworkUsageDescription",
         "INFOPLIST_KEY_NSAppleMusicUsageDescription",
+        "INFOPLIST_KEY_NSMicrophoneUsageDescription",
     ]
     for key in keys:
         assert IPHONE_INFO[key]

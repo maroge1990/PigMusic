@@ -474,6 +474,7 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "PigMusic shows Apple Music playlists in search so you can find their songs on your server.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "PigMusic connects to your private music server to browse and play your library.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "PigMusic listens only when you tap What's playing? in Search, to identify the song that is playing.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -523,6 +524,7 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "PigMusic shows Apple Music playlists in search so you can find their songs on your server.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "PigMusic connects to your private music server to browse and play your library.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "PigMusic listens only when you tap What's playing? in Search, to identify the song that is playing.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
