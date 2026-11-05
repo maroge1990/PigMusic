@@ -343,42 +343,39 @@ struct DownloadMenu: View {
   var missingCount = 0
   var addMissing: (() async -> Void)?
   @State private var watchResult: String?
+  @State private var choosing = false
   var body: some View {
-    Menu {
-      if missingCount > 0, let addMissing {
-        Section {
-          Button(
-            "Add \(missingCount) missing song\(missingCount == 1 ? "" : "s") to server",
-            systemImage: "externaldrive.badge.plus"
-          ) {
+    // A plain button showing the choices (#97): a Menu wraps its label in a
+    // second, unnamed button, so VoiceOver found "Download" twice over.
+    RoundIcon(label: "Download", systemImage: "arrow.down") { choosing = true }
+      // An empty playlist can still be sent: the Watch follows it as songs are added.
+      .disabled(tracks.isEmpty && origin.playlistId == nil)
+      .confirmationDialog("Download", isPresented: $choosing) {
+        if missingCount > 0, let addMissing, model.canMutate {
+          Button("Add \(missingCount) missing song\(missingCount == 1 ? "" : "s") to server") {
             Task { await addMissing() }
-          }.disabled(!model.canMutate)
+          }
+        }
+        Button("Download originals") {
+          Task { await model.download(tracks, origin: origin) }
+        }
+        Button("Download smaller AAC copies") {
+          Task { await model.download(tracks, quality: "aac", origin: origin) }
+        }
+        if model.watch?.supported == true {
+          Button("Send to Apple Watch") {
+            Task { watchResult = await model.watch?.enqueue(tracks, origin: origin) }
+          }
         }
       }
-      Button("Download originals", systemImage: "arrow.down.circle") {
-        Task { await model.download(tracks, origin: origin) }
+      .alert(
+        "Apple Watch",
+        isPresented: Binding(get: { watchResult != nil }, set: { if !$0 { watchResult = nil } })
+      ) {
+        Button("OK") { watchResult = nil }
+      } message: {
+        Text(watchResult ?? "")
       }
-      Button("Download smaller AAC copies", systemImage: "arrow.down.circle.dotted") {
-        Task { await model.download(tracks, quality: "aac", origin: origin) }
-      }
-      if model.watch?.supported == true {
-        Button("Send to Apple Watch", systemImage: "applewatch") {
-          Task { watchResult = await model.watch?.enqueue(tracks, origin: origin) }
-        }
-      }
-    } label: {
-      RoundIconLabel(systemImage: "arrow.down")
-    }
-    // An empty playlist can still be sent: the Watch follows it as songs are added.
-    .disabled(tracks.isEmpty && origin.playlistId == nil).accessibilityLabel("Download")
-    .alert(
-      "Apple Watch",
-      isPresented: Binding(get: { watchResult != nil }, set: { if !$0 { watchResult = nil } })
-    ) {
-      Button("OK") { watchResult = nil }
-    } message: {
-      Text(watchResult ?? "")
-    }
   }
 }
 

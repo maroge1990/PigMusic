@@ -98,6 +98,26 @@ final class DemoLibraryTests: XCTestCase {
     expect(app.buttons["Play Open Road by The Orchard"])
   }
 
+  /// #97: the album page's Download menu is one VoiceOver stop named
+  /// "Download", not that plus an unnamed button in the same place.
+  func testTheDownloadMenuIsOneNamedButton() {
+    launch()
+    app.buttons["Sunrise, The Orchard"].tap()
+    expect(app.staticTexts["IN YOUR LIBRARY"])
+    let download = app.buttons["Download"]
+    expect(download)
+    XCTAssertEqual(app.buttons.matching(identifier: "Download").count, 1)
+    let place = download.frame
+    let unnamed = app.buttons.allElementsBoundByIndex.filter {
+      $0.label.isEmpty && $0.frame.intersects(place)
+    }
+    if !unnamed.isEmpty { print(app.debugDescription) }
+    XCTAssertEqual(unnamed.count, 0, "an unnamed button sits on the Download menu")
+    // It still opens the menu.
+    download.tap()
+    expect(app.buttons["Download originals"])
+  }
+
   func testSearchFindsALibrarySong() {
     launch()
     app.tabBars.buttons["Search"].tap()
