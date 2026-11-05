@@ -444,7 +444,10 @@ class Store:
             ):
                 return
             # Written only once the claim holds (#96): a request cancelled
-            # meanwhile left a journal recovery could never use.
+            # meanwhile left a journal recovery could never use. Never
+            # through a link: that would write outside appdata (D-71).
+            if not self.staging_owned() or journal.is_symlink():
+                raise ValueError("Download staging is not PigMusic's own folder")
             journal.write_text(
                 json.dumps(
                     {**metadata, **({"_legacy_replacement": legacy} if legacy else {})}
@@ -454,7 +457,7 @@ class Store:
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.exists():
                 if file_sha256(target) != sha:
-                    journal.unlink(missing_ok=True)
+                    self.drop_journal(journal)
                     raise ValueError(
                         "Import collision: an existing file has different content"
                     )
@@ -491,7 +494,7 @@ class Store:
                 "UPDATE queue SET status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (job["id"],),
             )
-        journal.unlink(missing_ok=True)
+        self.drop_journal(journal)
         self.published += 1
         return True
 
@@ -558,20 +561,30 @@ class Store:
                 if added:
                     bump(conn, beneficiary)
 
+    def staging_owned(self):
+        """Whether the publication journal folder is the app's own: neither it,
+        its parent nor appdata is a link to somewhere else (#96, D-71)."""
+        stage = self.directory / "downloads" / "staging"
+        return not any(p.is_symlink() for p in (stage, stage.parent, self.directory))
+
+    def drop_journal(self, journal):
+        """The one way a publication journal is deleted: only a real file
+        directly in the app's own staging folder, never through a link."""
+        stage = self.directory / "downloads" / "staging"
+        if (
+            self.staging_owned()
+            and not journal.is_symlink()
+            and journal.parent == stage
+        ):
+            journal.unlink(missing_ok=True)
+
     @coordinated
     def recover_requests(self):
         root = library_root(self).resolve()
         stage = self.directory / "downloads" / "staging"
         # Journals are deleted only from the app's own staging folder, never
         # through a link to somewhere else (#96, Codex round 2).
-        own = not any(p.is_symlink() for p in (stage, stage.parent, self.directory))
-
-        def drop(journal):
-            # The one way recovery deletes a journal: only a real file in the
-            # app's own staging folder, never through a link (#96, D-71).
-            if own and not journal.is_symlink() and journal.parent == stage:
-                journal.unlink(missing_ok=True)
-
+        drop = self.drop_journal
         if stage.exists():
             for journal in stage.glob("*.json"):
                 try:

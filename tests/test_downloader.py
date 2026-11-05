@@ -490,3 +490,41 @@ def test_recovery_never_deletes_a_linked_journal(tmp_path, audio):
     link.symlink_to(outside)
     store.recover_requests()
     assert link.is_symlink() and outside.exists()
+
+
+def test_publication_never_writes_or_deletes_journals_through_links(tmp_path, audio):
+    """Codex confirmation round 2 (D-71): commit_request wrote its journal
+    into a linked staging folder (or through a linked journal, truncating its
+    target) and deleted it unconditionally on success or collision."""
+    import pytest
+
+    store = Store(tmp_path / "data")
+    job = queued(store)
+    worker = Downloader(store)
+    store.request_state(job["id"], "validating")
+    probe = {"codec": "mp3", "bitrate_kbps": 320, "duration": 3}
+    sha = hashlib.sha256(audio.read_bytes()).hexdigest()
+
+    # A journal file that is a link: its target keeps its contents.
+    stage = store.directory / "downloads" / "staging"
+    outside = tmp_path / "outside.json"
+    outside.write_text("keep me")
+    name = job["id"] + "-" + job.get("claim_token", "legacy") + ".json"
+    (stage / name).symlink_to(outside)
+    staged = worker.staging / "staged.mp3"
+    shutil.copyfile(audio, staged)
+    with pytest.raises(ValueError):
+        store.commit_request(job, staged, worker.library_root / "a.mp3", probe, sha)
+    assert outside.read_text() == "keep me" and (stage / name).is_symlink()
+    (stage / name).unlink()
+
+    # A linked staging folder: nothing is written or deleted there.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "theirs.json").write_text("theirs")
+    shutil.rmtree(stage)
+    stage.symlink_to(elsewhere, target_is_directory=True)
+    with pytest.raises(ValueError):
+        store.commit_request(job, staged, worker.library_root / "b.mp3", probe, sha)
+    assert sorted(p.name for p in elsewhere.iterdir()) == ["theirs.json"]
+    assert not (worker.library_root / "b.mp3").exists()
