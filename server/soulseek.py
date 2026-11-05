@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 import httpx
 from .quality import satisfies
+from .storage import download_root, open_owned_folder, unlink_regular
 
 
 def words(value):
@@ -144,6 +145,27 @@ def candidate_for(job, response, file):
 
 # Imports stream in pieces this size (#96).
 CHUNK = 1024 * 1024
+# The engine's leftovers are swept at most this often (#96).
+SWEEP_EVERY = 3600
+# How the engine (slskd) reports a transfer that finished without success:
+# "Completed, Errored", "Completed, Cancelled" and so on.
+UNSUCCESSFUL = ("cancelled", "errored", "failed", "rejected", "timedout", "aborted")
+
+
+def engine_key(filename):
+    """The engine keeps a transfer's file as <remote folder name>/<file name>
+    under its folders (see `completed_path`)."""
+    original = PureWindowsPath(filename)
+    return original.parent.name, original.name
+
+
+def unsuccessful(state):
+    state = state.lower().replace(" ", "")
+    return (
+        "completed" in state
+        and "succeeded" not in state
+        and any(word in state for word in UNSUCCESSFUL)
+    )
 
 
 class Soulseek:
@@ -153,6 +175,13 @@ class Soulseek:
         self.search_lock = threading.Lock()
         self.peer_locks = {}
         self.peer_guard = threading.Lock()
+        # Engine files this process is transferring or importing, by
+        # `engine_key`, from before the engine is asked for them until the
+        # import is over; the leftover sweep never touches one, and decides
+        # and deletes under this lock (#96).
+        self.files_lock = threading.Lock()
+        self.active = {}
+        self.swept_at = None
 
     def config(self):
         path = self.store.directory / "slskd-connection.json"
@@ -285,15 +314,26 @@ class Soulseek:
         )[:20]
 
     def transfer(self, candidate, destination, check, progress):
-        with self.peer_guard:
-            lock = self.peer_locks.setdefault(candidate["username"], threading.Lock())
-        while not lock.acquire(timeout=0.5):
-            check()
+        key = engine_key(candidate["filename"])
+        with self.files_lock:
+            self.active[key] = self.active.get(key, 0) + 1
         try:
-            check()
-            return self._transfer(candidate, destination, check, progress)
+            with self.peer_guard:
+                lock = self.peer_locks.setdefault(
+                    candidate["username"], threading.Lock()
+                )
+            while not lock.acquire(timeout=0.5):
+                check()
+            try:
+                check()
+                return self._transfer(candidate, destination, check, progress)
+            finally:
+                lock.release()
         finally:
-            lock.release()
+            with self.files_lock:
+                self.active[key] -= 1
+                if not self.active[key]:
+                    del self.active[key]
 
     def _transfer(self, candidate, destination, check, progress):
         username = quote(candidate["username"], safe="")
@@ -492,6 +532,97 @@ class Soulseek:
             raise ValueError("Completed Soulseek file changed during import")
         if owned:
             source.unlink()
+
+    def engine_transfers(self):
+        """Every download the engine lists: {engine_key: [state, ...]}.
+        ValueError when the answer is not the expected shape, so a sweep
+        never acts on a list it could not read whole."""
+        with self.client() as client:
+            response = client.get("transfers/downloads")
+            response.raise_for_status()
+            data = response.json()
+        users = data if isinstance(data, list) else [data]
+        states = {}
+        try:
+            for user in users:
+                for directory in user["directories"]:
+                    for item in directory["files"]:
+                        filename = item["filename"]
+                        state = item.get("stateDescription") or item.get("state")
+                        if not isinstance(filename, str) or not isinstance(state, str):
+                            raise TypeError
+                        states.setdefault(engine_key(filename), []).append(state)
+        except (KeyError, TypeError, AttributeError):
+            raise ValueError("Unexpected engine transfer list")
+        return states
+
+    def sweep(self, now=None):
+        """Delete partial files the engine left for transfers it reports as
+        finished without success (failed, cancelled, rejected...), at most
+        once an hour; how many went. Never by age: a file is deleted only
+        when every transfer the engine lists for it is such a one and none
+        is being transferred or imported here. Only regular files one
+        folder down in engine-incomplete directly beneath the configured
+        work root, opened without following a link from the work root on;
+        nothing when the work root or either engine folder is a link. A
+        file in engine-downloads is a finished transfer: never swept."""
+        now = time.monotonic() if now is None else now
+        if self.swept_at is not None and now - self.swept_at < SWEEP_EVERY:
+            return 0
+        self.swept_at = now
+        work = os.environ.get("PIG_MUSIC_DOWNLOAD_ROOT")
+        try:
+            config = self.config()
+            if not work or config.get("ssh_host"):
+                return 0
+            work = Path(work)
+            # Only the embedded engine, saving into the work root's folder.
+            if os.path.normpath(
+                str(config.get("download_root", ""))
+            ) != os.path.normpath(work / "engine-downloads"):
+                return 0
+            download_root(self.store)  # The expected library mount, or nothing.
+        except (OSError, ValueError):
+            return 0
+        removed = 0
+        with self.files_lock:
+            try:
+                os.close(open_owned_folder(work, "engine-downloads"))
+                incomplete = open_owned_folder(work, "engine-incomplete")
+            except OSError:
+                return 0
+            try:
+                states = self.engine_transfers()
+                for folder_name in os.listdir(incomplete):
+                    try:
+                        folder = os.open(
+                            folder_name,
+                            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                            dir_fd=incomplete,
+                        )
+                    except OSError:
+                        continue  # A file or link at the top: never touched.
+                    try:
+                        for name in os.listdir(folder):
+                            key = (folder_name, name)
+                            found = states.get(key)
+                            if (
+                                not found
+                                or key in self.active
+                                or not all(unsuccessful(s) for s in found)
+                            ):
+                                continue
+                            try:
+                                removed += unlink_regular(folder, name)
+                            except OSError:
+                                pass
+                    finally:
+                        os.close(folder)
+            except (OSError, ValueError, httpx.HTTPError):
+                pass
+            finally:
+                os.close(incomplete)
+        return removed
 
 
 def engine_owned(folder):

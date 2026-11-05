@@ -325,6 +325,9 @@ class Downloader:
                 tasks = {t for t in tasks if not t.done()}
                 if time.monotonic() >= next_scan:
                     await asyncio.to_thread(self.store.schedule_upgrades)
+                    # At most hourly: partial files of transfers the engine
+                    # reports as failed or cancelled (#96).
+                    await asyncio.to_thread(self.soulseek.sweep)
                     next_scan = time.monotonic() + UPGRADE_SCAN_EVERY
                 settings = await asyncio.to_thread(self.store.download_settings)
                 while (

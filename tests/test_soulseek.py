@@ -339,3 +339,187 @@ def test_any_edition_requests_use_the_edition_free_title_and_lead_artist():
     assert (
         candidate_for({**remaster, "explicit_edition": True}, response, file()) is None
     )
+
+
+def engine(tmp_path, monkeypatch, transfers, work=None):
+    """A work root with the engine's two folders, the expected library mount,
+    and an engine that lists `transfers`: {file name: [state, ...]}, each
+    from the remote folder "Studio" (a list per name: several peers)."""
+    library = tmp_path / "library"
+    library.mkdir()
+    (library / ".pig-music-library.json").write_text('{"library_id": "test"}')
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "library-export.json").write_text('{"library_id": "test"}')
+    work = work or tmp_path / "work"
+    monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(library))
+    monkeypatch.setenv("PIG_MUSIC_DOWNLOAD_ROOT", str(work))
+    store = configured(data)
+    connection = data / "slskd-connection.json"
+    config = json.loads(connection.read_text())
+    connection.write_text(
+        json.dumps({**config, "download_root": str(work / "engine-downloads")})
+    )
+    peers = max((len(s) for s in transfers.values()), default=0)
+    listed = [
+        {
+            "username": f"peer{index}",
+            "directories": [
+                {
+                    "directory": "Music\\Example\\Studio",
+                    "files": [
+                        {
+                            "filename": f"Music\\Example\\Studio\\{name}",
+                            "size": 10000,
+                            "state": states[index],
+                        }
+                        for name, states in transfers.items()
+                        if index < len(states)
+                    ],
+                }
+            ],
+        }
+        for index in range(peers)
+    ]
+    adapter = Soulseek(store)
+    adapter.client = lambda: httpx.Client(
+        base_url="http://engine/api/v0/",
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=listed)),
+    )
+    return adapter
+
+
+def partial(folder, name):
+    path = folder / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"x")
+    old = time.time() - 30 * 86400  # However old: age never decides.
+    os.utime(path, (old, old))
+    return path
+
+
+def test_sweep_deletes_only_partials_of_transfers_the_engine_reports_failed(
+    tmp_path, monkeypatch
+):
+    """#96: cancelled or failed transfers left their partial files in the
+    engine's folder for good. Only those go: a stalled transfer can resume,
+    and a file no transfer is listed for may be anything."""
+    adapter = engine(
+        tmp_path,
+        monkeypatch,
+        {
+            "failed.mp3": ["Completed, Errored"],
+            "cancelled.mp3": ["Completed, Cancelled"],
+            "timed out.mp3": ["Completed, TimedOut"],
+            "resumable.mp3": ["InProgress"],
+            "queued.mp3": ["Queued, Remotely"],
+            "succeeded.mp3": ["Completed, Succeeded"],
+            # One peer failed, another is still sending the same file.
+            "retrying.mp3": ["Completed, Errored", "Initializing"],
+        },
+    )
+    work = tmp_path / "work"
+    incomplete, downloads = work / "engine-incomplete", work / "engine-downloads"
+    studio = incomplete / "Studio"
+    gone = [
+        partial(studio, n) for n in ("failed.mp3", "cancelled.mp3", "timed out.mp3")
+    ]
+    kept = [
+        partial(studio, n)
+        for n in ("resumable.mp3", "queued.mp3", "succeeded.mp3", "retrying.mp3")
+    ]
+    kept += [
+        partial(studio, "unlisted.mp3"),
+        partial(incomplete / "Other", "failed.mp3"),  # Another remote folder.
+        partial(incomplete, "failed.mp3"),  # Not where the engine keeps it.
+        partial(downloads / "Studio", "failed.mp3"),  # A finished file.
+    ]
+    (incomplete / "Linked").symlink_to(studio, target_is_directory=True)
+    assert adapter.sweep() == 3
+    assert not any(path.exists() for path in gone)
+    assert all(path.exists() for path in kept)
+    # At most hourly.
+    again = partial(studio, "failed.mp3")
+    assert adapter.sweep() == 0 and again.exists()
+
+
+def test_sweep_never_follows_a_linked_partial(tmp_path, monkeypatch):
+    adapter = engine(tmp_path, monkeypatch, {"failed.mp3": ["Completed, Failed"]})
+    (tmp_path / "work" / "engine-downloads").mkdir(parents=True)
+    studio = tmp_path / "work" / "engine-incomplete" / "Studio"
+    studio.mkdir(parents=True)
+    outside = partial(tmp_path, "outside.mp3")
+    (studio / "failed.mp3").symlink_to(outside)
+    adapter.sweep()
+    assert outside.exists()
+
+
+def test_sweep_never_deletes_the_file_a_transfer_is_importing(tmp_path, monkeypatch):
+    adapter = engine(tmp_path, monkeypatch, {"01 Song.mp3": ["Completed, Cancelled"]})
+    (tmp_path / "work" / "engine-downloads").mkdir(parents=True)
+    path = partial(tmp_path / "work" / "engine-incomplete" / "Studio", "01 Song.mp3")
+    swept = []
+
+    def importing(candidate, destination, check, progress):
+        swept.append(adapter.sweep())
+        assert path.exists()
+
+    adapter._transfer = importing
+    candidate = candidate_for(song(), {"username": "peer"}, file())
+    adapter.transfer(candidate, tmp_path / "staged.mp3", lambda: None, None)
+    assert swept == [0] and path.exists()
+    adapter.swept_at = None  # An hour later, nothing is importing it.
+    assert adapter.sweep() == 1 and not path.exists()
+
+
+@pytest.mark.parametrize(
+    "linked", [None, "work", "engine-incomplete", "engine-downloads"]
+)
+def test_sweep_deletes_nothing_behind_a_linked_work_root_or_engine_folder(
+    tmp_path, monkeypatch, linked
+):
+    """A link could lead the sweep into the library (Codex, 5 Nov)."""
+    real = tmp_path / "real"
+    elsewhere = tmp_path / "elsewhere"
+    for name in ("engine-downloads", "engine-incomplete"):
+        (real / name).mkdir(parents=True)
+        (elsewhere / name).mkdir(parents=True)
+    work = tmp_path / "work"
+    if linked is None:
+        work = real
+    elif linked == "work":
+        work.symlink_to(real, target_is_directory=True)
+    else:
+        work.mkdir()
+        for name in ("engine-downloads", "engine-incomplete"):
+            if name == linked:
+                (work / name).symlink_to(elsewhere / name, target_is_directory=True)
+            else:
+                (work / name).mkdir()
+    folder = "engine-incomplete"
+    owner = elsewhere if linked == "engine-incomplete" else work
+    path = partial(owner / folder / "Studio", "failed.mp3")
+    adapter = engine(
+        tmp_path, monkeypatch, {"failed.mp3": ["Completed, Errored"]}, work=work
+    )
+    assert adapter.sweep() == (1 if linked is None else 0)
+    assert path.exists() == (linked is not None)
+
+
+@pytest.mark.parametrize("answer", [500, {"unexpected": True}, [{"directories": 1}]])
+def test_sweep_deletes_nothing_when_the_engine_list_is_unreadable(
+    tmp_path, monkeypatch, answer
+):
+    adapter = engine(tmp_path, monkeypatch, {})
+    (tmp_path / "work" / "engine-downloads").mkdir(parents=True)
+    path = partial(tmp_path / "work" / "engine-incomplete" / "Studio", "failed.mp3")
+
+    def reply(request):
+        if isinstance(answer, int):
+            return httpx.Response(answer)
+        return httpx.Response(200, json=answer)
+
+    adapter.client = lambda: httpx.Client(
+        base_url="http://engine/api/v0/", transport=httpx.MockTransport(reply)
+    )
+    assert adapter.sweep() == 0 and path.exists()
