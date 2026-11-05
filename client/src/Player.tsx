@@ -1,7 +1,7 @@
 import { api, apiFetch } from "./api";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Play, Pause, SkipBack, SkipForward, LoaderCircle } from "lucide-react";
+import { Play, Pause, LoaderCircle } from "lucide-react";
 import type { Track } from "./types";
 import { useFixedHeight } from "./useFixedHeight";
 import {
@@ -10,7 +10,7 @@ import {
   LISTEN_SECONDS,
   recordListen,
 } from "./listens";
-import { Cover } from "./Cover";
+import { MiniPlayer } from "./MiniPlayer";
 import { fromMixTrack, fromTrack, songBody, type Song } from "./songs";
 import { startFailure } from "./playStart";
 import { resolve, type Playing } from "./playbackSource";
@@ -515,52 +515,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           }}
         />
         {song && (
-          <section ref={bar} className="mini-player" aria-label="Now playing">
-            <button
-              className="mini-open"
-              aria-label={`Open now playing: ${song.title}`}
-              onClick={(e) => {
-                openedFrom.current = e.currentTarget;
-                setExpanded(true);
-              }}
-            >
-              <Cover title={song.title} src={song.cover} sizes="48px" />
-              <span>
-                <strong>{song.title}</strong>
-                <small>
-                  {/* No status text in normal use (#60): the play button's
-                      spinner shows loading; only a problem gets words. */}
-                  {error
-                    ? error
-                    : song.source && song.source !== "Saved library"
-                      ? `${song.artist} · Streaming`
-                      : song.artist}
-                </small>
-              </span>
-            </button>
-            <button
-              className="mini-next"
-              aria-label="Previous song"
-              disabled={!canPrevious}
-              onClick={previous}
-            >
-              <SkipBack size={22} fill="currentColor" />
-            </button>
-            {playButton(22)}
-            <button
-              className="mini-next"
-              aria-label="Next song"
-              disabled={!hasNext || busy}
-              onClick={next}
-            >
-              <SkipForward size={22} fill="currentColor" />
-            </button>
-            <span
-              className="mini-progress"
-              aria-hidden="true"
-              style={{ transform: `scaleX(${progress})` }}
-            />
-          </section>
+          <MiniPlayer
+            song={song}
+            bar={bar}
+            open={(from) => {
+              openedFrom.current = from;
+              setExpanded(true);
+            }}
+            error={error}
+            playButton={playButton}
+            canPrevious={canPrevious}
+            hasNext={hasNext}
+            busy={busy}
+            previous={previous}
+            next={next}
+            progress={progress}
+          />
         )}
         {song && expanded && (
           <NowPlaying
