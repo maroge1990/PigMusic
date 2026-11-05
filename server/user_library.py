@@ -972,9 +972,11 @@ class UserLibrary:
     def lookup(self, user_id, songs):
         """Which of these songs are already in a person's library.
 
-        A recording ID is decisive; otherwise title and artist must both match.
+        A recording ID is decisive; otherwise the shared policy decides
+        (`matching.compatible`), with candidates indexed by `song_key` so an
+        edition or featured credit ("One - 2011 Remaster") finds the song.
         """
-        from .matching import compatible
+        from .matching import compatible, song_key
 
         data = self.projection(user_id)
         cached = self.lookup_cache.get(user_id)
@@ -988,9 +990,7 @@ class UserLibrary:
                     recordings.setdefault(track["musicbrainz_recording_id"], track)
                 # Compared as filed: a "Live at ..." album is a live recording.
                 filed = {**track, "album": albums.get(track.get("album_id"))}
-                names[(normalise(track["title"]), normalise(track["artist"]))].append(
-                    (filed, track)
-                )
+                names[song_key(filed)].append((filed, track))
             cached = (data["music_revision"], recordings, names)
             self.lookup_cache[user_id] = cached
         _, recordings, names = cached
@@ -1000,9 +1000,7 @@ class UserLibrary:
             track = recordings.get(song.get("musicbrainz_recording_id") or "") or next(
                 (
                     track
-                    for filed, track in names.get(
-                        (normalise(song["title"]), normalise(song["artist"])), ()
-                    )
+                    for filed, track in names.get(song_key(song), ())
                     if compatible(
                         {**song, "musicbrainz_recording_id": None},
                         {**filed, "musicbrainz_recording_id": None},
@@ -1018,8 +1016,10 @@ class UserLibrary:
         copy, else a household copy anyone may play, else None. One shared
         policy (`matching.compatible`): a live, remix or demo recording never
         stands in for the studio song, an album's own words count ("Live at
-        ..."), and lengths must agree when both are known (#109)."""
-        from .matching import compatible
+        ..."), and lengths must agree when both are known (#109). Candidates
+        are indexed by `song_key`, so editions and featured credits meet
+        (#118)."""
+        from .matching import compatible, song_key
 
         own = self.lookup(user_id, songs)
         revision = self.store.library_revision
@@ -1032,11 +1032,7 @@ class UserLibrary:
                     if track.get("available", True) is False:
                         continue
                     filed = {**track, "album": album.get("title") or track.get("album")}
-                    key = (
-                        normalise(track["title"]),
-                        normalise(track.get("artist", "")),
-                    )
-                    names[key].append((filed, track))
+                    names[song_key(filed)].append((filed, track))
             self.household_cache = (revision, names)
         names = self.household_cache[1]
         found = []
@@ -1047,9 +1043,7 @@ class UserLibrary:
             track = next(
                 (
                     track
-                    for filed, track in names.get(
-                        (normalise(song["title"]), normalise(song["artist"])), ()
-                    )
+                    for filed, track in names.get(song_key(song), ())
                     if compatible(song, filed)
                 ),
                 None,

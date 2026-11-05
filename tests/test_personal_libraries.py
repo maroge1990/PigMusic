@@ -583,3 +583,41 @@ def test_server_matches_find_household_songs_but_never_another_recording(
     # The owner has both in their own library.
     mine = app.state.store.user_libraries.server_matches(owner, songs[:1])
     assert mine[0]["id"] == "song" and mine[0]["server_state"] == "in_library"
+
+
+def test_server_matches_meet_editions_and_featured_credits(tmp_path, monkeypatch):
+    """#118: candidates are found by the shared policy's own key, so a
+    remastered title or a featured credit finds the server's song (personal
+    and household), while live copies and other lengths still never do."""
+    tracks = [
+        {
+            "id": "song",
+            "title": "One",
+            "artist": "Artist",
+            "album_artist": "Artist",
+            "album": "Studio",
+            "duration": 200,
+            "relative_path": "private/song.mp3",
+        },
+    ]
+    (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": tracks}))
+    app, owner = protected(tmp_path, monkeypatch)
+    code = app.state.auth.setup_code(owner, "member", "Member")
+    member = app.state.auth.activate(code["code"], PASSWORD, "fixture")["id"]
+    songs = [
+        {"title": "One - 2011 Remaster", "artist": "Artist", "duration": 201},
+        {"title": "One (feat. Someone)", "artist": "Artist", "duration": 200},
+        {"title": "One", "artist": "Artist & Someone", "duration": 199},
+        {"title": "One (Live)", "artist": "Artist", "duration": 200},
+        {"title": "One", "artist": "Artist", "album": "Live at X", "duration": 200},
+        {"title": "One - 2011 Remaster", "artist": "Artist", "duration": 260},
+    ]
+    expected = ["song"] * 3 + [None] * 3
+    libraries = app.state.store.user_libraries
+    household = libraries.server_matches(member, songs)
+    assert [m and m["id"] for m in household] == expected
+    assert all(m["server_state"] == "household_available" for m in household[:3])
+    mine = libraries.server_matches(owner, songs)
+    assert [m and m["id"] for m in mine] == expected
+    assert all(m["server_state"] == "in_library" for m in mine[:3])
+    assert [m and m["id"] for m in libraries.lookup(owner, songs)] == expected
