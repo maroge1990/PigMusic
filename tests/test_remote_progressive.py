@@ -74,7 +74,11 @@ def relayed(tmp_path, monkeypatch, data, declared=True, **drip):
         assert request.url.host == "meln.top"
         return httpx.Response(
             200,
-            headers={"content-length": str(len(data))} if declared else {},
+            headers=(
+                {"content-length": str(len(data) if declared is True else declared)}
+                if declared
+                else {}
+            ),
             stream=source,
         )
 
@@ -356,26 +360,102 @@ def test_an_mp3_head_proves_its_length_or_the_file_arrives_whole(tmp_path, monke
     info = mp3(tmp_path, "info.mp3", "-b:a", "192k")
     vbr = mp3(tmp_path, "vbr.mp3", "-q:a", "2", "-write_xing", "0")
     tagged = mp3(tmp_path, "tagged.mp3", "-metadata", "title=Song", "-q:a", "4")
-    assert abs(mp3_head(cbr[:CHUNK], len(cbr)) - 30) < 0.5
     assert abs(mp3_head(info[:CHUNK], len(info)) - 30) < 0.1
     assert abs(mp3_head(tagged[:CHUNK], len(tagged)) - 30) < 0.1
     # Too few bytes yet: wait for more.
     assert mp3_head(info[:20], len(info)) is None
-    # A variable bitrate with no length header, or something else entirely,
-    # cannot be measured from its head.
+
+    # Without a length header nothing is proved: a constant bitrate so far
+    # can change later (Codex #23: eight 192 kbps frames, then 32 kbps).
+    def frame(bitrate_index, length):
+        return bytes([0xFF, 0xFB, bitrate_index << 4, 0xC0]) + bytes(length - 4)
+
+    changing = frame(11, 626) * 8 + frame(1, 104) * 600
     with pytest.raises(NotProgressive):
-        mp3_head(vbr[:CHUNK], len(vbr))
+        mp3_head(changing, 720000)
+    for headerless in (cbr, vbr):
+        with pytest.raises(NotProgressive):
+            mp3_head(headerless[:CHUNK], len(headerless))
     with pytest.raises(NotProgressive):
         mp3_head(b"<html>" + b" " * 200, 1000)
+    # A constant-bitrate header whose size disagrees with the source's.
+    with pytest.raises(NotProgressive):
+        mp3_head(info[:CHUNK], 2 * len(info))
+
+    # A headerless file is relayed as before: whole, validated, then played.
+    resolver, source = relayed(tmp_path, monkeypatch, cbr, pause=0)
+    found, phases = asyncio.run(play(resolver))
+    assert "freemp3cloud-transfer" in phases
+    assert "freemp3cloud-streaming" not in phases
+    assert resolver.relay(found["relay"], "member")[0].is_file()
 
     # A source that does not declare its size gives no length to declare:
     # such a file is relayed as before, whole and validated, then played.
-    resolver, source = relayed(tmp_path, monkeypatch, info, declared=False, pause=0)
+    resolver, source = relayed(
+        tmp_path / "undeclared", monkeypatch, info, declared=False, pause=0
+    )
     found, phases = asyncio.run(play(resolver))
     assert "freemp3cloud-transfer" in phases
     assert "freemp3cloud-streaming" not in phases
     path, _ = resolver.relay(found["relay"], "member")
     assert path.is_file()
+
+
+def test_the_last_byte_waits_for_the_validated_file(tmp_path, monkeypatch, caplog):
+    """Codex #23: every byte had arrived, then the whole-file probe rejected
+    it; the body must not have completed."""
+    from server import audio
+
+    data = mp3(tmp_path)
+    resolver, source = relayed(tmp_path, monkeypatch, data, pause=0.02)
+
+    def rejecting_probe(path, check=lambda: None):
+        time.sleep(0.3)
+        return None
+
+    monkeypatch.setattr(audio, "probe_file", rejecting_probe)
+
+    async def run():
+        found, _ = await play(resolver)
+        transfer = resolver.relay(found["relay"], "member")
+        whole, tail = await asyncio.gather(
+            listen(await transfer.response("GET", None)),
+            listen(await transfer.response("GET", f"bytes={len(data) - 10}-")),
+        )
+        await settled(resolver)
+        return found, whole, tail
+
+    with caplog.at_level("INFO", logger="pig_music.remote"):
+        found, whole, tail = asyncio.run(run())
+    status, _, chunks, completed = whole
+    assert status == 200 and not completed
+    assert body(chunks) == data[: len(body(chunks))]
+    assert len(body(chunks)) < len(data)
+    status, _, chunks, completed = tail
+    assert not completed and len(body(chunks)) < 10
+    assert resolver.relay(found["relay"], "member") is None
+    assert list((tmp_path / "relay").iterdir()) == []
+
+
+def test_a_source_sending_more_than_it_declared_fails_the_transfer(
+    tmp_path, monkeypatch
+):
+    data = mp3(tmp_path)
+    declared = len(data) - 1000
+    resolver, source = relayed(tmp_path, monkeypatch, data, declared=declared)
+
+    async def run():
+        found, _ = await play(resolver)
+        transfer = resolver.relay(found["relay"], "member")
+        heard = await listen(await transfer.response("GET", None))
+        await settled(resolver)
+        return found, heard
+
+    found, (status, headers, chunks, completed) = asyncio.run(run())
+    assert status == 200 and headers["content-length"] == str(declared)
+    assert not completed and len(body(chunks)) < declared
+    assert resolver.relay(found["relay"], "member") is None
+    assert list((tmp_path / "relay").iterdir()) == []
 
 
 @pytest.mark.loop_timing

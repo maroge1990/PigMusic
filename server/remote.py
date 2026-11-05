@@ -694,8 +694,6 @@ MP3_RATES = {
     2: (22050, 24000, 16000),
     0: (11025, 12000, 8000),
 }
-# Frames a header-less file must show at one bitrate to count as constant.
-CBR_FRAMES = 8
 
 
 class NotProgressive(Exception):
@@ -733,9 +731,10 @@ def mp3_frame(data, at):
 
 
 def mp3_head(data, size):
-    """The playing time an MP3's first bytes prove for a file of `size` bytes:
-    from its Xing/Info or VBRI header, or from a constant bitrate. None when
-    more bytes are needed; NotProgressive when the head cannot prove it."""
+    """The playing time an MP3's first bytes prove for a file of `size` bytes,
+    from its Xing/Info or VBRI frame count: None when more bytes are needed;
+    NotProgressive when the head cannot prove it. Matching early frames never
+    prove a constant bitrate, so a file without such a header arrives whole."""
     start = 0
     if data[:3] == b"ID3":
         if len(data) < 10:
@@ -750,24 +749,34 @@ def mp3_head(data, size):
     if first is None or len(data) < start + 64:
         return None
     xing = start + 4 + first["side"]
+    audio = size - start
     if data[xing : xing + 4] in (b"Xing", b"Info"):
-        if not data[xing + 7] & 1:
+        flags = data[xing + 7]
+        if not flags & 1:
             raise NotProgressive("Length header without a frame count.")
         frames = int.from_bytes(data[xing + 8 : xing + 12], "big")
-        return frames * first["samples"] / first["rate"]
-    if data[start + 36 : start + 40] == b"VBRI":
+        stated = (
+            int.from_bytes(data[xing + 12 : xing + 16], "big") if flags & 2 else None
+        )
+        seconds = frames * first["samples"] / first["rate"]
+        # Info declares a constant bitrate: the declared size must give the
+        # same length the frame count does.
+        if (
+            data[xing : xing + 4] == b"Info"
+            and abs(audio * 8 / first["bitrate"] - seconds) > 1
+        ):
+            raise NotProgressive("A constant bitrate the size disagrees with.")
+    elif data[start + 36 : start + 40] == b"VBRI":
+        stated = int.from_bytes(data[start + 46 : start + 50], "big")
         frames = int.from_bytes(data[start + 50 : start + 54], "big")
-        return frames * first["samples"] / first["rate"]
-    # No header: only a constant bitrate makes the size give the length.
-    at = start
-    for _ in range(CBR_FRAMES):
-        frame = mp3_frame(data, at)
-        if frame is None:
-            return None
-        if (frame["bitrate"], frame["rate"]) != (first["bitrate"], first["rate"]):
-            raise NotProgressive("A variable bitrate without a length header.")
-        at += frame["length"]
-    return (size - start) * 8 / first["bitrate"]
+        seconds = frames * first["samples"] / first["rate"]
+    else:
+        raise NotProgressive("No length header.")
+    # The header's own byte count, when given, must match the declared size
+    # (trailing tags allowed).
+    if stated is not None and abs(stated - audio) > max(4096, audio // 100):
+        raise NotProgressive("A length header for another size.")
+    return seconds
 
 
 class RelayTransfer:
@@ -798,6 +807,10 @@ class RelayTransfer:
     def progress(self, received, total):
         """After each written chunk. The head is checked once, before any
         byte is served: a recording of another length stops the transfer."""
+        if total and received > total:
+            # More than the source declared: not the file whose length was
+            # promised to listeners.
+            raise ProviderError("invalid_response")
         try:
             arrived = os.stat(self.path).st_size
         except OSError:
@@ -869,11 +882,20 @@ class RelayTransfer:
         self.error = exc
         self._grew(0)
 
+    @property
+    def servable(self):
+        """Bytes a listener may have: the file's last byte only once the whole
+        file has been validated and published, so no body completes for a
+        file that was then rejected."""
+        if self.error is not None:
+            return 0
+        return self.arrived if self.complete else min(self.arrived, self.size - 1)
+
     async def until(self, position, seconds):
-        """Whether byte `position` arrived within `seconds`; never once the
-        transfer has failed."""
+        """Whether byte `position` may be served within `seconds`; never once
+        the transfer has failed."""
         deadline = self.loop.time() + seconds
-        while self.error is None and self.arrived <= position and not self.complete:
+        while self.error is None and self.servable <= position and not self.complete:
             remaining = deadline - self.loop.time()
             if remaining <= 0:
                 return False
@@ -881,7 +903,7 @@ class RelayTransfer:
                 await asyncio.wait_for(self._changed.wait(), remaining)
             except TimeoutError:
                 return False
-        return self.error is None and self.arrived > position
+        return self.servable > position
 
     async def response(self, method, range_header):
         size = self.size
@@ -946,8 +968,9 @@ def byte_range(header, size):
 
 class GrowingResponse(StreamingResponse):
     """A range of a relay file served as its bytes arrive, never past them.
-    A failed or stalled transfer ends the body short of its length, which
-    closes the connection rather than presenting a whole song."""
+    Its last byte waits for the validated file; a failed, rejected or
+    stalled transfer ends the body short of its length, which closes the
+    connection rather than presenting a whole song."""
 
     def __init__(self, transfer, start, end, status, headers):
         self.transfer, self.start, self.end = transfer, start, end
@@ -966,7 +989,7 @@ class GrowingResponse(StreamingResponse):
             if not await transfer.until(position, WAIT_SECONDS):
                 return
             count = min(
-                CHUNK_BYTES, self.end + 1 - position, transfer.arrived - position
+                CHUNK_BYTES, self.end + 1 - position, transfer.servable - position
             )
             data = await asyncio.to_thread(transfer.read, position, count)
             if not data or transfer.error is not None:
