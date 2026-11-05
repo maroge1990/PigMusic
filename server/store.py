@@ -565,6 +565,13 @@ class Store:
         # Journals are deleted only from the app's own staging folder, never
         # through a link to somewhere else (#96, Codex round 2).
         own = not any(p.is_symlink() for p in (stage, stage.parent, self.directory))
+
+        def drop(journal):
+            # The one way recovery deletes a journal: only a real file in the
+            # app's own staging folder, never through a link (#96, D-71).
+            if own and not journal.is_symlink() and journal.parent == stage:
+                journal.unlink(missing_ok=True)
+
         if stage.exists():
             for journal in stage.glob("*.json"):
                 try:
@@ -575,8 +582,7 @@ class Store:
                         sha = metadata["sha256"]
                     except (ValueError, KeyError, TypeError, AttributeError):
                         # Torn or unreadable: it can never be recovered (#96).
-                        if own and not journal.is_symlink():
-                            journal.unlink(missing_ok=True)
+                        drop(journal)
                         continue
                     if (
                         not target.is_relative_to(root)
@@ -585,8 +591,7 @@ class Store:
                     ):
                         # Its song never reached the library (or another file
                         # holds its place): nothing to recover (#96).
-                        if own and not journal.is_symlink():
-                            journal.unlink(missing_ok=True)
+                        drop(journal)
                         continue
                     with self.connect() as conn:
                         conn.execute("BEGIN IMMEDIATE")
@@ -639,7 +644,7 @@ class Store:
                                 "UPDATE queue SET status='completed' WHERE id=?",
                                 (request_id,),
                             )
-                    journal.unlink(missing_ok=True)
+                    drop(journal)
                 except (ValueError, KeyError, OSError):
                     continue
         with self.connect() as conn:

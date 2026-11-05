@@ -445,3 +445,48 @@ def test_freemp3cloud_empty_result_is_retried_exactly_once(tmp_path, monkeypatch
     downloader, state = paced_downloader(tmp_path, monkeypatch, [])
     assert downloader.paced_search({"id": 1}, "q") == []
     assert len(state["starts"]) == 2
+
+
+def published_journal(store, worker, audio, name):
+    """A valid journal for a song already in the library: recovery would
+    complete it and then delete the journal."""
+    job = queued(store)
+    store.request_state(job["id"], "validating")
+    target = worker.library_root / f"{name}.mp3"
+    shutil.copyfile(audio, target)
+    return job, {
+        **job,
+        "codec": "mp3",
+        "bitrate": 320,
+        "relative_path": f"{name}.mp3",
+        "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+    }
+
+
+def test_recovery_keeps_a_valid_journal_behind_a_linked_staging_folder(tmp_path, audio):
+    """Codex confirmation round (D-71): the delete after a successful
+    recovery was unguarded and followed a linked staging folder."""
+    store = Store(tmp_path / "data")
+    worker = Downloader(store)
+    job, metadata = published_journal(store, worker, audio, "linked")
+    stage = store.directory / "downloads" / "staging"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    shutil.rmtree(stage)
+    stage.symlink_to(elsewhere, target_is_directory=True)
+    journal = elsewhere / (job["id"] + ".json")
+    journal.write_text(json.dumps(metadata))
+    store.recover_requests()
+    assert journal.exists()
+
+
+def test_recovery_never_deletes_a_linked_journal(tmp_path, audio):
+    store = Store(tmp_path / "data")
+    worker = Downloader(store)
+    job, metadata = published_journal(store, worker, audio, "pointed")
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps(metadata))
+    link = store.directory / "downloads" / "staging" / (job["id"] + ".json")
+    link.symlink_to(outside)
+    store.recover_requests()
+    assert link.is_symlink() and outside.exists()
