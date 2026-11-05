@@ -789,3 +789,15 @@ def test_apple_music_playlist_limit(tmp_path, monkeypatch):
         response = client.post("/api/v1/imports/apple-music", json=apple_body(songs))
         assert response.status_code == 422
         assert client.get("/api/v1/playlists").json()["playlists"] == []
+
+
+def test_apple_music_playlist_long_name_keeps_the_usual_limit(tmp_path, monkeypatch):
+    app, owner, member, token, track = household(tmp_path, monkeypatch)
+    users = app.state.store.user_libraries
+    users.add_apple_playlist(
+        owner, "pl.long", "x" * 150, None, [{"title": "One", "artist": "Artist"}], False
+    )
+    from server.playlists import Playlists
+
+    names = [p["name"] for p in Playlists(app.state.store, owner).list()]
+    assert "x" * 100 in names and "x" * 150 not in names

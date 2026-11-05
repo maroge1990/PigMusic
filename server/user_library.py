@@ -1338,6 +1338,8 @@ class UserLibrary:
 
         if len(songs) > MAX_PLAYLIST_ENTRIES:
             raise ValueError("Playlist has reached 10,000 songs")
+        # Playlist names are 100 characters everywhere else (rename, create).
+        name = name.strip()[:100] or "Apple Music playlist"
         found = self.server_matches(user_id, songs)
         tracks, missing = [], []
         counts = {"in_library": 0, "household": 0, "missing": 0, "requested": 0}
