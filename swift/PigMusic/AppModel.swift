@@ -79,7 +79,8 @@ enum PlayOrigin: Hashable {
   /// One refresh at a time; one asked for meanwhile runs after it (RV23).
   @ObservationIgnored private let refreshLoop = RefreshLoop()
   @ObservationIgnored private var restoring = false
-  @ObservationIgnored private var activeScene = true
+  /// Whether the scene is active and the foreground work runs (#97).
+  @ObservationIgnored private var foreground = ForegroundGate()
   @ObservationIgnored private let defaults: UserDefaults
   @ObservationIgnored private let network = NetworkConditions()
   init(defaults: UserDefaults = .standard) {
@@ -121,46 +122,37 @@ enum PlayOrigin: Hashable {
       startLiveUpdates()
     } catch { message = error.userMessage }
   }
-  /// When the app last stopped being active.
-  @ObservationIgnored private var inactiveSince: ContinuousClock.Instant?
-  /// Whether the foreground work (live updates, downloads, Watch copying) is
-  /// stopped; true until the first activation, which starts it.
-  @ObservationIgnored private var suspended = true
   func sceneActive(_ active: Bool, background: Bool = false) async {
-    activeScene = active
+    let change = foreground.change(active: active, background: background)
     player.sceneBackground(background)
-    if !active {
-      if inactiveSince == nil { inactiveSince = .now }
+    switch change {
+    case .stay: return
+    case .suspend:
       // A moment of Control Centre or a notification keeps everything
       // running; only the background stops it (#97).
-      guard background, !suspended else { return }
-      suspended = true
       account.cancel("live")
       await downloads?.suspendPreparation()
       await watch?.suspend()
-      return
+    case .back(let away, let renewConnections, let restart):
+      // Connections kept through a break may be dead without the system
+      // knowing; the first request on one waited for its timeout.
+      if renewConnections {
+        service?.renewConnections()
+        player.renewConnections()
+        DiagnosticsLog.shared.record(
+          "network", "new connections after \(Int(away / .seconds(1))) s away")
+      }
+      guard restart else { return }
+      downloads?.resumePreparation()
+      watch?.resume()
+      await refresh()
+      startLiveUpdates()
     }
-    let away = inactiveSince.map { ContinuousClock.now - $0 } ?? .zero
-    inactiveSince = nil
-    // Connections kept through a break may be dead without the system
-    // knowing; the first request on one waited for its timeout.
-    if away >= SceneReturn.longAway {
-      service?.renewConnections()
-      player.renewConnections()
-      DiagnosticsLog.shared.record(
-        "network", "new connections after \(Int(away / .seconds(1))) s away")
-    }
-    guard SceneReturn.restarts(away: away, suspended: suspended) else { return }
-    suspended = false
-    downloads?.resumePreparation()
-    watch?.resume()
-    await refresh()
-    startLiveUpdates()
   }
   /// The last library revision the live updates announced, this account.
   @ObservationIgnored private var libraryEvent: String?
   private func startLiveUpdates() {
-    guard activeScene, account.task("live") == nil, let service else { return }
+    guard foreground.active, account.task("live") == nil, let service else { return }
     let stamp = account.generation
     account.own("live", Task { [weak self] in
       var delay = 1
