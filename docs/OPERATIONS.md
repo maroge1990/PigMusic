@@ -78,7 +78,7 @@ Accounts stop one person from browsing or editing another's library, playlists, 
 - **Never logged or exported:** passwords, bearer tokens, setup codes.
 - **First-run installation code:** The one exception. Before any owner exists, startup prints a 128-bit installation code to the operator-only container console. It is never returned over HTTP, and it stops working once an owner exists. Keep startup logs private.
 - **HTTP hardening:** Same-origin CSP with no inline scripts, frame denial and HSTS. JSON bodies are capped at 1 MB before parsing (Apple XML imports at 20 MB). Validation errors omit submitted values. Failed sign-ins are rate limited, and only the administrator sees security activity.
-- **Dependencies:** CI audits the locked Python and npm dependencies before publishing an image.
+- **Dependencies:** CI audits the locked Python (runtime and test locks) and npm dependencies before publishing an image. The image holds only the runtime lock; its build fails if pytest is importable.
 
 ## Private configuration
 
@@ -103,7 +103,7 @@ Active/current and staged-next editions retain their files; retired/hidden editi
 
 ## Container images
 
-`.github/workflows/container.yml` builds the pinned Dockerfile, tests that exact image (backend suite, OpenAPI contract, web checks; the 1 GB artwork, delivery, sync and mix scale gates run on the nightly schedule, on manual runs and on release tags), and publishes `ghcr.io/maroge1990/pig-music:sha-<rev>` (plus `:main` on main, `:vX.Y.Z` on tags). The nightly run publishes nothing. Pull requests only validate. No workflow deploys, and there is no `latest` tag. Images carry OCI source/revision labels. The package stays private.
+`.github/workflows/container.yml` builds the pinned Dockerfile, tests that exact image (no test tools in it; backend suite with only `requirements-test.lock.txt` added outside the image, OpenAPI contract, web checks; the 1 GB artwork, delivery, sync and mix scale gates run on the nightly schedule, on manual runs and on release tags), and publishes `ghcr.io/maroge1990/pig-music:sha-<rev>` (plus `:main` on main, `:vX.Y.Z` on tags). The nightly run publishes nothing. Pull requests only validate. No workflow deploys, and there is no `latest` tag. Images carry OCI source/revision labels. The package stays private.
 
 Unraid pulls with a GitHub credential that has `read:packages`, entered through `docker login ghcr.io --password-stdin`. Never put it in templates, Git, docs, shell history or build arguments.
 
@@ -119,7 +119,7 @@ Each release has two steps:
    ```sh
    .venv/bin/python scripts/deploy_unraid.py --version <unused-name> --image ghcr.io/maroge1990/pig-music@sha256:<digest> --key <ssh-key> | tee verify.log
    ```
-   It pulls the image and checks its labels against the local checkout, which must be clean and at the image's revision. It then runs the image tests and scale gates on Unraid.
+   It pulls the image and checks its labels against the local checkout, which must be clean and at the image's revision. It then checks that the image holds no test tools, installs `requirements-test.lock.txt` (and nothing else) from the image into a folder in the release stage, runs the image tests with that folder mounted read-only and no network, and runs the scale gates on Unraid.
 2. **Release:**
    ```sh
    .venv/bin/python scripts/deploy_release.py --image <digest> --revision <sha> --version <same-name> --verified-log verify.log

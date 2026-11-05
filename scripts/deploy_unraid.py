@@ -43,6 +43,7 @@ def bundle(target):
                 "requirements.txt",
                 "requirements-dev.txt",
                 "requirements.lock.txt",
+                "requirements-test.lock.txt",
                 "pyproject.toml",
                 "README.md",
             )
@@ -72,6 +73,56 @@ def bundle(target):
             info.uname = info.gname = ""
             with path.open("rb") as stream:
                 archive.addfile(info, stream)
+
+
+# The production image carries no test tools (#86). The suite still runs on the
+# image's own Python, packages and code: a throwaway container from the same
+# image installs only requirements-test.lock.txt (--no-deps) into a folder in the
+# release stage, and the suite's container (still --network none) mounts it
+# read-only on PYTHONPATH.
+TEST_LIBS = "/opt/pig-test"
+NO_TEST_TOOLS = (
+    "import importlib.util as u, sys; "
+    "sys.exit([m for m in ('pytest', 'xdist', 'pluggy') if u.find_spec(m)] or 0)"
+)
+
+
+def suite_commands(image, stage):
+    """The remote commands that prove the image is clean, then run the suite in it."""
+    libs = stage + "/testlibs"
+    return [
+        "docker run --rm --network none --entrypoint python "
+        + shlex.quote(image)
+        + " -c "
+        + shlex.quote(NO_TEST_TOOLS),
+        "set -e; mkdir "
+        + shlex.quote(libs)
+        + "; docker run --rm --user 0:0 -v "
+        + shlex.quote(libs + ":" + TEST_LIBS)
+        + " -v "
+        + shlex.quote(
+            stage + "/requirements-test.lock.txt:/tmp/requirements-test.lock.txt:ro"
+        )
+        + " --entrypoint python "
+        + shlex.quote(image)
+        + " -m pip install --no-cache-dir --no-deps --only-binary :all:"
+        + " --disable-pip-version-check"
+        + " --root-user-action=ignore --target "
+        + TEST_LIBS
+        + " -r /tmp/requirements-test.lock.txt; chmod -R a+rX "
+        + shlex.quote(libs),
+        "docker run --rm --network none --memory=1g --user 99:100 --tmpfs /tmp:rw,uid=99,gid=100 --tmpfs /data:rw,uid=99,gid=100 -e PYTHONDONTWRITEBYTECODE=1 -e PIG_MUSIC_PRELOAD=false -e PIG_MUSIC_EMBEDDED_ENGINE=false -v "
+        + shlex.quote(stage + "/tests:/tests:ro")
+        + " -v "
+        + shlex.quote(stage + ":/source:ro")
+        + " -v "
+        + shlex.quote(libs + ":" + TEST_LIBS + ":ro")
+        + " -e PYTHONPATH="
+        + TEST_LIBS
+        + " -e PIG_MUSIC_SOURCE=/source --entrypoint python "
+        + shlex.quote(image)
+        + " -m pytest /tests -q -p no:cacheprovider --basetemp=/tmp/pig-tests",
+    ]
 
 
 def main():
@@ -235,15 +286,8 @@ def main():
             + shlex.quote(image)
             + " ."
         )
-    remote(
-        "docker run --rm --network none --memory=1g --user 99:100 --tmpfs /tmp:rw,uid=99,gid=100 --tmpfs /data:rw,uid=99,gid=100 -e PYTHONDONTWRITEBYTECODE=1 -e PIG_MUSIC_PRELOAD=false -e PIG_MUSIC_EMBEDDED_ENGINE=false -v "
-        + shlex.quote(stage + "/tests:/tests:ro")
-        + " -v "
-        + shlex.quote(stage + ":/source:ro")
-        + " -e PIG_MUSIC_SOURCE=/source --entrypoint python "
-        + shlex.quote(image)
-        + " -m pytest /tests -q -p no:cacheprovider --basetemp=/tmp/pig-tests"
-    )
+    for command in suite_commands(image, stage):
+        remote(command)
     remote(
         "docker run --rm --network none --memory=1g --entrypoint python "
         + shlex.quote(image)

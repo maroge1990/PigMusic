@@ -28,7 +28,7 @@ jobs:
         with:
           python-version: '3.14'
       - run: python -m pip install pip-audit==2.10.1
-      - run: pip-audit -r requirements.lock.txt
+      - run: pip-audit -r requirements.lock.txt -r requirements-test.lock.txt
       - working-directory: client
         run: npm audit --omit=dev
   image:
@@ -45,11 +45,28 @@ jobs:
           REVISION: ${{ github.sha }}
         run: |
           docker build --build-arg VCS_REF="$REVISION" --build-arg VERSION="sha-$REVISION" -t pig-music:candidate .
+      - name: No test tools in the production image
+        run: |
+          docker run --rm --network none --entrypoint python pig-music:candidate \
+            -c "import importlib.util as u, sys; sys.exit([m for m in ('pytest', 'xdist', 'pluggy') if u.find_spec(m)] or 0)"
+      # The suite runs on the candidate's own Python, packages and code. Only the
+      # locked test tools are added, without dependencies, in a separate folder
+      # that the suite's container (no network) mounts read-only (#86).
+      - name: Test tools for the suite, outside the image
+        run: |
+          mkdir "$RUNNER_TEMP/pig-testlibs"
+          docker run --rm --user 0:0 -v "$RUNNER_TEMP/pig-testlibs:/opt/pig-test" \
+            -v "$GITHUB_WORKSPACE/requirements-test.lock.txt:/tmp/requirements-test.lock.txt:ro" \
+            --entrypoint python pig-music:candidate -m pip install --no-cache-dir --no-deps \
+            --only-binary :all: --disable-pip-version-check --root-user-action=ignore \
+            --target /opt/pig-test -r /tmp/requirements-test.lock.txt
+          sudo chmod -R a+rX "$RUNNER_TEMP/pig-testlibs"
       - name: Backend regression suite in isolated container
         run: |
           docker run --rm --network none --memory=1g --user 99:100 \
             --tmpfs /tmp:rw,uid=99,gid=100 --tmpfs /data:rw,uid=99,gid=100 \
             -e PYTHONDONTWRITEBYTECODE=1 -e PIG_MUSIC_PRELOAD=false -e PIG_MUSIC_EMBEDDED_ENGINE=false \
+            -v "$RUNNER_TEMP/pig-testlibs:/opt/pig-test:ro" -e PYTHONPATH=/opt/pig-test \
             -v "$GITHUB_WORKSPACE/tests:/tests:ro" \
             -v "$GITHUB_WORKSPACE:/source:ro" -e PIG_MUSIC_SOURCE=/source --entrypoint python \
             pig-music:candidate -m pytest /tests -q -p no:cacheprovider --basetemp=/tmp/pig-tests \
@@ -65,6 +82,7 @@ jobs:
           docker run --rm --network none --memory=1g --user 99:100 \
             --tmpfs /tmp:rw,uid=99,gid=100 --tmpfs /data:rw,uid=99,gid=100 \
             -e PYTHONDONTWRITEBYTECODE=1 -e PIG_MUSIC_PRELOAD=false -e PIG_MUSIC_EMBEDDED_ENGINE=false \
+            -v "$RUNNER_TEMP/pig-testlibs:/opt/pig-test:ro" -e PYTHONPATH=/opt/pig-test \
             -v "$GITHUB_WORKSPACE/tests:/tests:ro" \
             -v "$GITHUB_WORKSPACE:/source:ro" -e PIG_MUSIC_SOURCE=/source --entrypoint python \
             pig-music:candidate -m pytest /tests -q -p no:cacheprovider --basetemp=/tmp/pig-timing \

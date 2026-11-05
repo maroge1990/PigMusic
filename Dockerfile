@@ -20,6 +20,9 @@ COPY --from=soulseek /slskd /opt/slskd
 COPY requirements.lock.txt ./
 RUN pip install --no-cache-dir -r requirements.lock.txt
 RUN python -c "import yt_dlp.version; assert yt_dlp.version.__version__ == '2026.08.19'"
+# Test tools stay out of the production image (#86); CI and the release verify
+# add requirements-test.lock.txt in a separate folder for the suite run only.
+RUN python -c "import importlib.util as u, sys; sys.exit([m for m in ('pytest', 'xdist', 'pluggy') if u.find_spec(m)] or 0)"
 COPY server/ ./server/
 COPY api/ ./api/
 COPY scripts/benchmark_native_sync.py scripts/benchmark_mixes.py scripts/verify_download_source.py ./scripts/

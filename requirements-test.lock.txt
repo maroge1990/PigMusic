@@ -1,0 +1,11 @@
+# Test tools only, never in the production image (#86). CI and the release
+# verify install exactly these (--no-deps) into a separate folder that only the
+# suite's container mounts; requirements-dev.txt pulls them in for local setup.
+# No name here may also appear in requirements.lock.txt (tests/test_test_tools.py).
+execnet==2.1.2
+iniconfig==2.3.0
+packaging==26.3
+pluggy==1.6.0
+Pygments==2.21.0
+pytest-xdist==3.8.0
+pytest==9.1.1
