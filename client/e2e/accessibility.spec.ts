@@ -84,6 +84,21 @@ test("Home cards hold no paragraphs inside their buttons", async ({ page }) => {
   ).toContainText("Someone");
 });
 
+// #97: the library artist page's album cards are buttons too, so they hold
+// no heading or paragraph; each still reads as its album.
+test("library artist album cards hold no headings or paragraphs", async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.goto("/#/library/artist/artist-1");
+  const card = page.locator(".personal-grid button", { hasText: "Brat" });
+  await expect(card).toBeVisible();
+  await expect(page.locator("button h3, button p")).toHaveCount(0);
+  await expect(card).toHaveAccessibleName(/Brat.*2 songs/);
+  await card.click();
+  await expect(page).toHaveURL(/#\/library\/album\/album-1$/);
+});
+
 // #97: "You do not have access" belongs to the page it happened on.
 test("the access-denied notice clears on the next page", async ({ page }) => {
   await mockApi(page);

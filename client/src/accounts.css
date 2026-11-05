@@ -209,6 +209,17 @@
 .personal-grid p {
   overflow-wrap: anywhere;
 }
+/* Album buttons on an artist page: spans laid out as the heading and line
+   the link cards use, since a button can't hold <h3> or <p> (#97). */
+.personal-grid .grid-card-title,
+.personal-grid .grid-card-detail {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.personal-grid .grid-card-title {
+  font-size: var(--type-body);
+  font-weight: 700;
+}
 /* Cards share one rhythm: 16px padding (24px from 768px), 12px under the heading. */
 .account-section,
 .system-panel {
