@@ -74,11 +74,11 @@ enum PlayOrigin: Hashable {
   @ObservationIgnored private(set) var service: NativeService?
   @ObservationIgnored private(set) var store: LibraryStore?
   @ObservationIgnored private var sync: SyncCoordinator?
-  @ObservationIgnored private var generation = 0
+  /// The signed-in account's generation and the tasks that end with it.
+  @ObservationIgnored private let account = AccountFence()
   /// One refresh at a time; one asked for meanwhile runs after it (RV23).
   @ObservationIgnored private let refreshLoop = RefreshLoop()
   @ObservationIgnored private var restoring = false
-  @ObservationIgnored private var liveTask: Task<Void, Never>?
   @ObservationIgnored private var activeScene = true
   @ObservationIgnored private let defaults: UserDefaults
   @ObservationIgnored private let network = NetworkConditions()
@@ -135,8 +135,7 @@ enum PlayOrigin: Hashable {
       // running; only the background stops it (#97).
       guard background, !suspended else { return }
       suspended = true
-      liveTask?.cancel()
-      liveTask = nil
+      account.cancel("live")
       await downloads?.suspendPreparation()
       await watch?.suspend()
       return
@@ -161,16 +160,16 @@ enum PlayOrigin: Hashable {
   /// The last library revision the live updates announced, this account.
   @ObservationIgnored private var libraryEvent: String?
   private func startLiveUpdates() {
-    guard activeScene, liveTask == nil, let service else { return }
-    let stamp = generation
-    liveTask = Task { [weak self] in
+    guard activeScene, account.task("live") == nil, let service else { return }
+    let stamp = account.generation
+    account.own("live", Task { [weak self] in
       var delay = 1
       while !Task.isCancelled {
-        guard let self, generation == stamp else { return }
+        guard let self, account.isCurrent(stamp) else { return }
         do {
           let events = try await service.events()
           for try await event in events {
-            guard generation == stamp, !Task.isCancelled else { return }
+            guard account.isCurrent(stamp), !Task.isCancelled else { return }
             delay = 1
             if event.name == "revoked" {
               revoked(generation: stamp)
@@ -195,12 +194,12 @@ enum PlayOrigin: Hashable {
         } catch is CancellationError { return } catch {
           // Cached browsing and manual refresh remain available.
         }
-        guard generation == stamp, !Task.isCancelled else { return }
+        guard account.isCurrent(stamp), !Task.isCancelled else { return }
         do { try await Task.sleep(for: .seconds(delay)) } catch { return }
         delay = min(30, delay * 2)
         await refresh()
       }
-    }
+    })
   }
   func saveDownloadBudget(_ bytes: Int64) {
     defaults.set(Int(bytes), forKey: "pig.download-budget:" + artworkNamespace)
@@ -211,10 +210,10 @@ enum PlayOrigin: Hashable {
     guard let downloads else { return }
     do {
       try await downloads.enqueue(tracks, quality: quality, origin: origin)
-      let stamp = generation
+      let stamp = account.generation
       let covers = Set(tracks.compactMap(\.coverSha))
       for sha in covers {
-        guard generation == stamp, !Task.isCancelled else { return }
+        guard account.isCurrent(stamp), !Task.isCancelled else { return }
         _ = await artwork(sha: sha, width: 512)
         _ = await artwork(sha: sha, width: 256)
       }
@@ -245,7 +244,7 @@ enum PlayOrigin: Hashable {
   private func adoptServerPreferences(_ service: NativeService, generation stamp: Int) async {
     let change = preferenceChanges.current
     guard !pendingEdits.contains(where: { $0.mutation.action == "preferences" }),
-      let settings = try? await service.preferences(), generation == stamp,
+      let settings = try? await service.preferences(), account.isCurrent(stamp),
       preferenceChanges.isLatest(change),
       !pendingEdits.contains(where: { $0.mutation.action == "preferences" })
     else { return }
@@ -309,14 +308,14 @@ enum PlayOrigin: Hashable {
     } catch { message = error.userMessage }
   }
   private func attach(_ user: Person, service: NativeService) async throws {
-    generation += 1
+    account.advance()
     refreshLoop.reset()
     libraryEvent = nil
-    let stamp = generation
+    let stamp = account.generation
     let base = try FileManager.default.url(
       for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
     let origin = await service.server
-    guard generation == stamp else { throw CancellationError() }
+    try account.check(stamp)
     let directory = base.appendingPathComponent("PigMusic").appendingPathComponent(
       LibraryNamespace.key(server: origin, personId: user.id))
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -331,7 +330,7 @@ enum PlayOrigin: Hashable {
       directory: cacheBase.appendingPathComponent("PigMusic").appendingPathComponent(
         LibraryNamespace.key(server: origin, personId: user.id)
       ).appendingPathComponent("audio"))
-    guard generation == stamp else { throw CancellationError() }
+    try account.check(stamp)
     artworkCache = try? ArtworkCache(directory: directory.appendingPathComponent("artwork"))
     artworkNamespace = LibraryNamespace.key(server: origin, personId: user.id)
     artworkMemory.removeAllObjects()
@@ -368,10 +367,10 @@ enum PlayOrigin: Hashable {
       restoredQueue = PlaybackCheckpoint(queue: queue, elapsed: position.elapsed)
     }
     var savedOccurrenceIds = restoredQueue?.queue.items.map(\.id) ?? []
-    let listeningGeneration = generation
+    let listeningGeneration = account.generation
     player.onListen = { [weak self] event in
       Task {
-        guard let self, self.generation == listeningGeneration, let service = self.service else {
+        guard let self, self.account.isCurrent(listeningGeneration), let service = self.service else {
           return
         }
         let identity = await service.qualifiedHistoryTrackID(event.trackId) ?? event.trackId
@@ -381,7 +380,7 @@ enum PlayOrigin: Hashable {
         } else {
           exists = (try? await database.track(id: identity)) != nil
         }
-        guard exists, self.generation == listeningGeneration else { return }
+        guard exists, self.account.isCurrent(listeningGeneration) else { return }
         try? await database.recordListen(
           ListeningEvent(
             eventId: event.eventId, trackId: identity, playedAt: event.playedAt,
@@ -462,13 +461,13 @@ enum PlayOrigin: Hashable {
   }
   private func refreshOnce() async {
     guard let service, let sync else { return }
-    let stamp = generation
+    let stamp = account.generation
     let began = ContinuousClock.now
     syncing = true
-    defer { if generation == stamp { syncing = false } }
+    defer { if account.isCurrent(stamp) { syncing = false } }
     do {
       let current = try await service.me()
-      guard generation == stamp else { return }
+      guard account.isCurrent(stamp) else { return }
       guard current.id == person?.id else {
         detach()
         message = "The server account changed. Please sign in again."
@@ -478,7 +477,7 @@ enum PlayOrigin: Hashable {
       let before = try? await store?.revision()
       let artworkBefore = try? await store?.artworkRevision()
       try await sync.refresh()
-      guard generation == stamp else { return }
+      guard account.isCurrent(stamp) else { return }
       // Reloading redraws every open page and list, so it waits for a real
       // change. Reconnecting the live updates syncs often with none. Covers
       // reload only when the sync changed one.
@@ -489,12 +488,12 @@ enum PlayOrigin: Hashable {
           artworkChanged: (try? await store?.artworkRevision()) != artworkBefore)
       }
       let revisions = await player.cachedRevisions()
-      guard generation == stamp else { return }
+      guard account.isCurrent(stamp) else { return }
       // One store query answers every cached and downloaded song at once.
       let records = downloads?.records ?? []
       let known =
         try await store?.sourceRevisions(ids: Set(revisions.keys).union(records.map(\.id))) ?? [:]
-      guard generation == stamp else { return }
+      guard account.isCurrent(stamp) else { return }
       // Songs the server changed or removed since their audio was cached.
       var changed = Set(
         revisions.filter { id, revision in known[id].map { $0 != revision } ?? true }.keys)
@@ -513,15 +512,15 @@ enum PlayOrigin: Hashable {
         }
         if !changed.isEmpty { invalid = await player.invalidateSources(changed: changed) }
         await downloads.reconcile(allowed)
-        guard generation == stamp else { return }
+        guard account.isCurrent(stamp) else { return }
         downloads.resume(automatic: true)
       } else if !changed.isEmpty {
         invalid = await player.invalidateSources(changed: changed)
       }
-      guard generation == stamp else { return }
+      guard account.isCurrent(stamp) else { return }
       await adoptServerPreferences(service, generation: stamp)
       let editsApplied = await flushEdits()
-      guard generation == stamp else { return }
+      guard account.isCurrent(stamp) else { return }
       if editsApplied {
         let artworkBefore = try? await store?.artworkRevision()
         try await sync.refresh()
@@ -532,7 +531,7 @@ enum PlayOrigin: Hashable {
       try await watch?.reconcile()
       await flushHistory()
       await refreshServerRequests()
-      guard generation == stamp else { return }
+      guard account.isCurrent(stamp) else { return }
       DiagnosticsLog.shared.record(
         "sync",
         "refreshed library in \(Int((ContinuousClock.now - began) / .milliseconds(1))) ms"
@@ -541,17 +540,17 @@ enum PlayOrigin: Hashable {
       message =
         invalid ? "Playback stopped because the server changed or removed cached music." : nil
     } catch NativeFailure.authentication {
-      guard generation == stamp else { return }
+      guard account.isCurrent(stamp) else { return }
       revoked(generation: stamp)
     } catch {
-      guard generation == stamp else { return }
+      guard account.isCurrent(stamp) else { return }
       // The cached library carries on quietly; the next foreground or pull retries.
       DiagnosticsLog.shared.record("sync", "refresh failed: \(error.localizedDescription)")
       message = nil
     }
     // A category chosen during this sync, changed or failed, loads now;
     // `syncing` stays set until this finishes, so a later choice joins it.
-    while generation == stamp, reloadGate.takePending() {
+    while account.isCurrent(stamp), reloadGate.takePending() {
       do { try await loadCache() } catch { message = error.userMessage }
     }
   }
@@ -559,7 +558,7 @@ enum PlayOrigin: Hashable {
   /// every cover; only an account change or a sync that changed covers needs it.
   private func loadCache(artworkChanged: Bool = false) async throws {
     guard let store else { return }
-    let stamp = generation
+    let stamp = account.generation
     let tracks = try await store.tracks(sort: songSort)
     let albums = try await store.albums(category: albumCategory, sort: albumSort)
     let artists = try await store.artists(sort: artistSort)
@@ -567,7 +566,7 @@ enum PlayOrigin: Hashable {
     let count = try await store.count(.tracks)
     let categoryCounts = try await store.albumCategoryCounts()
     let artistCount = try await store.ownArtistCount()
-    guard generation == stamp else { return }
+    guard account.isCurrent(stamp) else { return }
     songs = tracks
     self.albums = albums
     self.artists = artists
@@ -600,10 +599,10 @@ enum PlayOrigin: Hashable {
   private func prefetchAlbums(_ albums: [DiscoveryItem]) {
     // Optional work: not on cellular, Low Data Mode or Low Power Mode.
     guard network.conditions.allowsPrefetch else { return }
-    let stamp = generation
+    let stamp = account.generation
     Task(priority: .utility) { [weak self] in
       for album in albums.prefix(20) {
-        guard let self, generation == stamp, !Task.isCancelled,
+        guard let self, account.isCurrent(stamp), !Task.isCancelled,
           network.conditions.allowsPrefetch
         else { return }
         let key = "editions:\(album.id):0"
@@ -635,7 +634,7 @@ enum PlayOrigin: Hashable {
         || (section == .mixes && Date().timeIntervalSince(loaded) > 300)
     }
     guard !sections.isEmpty else { return }
-    let stamp = generation
+    let stamp = account.generation
     homeLoading.formUnion(sections)
     for section in sections { homeErrors[section] = nil }
     await withTaskGroup(of: (HomeSection, Result<HomeContent, NativeFailure>).self) { group in
@@ -651,7 +650,7 @@ enum PlayOrigin: Hashable {
         }
       }
       for await (section, result) in group {
-        guard generation == stamp, !Task.isCancelled else {
+        guard account.isCurrent(stamp), !Task.isCancelled else {
           group.cancelAll()
           continue
         }
@@ -671,7 +670,7 @@ enum PlayOrigin: Hashable {
         }
       }
     }
-    guard generation == stamp else { return }
+    guard account.isCurrent(stamp) else { return }
     homeLoading.subtract(sections)
     // Like the web: a chart still being prepared is asked for again, a few times.
     if HomeSection.allCases.contains(where: {
@@ -681,7 +680,7 @@ enum PlayOrigin: Hashable {
     {
       homePreparingRetries += 1
       try? await Task.sleep(for: .seconds(5 * homePreparingRetries))
-      guard generation == stamp, !Task.isCancelled else { return }
+      guard account.isCurrent(stamp), !Task.isCancelled else { return }
       await refreshHome()
     } else {
       homePreparingRetries = 0
@@ -705,11 +704,11 @@ enum PlayOrigin: Hashable {
     guard let service else {
       throw NativeFailure.unavailable("Connect to your server to browse the catalogue.")
     }
-    let stamp = generation
+    let stamp = account.generation
     do {
       let value = try await fetch(service)
       try Task.checkCancellation()
-      guard generation == stamp else { throw CancellationError() }
+      try account.check(stamp)
       return value
     } catch NativeFailure.authentication {
       revoked(generation: stamp)
@@ -719,8 +718,8 @@ enum PlayOrigin: Hashable {
 
   /// A check for a multi-step operation: whether the account it started
   /// under is still signed in (the generation it captured).
-  func isCurrent(_ stamp: Int) -> Bool { generation == stamp }
-  var currentGeneration: Int { generation }
+  func isCurrent(_ stamp: Int) -> Bool { account.isCurrent(stamp) }
+  var currentGeneration: Int { account.generation }
 
   func performPersonal<T: Sendable>(
     _ operation: @Sendable (NativeService) async throws -> T
@@ -728,15 +727,15 @@ enum PlayOrigin: Hashable {
     guard canMutate, let service else {
       throw NativeFailure.unavailable("Connect to your server and wait for sync to finish.")
     }
-    let stamp = generation
+    let stamp = account.generation
     mutationActive = true
-    defer { if generation == stamp { mutationActive = false } }
+    defer { if account.isCurrent(stamp) { mutationActive = false } }
     do {
       let result = try await operation(service)
       try Task.checkCancellation()
-      guard generation == stamp else { throw CancellationError() }
+      try account.check(stamp)
       await refresh(afterMutation: true)
-      guard generation == stamp else { throw CancellationError() }
+      try account.check(stamp)
       return result
     } catch NativeFailure.authentication {
       revoked(generation: stamp)
@@ -746,10 +745,10 @@ enum PlayOrigin: Hashable {
 
   func loadRecentSearches() async {
     guard !recentSearchesLoaded, let store else { return }
-    let stamp = generation
+    let stamp = account.generation
     let saved = try? await store.cached("search-recent", as: RecentSearches.self)
     // A pick made while this read is newer than what was saved.
-    guard generation == stamp, !recentSearchesLoaded else { return }
+    guard account.isCurrent(stamp), !recentSearchesLoaded else { return }
     recentSearchesLoaded = true
     if let saved, recentSearches.picks.isEmpty { recentSearches = saved }
   }
@@ -760,9 +759,9 @@ enum PlayOrigin: Hashable {
   /// Plays a recent song as the library holds it now; dropped if the account
   /// changes while it is looked up (#101).
   func replayRecent(_ pick: RecentPick) async {
-    let stamp = generation
+    let stamp = account.generation
     let fresh = await currentPick(pick)
-    guard generation == stamp, case .song(let song) = fresh else { return }
+    guard account.isCurrent(stamp), case .song(let song) = fresh else { return }
     rememberSearch(fresh)
     play(
       [song],
@@ -787,7 +786,7 @@ enum PlayOrigin: Hashable {
   func loadFavourite(_ track: Track) async {
     let key = "favourite:" + track.id
     // Every answer belongs to this account: a sign-out while reading drops it (#101).
-    let stamp = generation
+    let stamp = account.generation
     let store = self.store
     if let pending = pendingEdits.last(where: {
       $0.mutation.action == "favourite" && $0.mutation.track?.id == track.id
@@ -800,44 +799,44 @@ enum PlayOrigin: Hashable {
     let revision = favourites.revision(track.id)
     if favourites[track.id] == nil {
       let cached = (try? await store?.cached(key, as: Bool.self)) ?? false
-      guard generation == stamp else { return }
+      guard account.isCurrent(stamp) else { return }
       if favourites[track.id] == nil { favourites.answer(track.id, cached, since: revision) }
     }
     let confirmed = try? await readCatalogue({ try await $0.favourite(track) })
-    guard generation == stamp, let confirmed,
+    guard account.isCurrent(stamp), let confirmed,
       favourites.answer(track.id, confirmed, since: revision)
     else { return }
     try? await store?.cache(confirmed, key: key)
   }
   /// Whether the server confirmed the change; false when it waits on this phone.
   func setFavourite(_ track: Track, _ value: Bool) async throws -> Bool {
-    let stamp = generation
+    let stamp = account.generation
     let store = self.store
     favourites.invalidate(track.id)
     let confirmed = try await saveEdit(
       OfflineMutation(action: "favourite", track: track, favourite: value))
-    guard generation == stamp else { throw CancellationError() }
+    try account.check(stamp)
     favourites.change(track.id, value)
     try? await store?.cache(value, key: "favourite:" + track.id)
     return confirmed
   }
   @discardableResult func saveEdit(_ mutation: OfflineMutation) async throws -> Bool {
     guard let store, person != nil else { throw NativeFailure.authentication }
-    let stamp = generation
+    let stamp = account.generation
     try await store.enqueueMutation(mutation)
-    guard generation == stamp else { throw CancellationError() }
+    try account.check(stamp)
     pendingEdits = try await store.pendingMutations()
     let applied = await flushEdits()
-    guard generation == stamp else { throw CancellationError() }
+    try account.check(stamp)
     if applied { await refresh() }
     // The refresh can end this account (Codex on #101): its answer is stale.
-    guard generation == stamp else { throw CancellationError() }
+    try account.check(stamp)
     return !pendingEdits.contains { $0.id == mutation.id }
   }
   @discardableResult func flushEdits() async -> Bool {
     guard !flushingEdits, let store, let service, person != nil else { return false }
     flushingEdits = true
-    let stamp = generation
+    let stamp = account.generation
     defer { flushingEdits = false }
     var applied = false
     do {
@@ -846,7 +845,7 @@ enum PlayOrigin: Hashable {
       // Edits to anything else still go through. A network failure stops all.
       var blocked: Set<String> = []
       sending: for item in try await store.pendingMutations() {
-        guard generation == stamp else { return applied }
+        guard account.isCurrent(stamp) else { return applied }
         let scope = Self.editScope(item.mutation)
         guard item.state == "queued", !blocked.contains(scope) else {
           blocked.insert(scope)
@@ -854,7 +853,7 @@ enum PlayOrigin: Hashable {
         }
         do {
           let receipt = try await service.applyMutation(item.mutation)
-          guard receipt.applied, receipt.operationId == item.id, generation == stamp else {
+          guard receipt.applied, receipt.operationId == item.id, account.isCurrent(stamp) else {
             return applied
           }
           try await store.acknowledgeMutation(item.id)
@@ -879,8 +878,8 @@ enum PlayOrigin: Hashable {
           break sending
         }
       }
-      if generation == stamp { pendingEdits = try await store.pendingMutations() }
-    } catch { if generation == stamp { message = error.userMessage } }
+      if account.isCurrent(stamp) { pendingEdits = try await store.pendingMutations() }
+    } catch { if account.isCurrent(stamp) { message = error.userMessage } }
     return applied
   }
   /// What an edit changes, for keeping dependent edits in order.
@@ -899,18 +898,18 @@ enum PlayOrigin: Hashable {
   func cachedCatalogue<T: Codable & Sendable>(
     key: String, load: @Sendable (NativeService) async throws -> T
   ) async throws -> T {
-    let stamp = generation
+    let stamp = account.generation
     let database = store
     do {
       let result = try await readCatalogue(load)
-      guard generation == stamp else { throw CancellationError() }
+      try account.check(stamp)
       remember(result, key: key)
       try? await database?.cache(result, key: "catalogue:" + key)
       return result
     } catch NativeFailure.authentication {
       throw NativeFailure.authentication
     } catch is CancellationError { throw CancellationError() } catch {
-      guard generation == stamp else { throw CancellationError() }
+      try account.check(stamp)
       if let saved = try? await database?.cached("catalogue:" + key, as: T.self) { return saved }
       throw error
     }
@@ -923,7 +922,7 @@ enum PlayOrigin: Hashable {
       @escaping @Sendable (NativeService, _ etag: String?) async throws ->
       Conditional<T>
   ) async throws -> T {
-    let stamp = generation
+    let stamp = account.generation
     guard let database = store else {
       return try await cachedCatalogue(key: key) { service in
         guard case .fresh(let value, _) = try await load(service, nil) else {
@@ -938,13 +937,13 @@ enum PlayOrigin: Hashable {
           try await load(service, $0)
         }
       }
-      guard generation == stamp else { throw CancellationError() }
+      try account.check(stamp)
       remember(result, key: key)
       return result
     } catch NativeFailure.authentication {
       throw NativeFailure.authentication
     } catch is CancellationError { throw CancellationError() } catch {
-      guard generation == stamp else { throw CancellationError() }
+      try account.check(stamp)
       if let saved = try? await database.cached("catalogue:" + key, as: T.self) { return saved }
       throw error
     }
@@ -957,9 +956,9 @@ enum PlayOrigin: Hashable {
   /// The memory answer, else the one saved on this device from an earlier session.
   func storedCatalogue<T: Codable & Sendable>(key: String, as type: T.Type = T.self) async -> T? {
     if let value = peekCatalogue(key: key, as: T.self) { return value }
-    let stamp = generation
+    let stamp = account.generation
     guard let saved = try? await store?.cached("catalogue:" + key, as: T.self),
-      generation == stamp
+      account.isCurrent(stamp)
     else { return nil }
     remember(saved, key: key)
     return saved
@@ -1021,7 +1020,7 @@ enum PlayOrigin: Hashable {
     fetch: @escaping @Sendable (NativeService, ArtworkRequest) async throws -> Data
   ) async -> UIImage? {
     guard let service, let cache = artworkCache, UUID(uuidString: id) != nil else { return nil }
-    let stamp = generation
+    let stamp = account.generation
     // Catalogue artwork has no content hash on the client: key it by its alias.
     let sha = SHA256.hash(data: Data(("catalogue-\(kind):" + id.lowercased()).utf8)).map {
       String(format: "%02x", $0)
@@ -1034,7 +1033,7 @@ enum PlayOrigin: Hashable {
       let decoded = try await Task.detached(priority: .utility) {
         try ArtworkCache.thumbnail(data, width: width)
       }.value
-      guard generation == stamp else { return nil }
+      guard account.isCurrent(stamp) else { return nil }
       let image = UIImage(cgImage: decoded)
       artworkMemory.setObject(image, forKey: key, cost: decoded.bytesPerRow * decoded.height)
       return image
@@ -1130,23 +1129,23 @@ enum PlayOrigin: Hashable {
   }
   func more(_ collection: LibraryCollection) async {
     guard let store, !loadingMore, !syncing else { return }
-    let stamp = generation
+    let stamp = account.generation
     loadingMore = true
-    defer { if generation == stamp { loadingMore = false } }
+    defer { if account.isCurrent(stamp) { loadingMore = false } }
     do {
       switch collection {
       case .tracks:
         let next = try await store.tracks(offset: songs.count, sort: songSort)
-        guard generation == stamp else { return }
+        guard account.isCurrent(stamp) else { return }
         songs += next
       case .albums:
         let next = try await store.albums(
           category: albumCategory, offset: albums.count, sort: albumSort)
-        guard generation == stamp else { return }
+        guard account.isCurrent(stamp) else { return }
         albums += next
       case .artists:
         let next = try await store.artists(offset: artists.count, sort: artistSort)
-        guard generation == stamp else { return }
+        guard account.isCurrent(stamp) else { return }
         artists += next
       case .playlists: break
       }
@@ -1167,7 +1166,7 @@ enum PlayOrigin: Hashable {
       }
     #endif
     guard service != nil || demoData != nil else { return nil }
-    let stamp = generation
+    let stamp = account.generation
     let key = request.filename as NSString
     if let image = artworkMemory.object(forKey: key) { return image }
     do {
@@ -1182,7 +1181,7 @@ enum PlayOrigin: Hashable {
         try ArtworkCache.thumbnail(data, width: width)
       }.value
       try Task.checkCancellation()
-      guard generation == stamp else { return nil }
+      guard account.isCurrent(stamp) else { return nil }
       let image = UIImage(cgImage: decoded)
       artworkMemory.setObject(image, forKey: key, cost: decoded.bytesPerRow * decoded.height)
       return image
@@ -1193,7 +1192,7 @@ enum PlayOrigin: Hashable {
   }
   func flushHistory() async {
     guard !flushingHistory, let database = store, let service else { return }
-    let stamp = generation
+    let stamp = account.generation
     flushingHistory = true
     defer { flushingHistory = false }
     do {
@@ -1215,9 +1214,9 @@ enum PlayOrigin: Hashable {
         }
       }
       try await database.acknowledgeListens(discarded)
-      guard generation == stamp else { return }
+      guard account.isCurrent(stamp) else { return }
       try await service.recordListens(valid)
-      guard generation == stamp else { return }
+      guard account.isCurrent(stamp) else { return }
       try await database.acknowledgeListens(valid.map(\.id))
     } catch NativeFailure.authentication { revoked(generation: stamp) } catch {
       // Durable events remain queued until the next confirmed connection.
@@ -1279,7 +1278,7 @@ enum PlayOrigin: Hashable {
     #endif
     guard !busy || restored != nil, let service else { return }
     let archive = downloads?.archive
-    let stamp = generation
+    let stamp = account.generation
     player.play(
       tracks, startingAt: index, autoplay: restored == nil, restored: restored,
       artwork: { [weak self] track in
@@ -1327,11 +1326,10 @@ enum PlayOrigin: Hashable {
     store: TokenVault(service: "au.com.pig.music.parked-sign-out", account: "sessions"))
   private func detach() {
     watch?.disconnect()
-    generation += 1
+    // Stale for every operation still running; live updates stop.
+    account.end()
     refreshLoop.reset()
     libraryEvent = nil
-    liveTask?.cancel()
-    liveTask = nil
     if let downloads { Task { await downloads.clear() } }
     downloads = nil
     searchSession?.clear()
@@ -1375,7 +1373,7 @@ enum PlayOrigin: Hashable {
     defaults.removeObject(forKey: "pig.connection")
   }
   private func revoked(generation stamp: Int) {
-    guard generation == stamp else { return }
+    guard account.isCurrent(stamp) else { return }
     DiagnosticsLog.shared.record("account", "session revoked or expired")
     detach()
     message = "This device session was revoked or expired. Please sign in again."

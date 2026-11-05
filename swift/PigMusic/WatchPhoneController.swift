@@ -32,14 +32,14 @@ import SwiftUI
   @ObservationIgnored private var verified = false
   /// Whether the app is in the foreground: copies are prepared only then (D-51).
   @ObservationIgnored private var foreground = true
-  @ObservationIgnored private var poll: Task<Void, Never>?
   @ObservationIgnored private var published: CompanionManifest?
   @ObservationIgnored private var manifestURL: URL?
   /// The Watch's last confirmation, kept so a relaunch does not count every
   /// song as still to send until the Watch answers again.
   @ObservationIgnored private var receiptURL: URL?
   @ObservationIgnored private var subscriptionsURL: URL?
-  @ObservationIgnored private var generation = 0
+  /// The phone account's generation; the poll ends with it.
+  @ObservationIgnored private let account = AccountFence()
   @ObservationIgnored private var peerRevision: Int64 = 0
   @ObservationIgnored private let publishing = WatchPublishLoop()
   /// The ready songs and their files from the last publish, with what they
@@ -128,8 +128,8 @@ import SwiftUI
     } catch { message = error.userMessage }
   }
   func configure(directory: URL, namespace: String) async throws {
-    generation += 1
-    poll?.cancel()
+    account.advance()
+    account.cancel("poll")
     // Not pause(): that saves a user pause the background session would keep.
     await downloads?.suspendPreparation()
     self.namespace = namespace
@@ -187,12 +187,12 @@ import SwiftUI
   /// Foreground only. Without an installed Watch app there is nothing to
   /// deliver, so the bridge checks back slowly instead of every two seconds.
   private func startPolling() {
-    poll?.cancel()
+    account.cancel("poll")
     guard namespace != nil else { return }
-    let stamp = generation
-    poll = Task { [weak self] in
+    let stamp = account.generation
+    account.own("poll", Task { [weak self] in
       while !Task.isCancelled {
-        guard let self, generation == stamp else { return }
+        guard let self, account.isCurrent(stamp) else { return }
         link?.refreshState()
         let paired = link?.available == true
         if paired {
@@ -201,7 +201,7 @@ import SwiftUI
         }
         do { try await Task.sleep(for: .seconds(paired ? 2 : 30)) } catch { return }
       }
-    }
+    })
   }
   func resume() {
     foreground = true
@@ -227,15 +227,15 @@ import SwiftUI
   }
   func reconcile() async throws {
     guard let downloads, let store = model?.store else { return }
-    let stamp = generation
+    let stamp = account.generation
     // One store query for every Watch song (each song's own query before).
     let allowed = try await store.sourceRevisions(ids: downloads.records.map(\.id))
-    guard generation == stamp else { return }
+    guard account.isCurrent(stamp) else { return }
     await downloads.reconcile(allowed)
-    guard generation == stamp else { return }
+    guard account.isCurrent(stamp) else { return }
     verified = true
     await followPlaylists()
-    guard generation == stamp else { return }
+    guard account.isCurrent(stamp) else { return }
     // A reconcile that finishes after the phone was locked must not restart
     // preparation (#65); returning to the foreground does that.
     if foreground { downloads.resumePreparation() }
@@ -270,13 +270,13 @@ import SwiftUI
       message = "Choose up to 1,000 songs for your Watch library."
       return message
     }
-    let stamp = generation
+    let stamp = account.generation
     do {
       var personal: [Track] = []
       for id in Set(tracks.map(\.id)) {
         if let track = try await model?.store?.track(id: id) { personal.append(track) }
       }
-      guard generation == stamp else { return nil }
+      guard account.isCurrent(stamp) else { return nil }
       guard !personal.isEmpty else {
         message = "Add these songs to your library before downloading them to Watch."
         return message
@@ -422,14 +422,11 @@ import SwiftUI
   /// leave the system's background downloads and Watch transfers running.
   func suspend() async {
     foreground = false
-    poll?.cancel()
-    poll = nil
+    account.cancel("poll")
     await downloads?.suspendPreparation()
   }
   func disconnect() {
-    generation += 1
-    poll?.cancel()
-    poll = nil
+    account.end()
     if let downloads { Task { await downloads.clear() } }
     downloads = nil
     readyCache = nil
@@ -463,7 +460,7 @@ import SwiftUI
       return
     }
     if force { sent.reset() }
-    let stamp = generation
+    let stamp = account.generation
     var songs: [CompanionSong] = []
     var files: [String: URL] = [:]
     let ready = downloads.records.filter { $0.state == "ready" && $0.checksum != nil }
@@ -483,7 +480,7 @@ import SwiftUI
       songs.sort { $0.id < $1.id }
       readyCache = (key, archiveRevision, songs, files)
     }
-    guard generation == stamp else { return }
+    guard account.isCurrent(stamp) else { return }
     let ids = Set(songs.map(\.id))
     var remainingOccurrences = 10000
     // Only playlists sent to the Watch appear there, including empty ones.
@@ -621,10 +618,10 @@ import SwiftUI
   /// Publishes again once the batch interval has passed.
   private func deferPublish(after seconds: TimeInterval) {
     guard deferredPublish == nil else { return }
-    let stamp = generation
+    let stamp = account.generation
     deferredPublish = Task { [weak self] in
       try? await Task.sleep(for: .seconds(max(1, seconds)))
-      guard let self, generation == stamp else { return }
+      guard let self, account.isCurrent(stamp) else { return }
       deferredPublish = nil
       await publish()
     }
@@ -656,7 +653,7 @@ import SwiftUI
     guard verified, command.account == context.account, let model, let store = model.store else {
       return CompanionReply(message: "Refresh the library on your phone first.")
     }
-    let stamp = generation
+    let stamp = account.generation
     do {
       switch command.action {
       case "listen":
@@ -678,7 +675,7 @@ import SwiftUI
         for id in command.songIds {
           if let track = try await store.track(id: id) { tracks.append(track) }
         }
-        guard generation == stamp, verified, command.account == context.account else {
+        guard account.isCurrent(stamp), verified, command.account == context.account else {
           return CompanionReply(message: "The phone account changed. Retry after syncing.")
         }
         await enqueue(tracks)
@@ -686,7 +683,7 @@ import SwiftUI
           message: "Queued on your phone. AAC files transfer when both devices are available.")
       case "remove":
         for id in command.songIds.prefix(100) {
-          guard generation == stamp, command.account == context.account else {
+          guard account.isCurrent(stamp), command.account == context.account else {
             return CompanionReply(message: "The phone account changed.")
           }
           await remove(id)
