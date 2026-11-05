@@ -101,6 +101,21 @@ class Exporter:
         self.verified_at = None
         self.verified_config = None
         self.retry = set()
+        # The library snapshot that `relative` reads, kept while the file is
+        # unchanged (inode, size, modification time): a pass used to read
+        # and parse it once for every song it placed (#63).
+        self.snapshot = (None, {})
+
+    def library_snapshot(self):
+        path = self.store.directory / "library-snapshot.json"
+        try:
+            info = os.stat(path)
+            key = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+        except OSError:
+            key = None
+        if key is None or self.snapshot[0] != key:
+            self.snapshot = (key, load_json(path))
+        return self.snapshot[1]
 
     def digest(self, path, this_pass=False):
         key = os.fspath(path)
@@ -233,7 +248,7 @@ class Exporter:
         # Preserve the existing folder spelling and edition context when tags
         # identify exactly one matching album folder.
         candidates = {}
-        snapshot = load_json(self.store.directory / "library-snapshot.json")
+        snapshot = self.library_snapshot()
         for saved in snapshot.get("tracks", []):
             if normalise(saved.get("album_artist", "")) != normalise(
                 track["album_artist"]

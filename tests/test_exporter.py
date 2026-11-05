@@ -770,3 +770,42 @@ def test_a_replacement_committed_during_the_published_check_is_not_counted(
     exporter.process()
     status = store.read_document("library-export-status")
     assert status["files"] == 0, status
+
+
+def test_a_pass_reads_the_library_snapshot_once_whatever_its_song_count(
+    tmp_path, monkeypatch
+):
+    """#63: placing each song read and parsed library-snapshot.json again."""
+    import server.exporter as module
+
+    store, root = nas_with(tmp_path, monkeypatch, [("Artist/Album (2020)", 1)])
+    for index in range(6):
+        download(store, f"song-{index}")
+    reads = []
+    real = module.load_json
+
+    def counted(path):
+        if Path(path).name == "library-snapshot.json":
+            reads.append(path)
+        return real(path)
+
+    monkeypatch.setattr(module, "load_json", counted)
+    exporter = Exporter(store, root)
+    plan = exporter.plan()
+    assert len(plan["items"]) == 6 and len(reads) == 1
+    assert all(
+        i["destination"].startswith("Artist/Album (2020)/") for i in plan["items"]
+    )
+    # A rescan replaces the snapshot: the next pass reads the new one.
+    snapshot = store.directory / "library-snapshot.json"
+    data = json.loads(snapshot.read_text())
+    data["tracks"][0]["relative_path"] = "Artist/Album (2020) [Moved]/00 Existing.mp3"
+    replacement = snapshot.with_name("snapshot.new")
+    replacement.write_text(json.dumps(data))
+    os.replace(replacement, snapshot)
+    plan = exporter.plan()
+    assert len(reads) == 2
+    assert all(
+        i["destination"].startswith("Artist/Album (2020) [Moved]/")
+        for i in plan["items"]
+    )
