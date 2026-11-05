@@ -313,23 +313,42 @@ class Recovery:
                 try:
                     _, root = saved_track(self.store, record["track_id"])
                     contained(root, record["trash"])  # No "..", no escape.
-                    parts = Path(record["trash"]).parts
-                    deleted = self.delete_trashed(
-                        root.resolve(), parts[:-1], parts[-1], record["sha256"]
-                    )
+                    root = root.resolve()
                 except (OSError, ValueError, KeyError):
+                    kept += 1
+                    continue
+                parts = Path(record["trash"]).parts
+                # The private name is recorded before the rename, so a stop
+                # part-way is settled at the next start (`settle_purge`).
+                record["quarantine"] = ".pig-music-purge-" + uuid.uuid4().hex
+                self.save("removed:" + record["id"], record)
+                try:
+                    deleted = self.delete_trashed(
+                        root,
+                        parts[:-1],
+                        parts[-1],
+                        record["quarantine"],
+                        record["sha256"],
+                    )
+                except (OSError, ValueError):
                     deleted = False
                 if not deleted:
                     kept += 1
+                    try:
+                        # What it renamed goes back, whatever it holds.
+                        self.settle_purge(record, root, verify=False)
+                    except (OSError, ValueError):
+                        pass  # The intent stays for the next start.
                     continue
                 record["purged_at"] = int(time.time())
+                record.pop("quarantine")
                 self.save("removed:" + record["id"], record)
                 purged += 1
                 # Its now-empty folders inside this removal's Trash folder,
                 # each removed through its parent's descriptor.
                 for depth in range(len(parts) - 2, 0, -1):
                     try:
-                        parent = open_owned_folder(root.resolve(), *parts[:depth])
+                        parent = open_owned_folder(root, *parts[:depth])
                     except OSError:
                         break
                     try:
@@ -340,57 +359,99 @@ class Recovery:
                         os.close(parent)
             return {"purged": purged, "kept": kept}
 
-    def delete_trashed(self, root, folders, name, sha256):
+    @staticmethod
+    def held(folder, name, sha256):
+        """Whether `name` in the open folder is a regular file (never
+        followed) holding `sha256`, and still the same file after hashing."""
+        try:
+            handle = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=folder)
+            with os.fdopen(handle, "rb") as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or (
+                    hashlib.file_digest(stream, "sha256").hexdigest() != sha256
+                ):
+                    return False
+            now = os.stat(name, dir_fd=folder, follow_symlinks=False)
+        except OSError:
+            return False
+        return (now.st_dev, now.st_ino) == (info.st_dev, info.st_ino)
+
+    def delete_trashed(self, root, folders, name, quarantine, sha256):
         """Delete Trash file `name` in root/folders only if it holds `sha256`;
         whether it went. The folders are opened without following a link
         from the root on and held open, so a folder another writer swaps for
-        a link meanwhile is never followed; the file is first renamed to a
-        private name inside that held folder, then checked through its own
-        descriptor, and that same file is deleted. A file that doesn't match
-        is put back (or, if its name is taken meanwhile, left in Trash under
-        the private name)."""
+        a link meanwhile is never followed; the file is first renamed to the
+        private `quarantine` name inside that held folder, then checked
+        through its own descriptor, and that same file is deleted. One that
+        doesn't match stays under the private name for `settle_purge`."""
         folder = open_owned_folder(root, *folders)
         try:
-            quarantine = ".pig-music-purge-" + uuid.uuid4().hex
             os.rename(name, quarantine, src_dir_fd=folder, dst_dir_fd=folder)
-            matches = False
-            try:
-                handle = os.open(quarantine, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=folder)
-                with os.fdopen(handle, "rb") as stream:
-                    info = os.fstat(stream.fileno())
-                    matches = (
-                        stat.S_ISREG(info.st_mode)
-                        and hashlib.file_digest(stream, "sha256").hexdigest() == sha256
-                    )
-                now = os.stat(quarantine, dir_fd=folder, follow_symlinks=False)
-                matches = matches and (now.st_dev, now.st_ino) == (
-                    info.st_dev,
-                    info.st_ino,
-                )
-            except OSError:
-                matches = False
-            if matches:
-                os.unlink(quarantine, dir_fd=folder)
-                return True
-            try:
-                # Back under its name, never over another file.
-                os.link(
-                    quarantine,
-                    name,
-                    src_dir_fd=folder,
-                    dst_dir_fd=folder,
-                    follow_symlinks=False,
-                )
-                os.unlink(quarantine, dir_fd=folder)
-            except OSError:
-                pass
-            return False
+            if not self.held(folder, quarantine, sha256):
+                return False
+            os.unlink(quarantine, dir_fd=folder)
+            return True
         finally:
             os.close(folder)
+
+    def settle_purge(self, record, root, verify=True):
+        """Bring a purge that kept or was interrupted with its file under the
+        private name to rest, then clear the recorded intent. The file is
+        put back under its name when it still holds the removal's content
+        (never over another file; if the name is taken, the record points at
+        the private name instead, so Restore and purge still find it). With
+        neither name there, the file was deleted before the purge was
+        recorded: the record is marked purged. `verify=False` (the purge's
+        own rename just now) puts back whatever is there."""
+        parts = Path(record["trash"]).parts
+        folders, name, quarantine = parts[:-1], parts[-1], record["quarantine"]
+        folder = open_owned_folder(root, *folders)
+        try:
+            try:
+                there = os.stat(quarantine, dir_fd=folder, follow_symlinks=False)
+            except FileNotFoundError:
+                there = None
+            if there is None:
+                try:
+                    os.stat(name, dir_fd=folder, follow_symlinks=False)
+                except FileNotFoundError:
+                    record["purged_at"] = int(time.time())
+            elif not verify or self.held(folder, quarantine, record["sha256"]):
+                try:
+                    os.link(
+                        quarantine,
+                        name,
+                        src_dir_fd=folder,
+                        dst_dir_fd=folder,
+                        follow_symlinks=False,
+                    )
+                except FileExistsError:
+                    # Put back already (a stop before the private name went)?
+                    other = os.stat(name, dir_fd=folder, follow_symlinks=False)
+                    if (other.st_dev, other.st_ino) != (there.st_dev, there.st_ino):
+                        record["trash"] = "/".join(folders + (quarantine,))
+                        name = None
+                if name is not None:
+                    os.unlink(quarantine, dir_fd=folder)
+            # Otherwise the private name holds something else: left alone.
+        finally:
+            os.close(folder)
+        record.pop("quarantine")
+        self.save("removed:" + record["id"], record)
 
     @coordinated
     def recover(self):
         for record in self.list():
+            if record.get("quarantine") and not record.get("purged_at"):
+                try:
+                    _, root = saved_track(self.store, record["track_id"])
+                    self.check_mount(root)
+                    if str(root.resolve()) == record["root"]:
+                        contained(root, record["trash"])
+                        self.settle_purge(record, root.resolve())
+                except (OSError, ValueError, KeyError):
+                    pass
+                continue
             if record["status"] != "removing":
                 continue
             try:

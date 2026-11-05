@@ -268,3 +268,85 @@ def test_purge_never_deletes_a_trash_file_replaced_after_checking(
     recovery.purge(30, plan["fingerprint"])
     assert swapper.done
     assert trash.read_bytes() == b"another file"
+
+
+class Stop(BaseException):
+    """The process stops here."""
+
+
+def test_a_purge_stopped_after_its_rename_is_put_back_at_the_next_start(
+    tmp_path, monkeypatch
+):
+    """Codex round 2: a stop between the private rename and the delete left
+    the only Trash copy under an unrecorded name, out of Restore's reach."""
+    import server.recovery as module
+
+    store, root, recovery, old, new = two_removed(tmp_path, monkeypatch)
+    plan = recovery.purge_plan(30)
+
+    def stop():
+        raise Stop
+
+    monkeypatch.setattr(module, "hashlib", SwapAfterHashing(stop))
+    with pytest.raises(Stop):
+        recovery.purge(30, plan["fingerprint"])
+    monkeypatch.undo()
+    monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(root))
+    assert not (root / old["trash"]).exists()
+    restarted = Recovery(Store(store.directory))
+    restarted.recover()
+    assert (root / old["trash"]).exists()
+    assert not list((root / old["trash"]).parent.glob(".pig-music-purge-*"))
+    record = store.read_document("removed:" + old["id"])
+    assert "quarantine" not in record and not record.get("purged_at")
+    restarted.restore(old["id"])
+    assert (root / "Artist" / "Album" / "Song.mp3").read_bytes() == b"original music"
+
+
+def test_a_purge_stopped_after_deleting_is_recorded_at_the_next_start(
+    tmp_path, monkeypatch
+):
+    store, root, recovery, old, new = two_removed(tmp_path, monkeypatch)
+    plan = recovery.purge_plan(30)
+    real = Recovery.save
+
+    def save(self, key, value):
+        if value.get("purged_at"):
+            raise Stop
+        return real(self, key, value)
+
+    monkeypatch.setattr(Recovery, "save", save)
+    with pytest.raises(Stop):
+        recovery.purge(30, plan["fingerprint"])
+    monkeypatch.setattr(Recovery, "save", real)
+    assert not (root / old["trash"]).exists()
+    restarted = Recovery(Store(store.directory))
+    restarted.recover()
+    record = store.read_document("removed:" + old["id"])
+    assert record["purged_at"] and "quarantine" not in record
+    assert [i["id"] for i in restarted.purge_plan(1)["items"]] == [new["id"]]
+    with pytest.raises(ValueError):
+        restarted.restore(old["id"])
+
+
+def test_a_stopped_purge_whose_name_was_taken_stays_restorable(tmp_path, monkeypatch):
+    import server.recovery as module
+
+    store, root, recovery, old, new = two_removed(tmp_path, monkeypatch)
+    trash = root / old["trash"]
+    plan = recovery.purge_plan(30)
+
+    def stop():
+        trash.write_bytes(b"someone else's file")
+        raise Stop
+
+    monkeypatch.setattr(module, "hashlib", SwapAfterHashing(stop))
+    with pytest.raises(Stop):
+        recovery.purge(30, plan["fingerprint"])
+    monkeypatch.undo()
+    monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(root))
+    restarted = Recovery(Store(store.directory))
+    restarted.recover()
+    assert trash.read_bytes() == b"someone else's file"
+    restarted.restore(old["id"])
+    assert (root / "Artist" / "Album" / "Song.mp3").read_bytes() == b"original music"
