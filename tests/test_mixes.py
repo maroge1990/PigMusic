@@ -1594,8 +1594,11 @@ def test_radio_appends_stable_entries_pages_and_learns_from_skips(
     grown = json.loads(mixes.radio_row(user, today)[1])
     assert len(grown["tracks"]) == 40
     assert grown["tracks"][:20] == payload["tracks"]
-    weights = mixes.radio_weights(user, [skipped, owned[59]])
-    assert weights[song_key(skipped)] < weights[song_key(owned[59])]
+    # Compared with a song by another artist (the radio's first song is
+    # random, and could itself be owned[59]).
+    other = next(s for s in owned if s["artist"] != skipped["artist"])
+    weights = mixes.radio_weights(user, [skipped, other])
+    assert weights[song_key(skipped)] < weights[song_key(other)]
     # Another person cannot play or steer this station.
     assert mixes.radio_next(owner)["id"] != edition
     with pytest.raises(LookupError):
