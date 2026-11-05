@@ -5,57 +5,50 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 2 Nov 2026 (afternoon, Melbourne).*
+*Overwritten at the end of every session. 5 Nov 2026 (morning, Melbourne).*
 
-- **Live:** server `03b44b5` (`search-20261031-v1`; rollback container `PigMusic-before-search-20261031-v1`).
-  Overnight 31 Oct→1 Nov: 255 mix searches in ~2.5 h (was ~700 in ~7 h, #90 closed), 0 event-loop stalls, 146 export
-  lock holds of 1–2.5 s (#17).
-- **Pushed, not live** (main `4b17b88`): #106 one album download, one edition (D-64); #107 popular songs within ~2 s;
-  #17 published-song check outside the lifecycle lock; #109 stage A Home mixes in search. Each with two Codex rounds;
-  findings left: #110, #111 (P3). **Idle-loop batch** (#63, two #96 items): the download queue waits for a change
-  instead of polling every 0.5 s, artist jobs and the warming pass read their state in one query, device copies stop
-  loading the whole queue; two Codex rounds, no findings. Idle measured on 03b44b5 (2 Nov): 7.3% of a core, ~3,500
-  worker wakeups/s from the download poll; re-measure after release.
-- **iPhone/Watch:** native **0.2.0 (18)** uploaded to TestFlight on 1 Nov (#108 scrolling names, #62 one album page,
-  #59, #107, #56 tap-to-play mixes, #109 mixes in search, four #97 fixes incl. offline sign-out per D-55). Build 17 is
-  on Mark's phone. **0.2.0 (19)** uploaded to TestFlight on 2 Nov: #114 Watch Now playing row's hidden play/pause and
-  the player's title over the clock (Mark's report); waits for Mark's Watch check.
-- **Simulator tap-through tests (#113):** the Mac runs `scripts/simulator_ui_tests.py` (~4 min, 11 tests): iPhone demo
-  library, sign-in and Send to Apple Watch against a disposable HTTPS test server, Watch empty and `--demo` screens.
-  Watch delivery can't be tested in simulators (file transfers never arrive); mixes, catalogue search and downloads
-  are not covered yet. Open finding: #112 Watch logo.
-- **Closed on 1 Nov** after Mark's device checks: #98, #99, #100, #53, #64, #70, #71, #77, #19, #18, #60, #61, #39.
-  Closed on live checks: #90, #91.
-- **Still to check on devices (Mark):** #78, #76, #65; build 18's changes; Home See all (#55); the #95 checklist.
-- **Codex findings open:** #104, #105, #101, #110, #111.
+- **Live:** server `418bca0` (`matches-20261105-v1`, 01:07 UTC 5 Nov).
+  Released today under Mark's go-ahead (no activity): `idle-20261105-v1` (c56bc1a: #106, #107, #17, #109 stage A,
+  idle loops #63), `batch-20261105-v3` (#93 background tag job, #86 hardening and USER 99:100, #110, #111, #96 items,
+  #22, web #56/#97/#105), `matches-20261105-v1` (`/api/v1/server/matches` for #109 stage B). Rollback containers
+  `PigMusic-before-<version>` kept.
+- **Tag job (#93) done live:** Mark pressed Apply; 1,518 songs retagged/renamed in ~45 min, no errors, spot-checked.
+  Originals stay in `.pig-music-trash/organisation/` until Mark cleans them.
+- **Idle CPU (#63):** 5.7% of a core ~45 min after the release (7.3–7.8% before; the rig idles at 1%). Post-restart
+  catch-up runs 10–13% for the first half hour. The rest is background passes in the worker threads; finding them
+  needs a stack sampler on the live process (Mark's OK).
+- **iPhone/Watch:** **0.2.0 (20)** uploaded to TestFlight on 5 Nov: #115 songs retry a failed first connection and a
+  stalled stream recovers or stops with a message (from Mark's 4 Nov diagnostics), #109 stage B Apple Music playlists
+  in search (D-66; needs MusicKit ticked for the app identifier), #25, #112 Watch logo, three #97 iPhone/Watch fixes.
+  Builds 18–19's changes and #114 still wait for Mark's device check.
+- **T3 rig (#15) runs** (`scripts/test_rig.py`: check, artist, mixes, organise); 60-song library, too small for #22 timings.
+- **Codex findings open:** #116, #117 (stream recovery edge cases), #118 (remastered titles miss the server's copy),
+  #104, #101. Withdrawn in review and still to design: the Soulseek leftover sweep and the staged-audio sweep (#96).
 - **Parked by Mark (31 Oct):** the four-mockup screen redesign and the brand audit.
 - **Ways of working:** area batches, Codex rounds per D-59, Claude pushes (D-50); releases under D-52; D-58 closing.
 - **Household details** live only in the gitignored `.private/` (D-45).
 
 ## Now
 
-1. **Release** the server batches (#106, #107, #17, #109, idle loops #63) under D-52 tonight once CI is green and nobody is playing;
-   then Mark runs **Tidy** on *Enema of the State* and *Dude Ranch*.
-2. **Live gates after the release:** #17 hold count and named steps, #63 quiet idle CPU (15 min, per thread; was 7.3%), #94 remote "unavailable"
-   time, #16/#20 loaded window.
-3. **Mark on build 18:** the scrolling names, album pages, tap-to-play mixes, mixes in search; then #78, #76, #65.
-4. **Web half of #56** (tap-to-play mixes on the web) and the rest of #97.
-5. **Waiting on Mark:** go-ahead on Apple Music playlists (#109 stage B needs a MusicKit key); when to run the tag job
-   (#93); setting up the D-63 build keychain so uploads stop needing his Mac password.
+1. **Mark on build 20 (T5):** songs start after a cold launch on mobile data (#115); Apple Music playlists after
+   ticking MusicKit (#109); Watch logo (#112); then builds 18–19's items, #114, #78, #76, #65, Home See all (#55), #95.
+2. **#118** match remastered and featured-credit titles by `song_key` (server; quick, makes Apple playlists useful).
+3. **#97 Download menu** as one VoiceOver button; **#116, #117** stream recovery edge cases (next native batch).
+4. **#63** find the remaining ~5% idle CPU (stack sampler, with Mark's OK); re-measure #22 in the next diagnostics.
 
 ## Next (P1/P2)
 
-- Reliability: #15 T3 rig first full Unraid run, then #22 Home mixes latency on it · #25 harness attribution · #105
-  first chart build vs web polling · #104
-- Mark's requests: #109 stage B (Apple Music playlists) · #54 song search timing · #23 progressive relay
+- Reliability: #16/#20 loaded window on the live server · #96 the two sweeps, redesigned around the engine's transfer
+  state and publication claims · a larger rig library for #22 · #104
+- Mark's requests: #54 song search timing · #23 progressive relay
 - Device acceptance (Mark, T5): #95, one checklist of the former acceptance issues
 
 ## Later (P3)
 
-#96 smaller server findings (event loop, warming fairness, resilience, Soulseek imports) · #97 smaller web, iPhone
-and Watch findings · #86 hardening · #46 native split · #93 apply the 1,475 consistent-tag changes safely · set-aside
-ideas (Mac app, Shazam, CarPlay, mix tuning, split DNS) live in [docs/PRODUCT.md](docs/PRODUCT.md#set-aside), not in
-issues. Lower-severity security drafts are tracked privately.
+#96 remaining (warming fairness, marker files, Trash retention) · #97 web structure and test gaps · #86 pytest out of
+the image · #46 native split · #101 · clean the organisation trash once Mark is happy (#93 step 5) · set-aside ideas
+(Mac app, Shazam, CarPlay, mix tuning, split DNS) live in [docs/PRODUCT.md](docs/PRODUCT.md#set-aside), not in issues.
+Lower-severity security drafts are tracked privately.
 
 ## How to pick work
 
