@@ -143,3 +143,5 @@ The rules these decisions produce, as they stand today, are in [PRODUCT.md](PROD
 **D-67 (5 Nov 2026)** — Claude may apply the consistent-tag changes from Organise existing music to the live library (#93) on 5 Nov, once the safe version passes its tests on a disposable copy and a backup of the affected tags has been taken; then spot-check the result. Reason: nobody uses the server that day.
 
 **D-68 (5 Nov 2026)** — TestFlight uploads keep asking for Mark's Mac password at each upload for now; the separate build keychain (D-63) is not set up yet.
+
+**D-69 (5 Nov 2026)** — An Apple Music playlist added to PigMusic (#121) becomes an exact copy of the playlist as it was when added: the person's own playlist, in Apple's order, which does not follow Apple's later changes. Adding the same playlist again updates that copy instead of making a second one. Missing songs download only when the person confirms. Reason: Mark asked for "that exact playlist".
