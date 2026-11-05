@@ -148,3 +148,15 @@ private struct Server: ApplePlaylistStatusSource, ShazamRequestSource {
   #expect(ShazamFailure(shazamCode: nil, network: false) == .unavailable)
   #expect(ShazamFailure.microphone.message.contains("Settings"))
 }
+
+@Test func closingTheListeningScreenEndsItsAttempt() {
+  var attempts = ShazamAttempts()
+  let first = attempts.begin()
+  #expect(attempts.isCurrent(first))
+  // The sheet closes while the microphone prompt is still up.
+  attempts.cancel()
+  #expect(!attempts.isCurrent(first))
+  // A new tap starts a new attempt; the old one stays ended.
+  let second = attempts.begin()
+  #expect(attempts.isCurrent(second) && !attempts.isCurrent(first))
+}

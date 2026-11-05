@@ -20,6 +20,7 @@
     /// Songs shared to PigMusic from the Shazam app or Apple Music (option C).
     public private(set) var shared: [ShazamSong] = []
     @ObservationIgnored private var session: SHManagedSession?
+    @ObservationIgnored private var attempts = ShazamAttempts()
     @ObservationIgnored private var receiving = false
     /// The App Group shared with the share extension; nil until the App
     /// Groups capability is set up for both.
@@ -79,6 +80,8 @@
 
     /// Listens once. The microphone permission is asked on the first try.
     public func identify() async -> Result<ShazamSong, ShazamFailure> {
+      session?.cancel()
+      let attempt = attempts.begin()
       switch AVAudioApplication.shared.recordPermission {
       case .granted: break
       case .undetermined:
@@ -87,14 +90,26 @@
         }
       default: return .failure(.microphone)
       }
+      // The screen may have closed while the permission prompt was up: then
+      // the microphone is never opened (Codex, build 21).
+      guard !Task.isCancelled, attempts.isCurrent(attempt) else { return .failure(.cancelled) }
       let session = SHManagedSession()
       self.session = session
       defer { if self.session === session { self.session = nil } }
-      switch await session.result() {
+      let outcome = await withTaskCancellationHandler {
+        await session.result()
+      } onCancel: {
+        Task { @MainActor in session.cancel() }
+      }
+      guard !Task.isCancelled, attempts.isCurrent(attempt) else {
+        session.cancel()
+        return .failure(.cancelled)
+      }
+      switch outcome {
       case .match(let match):
         guard let item = match.mediaItems.first else { return .failure(.noMatch) }
         let song = await Self.detailedSong(item, found: Date())
-        guard !Task.isCancelled, self.session === session else { return .failure(.cancelled) }
+        guard !Task.isCancelled, attempts.isCurrent(attempt) else { return .failure(.cancelled) }
         identified = ShazamInbox.merge([song] + identified)
         // Only songs with a Shazam id can be saved.
         if item.shazamID != nil {
@@ -109,12 +124,13 @@
       case .noMatch:
         return .failure(.noMatch)
       case .error(let error, _):
-        if Task.isCancelled || self.session !== session { return .failure(.cancelled) }
+        if Task.isCancelled || !attempts.isCurrent(attempt) { return .failure(.cancelled) }
         return .failure(Self.failure(error))
       }
     }
 
     public func cancel() {
+      attempts.cancel()
       session?.cancel()
       session = nil
     }

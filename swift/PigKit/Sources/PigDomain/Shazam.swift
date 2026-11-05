@@ -140,3 +140,21 @@ public enum ShazamFailure: Error, Sendable, Hashable {
     }
   }
 }
+
+/// One "What's playing?" attempt at a time. Closing the listening screen
+/// ends the current attempt, so a microphone permission granted afterwards,
+/// or a result arriving late, never starts or reports listening the person
+/// no longer sees.
+public struct ShazamAttempts: Sendable {
+  private var current = 0
+  public init() {}
+  /// Starts an attempt and returns its token.
+  public mutating func begin() -> Int {
+    current += 1
+    return current
+  }
+  /// Ends whatever attempt is running.
+  public mutating func cancel() { current += 1 }
+  /// Whether `token`'s attempt is still the one the person is waiting on.
+  public func isCurrent(_ token: Int) -> Bool { token == current }
+}
