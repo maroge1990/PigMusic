@@ -1668,3 +1668,37 @@ def test_artist_mix_backfill_prefers_the_artist_then_neighbours_then_genre(
     )
     assert [t["artist"] for t in fill[:3]] == ["Focus"] * 3
     assert {t["artist"] for t in fill[3:]} == {"Near", "Other"}
+
+
+def test_mix_cache_cleanup_reads_each_unchanged_edition_once(tmp_path, monkeypatch):
+    """#63: cleanup (twice a minute, under the lifecycle lock) loaded every
+    kept edition and keyed all its songs each time (772 songs live)."""
+    (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": []}))
+    app, owner = protected(tmp_path, monkeypatch)
+    mixes = app.state.store.mixes
+    songs = [track(n) for n in range(1, 4)]
+    for song in songs:
+        cached(mixes, song)
+    ready(mixes, owner, songs)
+    keyed = []
+    real = __import__("server.mix_cache", fromlist=["song_key"]).song_key
+    monkeypatch.setattr(
+        "server.mix_cache.song_key", lambda t: keyed.append(1) or real(t)
+    )
+    mixes.cache.cleanup()
+    first = len(keyed)
+    mixes.cache.cleanup()
+    assert first >= 3 and len(keyed) == first
+    # A changed edition (radio appends songs) is read again.
+    with mixes.store.connect() as conn:
+        (identity, payload) = conn.execute(
+            "SELECT id,payload FROM mix_editions LIMIT 1"
+        ).fetchone()
+        value = json.loads(payload)
+        value["tracks"].append(track(9))
+        conn.execute(
+            "UPDATE mix_editions SET payload=? WHERE id=?",
+            (json.dumps(value), identity),
+        )
+    mixes.cache.cleanup()
+    assert len(keyed) > first

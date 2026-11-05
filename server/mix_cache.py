@@ -34,6 +34,9 @@ class MixCache:
         self.directory.mkdir(exist_ok=True)
         self.staging = self.directory / "staging"
         self.staging.mkdir(exist_ok=True)
+        # Song keys per edition, by its exact stored payload: cleanup runs
+        # twice a minute under the lifecycle lock and editions rarely change (#63).
+        self.edition_keys = {}
 
     def settings(self):
         return {
@@ -147,11 +150,18 @@ class MixCache:
 
     def retained(self, conn, now):
         retained = set()
-        for (payload,) in conn.execute(
-            "SELECT payload FROM mix_editions WHERE active=1 OR retired_at IS NULL OR retired_at>? OR lease_until>?",
+        seen = {}
+        for identity, payload in conn.execute(
+            "SELECT id,payload FROM mix_editions WHERE active=1 OR retired_at IS NULL OR retired_at>? OR lease_until>?",
             (now - 3600, now),
         ):
-            retained.update(song_key(t) for t in json.loads(payload)["tracks"])
+            # Keyed by the exact stored text: any change is read again.
+            keys = self.edition_keys.get((identity, payload))
+            if keys is None:
+                keys = frozenset(song_key(t) for t in json.loads(payload)["tracks"])
+            seen[(identity, payload)] = keys
+            retained.update(keys)
+        self.edition_keys = seen
         # Explicit library intent protects audio even while paused or retrying.
         retained.update(
             song_key(json.loads(payload))
