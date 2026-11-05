@@ -1,3 +1,4 @@
+import hashlib
 import json
 import time
 import pytest
@@ -185,3 +186,85 @@ def test_purge_never_follows_a_linked_trash_path(tmp_path, monkeypatch):
     folder.symlink_to(moved, target_is_directory=True)
     assert recovery.purge_plan(1)["items"] == []
     assert outside.exists() and any(moved.rglob("*.mp3"))
+
+
+class SwapAfterHashing:
+    """Stands in for hashlib in server.recovery: once the purge has hashed
+    the Trash file, another writer on the share runs `swap` (Codex round 1:
+    the check and the delete resolved the path independently)."""
+
+    def __init__(self, swap):
+        self.swap, self.done = swap, False
+
+    def after(self):
+        if not self.done:
+            self.done = True
+            self.swap()
+
+    def sha256(self, *args):
+        real, outer = hashlib.sha256(*args), self
+
+        class Hash:
+            read = False  # A file's content, not the plan's fingerprint.
+
+            def update(self, data):
+                self.read = True
+                real.update(data)
+
+            def hexdigest(self):
+                value = real.hexdigest()
+                if self.read:
+                    outer.after()
+                return value
+
+        return Hash()
+
+    def file_digest(self, *args, **kwargs):
+        value = hashlib.file_digest(*args, **kwargs)
+        self.after()
+        return value
+
+    def __getattr__(self, name):
+        return getattr(hashlib, name)
+
+
+def test_purge_never_follows_a_trash_folder_swapped_for_a_link_after_checking(
+    tmp_path, monkeypatch
+):
+    import server.recovery as module
+
+    store, root, recovery, old, new = two_removed(tmp_path, monkeypatch)
+    library = root / "Artist" / "Album" / "Song.mp3"
+    library.write_bytes(b"the library's own copy")
+    trash = root / old["trash"]
+
+    def swap():
+        trash.parent.rename(trash.parent.with_name("Album-moved"))
+        trash.parent.symlink_to(root / "Artist" / "Album", target_is_directory=True)
+
+    plan = recovery.purge_plan(30)
+    swapper = SwapAfterHashing(swap)
+    monkeypatch.setattr(module, "hashlib", swapper)
+    recovery.purge(30, plan["fingerprint"])
+    assert swapper.done
+    assert library.read_bytes() == b"the library's own copy"
+
+
+def test_purge_never_deletes_a_trash_file_replaced_after_checking(
+    tmp_path, monkeypatch
+):
+    import server.recovery as module
+
+    store, root, recovery, old, new = two_removed(tmp_path, monkeypatch)
+    trash = root / old["trash"]
+
+    def swap():
+        trash.unlink(missing_ok=True)
+        trash.write_bytes(b"another file")
+
+    plan = recovery.purge_plan(30)
+    swapper = SwapAfterHashing(swap)
+    monkeypatch.setattr(module, "hashlib", swapper)
+    recovery.purge(30, plan["fingerprint"])
+    assert swapper.done
+    assert trash.read_bytes() == b"another file"

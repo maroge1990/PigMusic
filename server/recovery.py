@@ -7,7 +7,7 @@ from .media import saved_track, track_file
 from .library import identifier, normalise, load_json
 from .exporter import contained
 from .matching import exclusion_key, same_song
-from .storage import library_root, require_library_mount
+from .storage import library_root, open_owned_folder, require_library_mount
 
 
 class Recovery:
@@ -312,30 +312,81 @@ class Recovery:
                 record = self.store.read_document("removed:" + item["id"])
                 try:
                     _, root = saved_track(self.store, record["track_id"])
-                    trash = contained(root, record["trash"])
-                    if (
-                        not stat.S_ISREG(os.lstat(trash).st_mode)
-                        or self.digest(trash) != record["sha256"]
-                    ):
-                        kept += 1
-                        continue
-                    os.unlink(trash)
+                    contained(root, record["trash"])  # No "..", no escape.
+                    parts = Path(record["trash"]).parts
+                    deleted = self.delete_trashed(
+                        root.resolve(), parts[:-1], parts[-1], record["sha256"]
+                    )
                 except (OSError, ValueError, KeyError):
+                    deleted = False
+                if not deleted:
                     kept += 1
                     continue
                 record["purged_at"] = int(time.time())
                 self.save("removed:" + record["id"], record)
                 purged += 1
-                # Its now-empty folders inside this removal's Trash folder.
-                try:
-                    top = contained(root, ".pig-music-trash/" + record["id"])
-                    folder = trash.parent
-                    while folder.is_relative_to(top):
-                        folder.rmdir()  # Only when empty.
-                        folder = folder.parent
-                except (OSError, ValueError):
-                    pass
+                # Its now-empty folders inside this removal's Trash folder,
+                # each removed through its parent's descriptor.
+                for depth in range(len(parts) - 2, 0, -1):
+                    try:
+                        parent = open_owned_folder(root.resolve(), *parts[:depth])
+                    except OSError:
+                        break
+                    try:
+                        os.rmdir(parts[depth], dir_fd=parent)  # Only when empty.
+                    except OSError:
+                        break
+                    finally:
+                        os.close(parent)
             return {"purged": purged, "kept": kept}
+
+    def delete_trashed(self, root, folders, name, sha256):
+        """Delete Trash file `name` in root/folders only if it holds `sha256`;
+        whether it went. The folders are opened without following a link
+        from the root on and held open, so a folder another writer swaps for
+        a link meanwhile is never followed; the file is first renamed to a
+        private name inside that held folder, then checked through its own
+        descriptor, and that same file is deleted. A file that doesn't match
+        is put back (or, if its name is taken meanwhile, left in Trash under
+        the private name)."""
+        folder = open_owned_folder(root, *folders)
+        try:
+            quarantine = ".pig-music-purge-" + uuid.uuid4().hex
+            os.rename(name, quarantine, src_dir_fd=folder, dst_dir_fd=folder)
+            matches = False
+            try:
+                handle = os.open(quarantine, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=folder)
+                with os.fdopen(handle, "rb") as stream:
+                    info = os.fstat(stream.fileno())
+                    matches = (
+                        stat.S_ISREG(info.st_mode)
+                        and hashlib.file_digest(stream, "sha256").hexdigest() == sha256
+                    )
+                now = os.stat(quarantine, dir_fd=folder, follow_symlinks=False)
+                matches = matches and (now.st_dev, now.st_ino) == (
+                    info.st_dev,
+                    info.st_ino,
+                )
+            except OSError:
+                matches = False
+            if matches:
+                os.unlink(quarantine, dir_fd=folder)
+                return True
+            try:
+                # Back under its name, never over another file.
+                os.link(
+                    quarantine,
+                    name,
+                    src_dir_fd=folder,
+                    dst_dir_fd=folder,
+                    follow_symlinks=False,
+                )
+                os.unlink(quarantine, dir_fd=folder)
+            except OSError:
+                pass
+            return False
+        finally:
+            os.close(folder)
 
     @coordinated
     def recover(self):
