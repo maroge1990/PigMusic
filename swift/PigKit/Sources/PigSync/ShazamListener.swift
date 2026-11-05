@@ -27,6 +27,10 @@
       "\(configuration.category.rawValue) \(configuration.mode.rawValue), "
         + "input available \(audio.isInputAvailable)"
     }
+    /// As PlayerController's `configureAudioSession` sets it.
+    func playbackConfiguration() -> Configuration {
+      Configuration(category: .playback, mode: .default, policy: .longFormAudio, options: [])
+    }
     func record() throws {
       try audio.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
     }
@@ -128,11 +132,11 @@
     }
 
     /// Listens once, for at most `ShazamListening.limit`. The microphone
-    /// permission is asked on the first try. `keepAudioActive`: PigMusic's
-    /// own audio session is active (playing or paused), so it stays active
-    /// once its category is put back (#124).
+    /// permission is asked on the first try. `playbackHolds`: PigMusic's own
+    /// audio session is active (playing or paused), asked when listening
+    /// ends, so the session stays PigMusic's (#124).
     public func identify(
-      keepAudioActive: Bool = false
+      playbackHolds: @escaping @MainActor @Sendable () -> Bool = { false }
     ) async -> Result<ShazamSong, ShazamFailure> {
       session?.cancel()
       let attempt = attempts.begin()
@@ -162,7 +166,7 @@
       self.session = session
       defer { if self.session === session { self.session = nil } }
       let audio = ShazamAudioHooks.recording(
-        SharedAudioSession(), keepActive: keepAudioActive, log: log)
+        SharedAudioSession(), playbackHolds: playbackHolds, log: log)
       let end = await ShazamListening.listen(ManagedShazam(session), audio: audio, log: log)
       guard !Task.isCancelled, attempts.isCurrent(attempt) else {
         session.cancel()
@@ -174,6 +178,7 @@
       case .timedOut: return .failure(.timedOut)
       case .cancelled: return .failure(.cancelled)
       case .audioUnavailable: return .failure(.unavailable)
+      case .playbackStarted: return .failure(.playbackStarted)
       }
       switch outcome {
       case .match(let match):

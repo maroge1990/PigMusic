@@ -118,6 +118,8 @@ public enum ShazamFailure: Error, Sendable, Hashable {
   case offline
   case unavailable
   case cancelled
+  /// PigMusic started playing, which stops listening (#124).
+  case playbackStarted
   public var message: String {
     switch self {
     case .microphone:
@@ -127,6 +129,7 @@ public enum ShazamFailure: Error, Sendable, Hashable {
     case .offline: "Identifying a song needs the internet. Check your connection and try again."
     case .unavailable: "Song recognition isn't working right now. Try again shortly."
     case .cancelled: "Stopped listening."
+    case .playbackStarted: "Stopped listening because PigMusic started playing."
     }
   }
   /// A failed attempt, from ShazamKit's error code (`SHError.Code`, nil for

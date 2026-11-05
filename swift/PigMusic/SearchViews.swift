@@ -1095,8 +1095,9 @@ private struct ShazamListenView: View {
         player.pause()
         listeningPause = ListeningPause(after: player.playbackMark)
       }
-      let outcome = await ShazamListener.shared.identify(
-        keepAudioActive: player.audioSessionActive)
+      let outcome = await ShazamListener.shared.identify(playbackHolds: {
+        player.audioSessionActive
+      })
       switch outcome {
       case .success(let song): found = song
       case .failure(.cancelled): break

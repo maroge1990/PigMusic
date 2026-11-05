@@ -575,6 +575,10 @@ import PigSync
   }
   private func activate() async throws {
     try Task.checkCancellation()
+    // Playback wins the shared session (#124): any "What's playing?" stops
+    // and puts the session back before PigMusic takes it.
+    await ListeningAudioGate.shared.yieldToPlayback()
+    try Task.checkCancellation()
     let stamp = generation
     while generation == stamp, intent.canPlay {
       try Task.checkCancellation()
@@ -824,7 +828,8 @@ import PigSync
       publishNowPlaying()
     }
     // Usually already active: resume at once, without a main-thread wait.
-    if audioSession.isActive { return start() }
+    // Not while listening: activation first stops it and waits (#124).
+    if audioSession.isActive, !ListeningAudioGate.shared.isListening { return start() }
     let stamp = generation
     Task {
       do { try await activate() } catch is CancellationError { return } catch {

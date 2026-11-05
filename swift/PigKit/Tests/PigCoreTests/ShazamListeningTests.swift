@@ -49,7 +49,7 @@ private final class FakeSession: ShazamListeningSession, @unchecked Sendable {
         if failBegin { throw NSError(domain: "AVAudioSessionErrorDomain", code: 561_017_449) }
         began += 1
       },
-      end: { [self] in ended += 1 })
+      end: { [self] _ in ended += 1 })
   }
   func log(_ line: String) { lines.append(line) }
 }
@@ -134,6 +134,7 @@ private final class FakeSession: ShazamListeningSession, @unchecked Sendable {
   var failActivate = false
   func configuration() -> String { current }
   func describe(_ configuration: String) -> String { configuration }
+  func playbackConfiguration() -> String { "playback longForm" }
   func record() throws {
     current = "playAndRecord"
     calls.append("record")
@@ -155,7 +156,7 @@ private final class FakeSession: ShazamListeningSession, @unchecked Sendable {
   let probe = Probe()
   let end = await ShazamListening.listen(
     FakeSession(answer: .match),
-    audio: .recording(audio, keepActive: false, log: probe.log), limit: .seconds(10),
+    audio: .recording(audio, playbackHolds: { false }, log: probe.log), limit: .seconds(10),
     log: probe.log)
   guard case .audioUnavailable = end else {
     Issue.record("expected audioUnavailable, got \(end)")
@@ -172,7 +173,7 @@ private final class FakeSession: ShazamListeningSession, @unchecked Sendable {
       let probe = Probe()
       _ = await ShazamListening.listen(
         FakeSession(answer: answer),
-        audio: .recording(audio, keepActive: keepActive, log: probe.log),
+        audio: .recording(audio, playbackHolds: { keepActive }, log: probe.log),
         limit: .milliseconds(200), log: probe.log)
       #expect(audio.current == "playback longForm")
       #expect(
@@ -185,7 +186,7 @@ private final class FakeSession: ShazamListeningSession, @unchecked Sendable {
   let probe = Probe()
   let task = Task { @MainActor in
     await ShazamListening.listen(
-      FakeSession(answer: nil), audio: .recording(audio, keepActive: false, log: probe.log),
+      FakeSession(answer: nil), audio: .recording(audio, playbackHolds: { false }, log: probe.log),
       limit: .seconds(60), log: probe.log)
   }
   try? await Task.sleep(for: .milliseconds(100))
@@ -193,12 +194,88 @@ private final class FakeSession: ShazamListeningSession, @unchecked Sendable {
   _ = await task.value
   #expect(audio.calls == ["record", "activate", "restore playback longForm", "release"])
   // Ending twice still restores once.
-  let hooks = ShazamAudioHooks.recording(audio, keepActive: false, log: probe.log)
+  let hooks = ShazamAudioHooks.recording(audio, playbackHolds: { false }, log: probe.log)
   audio.calls = []
   try? hooks.begin()
-  hooks.end()
-  hooks.end()
+  hooks.end(false)
+  hooks.end(false)
   #expect(audio.calls == ["record", "activate", "restore playback longForm", "release"])
+}
+
+// Codex round 2: Play during listening (Control Centre) activated PigMusic's
+// session, then listening's clean-up released it under the new playback.
+
+/// PigMusic's player as listening sees it: activation goes through the gate.
+@MainActor private final class FakePlayer {
+  let gate: ListeningAudioGate
+  let audio: FakeAudio
+  var active = false
+  init(gate: ListeningAudioGate, audio: FakeAudio) {
+    self.gate = gate
+    self.audio = audio
+  }
+  /// PlayerController.activate(): listening stops and is put back first.
+  func play() async {
+    await gate.yieldToPlayback()
+    audio.current = "playback longForm"
+    audio.calls.append("playback activates")
+    active = true
+  }
+}
+
+@MainActor @Test func playDuringListeningStopsItAndKeepsTheSessionActive() async {
+  let gate = ListeningAudioGate()
+  let audio = FakeAudio()
+  audio.current = "soloAmbient"
+  let player = FakePlayer(gate: gate, audio: audio)
+  let probe = Probe()
+  let listening = Task { @MainActor in
+    await ShazamListening.listen(
+      FakeSession(answer: nil),
+      audio: .recording(audio, playbackHolds: { player.active }, log: probe.log),
+      limit: .seconds(60), gate: gate, log: probe.log)
+  }
+  try? await Task.sleep(for: .milliseconds(100))
+  await player.play()
+  let end = await listening.value
+  guard case .playbackStarted = end else {
+    Issue.record("expected playbackStarted, got \(end)")
+    return
+  }
+  // Put back to playback's configuration before playback activated, and
+  // never released afterwards.
+  #expect(
+    audio.calls == ["record", "activate", "restore playback longForm", "playback activates"])
+  #expect(audio.current == "playback longForm")
+  #expect(player.active)
+  #expect(!gate.isListening)
+}
+
+@MainActor @Test func aSessionPlaybackHoldsWhenListeningEndsIsNeverReleased() async {
+  // Playback took the session some other way while listening: the
+  // clean-up checks again at the end and leaves it to playback.
+  let gate = ListeningAudioGate()
+  let audio = FakeAudio()
+  audio.current = "soloAmbient"
+  let player = FakePlayer(gate: gate, audio: audio)
+  let probe = Probe()
+  let listening = Task { @MainActor in
+    await ShazamListening.listen(
+      FakeSession(answer: .noMatch, delay: .milliseconds(150)),
+      audio: .recording(audio, playbackHolds: { player.active }, log: probe.log),
+      limit: .seconds(60), gate: gate, log: probe.log)
+  }
+  try? await Task.sleep(for: .milliseconds(50))
+  player.active = true
+  _ = await listening.value
+  #expect(audio.calls == ["record", "activate", "restore playback longForm"])
+}
+
+@MainActor @Test func playWithNothingListeningGoesStraightOn() async {
+  let gate = ListeningAudioGate()
+  let player = FakePlayer(gate: gate, audio: FakeAudio())
+  await player.play()
+  #expect(player.active)
 }
 
 @Test func aTimeoutSaysTheSongCouldNotBeIdentified() {
