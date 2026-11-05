@@ -25,6 +25,7 @@ from ..api_models import (
     ClearedRequestsDTO,
     DeletedPlaylistDTO,
     ImportResultDTO,
+    AppleMusicImportDTO,
     ImportPreviewDTO,
     QualityDTO,
     QualitySavedDTO,
@@ -96,6 +97,22 @@ class LookupSong(BaseModel):
 
 class Lookup(BaseModel):
     songs: list[LookupSong] = Field(min_length=1, max_length=200)
+
+
+class AppleMusicSong(BaseModel):
+    title: str = Field(min_length=1, max_length=500)
+    artist: str = Field(min_length=1, max_length=500)
+    album: str | None = Field(default=None, max_length=500)
+    duration: float = Field(default=0, ge=0, le=86400)
+    apple_id: str | None = Field(default=None, max_length=32)
+
+
+class AppleMusicPlaylist(BaseModel):
+    apple_playlist_id: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=200)
+    curator: str | None = Field(default=None, max_length=200)
+    songs: list[AppleMusicSong] = Field(min_length=1, max_length=200)
+    download_missing: bool = False
 
 
 class Membership(BaseModel):
@@ -607,6 +624,29 @@ def personal_router(store, artist_jobs, recovery, mixes=None):
             if len(body) > 20 * 1024 * 1024:
                 raise HTTPException(413, "Import is larger than 20MB")
         return await run(users.import_playlists, identity(request), bytes(body))
+
+    @router.post("/imports/apple-music", response_model=AppleMusicImportDTO)
+    async def import_apple_music(body: AppleMusicPlaylist, request: Request):
+        """An Apple Music playlist as the person's own exact copy (#121, D-69);
+        adding it again updates that copy. Missing songs are requested only
+        when `download_missing` is true."""
+        user_id = identity(request)
+
+        def add():
+            playlist_id, counts = users.add_apple_playlist(
+                user_id,
+                body.apple_playlist_id,
+                body.name.strip() or body.name,
+                body.curator,
+                [s.model_dump() for s in body.songs],
+                body.download_missing,
+            )
+            return {
+                "playlist": playlist_dto(Playlists(store, user_id).detail(playlist_id)),
+                "counts": counts,
+            }
+
+        return await run(add)
 
     @router.post("/requests", response_model=AcquisitionResultDTO)
     async def request_tracks(body: Tracks, request: Request):

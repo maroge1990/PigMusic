@@ -621,3 +621,171 @@ def test_server_matches_meet_editions_and_featured_credits(tmp_path, monkeypatch
     assert [m and m["id"] for m in mine] == expected
     assert all(m["server_state"] == "in_library" for m in mine[:3])
     assert [m and m["id"] for m in libraries.lookup(owner, songs)] == expected
+
+
+def apple_household(tmp_path, monkeypatch):
+    """Studio "One" (the member adds it), studio "Two" (household only) and a
+    live "Three" (household only)."""
+    tracks = [
+        {
+            "id": track_id,
+            "title": title,
+            "artist": "Artist",
+            "album_artist": "Artist",
+            "album": album,
+            "duration": 200,
+            "relative_path": "private/" + track_id + ".mp3",
+        }
+        for track_id, title, album in (
+            ("one", "One", "Studio"),
+            ("two", "Two", "Studio"),
+            ("three-live", "Three", "Live at Wembley"),
+        )
+    ]
+    (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": tracks}))
+    app, owner = protected(tmp_path, monkeypatch)
+    code = app.state.auth.setup_code(owner, "member", "Member")
+    member = app.state.auth.activate(code["code"], PASSWORD, "fixture")["id"]
+    token = app.state.auth.login(
+        "member", PASSWORD, "device", "phone", "ios", "fixture"
+    )["token"]
+    app.state.store.user_libraries.add(member, ["one"])
+    return app, owner, member, token
+
+
+def apple_body(songs, download_missing=False, name="Road Trip"):
+    return {
+        "apple_playlist_id": "pl.u-abc123",
+        "name": name,
+        "curator": "Apple Music",
+        "songs": songs,
+        "download_missing": download_missing,
+    }
+
+
+APPLE_SONGS = [
+    {"title": "Missing", "artist": "Artist", "album": "Elsewhere", "apple_id": "3"},
+    {"title": "Two", "artist": "Artist", "album": "Studio", "duration": 201},
+    {"title": "One", "artist": "Artist", "album": "Studio", "apple_id": "1"},
+]
+
+
+def test_apple_music_playlist_becomes_own_exact_copy(tmp_path, monkeypatch):
+    """#121, D-69: Apple's order, each song resolved by the shared policy, and
+    nothing requested unless the person asks; adding it again updates the
+    same copy and never queues a song twice."""
+    app, owner, member, token = apple_household(tmp_path, monkeypatch)
+    store = app.state.store
+    # The owner added the same Apple playlist earlier: theirs stays theirs.
+    owners_id, _ = store.user_libraries.add_apple_playlist(
+        owner, "pl.u-abc123", "Owner's copy", None, APPLE_SONGS[2:], False
+    )
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token, "X-Pig-Request": "1"},
+    ) as client:
+        response = client.post(
+            "/api/v1/imports/apple-music", json=apple_body(APPLE_SONGS)
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["counts"] == {
+            "in_library": 1,
+            "household": 1,
+            "missing": 1,
+            "requested": 0,
+        }
+        playlist = body["playlist"]
+        assert playlist["name"] == "Road Trip"
+        assert [e["title"] for e in playlist["entries"]] == ["Missing", "Two", "One"]
+        assert [e["server_state"] for e in playlist["entries"]] == [
+            "not_in_library",
+            "household_available",
+            "in_library",
+        ]
+        assert playlist["entries"][1]["household_track"]["id"] == "two"
+        assert playlist["entries"][2]["saved_id"] == "one"
+        assert "relative_path" not in response.text
+        assert store.queue()["items"] == []
+        listed = client.get("/api/v1/playlists").json()["playlists"]
+        assert [p["id"] for p in listed] == [playlist["id"]]
+        assert client.get("/api/v1/playlists/" + playlist["id"]).json() == playlist
+
+        # Confirmed: exactly the missing song is requested, once.
+        again = client.post(
+            "/api/v1/imports/apple-music", json=apple_body(APPLE_SONGS, True)
+        ).json()
+        assert again["counts"]["requested"] == 1
+        assert again["playlist"]["id"] == playlist["id"]
+        items = store.queue()["items"]
+        assert [(i["title"], i["album"]) for i in items] == [("Missing", "Elsewhere")]
+        assert items[0]["requested_by"] == [member]
+
+        # Apple's playlist changed: the same copy follows the new order and
+        # name, and the already-requested song is not queued a second time.
+        changed = [
+            APPLE_SONGS[2],
+            {"title": "New", "artist": "Artist", "album": "Fresh"},
+            APPLE_SONGS[0],
+        ]
+        third = client.post(
+            "/api/v1/imports/apple-music",
+            json=apple_body(changed, True, name="Road Trip 2"),
+        ).json()
+        assert third["playlist"]["id"] == playlist["id"]
+        assert third["playlist"]["name"] == "Road Trip 2"
+        assert third["playlist"]["revision"] > playlist["revision"]
+        assert [e["title"] for e in third["playlist"]["entries"]] == [
+            "One",
+            "New",
+            "Missing",
+        ]
+        assert third["counts"] == {
+            "in_library": 1,
+            "household": 0,
+            "missing": 2,
+            "requested": 2,
+        }
+        titles = sorted(i["title"] for i in store.queue()["items"])
+        assert titles == ["Missing", "New"]
+        assert len(client.get("/api/v1/playlists").json()["playlists"]) == 1
+    # Another person's copy is untouched.
+    owners = Playlists(store, owner).list()
+    assert [(p["id"], p["name"], p["track_count"]) for p in owners] == [
+        (owners_id, "Owner's copy", 1)
+    ]
+    assert owners_id != playlist["id"]
+
+
+def test_apple_music_playlist_keeps_live_and_studio_apart(tmp_path, monkeypatch):
+    """A live recording on the server never stands in for the studio song:
+    the entry stays missing, and a confirmed request asks for the studio one."""
+    app, owner, member, token = apple_household(tmp_path, monkeypatch)
+    libraries = app.state.store.user_libraries
+    playlist_id, counts = libraries.add_apple_playlist(
+        member,
+        "pl.live",
+        "Studio only",
+        None,
+        [{"title": "Three", "artist": "Artist", "album": "Three", "duration": 200}],
+        True,
+    )
+    assert counts == {"in_library": 0, "household": 0, "missing": 1, "requested": 1}
+    entry = Playlists(app.state.store, member).detail(playlist_id)["entries"][0]
+    assert entry["status"] == "missing" and not entry["household_available"]
+    queued = app.state.store.queue()["items"]
+    assert [(i["title"], i["album"]) for i in queued] == [("Three", "Three")]
+
+
+def test_apple_music_playlist_limit(tmp_path, monkeypatch):
+    app, owner, member, token = apple_household(tmp_path, monkeypatch)
+    songs = [{"title": f"Song {i}", "artist": "Artist"} for i in range(201)]
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token, "X-Pig-Request": "1"},
+    ) as client:
+        response = client.post("/api/v1/imports/apple-music", json=apple_body(songs))
+        assert response.status_code == 422
+        assert client.get("/api/v1/playlists").json()["playlists"] == []

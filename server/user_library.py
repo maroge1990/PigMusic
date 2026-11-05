@@ -1320,6 +1320,102 @@ class UserLibrary:
             "tracks": len(source["tracks"]),
         }
 
+    @coordinated
+    def add_apple_playlist(
+        self, user_id, apple_playlist_id, name, curator, songs, download_missing
+    ):
+        """An Apple Music playlist as the person's own (#121, D-69): an exact
+        copy in Apple's order that does not follow Apple's later changes.
+        Adding the same playlist again replaces that copy's songs and name.
+
+        Each song resolves under the shared policy (`server_matches`): the
+        person's copy, else a household one they may play, else it stays a
+        missing entry that joins when acquired (like the XML import). Nothing
+        downloads unless `download_missing`; then only the missing songs go
+        through the ordinary request path, which joins songs already queued.
+        Returns the playlist ID and the counts."""
+        from datetime import datetime, timezone
+
+        if len(songs) > MAX_PLAYLIST_ENTRIES:
+            raise ValueError("Playlist has reached 10,000 songs")
+        found = self.server_matches(user_id, songs)
+        tracks, missing = [], []
+        counts = {"in_library": 0, "household": 0, "missing": 0, "requested": 0}
+        for song, match in zip(songs, found):
+            apple = {
+                "title": song["title"],
+                "artist": song["artist"],
+                "album": song.get("album") or "",
+                "duration": song.get("duration") or 0,
+            }
+            if match:
+                mine = match["server_state"] == "in_library"
+                counts["in_library" if mine else "household"] += 1
+                # The matched file's own identity, so the entry resolves to
+                # exactly that song whenever the playlist is read.
+                entry = {
+                    k: v
+                    for k, v in match.items()
+                    if k in TRACK_FIELDS and k not in {"cover_url", "codec", "bitrate"}
+                }
+                if not entry.get("album"):
+                    entry["album"] = apple["album"]
+            else:
+                counts["missing"] += 1
+                missing.append(apple)
+                entry = {
+                    **apple,
+                    "id": identifier(
+                        "apple-music-song",
+                        song.get("apple_id")
+                        or normalise(apple["artist"] + " " + apple["title"]),
+                    ),
+                }
+            if song.get("apple_id"):
+                entry["apple_id"] = song["apple_id"]
+            tracks.append(entry)
+        identity = identifier("apple-music-playlist", user_id, apple_playlist_id)
+        with self.store.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            previous = conn.execute(
+                "SELECT payload FROM playlists WHERE id=? AND owner_id=?",
+                (identity, user_id),
+            ).fetchone()
+            payload = {
+                "id": identity,
+                "name": name,
+                "tracks": tracks,
+                "imported_at": datetime.now(timezone.utc).isoformat(),
+                "source": "apple-music",
+                "apple_playlist_id": apple_playlist_id,
+                "curator": curator,
+                "revision": (
+                    json.loads(previous[0]).get("revision", 0) + 1 if previous else 0
+                ),
+            }
+            conn.execute(
+                "INSERT INTO playlists(id,payload,owner_id) VALUES (?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",
+                (identity, json.dumps(payload), user_id),
+            )
+            bump(conn, user_id)
+        if download_missing and missing:
+            result = self.request(
+                user_id,
+                [
+                    {
+                        **track,
+                        "album_artist": "",
+                        "year": "",
+                        "disc_number": 1,
+                        "track_number": 1,
+                    }
+                    for track in missing
+                ],
+            )
+            counts["requested"] = result["created"] + result["existing"]
+        return identity, counts
+
     def request(self, user_id, tracks):
         from .catalogue import cached_release_kind
 

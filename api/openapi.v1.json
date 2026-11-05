@@ -379,6 +379,134 @@
         "title": "AppleAlbum",
         "type": "object"
       },
+      "AppleMusicImportCounts": {
+        "properties": {
+          "household": {
+            "title": "Household",
+            "type": "integer"
+          },
+          "in_library": {
+            "title": "In Library",
+            "type": "integer"
+          },
+          "missing": {
+            "title": "Missing",
+            "type": "integer"
+          },
+          "requested": {
+            "title": "Requested",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "in_library",
+          "household",
+          "missing",
+          "requested"
+        ],
+        "title": "AppleMusicImportCounts",
+        "type": "object"
+      },
+      "AppleMusicImportDTO": {
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/AppleMusicImportCounts"
+          },
+          "playlist": {
+            "$ref": "#/components/schemas/PlaylistDTO"
+          }
+        },
+        "required": [
+          "playlist",
+          "counts"
+        ],
+        "title": "AppleMusicImportDTO",
+        "type": "object"
+      },
+      "AppleMusicPlaylist": {
+        "properties": {
+          "apple_playlist_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Apple Playlist Id",
+            "type": "string"
+          },
+          "curator": {
+            "maxLength": 200,
+            "nullable": true,
+            "title": "Curator",
+            "type": "string"
+          },
+          "download_missing": {
+            "default": false,
+            "title": "Download Missing",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "songs": {
+            "items": {
+              "$ref": "#/components/schemas/AppleMusicSong"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Songs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "apple_playlist_id",
+          "name",
+          "songs"
+        ],
+        "title": "AppleMusicPlaylist",
+        "type": "object"
+      },
+      "AppleMusicSong": {
+        "properties": {
+          "album": {
+            "maxLength": 500,
+            "nullable": true,
+            "title": "Album",
+            "type": "string"
+          },
+          "apple_id": {
+            "maxLength": 32,
+            "nullable": true,
+            "title": "Apple Id",
+            "type": "string"
+          },
+          "artist": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Artist",
+            "type": "string"
+          },
+          "duration": {
+            "default": 0,
+            "maximum": 86400.0,
+            "minimum": 0.0,
+            "title": "Duration",
+            "type": "number"
+          },
+          "title": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "artist"
+        ],
+        "title": "AppleMusicSong",
+        "type": "object"
+      },
       "AppleSong": {
         "properties": {
           "album": {
@@ -15596,6 +15724,133 @@
           }
         ],
         "summary": "Import Apple",
+        "tags": [
+          "personal-library"
+        ]
+      }
+    },
+    "/api/v1/imports/apple-music": {
+      "post": {
+        "description": "An Apple Music playlist as the person's own exact copy (#121, D-69);\nadding it again updates that copy. Missing songs are requested only\nwhen `download_missing` is true.",
+        "operationId": "import_apple_music_api_v1_imports_apple_music_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppleMusicPlaylist"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppleMusicImportDTO"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          }
+        },
+        "security": [
+          {
+            "deviceBearer": []
+          }
+        ],
+        "summary": "Import Apple Music",
         "tags": [
           "personal-library"
         ]

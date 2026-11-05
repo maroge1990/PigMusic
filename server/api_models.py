@@ -460,6 +460,19 @@ class ImportResultDTO(BaseModel):
     tracks: int
 
 
+class AppleMusicImportCounts(BaseModel):
+    in_library: int
+    household: int
+    missing: int
+    # Missing songs sent to Downloads (only when the person asked).
+    requested: int
+
+
+class AppleMusicImportDTO(BaseModel):
+    playlist: PlaylistDTO
+    counts: AppleMusicImportCounts
+
+
 class SessionDTO(BaseModel):
     id: str
     kind: str
