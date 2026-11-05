@@ -69,7 +69,7 @@ enum PlayOrigin: Hashable {
   /// Decoded covers in memory, in front of the account's artwork cache.
   @ObservationIgnored private let images = ArtworkLoader<UIImage> { UIImage(cgImage: $0) }
   @ObservationIgnored private var artistCovers: [String: String?] = [:]
-  @ObservationIgnored private var catalogueMemory: [String: any Sendable] = [:]
+  @ObservationIgnored private var catalogueMemory = CatalogueMemory()
   @ObservationIgnored private(set) var service: NativeService?
   @ObservationIgnored private(set) var store: LibraryStore?
   @ObservationIgnored private var sync: SyncCoordinator?
@@ -940,7 +940,7 @@ enum PlayOrigin: Hashable {
   /// The last catalogue answer for a key, so a revisited page draws at once.
   /// Pages still refresh it through `cachedCatalogue`.
   func peekCatalogue<T: Sendable>(key: String, as type: T.Type = T.self) -> T? {
-    catalogueMemory[key] as? T
+    catalogueMemory.peek(key, as: T.self)
   }
   /// The memory answer, else the one saved on this device from an earlier session.
   func storedCatalogue<T: Codable & Sendable>(key: String, as type: T.Type = T.self) async -> T? {
@@ -953,8 +953,7 @@ enum PlayOrigin: Hashable {
     return saved
   }
   private func remember(_ value: any Sendable, key: String) {
-    if catalogueMemory.count > 400 { catalogueMemory.removeAll() }
-    catalogueMemory[key] = value
+    catalogueMemory.remember(value, key: key)
   }
   /// Artwork addressed by stored hash, or a server alias for catalogue items.
   enum ArtworkSource: Hashable, Sendable {
@@ -1319,7 +1318,7 @@ enum PlayOrigin: Hashable {
     images.detach()
     artworkNamespace = ""
     artistCovers = [:]
-    catalogueMemory = [:]
+    catalogueMemory.clear()
     homeContent = [:]
     homeLoadedAt = [:]
     homeErrors = [:]
