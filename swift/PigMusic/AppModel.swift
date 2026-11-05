@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import Network
 import Observation
@@ -67,8 +66,8 @@ enum PlayOrigin: Hashable {
   let player = PlayerController()
   var artworkNamespace = ""
   var artworkRefresh = 0
-  @ObservationIgnored private var artworkCache: ArtworkCache?
-  @ObservationIgnored private let artworkMemory = NSCache<NSString, UIImage>()
+  /// Decoded covers in memory, in front of the account's artwork cache.
+  @ObservationIgnored private let images = ArtworkLoader<UIImage> { UIImage(cgImage: $0) }
   @ObservationIgnored private var artistCovers: [String: String?] = [:]
   @ObservationIgnored private var catalogueMemory: [String: any Sendable] = [:]
   @ObservationIgnored private(set) var service: NativeService?
@@ -86,8 +85,6 @@ enum PlayOrigin: Hashable {
   init(defaults: UserDefaults = .standard) {
     self.defaults = defaults
     watch = WatchPhoneController(model: self, defaults: defaults)
-    artworkMemory.countLimit = 128
-    artworkMemory.totalCostLimit = 24 * 1024 * 1024
   }
 
   func restore() async {
@@ -323,9 +320,9 @@ enum PlayOrigin: Hashable {
         LibraryNamespace.key(server: origin, personId: user.id)
       ).appendingPathComponent("audio"))
     try account.check(stamp)
-    artworkCache = try? ArtworkCache(directory: directory.appendingPathComponent("artwork"))
+    images.cache = try? ArtworkCache(directory: directory.appendingPathComponent("artwork"))
     artworkNamespace = LibraryNamespace.key(server: origin, personId: user.id)
-    artworkMemory.removeAllObjects()
+    images.clearMemory()
     server = origin.absoluteString
     self.service = service
     store = database
@@ -1001,34 +998,23 @@ enum PlayOrigin: Hashable {
   }
   /// The image already decoded in memory, for drawing a revisited page at once.
   func memoryCatalogueImage(_ kind: String, _ id: String, width: Int) -> UIImage? {
-    let sha = SHA256.hash(data: Data(("catalogue-\(kind):" + id.lowercased()).utf8)).map {
-      String(format: "%02x", $0)
-    }.joined()
-    guard let request = try? ArtworkRequest(sha: sha, width: width) else { return nil }
-    return artworkMemory.object(forKey: request.filename as NSString)
+    guard let request = ArtworkLoader<UIImage>.catalogueRequest(kind: kind, id: id, width: width)
+    else { return nil }
+    return images.memoryImage(request)
   }
   private func catalogueImage(
     _ kind: String, _ id: String, _ width: Int,
     fetch: @escaping @Sendable (NativeService, ArtworkRequest) async throws -> Data
   ) async -> UIImage? {
-    guard let service, let cache = artworkCache, UUID(uuidString: id) != nil else { return nil }
+    guard let service, images.cache != nil, UUID(uuidString: id) != nil else { return nil }
     let stamp = account.generation
     // Catalogue artwork has no content hash on the client: key it by its alias.
-    let sha = SHA256.hash(data: Data(("catalogue-\(kind):" + id.lowercased()).utf8)).map {
-      String(format: "%02x", $0)
-    }.joined()
-    guard let request = try? ArtworkRequest(sha: sha, width: width) else { return nil }
-    let key = request.filename as NSString
-    if let image = artworkMemory.object(forKey: key) { return image }
+    guard let request = ArtworkLoader<UIImage>.catalogueRequest(kind: kind, id: id, width: width)
+    else { return nil }
     do {
-      let data = try await cache.data(for: request) { try await fetch(service, $0) }
-      let decoded = try await Task.detached(priority: .utility) {
-        try ArtworkCache.thumbnail(data, width: width)
-      }.value
-      guard account.isCurrent(stamp) else { return nil }
-      let image = UIImage(cgImage: decoded)
-      artworkMemory.setObject(image, forKey: key, cost: decoded.bytesPerRow * decoded.height)
-      return image
+      return try await images.load(
+        request, stopsWhenCancelled: false, isCurrent: { [account] in account.isCurrent(stamp) }
+      ) { try await fetch(service, $0) }
     } catch NativeFailure.authentication {
       revoked(generation: stamp)
       return nil
@@ -1147,8 +1133,7 @@ enum PlayOrigin: Hashable {
     (try? await store?.tracks(albumId: album.id)) ?? []
   }
   func artwork(sha: String?, width: Int = 256) async -> UIImage? {
-    guard let sha, let request = try? ArtworkRequest(sha: sha, width: width),
-      let cache = artworkCache
+    guard let sha, let request = try? ArtworkRequest(sha: sha, width: width), images.cache != nil
     else { return nil }
     let service = self.service
     var demoData: Data?
@@ -1159,24 +1144,15 @@ enum PlayOrigin: Hashable {
     #endif
     guard service != nil || demoData != nil else { return nil }
     let stamp = account.generation
-    let key = request.filename as NSString
-    if let image = artworkMemory.object(forKey: key) { return image }
     do {
       let synthetic = demoData
-      let data = try await cache.data(for: request) {
+      return try await images.load(
+        request, stopsWhenCancelled: true, isCurrent: { [account] in account.isCurrent(stamp) }
+      ) {
         if let synthetic { return synthetic }
         guard let service else { throw ArtworkFailure.unavailable }
         return try await service.artwork($0)
       }
-      try Task.checkCancellation()
-      let decoded = try await Task.detached(priority: .utility) {
-        try ArtworkCache.thumbnail(data, width: width)
-      }.value
-      try Task.checkCancellation()
-      guard account.isCurrent(stamp) else { return nil }
-      let image = UIImage(cgImage: decoded)
-      artworkMemory.setObject(image, forKey: key, cost: decoded.bytesPerRow * decoded.height)
-      return image
     } catch NativeFailure.authentication {
       revoked(generation: stamp)
       return nil
@@ -1340,10 +1316,8 @@ enum PlayOrigin: Hashable {
     service = nil
     store = nil
     sync = nil
-    if let cache = artworkCache { Task { await cache.cancelPending() } }
-    artworkCache = nil
+    images.detach()
     artworkNamespace = ""
-    artworkMemory.removeAllObjects()
     artistCovers = [:]
     catalogueMemory = [:]
     homeContent = [:]
@@ -1393,7 +1367,7 @@ enum PlayOrigin: Hashable {
         )
         .appendingPathComponent("PigMusicDemoArtwork-v1")
         try await player.configureSources(directory: demoDirectory.appendingPathComponent("audio"))
-        artworkCache = try ArtworkCache(directory: demoDirectory)
+        images.cache = try ArtworkCache(directory: demoDirectory)
         artworkNamespace = "synthetic-demo"
         store = database
         searchSession = SearchSession(cached: database)
