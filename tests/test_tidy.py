@@ -775,3 +775,253 @@ def test_downloads_not_yet_in_the_music_folder(tmp_path, monkeypatch, kept):
     assert store.read_document("library-export-status")["status"] == "completed"
     tidy.undo(record["id"])
     assert staged.exists() and songs(store) == before
+
+
+# Blink-182 albums split across two releases (#120): each song exists once.
+DUDE_RANCH = [
+    "Pathetic",
+    "Voyeur",
+    "Dammit",
+    "Boring",
+    "Dick Lips",
+    "Waggy",
+    "Enthused",
+    "Untitled",
+    "Apple Shampoo",
+    "Emo",
+    "Josie",
+    "A New Hope",
+    "Degenerate",
+    "Lemmings",
+    "I'm Sorry",
+]
+ENEMA = [
+    "Dumpweed",
+    "Don't Leave Me",
+    "Aliens Exist",
+    "Going Away to College",
+    "What's My Age Again?",
+    "Dysentery Gary",
+    "Adam's Song",
+    "All the Small Things",
+    "The Party Song",
+    "Mutt",
+    "Wendy Clear",
+    "Anthem",
+]
+# (title, songs, original year, its track numbers, reissue year)
+SPLITS = {
+    "dude ranch": ("Dude Ranch", DUDE_RANCH, 1997, {3, 11}, 2008),
+    "enema": ("Enema of the State", ENEMA, 1999, {5, 7, 8, 10}, 2016),
+}
+
+
+def blink(title, album, number, year, **extra):
+    return song(
+        title,
+        album,
+        number,
+        **{
+            "artist": "blink-182",
+            "album_artist": "blink-182",
+            "year": year,
+            "musicbrainz_release_id": f"release-{year}",
+            "id": f"{year}/{title}",
+            "relative_path": f"blink-182/{album} ({year})/{number:02} {title}.mp3",
+        }
+        | extra,
+    )
+
+
+def split(shape):
+    album, titles, original, numbers, reissue = SPLITS[shape]
+    return [
+        blink(title, album, n, original if n in numbers else reissue)
+        for n, title in enumerate(titles, 1)
+    ]
+
+
+@pytest.mark.parametrize("shape", SPLITS)
+def test_an_album_split_across_two_editions_is_offered_as_a_join(
+    tmp_path, monkeypatch, shape
+):
+    album, titles, original, numbers, reissue = SPLITS[shape]
+    (item,) = planned(tmp_path, split(shape), monkeypatch)
+    assert (item["keep"]["year"], item["keep"]["songs"]) == (
+        reissue,
+        len(titles) - len(numbers),
+    )
+    assert [(e["title"], e["year"]) for e in item["editions"]] == [(album, original)]
+    assert item["remove"] == item["replace"] == item["leftovers"] == []
+    assert [(r["title"], r["to"]) for r in item["join"]] == [
+        (titles[n - 1], {"track_number": n, "disc_number": 1}) for n in sorted(numbers)
+    ]
+
+
+def test_a_join_never_takes_a_kept_track_number(tmp_path, monkeypatch):
+    tracks = split("dude ranch")
+    # "Josie" also claims track 4, which the kept release has.
+    tracks[10] |= {"track_number": 4}
+    assert planned(tmp_path, tracks, monkeypatch) == []
+
+
+def test_a_join_needs_every_songs_track_number(tmp_path, monkeypatch):
+    tracks = split("dude ranch")
+    tracks[10] |= {"track_number": 0}
+    assert planned(tmp_path, tracks, monkeypatch) == []
+
+
+def test_another_album_sharing_only_the_title_is_not_joined(tmp_path, monkeypatch):
+    tracks = [t for t in split("dude ranch") if t["year"] == 2008] + [
+        blink("Something Else", "Dude Ranch", 1, 1997),
+        blink("Another Song", "Dude Ranch", 2, 1997),
+    ]
+    assert planned(tmp_path, tracks, monkeypatch) == []
+
+
+def test_a_join_past_the_kept_track_list_needs_the_catalogue(tmp_path, monkeypatch):
+    from server.catalogue import RELEASE_INC
+
+    # The original has the last two songs; nothing on the reissue shows the
+    # album runs to 15 tracks unless the catalogue knows its tracklist.
+    tracks = [
+        blink(t, "Dude Ranch", n, 1997 if n > 13 else 2008)
+        for n, t in enumerate(DUDE_RANCH, 1)
+    ]
+    assert planned(tmp_path, tracks, monkeypatch) == []
+    key = "catalogue:release/release-2008" + repr([("inc", RELEASE_INC)])
+    positions = [{"id": str(n), "position": n} for n in range(1, 16)]
+    release = {
+        "id": "release-2008",
+        "title": "Dude Ranch",
+        "media": [{"position": 1, "tracks": positions}],
+    }
+    store = Store(tmp_path / "data")
+    store.write_document(key, {"time": 0, "data": release})
+    recovery = Recovery(store)
+    (item,) = Tidy(store, recovery, Organisation(store, recovery)).plan()["albums"]
+    assert [r["to"]["track_number"] for r in item["join"]] == [14, 15]
+    # A release with a shorter tracklist does not cover them.
+    release["media"][0]["tracks"] = positions[:14]
+    store.write_document(key, {"time": 0, "data": release})
+    assert Tidy(store, recovery, Organisation(store, recovery)).plan()["albums"] == []
+
+
+def split_library(tmp_path, monkeypatch, shape):
+    """The split album as real FLAC files, each release tagged with its own
+    release ID and year; a member has the original's songs."""
+    from mutagen.flac import FLAC
+
+    root = tmp_path / "music"
+    monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(root))
+    tracks = []
+    for raw in split(shape):
+        relative = raw["relative_path"].removesuffix(".mp3") + ".flac"
+        audio(root / relative, raw["title"], raw["album"], raw["track_number"], "flac")
+        tags = FLAC(root / relative)
+        tags["ARTIST"] = tags["ALBUMARTIST"] = tags["ALBUM_ARTIST"] = "blink-182"
+        tags["DATE"] = str(raw["year"])
+        tags["MUSICBRAINZ_ALBUMID"] = raw["musicbrainz_release_id"]
+        tags.save()
+        tracks.append(inspect_file(root / relative, relative)[0])
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "library-snapshot.json").write_text(json.dumps({"tracks": tracks}))
+    store = Store(data)
+    auth = Auth(store)
+    owner = auth.create_owner("mark", "tidy fixture password")
+    code = auth.setup_code(owner, "member", "Member")
+    member = auth.activate(code["code"], "tidy fixture password", "f")["id"]
+    original = SPLITS[shape][2]
+    store.user_libraries.add(member, [t["id"] for t in tracks if t["year"] == original])
+    recovery = Recovery(store)
+    return Tidy(store, recovery, Organisation(store, recovery)), root, member
+
+
+def state(store, root):
+    """Every album with its songs' places and tags, and every file."""
+    return (
+        sorted(
+            (a["title"], a["year"], t["title"], t["track_number"], t["relative_path"])
+            for a in store.library["albums"]
+            for t in a["tracks"]
+        ),
+        sorted(
+            (p.relative_to(root).as_posix(), p.read_bytes())
+            for p in root.rglob("*.flac")
+            if ".pig-music-trash" not in p.parts
+        ),
+    )
+
+
+@pytest.mark.parametrize("shape", SPLITS)
+def test_apply_joins_the_split_album_and_undo_restores_it(tmp_path, monkeypatch, shape):
+    from mutagen.flac import FLAC
+
+    album, titles, original, numbers, reissue = SPLITS[shape]
+    tidy, root, member = split_library(tmp_path, monkeypatch, shape)
+    store = tidy.store
+    before = state(store, root)
+    listened = songs(store, member)
+    (item,) = tidy.plan()["albums"]
+    assert len(item["join"]) == len(numbers)
+    record = tidy.apply(item["id"], item["fingerprint"])
+    assert record["status"] == "applied"
+    assert len(record["moves"]) == len(numbers) and record["removals"] == []
+    # One album, every song once, in track order.
+    (joined,) = store.library["albums"]
+    assert (joined["title"], joined["year"]) == (album, reissue)
+    assert [t["title"] for t in joined["tracks"]] == titles
+    kept = root / "blink-182" / f"{album} ({reissue})"
+    for n in numbers:
+        (moved,) = kept.glob(f"* - {n:02} - *.flac")
+        tags = FLAC(moved)
+        assert tags["TITLE"] == [titles[n - 1]]
+        assert tags["ALBUM"] == [album] and tags["DATE"] == [str(reissue)]
+        assert tags["MUSICBRAINZ_ALBUMID"] == [f"release-{reissue}"]
+        assert inspect_file(moved, "x")[0]["track_number"] == n
+    assert not list((root / "blink-182" / f"{album} ({original})").glob("*.flac"))
+    # Nothing went to Trash, and the member still has the same songs.
+    assert tidy.recovery.list() == []
+    assert [t for _, t in songs(store, member)] == [t for _, t in listened]
+    assert tidy.plan()["albums"] == []
+    (entry,) = tidy.history()
+    assert tidy.undo(entry["id"])["status"] == "undone"
+    assert state(store, root) == before
+    assert songs(store, member) == listened
+    assert tidy.history() == []
+
+
+def test_a_restart_part_way_through_a_join_recovers_like_a_replace(
+    tmp_path, monkeypatch
+):
+    tidy, root, member = split_library(tmp_path, monkeypatch, "dude ranch")
+    store = tidy.store
+    before = state(store, root)
+    listened = songs(store, member)
+    finish = Organisation.finish
+
+    class Restart(BaseException):
+        """The process stops: nothing after this runs."""
+
+    def stopped(self, record, root):
+        raise Restart
+
+    monkeypatch.setattr(Organisation, "finish", stopped)
+    (item,) = tidy.plan()["albums"]
+    with pytest.raises(Restart):
+        tidy.apply(item["id"], item["fingerprint"])
+    monkeypatch.setattr(Organisation, "finish", finish)
+    (entry,) = tidy.history()
+    assert entry["status"] == "applying"
+    (operation,) = store.read_document("tidy:" + entry["id"])["moves"]
+    assert store.read_document("organisation:" + operation)["status"] == "publishing"
+    # Startup recovery publishes the prepared move; the tidy-up keeps it.
+    tidy.recovery.recover()
+    tidy.organisation.recover()
+    tidy.recover()
+    assert store.read_document("organisation:" + operation)["status"] == "completed"
+    assert list((root / "blink-182" / "Dude Ranch (2008)").glob("* - 03 - *.flac"))
+    assert tidy.undo(entry["id"])["status"] == "undone"
+    assert state(store, root) == before
+    assert songs(store, member) == listened

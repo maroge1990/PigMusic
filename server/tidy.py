@@ -8,7 +8,10 @@ on another edition that the kept album also has either goes to Trash (the
 kept copy is as good), or replaces the kept copy (it is better: the file
 moves into the kept album's folder, retagged to it, and the kept copy goes to
 Trash). Songs only another edition has stay where they are, listed for
-review. Nothing changes until the owner applies an album from a plan whose
+review. An album split across editions, each song on one of them, is joined
+instead: an edition none of whose songs the kept album has, each filling a
+free place on the kept album's track list, moves into the kept album's folder,
+retagged to it with its own track numbers. Nothing changes until the owner applies an album from a plan whose
 files are unchanged since it was made, and every step can be undone.
 """
 
@@ -21,6 +24,7 @@ import uuid
 from collections import defaultdict
 from pathlib import Path
 
+from .catalogue import cached_release
 from .library import normalise, year_order
 from .lifecycle import coordinated
 from .matching import compatible, primary_artist, strip_edition
@@ -90,6 +94,14 @@ def label(track):
     codec = canonical_codec(track.get("codec")).upper() or "Unknown"
     bitrate = track.get("bitrate")
     return codec if codec in {"FLAC", "ALAC"} or not bitrate else f"{codec} {bitrate}"
+
+
+def position(track):
+    """(disc, track) of a song with a track number, else None."""
+    number = track.get("track_number")
+    if not isinstance(number, int) or number < 1:
+        return None
+    return track.get("disc_number") or 1, number
 
 
 def summary(track, album):
@@ -175,7 +187,7 @@ class Tidy:
             return ("nas", known["path"]) if known["nas"] else ("work", known["staged"])
 
         kept_paths = {location(k) for k in kept if location(k)[1]}
-        matches, leftovers, others = defaultdict(list), [], []
+        matches, leftovers, others, separate = defaultdict(list), [], [], []
         for album, tracks in editions[1:]:
             found = {
                 t["id"]: [
@@ -184,6 +196,8 @@ class Tidy:
                 for t in tracks
             }
             if sum(len(f) == 1 for f in found.values()) < OVERLAP * len(tracks):
+                if not any(found.values()):
+                    separate.append((album, tracks))  # Perhaps the other half.
                 continue  # Another album that happens to share the title.
             others.append(album)
             for track in tracks:
@@ -193,7 +207,8 @@ class Tidy:
                     matches[found[track["id"]][0]["id"]].append((album, track))
                 else:
                     leftovers.append(summary(track, album))
-        if not others:
+        join, joined = self.joins(keeper, kept, separate, files)
+        if not others and not joined:
             return None
         remove, replace = [], []
         for k in kept:
@@ -242,7 +257,10 @@ class Tidy:
                 else:
                     leftovers.append(summary(track, album))
         involved = [t["id"] for t in kept] + [
-            t["id"] for album, tracks in editions[1:] if album in others for t in tracks
+            t["id"]
+            for album, tracks in editions[1:]
+            if album in others or album in joined
+            for t in tracks
         ]
         fingerprint = hashlib.sha256(
             json.dumps(sorted([i, files[i]] for i in involved), sort_keys=True).encode()
@@ -265,13 +283,82 @@ class Tidy:
                         [t for t in a["tracks"] if t.get("available") is not False]
                     ),
                 }
-                for a in others
+                for a in others + joined
             ],
             "remove": remove,
             "replace": replace,
+            "join": join,
             "leftovers": leftovers,
             "fingerprint": fingerprint,
         }
+
+    def folder(self, kept, files):
+        """The kept album's one music folder, or None when it has none or
+        several."""
+        folders = {
+            Path(files[k["id"]]["path"]).parent for k in kept if files[k["id"]]["nas"]
+        }
+        return folders.pop() if len(folders) == 1 else None
+
+    def joins(self, keeper, kept, separate, files):
+        """The editions whose songs fill free places on the kept album's track
+        list: every song with a track number, on a disc and number the kept
+        album has free and its track list covers (the catalogue's tracklist
+        for its release when this server has read it, else the highest
+        number on that disc the kept album has). One song that does not fit
+        leaves its whole edition alone: never a guess."""
+        if not separate or self.folder(kept, files) is None:
+            return [], []
+        release = keeper.get("musicbrainz_release_id")
+        release = cached_release(self.store, release) if release else None
+        listed = (
+            {
+                (medium.get("position", 1), track.get("position", 0))
+                for medium in release.get("media") or []
+                for track in medium.get("tracks") or []
+            }
+            if release
+            else None
+        )
+        last = defaultdict(int)
+        for k in kept:
+            if position(k):
+                disc, number = position(k)
+                last[disc] = max(last[disc], number)
+        taken = {position(k) for k in kept}
+        join, joined = [], []
+        for album, tracks in separate:
+            rows, places = [], set()
+            for track in tracks:
+                place = position(track)
+                known = files[track["id"]]
+                if (
+                    not place
+                    or place in taken
+                    or place in places
+                    or not (
+                        place in listed
+                        if listed is not None
+                        else place[1] <= last[place[0]]
+                    )
+                    or not known["nas"]
+                    or Path(known["path"]).suffix.lower() not in TAG_SUFFIXES
+                ):
+                    break
+                places.add(place)
+                rows.append(
+                    summary(track, album)
+                    | {
+                        "album_id": album["id"],
+                        "to": {"track_number": place[1], "disc_number": place[0]},
+                    }
+                )
+            else:
+                taken |= places
+                join += rows
+                joined.append(album)
+        join.sort(key=lambda r: (r["to"]["disc_number"], r["to"]["track_number"]))
+        return join, joined
 
     def unchanged(self, files, ids):
         """Every file still as PigMusic last saw it (else rescan first)."""
@@ -309,6 +396,7 @@ class Tidy:
             [r["id"] for r in item["remove"]]
             + [r["kept"]["id"] for r in item["remove"]]
             + [i for r in item["replace"] for i in (r["id"], r["replaces"]["id"])]
+            + [r["id"] for r in item["join"]]
         )
         if not self.unchanged(
             files, [i for i in checked if files[i]["nas"] or files[i]["staged"]]
@@ -336,26 +424,16 @@ class Tidy:
                 # The better file's listeners and the kept copy's share it.
                 self.share(record, row["replaces"]["id"], row["id"])
                 self.trash(record, old["id"])
-                placement = dict(
-                    album=keeper["title"],
-                    album_artist=keeper["artist"],
-                    year=keeper.get("year") or None,
-                    track_number=old.get("track_number"),
-                    disc_number=old.get("disc_number", 1),
-                    musicbrainz_release_id=keeper.get("musicbrainz_release_id"),
-                )
-                placement = {k: placement.get(k) for k in ALBUM_FIELDS}
-                source = files[row["id"]]["path"]
-                moved = self.store.index.by_id[row["id"]]
-                destination = (
-                    Path(files[old["id"]]["path"]).parent
-                    / file_name({**moved, **placement}, Path(source).suffix.lower())
-                ).as_posix()
-                operation = str(uuid.uuid4())
-                record["moves"].append(operation)
-                self.save(record)
-                self.organisation.move(
-                    row["id"], source, destination, True, placement, operation
+                self.place(
+                    record,
+                    keeper,
+                    row["id"],
+                    {
+                        "track_number": old.get("track_number"),
+                        "disc_number": old.get("disc_number", 1),
+                    },
+                    Path(files[old["id"]]["path"]).parent,
+                    files,
                 )
             for row in item["remove"]:
                 kept = row["kept"]["id"]
@@ -366,6 +444,12 @@ class Tidy:
                 )
                 self.share(record, row["id"], kept)
                 self.trash(record, row["id"])
+            folder = self.folder(
+                [t for t in keeper["tracks"] if t.get("available") is not False], files
+            )
+            for row in item["join"]:
+                # The song keeps its own identity, so its listeners keep it.
+                self.place(record, keeper, row["id"], row["to"], folder, files)
             record["status"] = "applied"
         except (ValueError, OSError) as error:
             record.update(status="stopped", error=str(error) or type(error).__name__)
@@ -376,6 +460,29 @@ class Tidy:
             finally:
                 self.store.refresh_library()
         return record
+
+    def place(self, record, keeper, track_id, number, folder, files):
+        """Move a song into the kept album's `folder`, retagged to the kept
+        album at `number` (track and disc), journaled before it happens."""
+        placement = dict(
+            album=keeper["title"],
+            album_artist=keeper["artist"],
+            year=keeper.get("year") or None,
+            musicbrainz_release_id=keeper.get("musicbrainz_release_id"),
+            **number,
+        )
+        placement = {k: placement.get(k) for k in ALBUM_FIELDS}
+        source = files[track_id]["path"]
+        moved = self.store.index.by_id[track_id]
+        destination = (
+            folder / file_name({**moved, **placement}, Path(source).suffix.lower())
+        ).as_posix()
+        operation = str(uuid.uuid4())
+        record["moves"].append(operation)
+        self.save(record)
+        self.organisation.move(
+            track_id, source, destination, True, placement, operation
+        )
 
     def share(self, record, track_id, keeper):
         """Give the kept copy to everyone who has `track_id`, journaled in the

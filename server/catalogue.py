@@ -48,15 +48,22 @@ def group_kinds(group):
     )
 
 
+def cached_release(store, release_id):
+    """A release this server has already read (its catalogue page), however
+    old, or None when it has not; never a request."""
+    key = "catalogue:release/" + str(release_id) + repr([("inc", RELEASE_INC)])
+    cached = store.read_document(key)
+    return (cached or {}).get("data") or None
+
+
 def cached_release_kind(store, release_id):
     """The recording kinds of a release this server has already read (its
     catalogue page), or None when it has not: requests from clients that do
     not send `recording_kind` are reconstructed from it."""
-    key = "catalogue:release/" + str(release_id) + repr([("inc", RELEASE_INC)])
-    cached = store.read_document(key)
-    if not cached or "release-group" not in (cached.get("data") or {}):
+    release = cached_release(store, release_id)
+    if not release or "release-group" not in release:
         return None
-    return sorted(group_kinds(cached["data"]["release-group"]))
+    return sorted(group_kinds(release["release-group"]))
 
 
 def release_tracks(release):
