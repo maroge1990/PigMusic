@@ -5,14 +5,14 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 5 Nov 2026 (night, Melbourne).*
+*Overwritten at the end of every session. 6 Nov 2026 (morning, Melbourne).*
 
-- **Live:** server `2f3e5b1` (`relay-20261105-v2`): batch 1 (#122, #118, #119, #120, #121 server, #63 cleanup) plus
+- **Live:** server `0b68d76` (checked 6 Nov; no server change on main since): batch 1 (#122, #118, #119, #120, #121 server, #63 cleanup) plus
   #23 progressive remote relay (only `bytes=0-1` completes before a file is validated), #96 engine leftover sweep by
   transfer state, staged-audio sweep by claim, owner-run Trash purge (descriptor-relative, restart-safe), #86 no pytest
   in the image, journal ownership guard. Six releases on 5 Nov in all, under Mark's go-ahead.
-- **Pushed, not live (native):** #46 split of AppModel/WatchPhoneController (no behaviour change).
-- **iPhone/Watch:** **0.2.0 (21)** on TestFlight (5 Nov): Shazam A/B/C, #121 Add to my playlists, #116, #117, #97.
+- **iPhone/Watch:** **0.2.0 (22)** on TestFlight (6 Nov): Shazam audio-session fixes (#123–#127), single-song download
+  pause/resume, compact Popular songs, #46 split. Build 21 (5 Nov) had Shazam A/B/C, #121, #116, #117, #97.
 - **Web:** #97 structure split (Player, PersonalLibrary) with queue unit tests and new Playwright coverage — live.
 - **Idle CPU (#63):** 3.9% of a core (7.8% this morning); server Python ~7× quieter; the rest is mostly slskd.
 - **Reviews (D-71):** every Codex finding's fix is confirmed by Codex before it ships. Today that took 3 passes for
