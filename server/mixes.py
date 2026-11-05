@@ -1245,7 +1245,7 @@ class Mixes:
     def forget_unfound(self):
         with self.store.connect() as conn:
             conn.execute(
-                "DELETE FROM documents WHERE name LIKE 'mix-unfound:%' AND json_extract(payload,'$.until')<=?",
+                "DELETE FROM documents WHERE name >= 'mix-unfound:' AND name < 'mix-unfound;' AND json_extract(payload,'$.until')<=?",
                 (time.time(),),
             )
 

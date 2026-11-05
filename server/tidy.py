@@ -518,7 +518,7 @@ class Tidy:
         excluded = set()
         with self.store.connect() as conn:
             for (payload,) in conn.execute(
-                "SELECT payload FROM documents WHERE name LIKE 'excluded:%'"
+                "SELECT payload FROM documents WHERE name >= 'excluded:' AND name < 'excluded;'"
             ):
                 excluded.add(json.loads(payload).get("removal_id"))
         for removal in self.recovery.list():
@@ -630,7 +630,7 @@ class Tidy:
             return [
                 json.loads(v)
                 for (v,) in conn.execute(
-                    "SELECT payload FROM documents WHERE name LIKE 'tidy:%'"
+                    "SELECT payload FROM documents WHERE name >= 'tidy:' AND name < 'tidy;'"
                 )
             ]
 

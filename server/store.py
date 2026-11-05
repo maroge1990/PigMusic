@@ -119,7 +119,7 @@ class Store:
             removed = {
                 json.loads(v)["track_id"]
                 for (v,) in conn.execute(
-                    "SELECT payload FROM documents WHERE name LIKE 'removed:%'"
+                    "SELECT payload FROM documents WHERE name >= 'removed:' AND name < 'removed;'"
                 )
                 if json.loads(v).get("status") in {"removing", "removed"}
             }
@@ -1120,7 +1120,7 @@ class Store:
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
-                "SELECT name,payload FROM documents WHERE name LIKE 'quality-policy:%'"
+                "SELECT name,payload FROM documents WHERE name >= 'quality-policy:' AND name < 'quality-policy;'"
             ).fetchall()
             for name, raw in rows:
                 desired = json.loads(raw)
@@ -1421,7 +1421,7 @@ class Store:
             exclusions = [
                 json.loads(r[0])["track"]
                 for r in conn.execute(
-                    "SELECT payload FROM documents WHERE name LIKE 'excluded:%'"
+                    "SELECT payload FROM documents WHERE name >= 'excluded:' AND name < 'excluded;'"
                 )
             ]
             from .user_library import request_scope

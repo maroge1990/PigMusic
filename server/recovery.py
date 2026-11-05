@@ -27,7 +27,7 @@ class Recovery:
             return [
                 json.loads(v)
                 for (v,) in c.execute(
-                    "SELECT payload FROM documents WHERE name LIKE 'removed:%'"
+                    "SELECT payload FROM documents WHERE name >= 'removed:' AND name < 'removed;'"
                 )
             ]
 
@@ -207,7 +207,7 @@ class Recovery:
                     if added:
                         bump(c, membership[0])
             for name, payload in c.execute(
-                "SELECT name,payload FROM documents WHERE name LIKE 'excluded:%'"
+                "SELECT name,payload FROM documents WHERE name >= 'excluded:' AND name < 'excluded;'"
             ).fetchall():
                 if json.loads(payload).get("removal_id") == record["id"]:
                     c.execute("DELETE FROM documents WHERE name=?", (name,))

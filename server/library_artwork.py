@@ -122,7 +122,7 @@ def prune_artwork(store, now=None):
             references.update(
                 json.loads(payload).get("sha")
                 for (payload,) in conn.execute(
-                    "SELECT payload FROM documents WHERE name LIKE 'image-public:%'"
+                    "SELECT payload FROM documents WHERE name >= 'image-public:' AND name < 'image-public;'"
                 )
             )
         with store.connect() as conn:
@@ -130,7 +130,7 @@ def prune_artwork(store, now=None):
                 references.add(json.loads(payload).get("cover_sha"))
             expired = []
             for name, payload in conn.execute(
-                "SELECT name,payload FROM documents WHERE name LIKE 'missing-artwork:%' OR name LIKE 'catalogue:%'"
+                "SELECT name,payload FROM documents WHERE name >= 'missing-artwork:' AND name < 'missing-artwork;' OR name >= 'catalogue:' AND name < 'catalogue;'"
             ):
                 value = json.loads(payload)
                 expiry = (

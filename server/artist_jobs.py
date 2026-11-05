@@ -260,7 +260,7 @@ class ArtistJobs:
         initialise_owner(self.store)
         with self.store.connect() as conn:
             rows = conn.execute(
-                "SELECT name,payload FROM documents WHERE name LIKE 'artist-job:%'"
+                "SELECT name,payload FROM documents WHERE name >= 'artist-job:' AND name < 'artist-job;'"
             ).fetchall()
         owned = None
         jobs = []

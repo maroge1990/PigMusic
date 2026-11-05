@@ -399,3 +399,29 @@ def test_mix_planning_reads_artist_identities_and_the_day_off_the_loop(
     stall, result = asyncio.run(run())
     assert result == []
     assert stall < 0.2, stall
+
+
+def test_document_prefix_reads_use_the_primary_key(tmp_path):
+    """#122: `name LIKE 'removed:%'` scanned all of `documents` (22k rows on
+    the live server, 137 ms a read); the export pass did it per song."""
+    import re
+    from pathlib import Path
+
+    from server.store import Store
+
+    store = Store(tmp_path / "data")
+    source = Path(__file__).resolve().parents[1] / "server"
+    queries = set()
+    for path in source.glob("*.py"):
+        for match in re.finditer(r"FROM documents WHERE [^\"]+", path.read_text()):
+            queries.add(match.group(0).split(" AND json")[0])
+    assert queries
+    with store.connect() as conn:
+        for query in queries:
+            plan = " ".join(
+                str(row[-1])
+                for row in conn.execute(
+                    "EXPLAIN QUERY PLAN SELECT name " + query.replace("?", "0")
+                )
+            )
+            assert "SCAN documents" not in plan, (query, plan)

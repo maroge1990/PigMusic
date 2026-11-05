@@ -361,7 +361,7 @@ class Organisation:
             records = [
                 json.loads(v)
                 for (v,) in c.execute(
-                    "SELECT payload FROM documents WHERE name LIKE 'organisation:%'"
+                    "SELECT payload FROM documents WHERE name >= 'organisation:' AND name < 'organisation;'"
                 )
             ]
         for record in records:
@@ -389,7 +389,7 @@ class Organisation:
             return [
                 json.loads(v)
                 for (v,) in c.execute(
-                    "SELECT payload FROM documents WHERE name LIKE 'organisation:%'"
+                    "SELECT payload FROM documents WHERE name >= 'organisation:' AND name < 'organisation;'"
                 )
             ]
 

@@ -484,7 +484,7 @@ def initialise_owner(store):
                     "UPDATE queue SET payload=? WHERE id=?", (json.dumps(value), key)
                 )
         for key, raw in conn.execute(
-            "SELECT name,payload FROM documents WHERE name LIKE 'artist-job:%'"
+            "SELECT name,payload FROM documents WHERE name >= 'artist-job:' AND name < 'artist-job;'"
         ).fetchall():
             if key.count(":") == 1:
                 artist_id = key.split(":")[1]
@@ -1124,7 +1124,7 @@ class UserLibrary:
             removing = {
                 json.loads(raw)["track_id"]
                 for (raw,) in conn.execute(
-                    "SELECT payload FROM documents WHERE name LIKE 'removed:%'"
+                    "SELECT payload FROM documents WHERE name >= 'removed:' AND name < 'removed;'"
                 )
                 if json.loads(raw).get("status") in {"removing", "removed"}
             }

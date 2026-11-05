@@ -37,7 +37,7 @@ class HouseholdPolicy:
             "overrides": {
                 key: json.loads(raw).get("profile")
                 for key, raw in conn.execute(
-                    "SELECT name,payload FROM documents WHERE name LIKE 'quality-override:%'"
+                    "SELECT name,payload FROM documents WHERE name >= 'quality-override:' AND name < 'quality-override;'"
                 )
             },
             "settings": self.store.download_settings(),

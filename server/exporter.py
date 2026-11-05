@@ -187,7 +187,7 @@ class Exporter:
         if not row or json.loads(row[0]).get("sha256") != track["sha256"]:
             return False
         for (raw,) in conn.execute(
-            "SELECT payload FROM documents WHERE name LIKE 'removed:%'"
+            "SELECT payload FROM documents WHERE name >= 'removed:' AND name < 'removed;'"
         ):
             value = json.loads(raw)
             if value.get("track_id") == track["id"] and value.get("status") in {
@@ -207,7 +207,7 @@ class Exporter:
             removed = {
                 json.loads(v)["track_id"]
                 for (v,) in conn.execute(
-                    "SELECT payload FROM documents WHERE name LIKE 'removed:%'"
+                    "SELECT payload FROM documents WHERE name >= 'removed:' AND name < 'removed;'"
                 )
                 if json.loads(v).get("status") in {"removing", "removed"}
             }
