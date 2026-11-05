@@ -952,3 +952,16 @@ def test_jiosaavn_never_takes_a_sped_up_or_slowed_upload():
         resolved(unknown, [saavn("Summer Hits 2026", "s", duration=240)])
     same = saavn("Breathless - Single", "b", duration=240)
     assert resolved(unknown, [same]).endswith("/b.m4a")
+
+
+def test_one_alteration_is_never_another():
+    """Codex confirmation round (5 Nov): the check compared only 'altered or
+    not', so a reverb request took the 8D upload."""
+    target = {"artist": "CYRIL", "title": "Breathless", "duration": 171}
+    target["album"] = "Breathless (Reverb)"
+    for album in ("Breathless (8D)", "Breathless (Slowed + Reverb)", "Breathless"):
+        with pytest.raises(ValueError):
+            resolved(target, [saavn(album, "x")])
+    assert resolved(target, [saavn("Reverb Hits", "r")]).endswith("/r.m4a")
+    sped = {**target, "album": "Breathless (Sped Up)"}
+    assert resolved(sped, [saavn("Breathless (Speed Up)", "s")]).endswith("/s.m4a")

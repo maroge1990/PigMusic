@@ -37,7 +37,13 @@ ALTERED = re.compile(
 
 
 def altered(*texts):
-    return bool(ALTERED.search(" ".join(t or "" for t in texts)))
+    """The alterations a title or album names, speed synonyms as one kind:
+    a reverb upload is not the 8D one, nor slowed + reverb the slowed one."""
+    found = ALTERED.findall(" ".join(t or "" for t in texts))
+    return frozenset(
+        "sped" if word.lower().startswith(("sped", "speed")) else word.lower()
+        for word in found
+    )
 
 
 RELAYED = ("zvu4no", "freemp3cloud")
