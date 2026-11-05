@@ -1,6 +1,7 @@
 import PigAPI
 import PigBrand
 import PigDomain
+import PigPlayback
 import PigSync
 import SwiftUI
 
@@ -1040,6 +1041,12 @@ private struct ShazamListenView: View {
   @State private var attempt = 0
   @State private var found: ShazamSong?
   @State private var failure: ShazamFailure?
+  /// PigMusic's song paused for listening (#124).
+  @State private var listeningPause: ListeningPause?
+  private var offersResume: Bool {
+    listeningPause?.offersResume(
+      now: model.player.playbackMark, playing: model.player.playing) ?? false
+  }
   var body: some View {
     NavigationStack {
       Group {
@@ -1064,6 +1071,15 @@ private struct ShazamListenView: View {
           .accessibilityElement(children: .combine)
         }
       }
+      .safeAreaInset(edge: .bottom) {
+        if (found != nil || failure != nil) && offersResume {
+          Button("Resume playback", systemImage: "play.fill") {
+            listeningPause = nil
+            model.player.resume()
+          }
+          .buttonStyle(.bordered).padding()
+        }
+      }
       .pigCanvas().navigationTitle("What's playing?").navigationBarTitleDisplayMode(.inline)
       .toolbar { Button("Done", action: close) }
     }
@@ -1071,14 +1087,16 @@ private struct ShazamListenView: View {
       found = nil
       failure = nil
       // Listening records through PigMusic's own audio session and would
-      // hear PigMusic's song (#124): it pauses while listening and plays on
-      // afterwards, whatever the outcome.
+      // hear PigMusic's song (#124): it pauses, and never plays on by itself
+      // (a pause or interruption meanwhile must stand); "Resume playback" is
+      // offered while nothing else has changed playback.
       let player = model.player
-      let pausedForListening = player.playing
-      if pausedForListening { player.pause() }
+      if player.playing {
+        player.pause()
+        listeningPause = ListeningPause(after: player.playbackMark)
+      }
       let outcome = await ShazamListener.shared.identify(
         keepAudioActive: player.audioSessionActive)
-      if pausedForListening { player.resume() }
       switch outcome {
       case .success(let song): found = song
       case .failure(.cancelled): break

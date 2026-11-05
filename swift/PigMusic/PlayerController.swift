@@ -542,6 +542,9 @@ import PigSync
   /// "What's playing?" (#124) borrows the session to record and leaves it
   /// active afterwards while PigMusic holds it.
   var audioSessionActive: Bool { audioSession.isActive }
+  /// Which song, and how many Play, Pause and interruption changes so far:
+  /// "Resume playback" after listening is offered only while it is unchanged.
+  var playbackMark: PlaybackMark { PlaybackMark(item: queue.current?.id, revision: intent.revision) }
   @ObservationIgnored private var backgrounded = false
 
   /// Inactive (Control Centre, transitions) is not the same as backgrounded.
@@ -986,7 +989,7 @@ import PigSync
     artworkSource = nil
     artworkOccurrence = nil
     currentArtwork = nil
-    intent = PlaybackIntent()
+    intent.reset()
     playing = false
     preparing = false
     elapsed = 0
