@@ -31,6 +31,7 @@
 		7F270C7314244FC0A4D2CBBB /* PigSync in Frameworks */ = {isa = PBXBuildFile; productRef = 4F337A28AE8E9479782E0A6D /* PigSync */; };
 		80FB55DAAECF16F37CC005C6 /* PigAPI in Frameworks */ = {isa = PBXBuildFile; productRef = 1AD55F6B35CF20C479691C33 /* PigAPI */; };
 		84C0C7142785AAF4F6C987A0 /* PigStore in Frameworks */ = {isa = PBXBuildFile; productRef = F78ADD2090906AB62A1540AB /* PigStore */; };
+		8B6986DE10D9142D553210F3 /* PigMusic/WatchDownloadsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A827E284CEF61AECA62E5160 /* PigMusic/WatchDownloadsView.swift */; };
 		8D66645EFDD2E71EAF743FA0 /* PigMusic/demo-tone.m4a in Resources */ = {isa = PBXBuildFile; fileRef = 4D44330F571F678E16E5976D /* PigMusic/demo-tone.m4a */; };
 		9CBC40704DB3299044A72E59 /* PigMusic/ArtistAcquisitionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C762E1BA7F63AB9EA81B229 /* PigMusic/ArtistAcquisitionView.swift */; };
 		A645ED99462B7EA2FE73B7BC /* PigDownloads in Frameworks */ = {isa = PBXBuildFile; productRef = 22911A4C079B58143D1EA7D5 /* PigDownloads */; };
@@ -100,6 +101,7 @@
 		2826DC5ECF3BB7F4B4281097 /* PigMusicWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = PigMusicWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4C44087358A3231D30F36264 /* PigMusic/LibraryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PigMusic/LibraryViews.swift; sourceTree = "<group>"; };
 		4D44330F571F678E16E5976D /* PigMusic/demo-tone.m4a */ = {isa = PBXFileReference; lastKnownFileType = file; path = "PigMusic/demo-tone.m4a"; sourceTree = "<group>"; };
+		A827E284CEF61AECA62E5160 /* PigMusic/WatchDownloadsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PigMusic/WatchDownloadsView.swift; sourceTree = "<group>"; };
 		4EE208AEF635AF347BE14855 /* PigMusic/WatchPhoneController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PigMusic/WatchPhoneController.swift; sourceTree = "<group>"; };
 		519F6ED6640D2BDCF9D8B812 /* PigMusicWatch/PigMusicWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PigMusicWatch/PigMusicWatchApp.swift; sourceTree = "<group>"; };
 		55E147AF1AF6B2CA28A9BC96 /* PigMusic/DownloadsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PigMusic/DownloadsView.swift; sourceTree = "<group>"; };
@@ -192,6 +194,7 @@
 				6B189D1D7C2B99861A2C55B3 /* PigMusic/PlayerController.swift */,
 				92DBC13268733998956DEE43 /* PigMusic/PlaylistViews.swift */,
 				782019BB4C92EE2E91FE34DB /* PigMusic/SearchViews.swift */,
+				A827E284CEF61AECA62E5160 /* PigMusic/WatchDownloadsView.swift */,
 				4EE208AEF635AF347BE14855 /* PigMusic/WatchPhoneController.swift */,
 				EEE8C1DD6D13E0EB78367D33 /* Shared/CompanionLink.swift */,
 				519F6ED6640D2BDCF9D8B812 /* PigMusicWatch/PigMusicWatchApp.swift */,
@@ -367,6 +370,7 @@
 				4EBFAB763F062FB4A7A273D0 /* PigMusic/PlayerController.swift in Sources */,
 				08333ECADCBD3000A400AE91 /* PigMusic/PlaylistViews.swift in Sources */,
 				2CB0863E54CB0FB87C46108A /* PigMusic/SearchViews.swift in Sources */,
+				8B6986DE10D9142D553210F3 /* PigMusic/WatchDownloadsView.swift in Sources */,
 				4CE30B1F9BC2A5488E905549 /* PigMusic/WatchPhoneController.swift in Sources */,
 				AFA2AB66D46E78616729EC2C /* Shared/CompanionLink.swift in Sources */,
 			);
