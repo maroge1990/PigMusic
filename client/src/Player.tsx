@@ -36,6 +36,7 @@ import {
   type Song,
 } from "./songs";
 import { startFailure } from "./playStart";
+import { resolve } from "./playbackSource";
 import {
   afterEnd,
   canGoPrevious,
@@ -231,73 +232,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("keydown", keydown);
   }, [expanded]);
   const collapse = () => setExpanded(false);
-
-  /** Resolve the audio for one song: your file, or a stream when unsaved. */
-  async function resolve(s: Song) {
-    if (s.cache_id) {
-      const found = await resolveSaved(s.cache_id);
-      return { ...found, source: "Your mix" };
-    }
-    // Household files play straight from the server without being added.
-    if (s.state === "server" && s.server) return resolveSaved(s.server.id);
-    if (s.saved) return resolveSaved(s.saved.id);
-    if (s.release_id && (s.track_id || s.recording_id)) {
-      const response = await apiFetch("/api/v1/remote-playback/catalogue", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          release_id: s.release_id,
-          track_id: s.track_id,
-          recording_id: s.track_id ? undefined : s.recording_id,
-        }),
-      });
-      const body = await response.json();
-      if (!response.ok)
-        throw new Error(
-          typeof body.detail === "string"
-            ? body.detail
-            : "This song can't be streamed right now.",
-        );
-      return {
-        url: body.url as string,
-        source: body.source as string,
-        note: body.note as string | undefined,
-        saved_id:
-          body.history_track_id ||
-          (body.source === "Saved library" ? (body.id as string) : undefined),
-      };
-    }
-    const response = await apiFetch("/api/v1/remote-playback", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(songBody(s)),
-    });
-    const body = await response.json();
-    if (!response.ok)
-      throw new Error(
-        typeof body.detail === "string"
-          ? body.detail
-          : "This song can't be streamed right now.",
-      );
-    return {
-      url: body.url as string,
-      source: body.source as string,
-      note: body.note as string | undefined,
-      saved_id: body.history_track_id as string | undefined,
-    };
-  }
-  async function resolveSaved(id: string) {
-    const response = await apiFetch(
-      "/api/v1/playback/" + encodeURIComponent(id) + "/url",
-      { method: "POST" },
-    );
-    const body = await response.json();
-    if (!response.ok)
-      throw new Error(
-        typeof body.detail === "string" ? body.detail : "Playback unavailable.",
-      );
-    return { url: body.url as string, source: "Saved library", saved_id: id };
-  }
 
   async function load(s: Song) {
     reportPlay();
