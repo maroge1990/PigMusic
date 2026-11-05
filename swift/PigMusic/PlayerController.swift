@@ -539,6 +539,9 @@ import PigSync
   }
   @ObservationIgnored private let audioSession = PlaybackAudioSession(
     apply: PlayerController.configureAudioSession)
+  /// "What's playing?" (#124) borrows the session to record and leaves it
+  /// active afterwards while PigMusic holds it.
+  var audioSessionActive: Bool { audioSession.isActive }
   @ObservationIgnored private var backgrounded = false
 
   /// Inactive (Control Centre, transitions) is not the same as backgrounded.

@@ -6,6 +6,22 @@
   import Observation
   import ShazamKit
 
+  /// ShazamKit's managed session as the listening steps see it (#124).
+  private final class ManagedShazam: ShazamListeningSession {
+    let session: SHManagedSession
+    init(_ session: SHManagedSession) { self.session = session }
+    func prepare() async { await session.prepare() }
+    func result() async -> SHSession.Result { await session.result() }
+    func cancel() { session.cancel() }
+    @MainActor var stateName: String {
+      switch session.state {
+      case .idle: "idle"
+      case .prerecording: "prerecording"
+      case .matching: "matching"
+      }
+    }
+  }
+
   /// ShazamKit on the iPhone (D-70): listens only when asked, and keeps each
   /// identified song in the person's Shazam library, which the "Shazamed"
   /// list reads back. ShazamKit lets an app read only the songs it added
@@ -78,36 +94,60 @@
       }
     }
 
-    /// Listens once. The microphone permission is asked on the first try.
-    public func identify() async -> Result<ShazamSong, ShazamFailure> {
+    /// Listens once, for at most `ShazamListening.limit`. The microphone
+    /// permission is asked on the first try. `keepAudioActive`: PigMusic's
+    /// own audio session is active (playing or paused), so it stays active
+    /// once its category is put back (#124).
+    public func identify(
+      keepAudioActive: Bool = false
+    ) async -> Result<ShazamSong, ShazamFailure> {
       session?.cancel()
       let attempt = attempts.begin()
+      let log: @MainActor @Sendable (String) -> Void = { line in
+        DiagnosticsLog.shared.record("shazam", line)
+      }
       switch AVAudioApplication.shared.recordPermission {
-      case .granted: break
+      case .granted: log("microphone allowed")
       case .undetermined:
+        log("asking for the microphone")
         guard await AVAudioApplication.requestRecordPermission() else {
+          log("microphone refused")
           return .failure(.microphone)
         }
-      default: return .failure(.microphone)
+        log("microphone allowed")
+      default:
+        log("microphone not allowed")
+        return .failure(.microphone)
       }
       // The screen may have closed while the permission prompt was up: then
       // the microphone is never opened (Codex, build 21).
-      guard !Task.isCancelled, attempts.isCurrent(attempt) else { return .failure(.cancelled) }
+      guard !Task.isCancelled, attempts.isCurrent(attempt) else {
+        log("closed before listening")
+        return .failure(.cancelled)
+      }
       let session = SHManagedSession()
       self.session = session
       defer { if self.session === session { self.session = nil } }
-      let outcome = await withTaskCancellationHandler {
-        await session.result()
-      } onCancel: {
-        Task { @MainActor in session.cancel() }
-      }
+      let end = await ShazamListening.listen(
+        ManagedShazam(session), audio: Self.recordingAudio(keepActive: keepAudioActive, log: log), log: log)
       guard !Task.isCancelled, attempts.isCurrent(attempt) else {
         session.cancel()
         return .failure(.cancelled)
       }
+      let outcome: SHSession.Result
+      switch end {
+      case .finished(let result): outcome = result
+      case .timedOut: return .failure(.timedOut)
+      case .cancelled: return .failure(.cancelled)
+      case .audioUnavailable: return .failure(.unavailable)
+      }
       switch outcome {
       case .match(let match):
-        guard let item = match.mediaItems.first else { return .failure(.noMatch) }
+        guard let item = match.mediaItems.first else {
+          log("match without a song")
+          return .failure(.noMatch)
+        }
+        log("match")
         let song = await Self.detailedSong(item, found: Date())
         guard !Task.isCancelled, attempts.isCurrent(attempt) else { return .failure(.cancelled) }
         identified = ShazamInbox.merge([song] + identified)
@@ -117,16 +157,65 @@
             try await SHLibrary.default.addItems([item])
             saveFailed = false
           } catch {
+            log("saving to the Shazam library failed: \(ShazamListening.describe(error))")
             saveFailed = true
           }
         }
         return .success(song)
       case .noMatch:
+        log("no match")
         return .failure(.noMatch)
       case .error(let error, _):
+        log("error \(ShazamListening.describe(error))")
         if Task.isCancelled || !attempts.isCurrent(attempt) { return .failure(.cancelled) }
         return .failure(Self.failure(error))
       }
+    }
+
+    /// ShazamKit records through the app's shared audio session, which
+    /// PigMusic sets to `.playback` for its own songs and which otherwise
+    /// starts as `.soloAmbient`: neither has an input, so a managed session
+    /// hears nothing (#124). While listening the session is `.playAndRecord`;
+    /// afterwards its category, mode, policy and options are put back, and it
+    /// is released unless PigMusic had it active.
+    private static func recordingAudio(
+      keepActive: Bool, log: @escaping @MainActor @Sendable (String) -> Void
+    ) -> ShazamAudioHooks {
+      final class Saved: @unchecked Sendable {
+        var category = AVAudioSession.Category.soloAmbient
+        var mode = AVAudioSession.Mode.default
+        var policy = AVAudioSession.RouteSharingPolicy.default
+        var options: AVAudioSession.CategoryOptions = []
+      }
+      let saved = Saved()
+      return ShazamAudioHooks(
+        begin: {
+          let audio = AVAudioSession.sharedInstance()
+          saved.category = audio.category
+          saved.mode = audio.mode
+          saved.policy = audio.routeSharingPolicy
+          saved.options = audio.categoryOptions
+          log(
+            "audio session was \(saved.category.rawValue) \(saved.mode.rawValue), "
+              + "input available \(audio.isInputAvailable)")
+          try audio.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+          try audio.setActive(true)
+        },
+        end: {
+          let audio = AVAudioSession.sharedInstance()
+          do {
+            try audio.setCategory(
+              saved.category, mode: saved.mode, policy: saved.policy, options: saved.options)
+          } catch {
+            log("putting the audio session back failed: \(ShazamListening.describe(error))")
+          }
+          guard !keepActive else { return }
+          do {
+            try audio.setActive(false, options: .notifyOthersOnDeactivation)
+          } catch {
+            log("releasing the audio session failed: \(ShazamListening.describe(error))")
+          }
+        })
     }
 
     public func cancel() {

@@ -113,6 +113,8 @@ public enum ShazamInbox {
 public enum ShazamFailure: Error, Sendable, Hashable {
   case microphone
   case noMatch
+  /// Nothing came back within the listening limit (#124).
+  case timedOut
   case offline
   case unavailable
   case cancelled
@@ -121,6 +123,7 @@ public enum ShazamFailure: Error, Sendable, Hashable {
     case .microphone:
       "PigMusic can't use the microphone. Allow it in Settings › Apps › PigMusic to identify songs."
     case .noMatch: "No match. Try again closer to the music."
+    case .timedOut: "Couldn't identify the song. Try again closer to the music."
     case .offline: "Identifying a song needs the internet. Check your connection and try again."
     case .unavailable: "Song recognition isn't working right now. Try again shortly."
     case .cancelled: "Stopped listening."

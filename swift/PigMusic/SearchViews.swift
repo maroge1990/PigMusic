@@ -1070,7 +1070,16 @@ private struct ShazamListenView: View {
     .task(id: attempt) {
       found = nil
       failure = nil
-      switch await ShazamListener.shared.identify() {
+      // Listening records through PigMusic's own audio session and would
+      // hear PigMusic's song (#124): it pauses while listening and plays on
+      // afterwards, whatever the outcome.
+      let player = model.player
+      let pausedForListening = player.playing
+      if pausedForListening { player.pause() }
+      let outcome = await ShazamListener.shared.identify(
+        keepAudioActive: player.audioSessionActive)
+      if pausedForListening { player.resume() }
+      switch outcome {
       case .success(let song): found = song
       case .failure(.cancelled): break
       case .failure(let reason): failure = reason
