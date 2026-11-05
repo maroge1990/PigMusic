@@ -531,7 +531,7 @@ class Organisation:
             return [
                 json.loads(v)
                 for (v,) in c.execute(
-                    "SELECT payload FROM documents WHERE name LIKE 'organisation:%' "
+                    "SELECT payload FROM documents WHERE name >= 'organisation:' AND name < 'organisation;' "
                     "AND json_extract(payload,'$.status') IN ('completed','undoing') "
                     "ORDER BY rowid DESC LIMIT ? OFFSET ?",
                     (-1 if limit is None else limit, offset),
