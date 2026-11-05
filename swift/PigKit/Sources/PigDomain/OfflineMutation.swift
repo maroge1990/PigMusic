@@ -45,6 +45,16 @@ public struct OfflineMutationReceipt: Codable, Sendable {
   public var playlistId: String?
   public var revision: Int?
   public var favourited: Bool?
+  public init(
+    operationId: String, applied: Bool, playlistId: String? = nil, revision: Int? = nil,
+    favourited: Bool? = nil
+  ) {
+    self.operationId = operationId
+    self.applied = applied
+    self.playlistId = playlistId
+    self.revision = revision
+    self.favourited = favourited
+  }
 }
 public enum MutationRejection: Error, LocalizedError, Sendable {
   case rejected

@@ -829,53 +829,20 @@ enum PlayOrigin: Hashable {
     defer { flushingEdits = false }
     var applied = false
     do {
-      // Edits to one playlist (or one song's favourite) stay in order: once one
-      // conflicts or is rejected, later edits to the same thing wait for review.
-      // Edits to anything else still go through. A network failure stops all.
-      var blocked: Set<String> = []
-      sending: for item in try await store.pendingMutations() {
-        guard account.isCurrent(stamp) else { return applied }
-        let scope = Self.editScope(item.mutation)
-        guard item.state == "queued", !blocked.contains(scope) else {
-          blocked.insert(scope)
-          continue
-        }
-        do {
-          let receipt = try await service.applyMutation(item.mutation)
-          guard receipt.applied, receipt.operationId == item.id, account.isCurrent(stamp) else {
-            return applied
-          }
-          try await store.acknowledgeMutation(item.id)
-          applied = true
-        } catch NativeFailure.authentication {
-          revoked(generation: stamp)
-          return applied
-        } catch NativeFailure.changed {
-          var changed = item
-          changed.state = "conflict"
-          changed.message =
-            "This playlist changed on the server. Discard this edit or review the current playlist before reapplying it."
-          try await store.updateMutation(changed)
-          blocked.insert(scope)
-        } catch is MutationRejection {
-          var rejected = item
-          rejected.state = "rejected"
-          rejected.message = "The server could not apply this edit. Review its song or playlist."
-          try await store.updateMutation(rejected)
-          blocked.insert(scope)
-        } catch {
-          break sending
-        }
+      // Edits to one thing stay in order; a network failure stops all.
+      let stop = try await EditOutbox.send(
+        store: store, isCurrent: { [account] in account.isCurrent(stamp) }, applied: &applied
+      ) { try await service.applyMutation($0) }
+      switch stop {
+      case .sent: break
+      case .stale: return applied
+      case .signedOut:
+        revoked(generation: stamp)
+        return applied
       }
       if account.isCurrent(stamp) { pendingEdits = try await store.pendingMutations() }
     } catch { if account.isCurrent(stamp) { message = error.userMessage } }
     return applied
-  }
-  /// What an edit changes, for keeping dependent edits in order.
-  private static func editScope(_ mutation: OfflineMutation) -> String {
-    if let playlist = mutation.playlistId { return "playlist:" + playlist }
-    if let track = mutation.track { return mutation.action + ":" + track.id }
-    return mutation.action + ":" + (mutation.name ?? "")
   }
   func discardEdit(_ id: String) async {
     guard !flushingEdits, let store else { return }
