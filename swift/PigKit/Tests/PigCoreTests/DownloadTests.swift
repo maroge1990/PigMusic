@@ -512,6 +512,59 @@ private actor Flag {
     }
     #expect(await archive.localFile(song) == nil)
   }
+  /// Codex round 1 on #127: a background transfer can finish while the
+  /// person's Pause of that song is handled, or before a relaunch recovers
+  /// it. The finished file is kept and published, and the pause cleared since
+  /// nothing is left to fetch; it is never failed or deleted, nor left
+  /// paused-and-ready. A paused song with no finished file stays paused.
+  @MainActor @Test func aFileFinishedAfterItsSongWasPausedIsKept() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    // The transport keeps arrived files in its own folder, beside the archive's.
+    let transfers = root.appendingPathComponent("transfers")
+    try FileManager.default.createDirectory(at: transfers, withIntermediateDirectories: true)
+    let library = root.appendingPathComponent("archive")
+    let archive = try archive(library)
+    let all = try songs(["late", "relaunch", "waiting"])
+    try await archive.enqueue(all, quality: "original")
+    let manifest = try copy()
+    func record(_ archive: DownloadArchive, _ id: String) async -> DownloadRecord? {
+      await archive.snapshot().first { $0.id == id }
+    }
+    // Delivered while the pause is handled.
+    let late = try #require(await record(archive, "late"))
+    try await archive.prepareFileTransfer(late, manifest: manifest, budget: 1_000_000)
+    try await archive.setPaused(id: "late", true)
+    let arrived = transfers.appendingPathComponent("late.incoming")
+    try CopyProtocol.payload.write(to: arrived)
+    try await archive.publishFile(arrived, record: late, manifest: manifest, budget: 1_000_000)
+    #expect(await record(archive, "late")?.state == "ready")
+    #expect(await record(archive, "late")?.paused == nil)
+    #expect(await archive.localFile(all[0]) != nil)
+    // Recovered after a relaunch: the file arrived, then the app was reopened
+    // with the song paused.
+    let relaunch = try #require(await record(archive, "relaunch"))
+    try await archive.prepareFileTransfer(relaunch, manifest: manifest, budget: 1_000_000)
+    try await archive.setPaused(id: "relaunch", true)
+    try await archive.setPaused(id: "waiting", true)
+    let recovered = transfers.appendingPathComponent("relaunch.incoming")
+    try CopyProtocol.payload.write(to: recovered)
+    let reopened = try self.archive(library)
+    #expect(await record(reopened, "relaunch")?.paused == true)
+    try await reopened.publishFile(
+      recovered, record: relaunch, manifest: manifest, budget: 1_000_000)
+    #expect(await record(reopened, "relaunch")?.state == "ready")
+    #expect(await record(reopened, "relaunch")?.paused == nil)
+    #expect(await reopened.localFile(all[1]) != nil)
+    #expect(await reopened.localFile(all[0]) != nil)
+    // The song with no finished file stays paused and isn't fetched.
+    let source = AheadSource(ready: try copy(), preparing: try copy())
+    let controller = DownloadController(archive: reopened, source: source)
+    controller.resume()
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(await source.calls.isEmpty)
+    #expect(await record(reopened, "waiting")?.isPaused == true)
+  }
   @Test func queueEditingPreservesRepeatedOccurrencesAndCurrentIdentity() throws {
     let song = try track()
     var queue = PlaybackQueue()

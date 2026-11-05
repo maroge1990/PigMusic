@@ -260,6 +260,8 @@
           response.mime != "text/html", response.mime != "application/json"
         else { throw OfflineFailure.unsafeResponse }
         try Task.checkCancellation()
+        // A song paused after its file arrived is still published: the
+        // archive keeps the file and clears the pause (#127).
         try await archive.publishFile(
           file, record: job.record, manifest: job.manifest, budget: budgetBytes)
         removeJob(id)

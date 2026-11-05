@@ -230,6 +230,17 @@ public actor DownloadArchive {
     records[index].paused = paused ? true : nil
     try persist()
   }
+  /// A file that finished downloading is kept even if the person paused the
+  /// song meanwhile (a background transfer can complete while the Pause is
+  /// handled, or before a relaunch recovers it): the audio is already on the
+  /// phone, so publication clears the pause, since nothing is left to fetch
+  /// (#127). Publication never fails because a song is paused.
+  private func clearFinishedPause(_ index: Int) {
+    guard records[index].paused == true else { return }
+    records[index].paused = nil
+    DiagnosticsLog.shared.record(
+      "downloads", "a paused song's download had already finished; kept, pause cleared")
+  }
   /// One transfer goes back to the queue (its network rules changed).
   public func requeue(id: String) throws {
     guard let index = records.firstIndex(where: { $0.id == id && $0.state == "downloading" })
@@ -308,6 +319,7 @@ public actor DownloadArchive {
     let retained = previous.retained
     records[index].retained = nil
     records[index].state = "ready"
+    clearFinishedPause(index)
     records[index].bytes = manifest.bytes
     records[index].total = manifest.bytes
     records[index].fileName = name
@@ -399,14 +411,17 @@ public actor DownloadArchive {
     }
     try FileManager.default.moveItem(at: temporary, to: output)
     let retained = records[index].retained
+    let paused = records[index].paused
     records[index].retained = nil
     records[index].state = "ready"
+    clearFinishedPause(index)
     records[index].bytes = bytes
     records[index].total = bytes
     records[index].fileName = name
     records[index].checksum = expected
     do { try persist() } catch {
       records[index].retained = retained
+      records[index].paused = paused
       records[index].state = "failed"
       try? FileManager.default.removeItem(at: output)
       throw error
