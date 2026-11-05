@@ -410,7 +410,9 @@ def test_document_prefix_reads_use_the_primary_key(tmp_path):
     from server.store import Store
 
     store = Store(tmp_path / "data")
-    source = Path(__file__).resolve().parents[1] / "server"
+    from source import SOURCE
+
+    source = SOURCE / "server"
     queries = set()
     for path in source.glob("*.py"):
         for match in re.finditer(r"FROM documents WHERE [^\"]+", path.read_text()):
