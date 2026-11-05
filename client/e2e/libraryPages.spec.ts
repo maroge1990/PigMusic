@@ -294,3 +294,41 @@ test("cancelling a removal keeps the song", async ({ page }) => {
   await expect(page).toHaveURL(/album\/album-1$/);
   expect(calls).toEqual([]);
 });
+
+// Playlist options rename a playlist, and delete it only once confirmed.
+test("a playlist is renamed, then deleted once confirmed", async ({ page }) => {
+  const calls: string[] = [];
+  await mockApi(page, {
+    answers: {
+      "/v1/playlists/p1": (route: Route) => {
+        const request = route.request();
+        const url = new URL(request.url());
+        if (request.method() !== "GET")
+          calls.push(
+            `${request.method()}${url.search} ${request.postData() ?? ""}`.trim(),
+          );
+        return route.fulfill({
+          json: { id: "p1", name: "Road trip", revision: 2, entries: [] },
+        });
+      },
+    },
+  });
+  await page.goto("/#/library/playlist/p1");
+  await page.getByText("Playlist options").click();
+  await page.getByLabel("Playlist name").fill("Long drive");
+  await page.getByRole("button", { name: "Rename" }).click();
+  await expect.poll(() => calls.length).toBe(1);
+  expect(calls[0]).toBe('PATCH {"revision":2,"name":"Long drive"}');
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page.getByRole("button", { name: "Delete playlist" }).click();
+  await expect(page).toHaveURL(/playlist\/p1$/);
+  expect(calls).toHaveLength(1);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Delete playlist" }).click();
+  await expect.poll(() => calls.length).toBe(2);
+  expect(calls[1]).toBe("DELETE?revision=2");
+  await expect(page.getByRole("status").first()).toContainText(
+    "Playlist deleted",
+  );
+  await expect(page).toHaveURL(/#\/library\/[a-z]+$/);
+});
