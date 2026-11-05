@@ -52,7 +52,7 @@ import SwiftUI
   @ObservationIgnored private var lastAdvance = Date.distantPast
   /// The context last handed to WatchConnectivity, which keeps delivering it.
   @ObservationIgnored private var contextSent: CompanionContext?
-  @ObservationIgnored private var deferredPublish: Task<Void, Never>?
+  @ObservationIgnored private let deferredPublish = DeferredRun()
   init(model: AppModel, defaults: UserDefaults) {
     self.model = model
     self.defaults = defaults
@@ -427,6 +427,7 @@ import SwiftUI
   }
   func disconnect() {
     account.end()
+    deferredPublish.cancel()
     if let downloads { Task { await downloads.clear() } }
     downloads = nil
     readyCache = nil
@@ -609,13 +610,14 @@ import SwiftUI
   }
   /// Publishes again once the batch interval has passed.
   private func deferPublish(after seconds: TimeInterval) {
-    guard deferredPublish == nil else { return }
     let stamp = account.generation
-    deferredPublish = Task { [weak self] in
-      try? await Task.sleep(for: .seconds(max(1, seconds)))
-      guard let self, account.isCurrent(stamp) else { return }
-      deferredPublish = nil
-      await publish()
+    // Cleared whenever its wait ends, even for an account that has gone, so
+    // the next deferred publish is scheduled (#123).
+    deferredPublish.schedule(
+      after: .seconds(max(1, seconds)),
+      isCurrent: { [weak self] in self?.account.isCurrent(stamp) ?? false }
+    ) { [weak self] in
+      await self?.publish()
     }
   }
   /// Asks the Watch for its lifecycle log; it answers when it can.
