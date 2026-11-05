@@ -22,7 +22,9 @@ public enum ShazamListenEnd<Outcome: Sendable>: Sendable {
 }
 
 /// Switches the app's audio session to one that can record before listening,
-/// and back afterwards. `end` always runs once `begin` has succeeded.
+/// and back afterwards. Once `begin` is called, `end` runs exactly once,
+/// even when `begin` failed part-way (Codex, #124: a category set before
+/// activation failed was never put back).
 public struct ShazamAudioHooks: Sendable {
   public var begin: @MainActor @Sendable () throws -> Void
   public var end: @MainActor @Sendable () -> Void
@@ -33,6 +35,53 @@ public struct ShazamAudioHooks: Sendable {
     self.begin = begin
     self.end = end
   }
+
+  /// The app's audio session, recording while listening: its configuration
+  /// is read before anything changes and put back afterwards; it is released
+  /// unless `keepActive` (PigMusic holds it).
+  public static func recording<Audio: ListeningAudioSession>(
+    _ audio: Audio, keepActive: Bool, log: @escaping @MainActor @Sendable (String) -> Void
+  ) -> ShazamAudioHooks {
+    let saved = SavedAudio<Audio.Configuration>()
+    return ShazamAudioHooks(
+      begin: {
+        let configuration = audio.configuration()
+        saved.configuration = configuration
+        log("audio session was \(audio.describe(configuration))")
+        try audio.record()
+        try audio.activate()
+      },
+      end: {
+        guard let configuration = saved.configuration else { return }
+        saved.configuration = nil
+        do { try audio.restore(configuration) } catch {
+          log("putting the audio session back failed: \(ShazamListening.describe(error))")
+        }
+        guard !keepActive else { return }
+        do { try audio.release() } catch {
+          log("releasing the audio session failed: \(ShazamListening.describe(error))")
+        }
+      })
+  }
+}
+
+/// The configuration listening put aside, used on the main actor only.
+private final class SavedAudio<Configuration>: @unchecked Sendable {
+  var configuration: Configuration?
+}
+
+/// The app's audio session as listening uses it (AVAudioSession on the
+/// iPhone; a fake in tests).
+public protocol ListeningAudioSession: Sendable {
+  associatedtype Configuration
+  /// The category, mode, policy and options in force.
+  @MainActor func configuration() -> Configuration
+  @MainActor func describe(_ configuration: Configuration) -> String
+  /// A category that records (`.playAndRecord`).
+  @MainActor func record() throws
+  @MainActor func activate() throws
+  @MainActor func restore(_ configuration: Configuration) throws
+  @MainActor func release() throws
 }
 
 /// One listen with a hard limit (#124: the sheet stayed on "Listening…"
@@ -45,16 +94,18 @@ public struct ShazamAudioHooks: Sendable {
     log: @escaping @MainActor @Sendable (String) -> Void
   ) async -> ShazamListenEnd<Session.Outcome> {
     if Task.isCancelled { return .cancelled }
+    // Installed before anything changes: a begin that fails part-way is
+    // put back too, once.
+    defer {
+      audio.end()
+      log("audio session restored")
+    }
     do {
       try audio.begin()
       log("audio session ready to record")
     } catch {
       log("audio session can't record: \(Self.describe(error))")
       return .audioUnavailable
-    }
-    defer {
-      audio.end()
-      log("audio session restored")
     }
     let race = ShazamRace<Session.Outcome>()
     let work = Task { @MainActor in

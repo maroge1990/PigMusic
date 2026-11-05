@@ -6,6 +6,39 @@
   import Observation
   import ShazamKit
 
+  /// ShazamKit records through the app's shared audio session, which
+  /// PigMusic sets to `.playback` for its own songs and which otherwise
+  /// starts as `.soloAmbient`: neither has an input, so a managed session
+  /// hears nothing (#124). While listening it is `.playAndRecord`.
+  private struct SharedAudioSession: ListeningAudioSession {
+    struct Configuration {
+      var category: AVAudioSession.Category
+      var mode: AVAudioSession.Mode
+      var policy: AVAudioSession.RouteSharingPolicy
+      var options: AVAudioSession.CategoryOptions
+    }
+    private var audio: AVAudioSession { .sharedInstance() }
+    func configuration() -> Configuration {
+      Configuration(
+        category: audio.category, mode: audio.mode, policy: audio.routeSharingPolicy,
+        options: audio.categoryOptions)
+    }
+    func describe(_ configuration: Configuration) -> String {
+      "\(configuration.category.rawValue) \(configuration.mode.rawValue), "
+        + "input available \(audio.isInputAvailable)"
+    }
+    func record() throws {
+      try audio.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+    }
+    func activate() throws { try audio.setActive(true) }
+    func restore(_ configuration: Configuration) throws {
+      try audio.setCategory(
+        configuration.category, mode: configuration.mode, policy: configuration.policy,
+        options: configuration.options)
+    }
+    func release() throws { try audio.setActive(false, options: .notifyOthersOnDeactivation) }
+  }
+
   /// ShazamKit's managed session as the listening steps see it (#124).
   private final class ManagedShazam: ShazamListeningSession {
     let session: SHManagedSession
@@ -128,8 +161,9 @@
       let session = SHManagedSession()
       self.session = session
       defer { if self.session === session { self.session = nil } }
-      let end = await ShazamListening.listen(
-        ManagedShazam(session), audio: Self.recordingAudio(keepActive: keepAudioActive, log: log), log: log)
+      let audio = ShazamAudioHooks.recording(
+        SharedAudioSession(), keepActive: keepAudioActive, log: log)
+      let end = await ShazamListening.listen(ManagedShazam(session), audio: audio, log: log)
       guard !Task.isCancelled, attempts.isCurrent(attempt) else {
         session.cancel()
         return .failure(.cancelled)
@@ -170,52 +204,6 @@
         if Task.isCancelled || !attempts.isCurrent(attempt) { return .failure(.cancelled) }
         return .failure(Self.failure(error))
       }
-    }
-
-    /// ShazamKit records through the app's shared audio session, which
-    /// PigMusic sets to `.playback` for its own songs and which otherwise
-    /// starts as `.soloAmbient`: neither has an input, so a managed session
-    /// hears nothing (#124). While listening the session is `.playAndRecord`;
-    /// afterwards its category, mode, policy and options are put back, and it
-    /// is released unless PigMusic had it active.
-    private static func recordingAudio(
-      keepActive: Bool, log: @escaping @MainActor @Sendable (String) -> Void
-    ) -> ShazamAudioHooks {
-      final class Saved: @unchecked Sendable {
-        var category = AVAudioSession.Category.soloAmbient
-        var mode = AVAudioSession.Mode.default
-        var policy = AVAudioSession.RouteSharingPolicy.default
-        var options: AVAudioSession.CategoryOptions = []
-      }
-      let saved = Saved()
-      return ShazamAudioHooks(
-        begin: {
-          let audio = AVAudioSession.sharedInstance()
-          saved.category = audio.category
-          saved.mode = audio.mode
-          saved.policy = audio.routeSharingPolicy
-          saved.options = audio.categoryOptions
-          log(
-            "audio session was \(saved.category.rawValue) \(saved.mode.rawValue), "
-              + "input available \(audio.isInputAvailable)")
-          try audio.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
-          try audio.setActive(true)
-        },
-        end: {
-          let audio = AVAudioSession.sharedInstance()
-          do {
-            try audio.setCategory(
-              saved.category, mode: saved.mode, policy: saved.policy, options: saved.options)
-          } catch {
-            log("putting the audio session back failed: \(ShazamListening.describe(error))")
-          }
-          guard !keepActive else { return }
-          do {
-            try audio.setActive(false, options: .notifyOthersOnDeactivation)
-          } catch {
-            log("releasing the audio session failed: \(ShazamListening.describe(error))")
-          }
-        })
     }
 
     public func cancel() {
