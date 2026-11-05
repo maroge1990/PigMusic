@@ -36,6 +36,30 @@ import {
   type Song,
 } from "./songs";
 import { startFailure } from "./playStart";
+import {
+  afterEnd,
+  canGoPrevious,
+  freshRadioSongs,
+  hasNext as queueHasNext,
+  insertNext,
+  lastRadioSong,
+  moveUpcoming as moveInQueue,
+  nextRepeat,
+  parseRepeat,
+  parseSavedQueue,
+  previousRestarts,
+  QUEUE_KEY,
+  radioRunningLow,
+  removeUpcoming as removeFromQueue,
+  REPEAT_KEY,
+  serializeQueue,
+  skipSteersRadio,
+  stepIndex,
+  upcomingToPrepare,
+  waitsForRadio,
+  type RepeatMode,
+  type SavedQueue,
+} from "./queue";
 
 type Playing = Song & {
   url?: string;
@@ -63,20 +87,9 @@ export const usePlayer = () => useContext(Context);
 const time = (n: number) =>
   `${Math.floor((n || 0) / 60)}:${String(Math.floor((n || 0) % 60)).padStart(2, "0")}`;
 
-const QUEUE_KEY = "pig-music-queue";
-function readSavedQueue(): {
-  songs: Song[];
-  cursor: number;
-  position: number;
-} | null {
+function readSavedQueue(): SavedQueue | null {
   try {
-    const saved = JSON.parse(localStorage.getItem(QUEUE_KEY) || "null");
-    if (!Array.isArray(saved?.songs) || !saved.songs[saved.cursor]) return null;
-    return {
-      songs: saved.songs,
-      cursor: saved.cursor,
-      position: Number(saved.position) || 0,
-    };
+    return parseSavedQueue(localStorage.getItem(QUEUE_KEY));
   } catch {
     return null;
   }
@@ -124,17 +137,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   function saveQueue(position?: number) {
     savedAt.current = Date.now();
     try {
-      if (!queue.current.length || cursor.current < 0)
-        localStorage.removeItem(QUEUE_KEY);
-      else
-        localStorage.setItem(
-          QUEUE_KEY,
-          JSON.stringify({
-            songs: queue.current.slice(0, 500),
-            cursor: Math.min(cursor.current, 499),
-            position: position ?? audio.current?.currentTime ?? 0,
-          }),
-        );
+      const saved = serializeQueue(
+        queue.current,
+        cursor.current,
+        position ?? audio.current?.currentTime ?? 0,
+      );
+      if (saved === null) localStorage.removeItem(QUEUE_KEY);
+      else localStorage.setItem(QUEUE_KEY, saved);
     } catch {
       /* Storage full or unavailable: the queue lasts for this visit. */
     }
@@ -313,8 +322,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         : null;
       setSong({ ...s, ...found });
       prepareUpcoming();
-      if (s.radio && queue.current.length - 1 - cursor.current <= 5)
-        void refillRadio();
+      if (radioRunningLow(s, queue.current, cursor.current)) void refillRadio();
     } catch (e) {
       if (request === serial.current) setError((e as Error).message);
     } finally {
@@ -323,9 +331,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }
   /** Ask the server to fetch the next streamed songs before they are reached. */
   function prepareUpcoming() {
-    const next = queue.current
-      .slice(cursor.current + 1, cursor.current + 3)
-      .filter((s) => !s.cache_id && !s.saved && s.state !== "server");
+    const next = upcomingToPrepare(queue.current, cursor.current);
     if (!next.length) return;
     void apiFetch("/api/v1/remote-playback/prepare", {
       method: "POST",
@@ -337,16 +343,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   /** Radio: append the next prepared songs; resolves to how many arrived. */
   function refillRadio(): Promise<number> {
     if (radioRequest.current) return radioRequest.current;
-    const last = [...queue.current].reverse().find((s) => s.radio);
+    const last = lastRadioSong(queue.current);
     if (!last?.cache_id) return Promise.resolve(0);
     radioRequest.current = api<{ tracks: Track[] }>(
       "/v1/radio?after=" + encodeURIComponent(last.cache_id),
     )
       .then((batch) => {
-        const known = new Set(queue.current.map((s) => s.cache_id));
-        const added = batch.tracks
-          .map((t) => fromMixTrack(t, true))
-          .filter((s) => !known.has(s.cache_id));
+        const added = freshRadioSongs(
+          queue.current,
+          batch.tracks.map((t) => fromMixTrack(t, true)),
+        );
         queue.current.push(...added);
         if (added.length) setQueueVersion((v) => v + 1);
         return added.length;
@@ -359,16 +365,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }
   /** Skipping a radio song before it counts as a listen steers the station. */
   function next() {
-    const event = playEvent.current;
-    if (
-      song?.radio &&
-      song.cache_id &&
-      !(event && event.seconds >= LISTEN_SECONDS)
-    )
+    if (skipSteersRadio(song, playEvent.current?.seconds, LISTEN_SECONDS))
       void api("/v1/radio/feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ track_id: song.cache_id, action: "skip" }),
+        body: JSON.stringify({ track_id: song?.cache_id, action: "skip" }),
       }).catch(() => undefined);
     step(1);
   }
@@ -393,7 +394,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }
   function playNext(s: Song) {
     if (!song) return play([s]);
-    queue.current.splice(cursor.current + 1, 0, s);
+    insertNext(queue.current, cursor.current, s);
     setQueueVersion((v) => v + 1);
   }
   function addToQueue(s: Song) {
@@ -401,47 +402,42 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     queue.current.push(s);
     setQueueVersion((v) => v + 1);
   }
-  /** Like iPhone: off, the whole queue again, or the current song again. */
-  const [repeat, setRepeat] = useState<"off" | "all" | "one">(() => {
+  const [repeat, setRepeat] = useState<RepeatMode>(() => {
     try {
-      const saved = localStorage.getItem("pig-music-repeat");
-      return saved === "all" || saved === "one" ? saved : "off";
+      return parseRepeat(localStorage.getItem(REPEAT_KEY));
     } catch {
       return "off";
     }
   });
   function cycleRepeat() {
-    const next = repeat === "off" ? "all" : repeat === "all" ? "one" : "off";
+    const next = nextRepeat(repeat);
     setRepeat(next);
     try {
-      localStorage.setItem("pig-music-repeat", next);
+      localStorage.setItem(REPEAT_KEY, next);
     } catch {
       /* Remembered for this visit only. */
     }
   }
   function moveUpcoming(at: number, delta: number) {
-    const target = at + delta;
-    if (target <= cursor.current || target >= queue.current.length) return;
-    const [item] = queue.current.splice(at, 1);
-    queue.current.splice(target, 0, item);
+    if (!moveInQueue(queue.current, cursor.current, at, delta)) return;
     setQueueVersion((v) => v + 1);
     prepareUpcoming();
   }
   function removeUpcoming(at: number) {
-    if (at <= cursor.current) return;
-    queue.current.splice(at, 1);
+    if (!removeFromQueue(queue.current, cursor.current, at)) return;
     setQueueVersion((v) => v + 1);
     prepareUpcoming();
   }
   function step(delta: number) {
-    let index = cursor.current + delta;
-    // Repeat all wraps around the queue in both directions.
-    if (repeat === "all" && queue.current.length)
-      index = (index + queue.current.length) % queue.current.length;
+    const index = stepIndex(
+      queue.current.length,
+      cursor.current,
+      delta,
+      repeat,
+    );
     const next = queue.current[index];
     if (!next) {
-      // Radio has no end: wait for the next prepared songs instead of stopping.
-      if (delta > 0 && queue.current[cursor.current]?.radio)
+      if (waitsForRadio(queue.current, cursor.current, delta))
         void refillRadio().then((added) => added && step(delta));
       return;
     }
@@ -455,7 +451,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (
       element &&
       song?.url &&
-      (element.currentTime > 3 || cursor.current <= 0)
+      previousRestarts(element.currentTime, cursor.current)
     ) {
       element.currentTime = 0;
       setPosition(0);
@@ -467,13 +463,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     // its saved position.
     if (song?.url) saveQueue();
   }, [song?.url, queueVersion]);
-  const canPrevious = !busy && (!!song?.url || cursor.current > 0);
+  const canPrevious = canGoPrevious(busy, !!song?.url, cursor.current);
   const index = cursor.current;
-  const hasNext =
-    index >= 0 &&
-    (index < queue.current.length - 1 ||
-      !!queue.current[index]?.radio ||
-      (repeat === "all" && queue.current.length > 0));
+  const hasNext = queueHasNext(queue.current, index, repeat);
   useEffect(() => {
     if (!song?.url) return;
     const request = serial.current;
@@ -639,8 +631,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           onEnded={() => {
             reportPlay();
             setPlaying(false);
-            // Repeat one plays the song again as a new play.
-            if (repeat === "one") void load(queue.current[cursor.current]);
+            if (afterEnd(repeat) === "again")
+              void load(queue.current[cursor.current]);
             else step(1);
           }}
           onError={() => {
