@@ -77,6 +77,8 @@ public actor DownloadArchive {
         let old = records[index]
         var replacement = DownloadRecord(track: track, quality: quality)
         replacement.origins = old.origins
+        // Adding the song again (an album, a retry) keeps the person's pause.
+        if old.state != "ready" { replacement.paused = old.paused }
         if old.track.sourceRevision == track.sourceRevision {
           if old.state == "ready", let name = old.fileName {
             replacement.retained = RetainedDownload(
@@ -218,6 +220,14 @@ public actor DownloadArchive {
       records[index].state = "queued"
       records[index].bytes = 0
     }
+    try persist()
+  }
+  /// The person's pause on one song still to download (#127); saved with the
+  /// list, so it lasts across app restarts.
+  public func setPaused(id: String, _ paused: Bool) throws {
+    guard let index = records.firstIndex(where: { $0.id == id }) else { return }
+    if paused && !["queued", "downloading"].contains(records[index].state) { return }
+    records[index].paused = paused ? true : nil
     try persist()
   }
   /// One transfer goes back to the queue (its network rules changed).

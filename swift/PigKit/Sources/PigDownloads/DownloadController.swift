@@ -114,7 +114,8 @@ import PigDomain
     await reload()
   }
   /// `resume()` is the person's Resume: it clears their Pause. `automatic: true`
-  /// is every internal restart. Neither lifts the suspension while the app is in
+  /// is every internal restart. Neither resumes a song the person paused on its
+  /// own (#127): that takes `resume(id:)`. Neither lifts the suspension while the app is in
   /// the background or before the owner allows preparation: copies are prepared
   /// only in the foreground, while transfers already running may finish (D-51).
   public func resume(automatic: Bool = false) {
@@ -144,12 +145,15 @@ import PigDomain
           if let background, background.activeCount >= 128 { break }
         #endif
         let all = await archive.snapshot()
-        guard let record = all.first(where: { $0.state == "queued" }) else { break }
+        // A song the person paused on its own waits for their Resume (#127).
+        guard let record = all.first(where: { $0.state == "queued" && $0.paused != true })
+        else { break }
         // Ask for the waiting copies now, not one after another, so the
         // server converts the next songs while this one is prepared and
         // transferred (WATCH1). Its own turn asks again and reports failures.
         let ahead = all.filter {
-          $0.state == "queued" && $0.id != record.id && !asked.contains($0.id)
+          $0.state == "queued" && $0.paused != true && $0.id != record.id
+            && !asked.contains($0.id)
         }
         .prefix(Self.requestAhead)
         if !ahead.isEmpty {
@@ -273,6 +277,24 @@ import PigDomain
       background?.userPaused = true
     #endif
     await interrupt()
+  }
+  /// The person's pause on one song (#127). Its copy isn't asked for or
+  /// transferred until they resume that song; other songs carry on. Internal
+  /// restarts and the Resume for all downloads leave it paused, and it is saved
+  /// with the download list, so it lasts across app restarts.
+  public func pause(id: String) async {
+    try? await archive.setPaused(id: id, true)
+    // The worker may be preparing or transferring it: restart without it, as a
+    // removal does. A background transfer keeps its resume data.
+    await interrupt()
+    resume(automatic: true)
+  }
+  /// The person's Resume for one song. It doesn't lift their Pause of all
+  /// downloads; the song starts with the rest when they resume those.
+  public func resume(id: String) async {
+    try? await archive.setPaused(id: id, false)
+    await reload()
+    resume(automatic: true)
   }
   /// Stops work for an internal change without recording a Pause (#65).
   private func interrupt() async {

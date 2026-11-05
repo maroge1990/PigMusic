@@ -100,6 +100,10 @@ private struct DownloadList: View {
         } else {
           Button("Resume queued downloads") { downloads.resume() }
         }
+        if downloads.records.contains(where: \.isPaused) {
+          Text("Songs you paused one at a time stay paused until you resume them.")
+            .font(PigType.footnote).foregroundStyle(.secondary)
+        }
         Button("Remove all device downloads", role: .destructive) { clearing = true }
       }
     }
@@ -131,8 +135,9 @@ private struct DownloadList: View {
   }
 }
 
-/// One transfer, shown by its mark: clock (queued), progress ring, check, or a
-/// warning that retries.
+/// One transfer, shown by its mark: clock (queued), pause (paused on its own),
+/// progress ring, check, or a warning that retries. Swipe or touch and hold to
+/// pause or resume the song, or cancel it (#127).
 private struct TransferRow: View {
   let model: AppModel
   @Bindable var downloads: DownloadController
@@ -154,9 +159,36 @@ private struct TransferRow: View {
       if record.state != "ready" {
         Button("Cancel", role: .destructive) { Task { await downloads.remove(id: record.id) } }
       }
+      pauseButton.tint(PigBrand.secondary(scheme))
+    }
+    .contextMenu {
+      pauseButton
+      if record.state != "ready" {
+        Button("Cancel download", systemImage: "xmark", role: .destructive) {
+          Task { await downloads.remove(id: record.id) }
+        }
+      }
+    }
+  }
+  @ViewBuilder private var pauseButton: some View {
+    if record.isPaused {
+      Button("Resume", systemImage: "play.fill") {
+        Task { await downloads.resume(id: record.id) }
+      }
+    } else if ["queued", "downloading"].contains(record.state) {
+      Button("Pause", systemImage: "pause.fill") {
+        Task { await downloads.pause(id: record.id) }
+      }
     }
   }
   @ViewBuilder private var mark: some View {
+    if record.isPaused {
+      Image(systemName: "pause.circle").foregroundStyle(.secondary)
+    } else {
+      stateMark
+    }
+  }
+  @ViewBuilder private var stateMark: some View {
     switch record.state {
     case "ready":
       Image(systemName: "checkmark.circle.fill").foregroundStyle(PigBrand.accent(scheme))
@@ -179,7 +211,8 @@ private struct TransferRow: View {
     }
   }
   private var stateLabel: String {
-    switch record.state {
+    if record.isPaused { return "Paused" }
+    return switch record.state {
     case "ready": "Downloaded"
     case "downloading": "Downloading"
     case "failed": "Failed: \(record.error ?? "try again")"

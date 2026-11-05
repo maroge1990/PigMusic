@@ -290,6 +290,94 @@ private actor Flag {
     await paused.value
     #expect(finishedAlone)
   }
+  func songs(_ ids: [String]) throws -> [Track] {
+    try ids.map { id in
+      try LibraryCodec.decoder().decode(
+        Track.self,
+        from: Data(
+          #"{"id":"\#(id)","title":"Song","artist":"Artist","source_revision":"v1"}"#.utf8))
+    }
+  }
+  @MainActor func waitUntilReady(_ archive: DownloadArchive, _ ids: Set<String>) async throws {
+    func ready() async -> Int {
+      await archive.snapshot().filter({ ids.contains($0.id) && $0.state == "ready" }).count
+    }
+    for _ in 0..<400 where await ready() < ids.count {
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    #expect(await ready() == ids.count)
+  }
+  /// #127: Downloads could only be paused all together. A song paused on its
+  /// own waits while the others download; no internal restart, Pause and
+  /// Resume of all downloads, or app restart resumes it; only its own Resume.
+  @MainActor @Test func aSongPausedOnItsOwnWaitsUntilItsOwnResume() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let archive = try archive(root)
+    let all = try songs(["one", "two", "three", "four"])
+    try await archive.enqueue(Array(all.prefix(3)), quality: "original")
+    let source = AheadSource(ready: try copy(), preparing: try copy())
+    let controller = DownloadController(archive: archive, source: source)
+    await controller.pause(id: "two")
+    controller.resume()
+    try await waitUntilReady(archive, ["one", "three"])
+    // Internal restarts: a removal, new songs, a release, the song added again
+    // (as part of an album), a Watch-style reconcile.
+    await controller.remove(id: "one")
+    try await controller.enqueue([all[3]])
+    await controller.release(ids: ["three"], origin: .direct)
+    try await controller.enqueue([all[1]])
+    await controller.reconcile(["two": "v1", "four": "v1"])
+    controller.resume(automatic: true)
+    try await waitUntilReady(archive, ["four"])
+    // The person's Pause and Resume of all downloads.
+    await controller.pause()
+    controller.resume()
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(!(await source.calls).contains { $0.hasSuffix(" two") }, "paused song was fetched")
+    #expect(controller.records.first { $0.id == "two" }?.isPaused == true)
+    // The app restarts: the pause was saved with the list.
+    let reopened = try self.archive(root)
+    let fresh = AheadSource(ready: try copy(), preparing: try copy())
+    let restarted = DownloadController(archive: reopened, source: fresh)
+    restarted.resume()
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(await fresh.calls.isEmpty, "paused song was fetched after a restart")
+    #expect(await reopened.snapshot().first { $0.id == "two" }?.isPaused == true)
+    // Its own Resume fetches it.
+    await restarted.resume(id: "two")
+    try await waitUntilReady(reopened, ["two"])
+    #expect(await fresh.calls.contains("create two"))
+    #expect(await reopened.snapshot().first { $0.id == "two" }?.paused == nil)
+  }
+  /// Pausing the song whose copy is being prepared stops asking about it and
+  /// moves on to the next song.
+  @MainActor @Test func pausingTheSongInProgressMovesOnToTheNext() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let archive = try archive(root)
+    try await archive.enqueue(try songs(["one", "two"]), quality: "original")
+    var preparing =
+      try JSONSerialization.jsonObject(
+        with: LibraryCodec.encoder().encode(copy())) as! [String: Any]
+    preparing["state"] = "preparing"
+    let stuck = try LibraryCodec.decoder().decode(
+      DeviceCopy.self, from: JSONSerialization.data(withJSONObject: preparing))
+    // "one" is still being prepared on every ask.
+    let source = AheadSource(ready: try copy(), preparing: stuck)
+    let controller = DownloadController(archive: archive, source: source)
+    controller.resume()
+    for _ in 0..<100 where !(await source.calls.contains("create one")) {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    await controller.pause(id: "one")
+    let asked = await source.calls.count
+    try await waitUntilReady(archive, ["two"])
+    try await Task.sleep(for: .milliseconds(2500))  // Past the next poll.
+    let after = await source.calls.dropFirst(asked)
+    #expect(!after.contains { $0.hasSuffix(" one") }, "kept asking about the paused song")
+    #expect(await archive.snapshot().first { $0.id == "one" }?.state == "queued")
+  }
   @Test func verifiedCopySurvivesRestartThenReconcilesOnlyAuthoritativeChanges() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }

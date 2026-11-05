@@ -59,6 +59,10 @@ public struct DownloadRecord: Codable, Sendable, Identifiable, Equatable {
   public var origins: [DownloadOrigin]?
   /// A finished transfer the person cleared from the activity list; the file stays.
   public var cleared: Bool?
+  /// The person paused this song on its own (#127). It waits until they resume
+  /// it; the Resume for all downloads and internal restarts leave it paused.
+  public var paused: Bool?
+  public var isPaused: Bool { paused == true && state != "ready" }
   public var id: String { track.id }
   public var effectiveOrigins: [DownloadOrigin] { origins ?? [.direct] }
   public init(track: Track, quality: String) {
