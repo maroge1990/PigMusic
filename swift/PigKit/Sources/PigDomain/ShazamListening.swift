@@ -27,40 +27,67 @@ public enum ShazamListenEnd<Outcome: Sendable>: Sendable {
 /// (#124). Playback wins: before it activates the session it stops any
 /// listening and waits until listening has put the session back, so a late
 /// clean-up never releases a session playback has just taken (Codex).
+///
+/// An attempt is reserved before the microphone permission is asked, so
+/// Play while the prompt is up claims it too: the attempt then never sets
+/// up recording (Codex). Playback waits only for attempts that have changed
+/// the session, never for a prompt.
 @MainActor public final class ListeningAudioGate {
   public static let shared = ListeningAudioGate()
+  private struct Entry {
+    var stop: (@MainActor () -> Void)?
+    var recording = false
+    var claimed = false
+  }
   private var next = 0
-  private var listening: [Int: @MainActor () -> Void] = [:]
-  private var claimed: Set<Int> = []
+  private var entries: [Int: Entry] = [:]
   private var waiters: [CheckedContinuation<Void, Never>] = []
   public init() {}
 
-  public var isListening: Bool { !listening.isEmpty }
+  /// An attempt is reserved or recording.
+  public var isListening: Bool { !entries.isEmpty }
 
-  /// Playback is starting: every listen stops at once.
+  /// Playback is starting: every attempt stops at once, or never starts.
   public func claim() {
-    for (id, stop) in listening where !claimed.contains(id) {
-      claimed.insert(id)
-      stop()
+    for id in Array(entries.keys) where entries[id]?.claimed == false {
+      entries[id]?.claimed = true
+      entries[id]?.stop?()
     }
   }
-  /// Stops every listen and returns once each has put the session back.
+  /// Claims every attempt and returns once each one recording has put the
+  /// session back.
   public func yieldToPlayback() async {
     claim()
-    guard isListening else { return }
+    guard entries.values.contains(where: \.recording) else { return }
     await withCheckedContinuation { waiters.append($0) }
   }
 
-  func begin(stop: @escaping @MainActor () -> Void) -> Int {
+  /// Reserves an attempt; `end` it whatever happens.
+  public func reserve() -> Int {
     next += 1
-    listening[next] = stop
+    entries[next] = Entry()
     return next
   }
-  func isClaimed(_ id: Int) -> Bool { claimed.contains(id) }
-  func end(_ id: Int) {
-    listening[id] = nil
-    claimed.remove(id)
-    guard listening.isEmpty else { return }
+  public func isClaimed(_ id: Int) -> Bool { entries[id]?.claimed ?? false }
+  public func end(_ id: Int) {
+    entries[id] = nil
+    wake()
+  }
+  /// False when playback has claimed the attempt: then nothing is recorded.
+  func startRecording(_ id: Int, stop: @escaping @MainActor () -> Void) -> Bool {
+    guard let entry = entries[id], !entry.claimed else { return false }
+    entries[id]?.stop = stop
+    entries[id]?.recording = true
+    return true
+  }
+  /// The session is put back. The claim stays until the attempt ends.
+  func stopRecording(_ id: Int) {
+    entries[id]?.recording = false
+    entries[id]?.stop = nil
+    wake()
+  }
+  private func wake() {
+    guard !entries.values.contains(where: \.recording) else { return }
     let waiting = waiters
     waiters = []
     for waiter in waiting { waiter.resume() }
@@ -150,17 +177,25 @@ public protocol ListeningAudioSession: Sendable {
 
   public static func listen<Session: ShazamListeningSession>(
     _ session: Session, audio: ShazamAudioHooks, limit: Duration = limit,
-    gate: ListeningAudioGate = .shared, log: @escaping @MainActor @Sendable (String) -> Void
+    gate: ListeningAudioGate = .shared, reservation: Int? = nil,
+    log: @escaping @MainActor @Sendable (String) -> Void
   ) async -> ShazamListenEnd<Session.Outcome> {
     if Task.isCancelled { return .cancelled }
+    // `reservation`: the caller reserved the attempt before asking for the
+    // microphone, and ends it.
+    let id = reservation ?? gate.reserve()
+    defer { if reservation == nil { gate.end(id) } }
     let race = ShazamRace<Session.Outcome>()
-    let id = gate.begin { race.finish(.playbackStarted) }
+    guard gate.startRecording(id, stop: { race.finish(.playbackStarted) }) else {
+      log("playback started before listening: not recording")
+      return .playbackStarted
+    }
     // Installed before anything changes: a begin that fails part-way is
     // put back too, once; playback waiting on the gate starts only after.
     defer {
       audio.end(gate.isClaimed(id))
       log("audio session restored")
-      gate.end(id)
+      gate.stopRecording(id)
     }
     do {
       try audio.begin()

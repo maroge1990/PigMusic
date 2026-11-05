@@ -143,6 +143,11 @@
       let log: @MainActor @Sendable (String) -> Void = { line in
         DiagnosticsLog.shared.record("shazam", line)
       }
+      // Reserved before the permission prompt: Play while it is up claims
+      // this attempt, which then never records (Codex, #124).
+      let gate = ListeningAudioGate.shared
+      let reservation = gate.reserve()
+      defer { gate.end(reservation) }
       switch AVAudioApplication.shared.recordPermission {
       case .granted: log("microphone allowed")
       case .undetermined:
@@ -167,7 +172,8 @@
       defer { if self.session === session { self.session = nil } }
       let audio = ShazamAudioHooks.recording(
         SharedAudioSession(), playbackHolds: playbackHolds, log: log)
-      let end = await ShazamListening.listen(ManagedShazam(session), audio: audio, log: log)
+      let end = await ShazamListening.listen(
+        ManagedShazam(session), audio: audio, gate: gate, reservation: reservation, log: log)
       guard !Task.isCancelled, attempts.isCurrent(attempt) else {
         session.cancel()
         return .failure(.cancelled)

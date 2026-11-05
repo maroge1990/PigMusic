@@ -271,6 +271,39 @@ private final class FakeSession: ShazamListeningSession, @unchecked Sendable {
   #expect(audio.calls == ["record", "activate", "restore playback longForm"])
 }
 
+@MainActor @Test func playWhileThePermissionPromptIsUpMeansNoRecording() async {
+  // Codex: the attempt registered only once permission came back, so Play
+  // meanwhile cancelled nothing and listening then recorded over playback.
+  let gate = ListeningAudioGate()
+  let audio = FakeAudio()
+  audio.current = "soloAmbient"
+  let player = FakePlayer(gate: gate, audio: audio)
+  let probe = Probe()
+  // identify(): reserved before asking for the microphone.
+  let reservation = gate.reserve()
+  #expect(gate.isListening)
+  // Play from Control Centre while the prompt is up: never waits on it.
+  await player.play()
+  #expect(player.active)
+  #expect(gate.isClaimed(reservation))
+  // Permission granted: listening goes ahead and must not record.
+  let session = FakeSession(answer: .match)
+  let end = await ShazamListening.listen(
+    session, audio: .recording(audio, playbackHolds: { player.active }, log: probe.log),
+    limit: .seconds(10), gate: gate, reservation: reservation, log: probe.log)
+  guard case .playbackStarted = end else {
+    Issue.record("expected playbackStarted, got \(end)")
+    return
+  }
+  #expect(audio.calls == ["playback activates"])
+  #expect(audio.current == "playback longForm")
+  #expect(probe.lines == ["playback started before listening: not recording"])
+  // The claim held until the attempt ended.
+  #expect(gate.isClaimed(reservation))
+  gate.end(reservation)
+  #expect(!gate.isListening)
+}
+
 @MainActor @Test func playWithNothingListeningGoesStraightOn() async {
   let gate = ListeningAudioGate()
   let player = FakePlayer(gate: gate, audio: FakeAudio())
