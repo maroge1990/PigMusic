@@ -5,7 +5,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 5 Nov 2026 (morning, Melbourne).*
+*Overwritten at the end of every session. 5 Nov 2026 (midday, Melbourne).*
 
 - **Live:** server `418bca0` (`matches-20261105-v1`, 01:07 UTC 5 Nov).
   Released today under Mark's go-ahead (no activity): `idle-20261105-v1` (c56bc1a: #106, #107, #17, #109 stage A,
@@ -17,6 +17,9 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 - **Idle CPU (#63):** 5.7% of a core ~45 min after the release (7.3–7.8% before; the rig idles at 1%). Post-restart
   catch-up runs 10–13% for the first half hour. The rest is background passes in the worker threads; finding them
   needs a stack sampler on the live process (Mark's OK).
+- **Mark's checks on build 20 (5 Nov):** Apple Music playlists in search work (MusicKit enabled; ShazamKit also
+  enabled). Asked for next: add an Apple Music playlist as his own and download its songs (#121); Album editions
+  misses the split Blink-182 albums (#120); Organise still lists ~1,500 songs after the tag job (#119).
 - **iPhone/Watch:** **0.2.0 (20)** uploaded to TestFlight on 5 Nov: #115 songs retry a failed first connection and a
   stalled stream recovers or stops with a message (from Mark's 4 Nov diagnostics), #109 stage B Apple Music playlists
   in search (D-66; needs MusicKit ticked for the app identifier), #25, #112 Watch logo, three #97 iPhone/Watch fixes.
@@ -30,25 +33,37 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Now
 
-1. **Mark on build 20 (T5):** songs start after a cold launch on mobile data (#115); Apple Music playlists after
-   ticking MusicKit (#109); Watch logo (#112); then builds 18–19's items, #114, #78, #76, #65, Home See all (#55), #95.
-2. **#118** match remastered and featured-credit titles by `song_key` (server; quick, makes Apple playlists useful).
-3. **#97 Download menu** as one VoiceOver button; **#116, #117** stream recovery edge cases (next native batch).
-4. **#63** find the remaining ~5% idle CPU (stack sampler, with Mark's OK); re-measure #22 in the next diagnostics.
+Batches by area (D-50); each ends with its Codex rounds (D-59), a push and, where it helps testing, a release (D-52).
+
+1. **Library tools (server + web):** #119 Review lists only songs whose tags differ (and a shorter Undo list) ·
+   #120 Album editions joins albums split across two editions. Two Codex rounds (file moves), a rig trial, release;
+   then Mark joins *Dude Ranch* and *Enema of the State*.
+2. **Apple Music playlists, server half:** #118 match remastered and featured-credit titles by `song_key` ·
+   #121 `POST /api/v1/imports/apple-music`: an Apple Music playlist becomes the person's own playlist, missing songs
+   download only when they confirm. Two Codex rounds (downloads, playlists); release.
+3. **Native build 21 (iPhone/Watch):** #121 "Add to my playlists" on the Apple Music playlist screen (Add only / Add
+   and download M songs) · #116, #117 stream recovery edge cases · #97 Download menu as one VoiceOver button · #104 ·
+   #101. Two Codex rounds (playback); TestFlight (Mark types his Mac password, D-68).
+4. **Mark on build 21 (T5):** add an Apple Music playlist and download its songs; then the older device checks below.
 
 ## Next (P1/P2)
 
-- Reliability: #16/#20 loaded window on the live server · #96 the two sweeps, redesigned around the engine's transfer
-  state and publication claims · a larger rig library for #22 · #104
-- Mark's requests: #54 song search timing · #23 progressive relay
-- Device acceptance (Mark, T5): #95, one checklist of the former acceptance issues
+- **Server load and live gates:** #63 the remaining ~5% idle CPU (needs a stack sampler on the live process: Mark's
+  OK) · #22 Home mixes timing in the next device diagnostics, and a larger rig library to reproduce it · #17 lock hold
+  count and #16/#20 the loaded window on the live server · #94 one live probe of remote "unavailable" time.
+- **Speed Mark asked for:** #54 song search timing · #23 progressive remote relay (start cold remote songs sooner) ·
+  #55 more Apple Music popular songs.
+- **Device acceptance (Mark, T5):** #115 cold start on mobile data and #112 Watch logo (build 20) · #114 · #108, #62,
+  #59, #56 (builds 18–19) · #78, #76, #65 · #95, one checklist of the former acceptance issues.
 
 ## Later (P3)
 
-#96 remaining (warming fairness, marker files, Trash retention) · #97 web structure and test gaps · #86 pytest out of
-the image · #46 native split · #101 · clean the organisation trash once Mark is happy (#93 step 5) · set-aside ideas
-(Mac app, Shazam, CarPlay, mix tuning, split DNS) live in [docs/PRODUCT.md](docs/PRODUCT.md#set-aside), not in issues.
-Lower-severity security drafts are tracked privately.
+#96 the two withdrawn sweeps (Soulseek leftovers and staged audio, redesigned around the engine's transfer state and
+publication claims), warming fairness, marker files, Trash retention · #97 web structure (Player, PersonalLibrary)
+and test gaps · #86 pytest out of the image · #46 native split · clean the organisation trash once Mark is happy
+(#93 step 5) · set-aside ideas (Mac app, Shazam, CarPlay, mix tuning, split DNS) live in
+[docs/PRODUCT.md](docs/PRODUCT.md#set-aside), not in issues; Shazam stays set aside unless Mark brings it back
+(ShazamKit is now enabled for the app identifier). Lower-severity security drafts are tracked privately.
 
 ## How to pick work
 
