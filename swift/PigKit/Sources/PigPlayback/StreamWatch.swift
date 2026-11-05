@@ -70,8 +70,12 @@ public struct StreamWatch: Sendable {
 @MainActor public final class StreamRecoveryDeadline {
   private let limit: Duration
   private var task: Task<Void, Never>?
+  private var expired: (@MainActor () -> Void)?
   public init(limit: Duration = StreamWatch.stallLimit) { self.limit = limit }
-  public var isActive: Bool { task != nil }
+  /// A recovery is running, or held by an audio interruption.
+  public var isActive: Bool { expired != nil }
+  /// Held by an audio interruption: no time runs until `resume()`.
+  public var isSuspended: Bool { expired != nil && task == nil }
   /// Where recovery is measured from: the position the stream was renewed
   /// from, or the latest seek since (#116).
   public private(set) var baseline: Double = 0
@@ -80,13 +84,32 @@ public struct StreamWatch: Sendable {
   public func start(from position: Double = 0, _ expired: @escaping @MainActor () -> Void) {
     cancel()
     baseline = position
+    self.expired = expired
+    arm()
+  }
+  private func arm() {
+    task?.cancel()
     let limit = limit
     task = Task { [weak self] in
       do { try await Task.sleep(for: limit) } catch { return }
-      guard !Task.isCancelled, let self else { return }
+      guard !Task.isCancelled, let self, let expired = self.expired else { return }
       self.task = nil
+      self.expired = nil
       expired()
     }
+  }
+  /// An audio interruption began (#117): playback is held, so the deadline
+  /// stops counting; it neither fails the stream meanwhile nor is dropped.
+  public func suspend() {
+    task?.cancel()
+    task = nil
+  }
+  /// Playback resumes after an interruption: the recovery gets a fresh,
+  /// whole limit, so an outstanding preparation or seek stays bounded and
+  /// the time before the interruption doesn't fail it at once.
+  public func resume() {
+    guard isSuspended else { return }
+    arm()
   }
   /// A seek during recovery (#116): progress counts from where it went, so a
   /// seek back from 2:00 to 0:00 recovers once the stream plays from 0:00.
@@ -101,5 +124,6 @@ public struct StreamWatch: Sendable {
   public func cancel() {
     task?.cancel()
     task = nil
+    expired = nil
   }
 }

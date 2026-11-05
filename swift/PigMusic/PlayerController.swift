@@ -712,6 +712,8 @@ import PigSync
     if began {
       // The system deactivates the session during an interruption.
       intent.beginInterruption()
+      // A recovering stream's deadline waits for the interruption (#117).
+      recovery.suspend()
       suspend()
       releaseSession()
     } else {
@@ -729,6 +731,8 @@ import PigSync
           engine?.recoverOutput()
           engine?.resume()
         } else {
+          // A recovery held by the interruption starts a fresh deadline.
+          recovery.resume()
           player.play()
           startClock()
         }
@@ -802,9 +806,14 @@ import PigSync
           engine?.recoverOutput()
         }
         engine?.resume()
-      } else if player.currentItem != nil {
-        player.play()
-        startClock()
+      } else {
+        // Play after an interruption that didn't resume by itself: a held
+        // recovery starts a fresh deadline, item or not (#117).
+        recovery.resume()
+        if player.currentItem != nil {
+          player.play()
+          startClock()
+        }
       }
       publishNowPlaying()
     }

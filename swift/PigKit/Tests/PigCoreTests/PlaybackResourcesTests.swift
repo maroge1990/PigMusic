@@ -308,6 +308,49 @@ struct StreamWatchTests {
     #expect(deadline.baseline == 90)
   }
 
+  /// #117: an interruption (a call, Siri) that ends just before the deadline
+  /// must not let the old timer fail the stream at once on resume.
+  @MainActor @Test func anInterruptionEndingBeforeTheDeadlineGetsAFreshOne() async throws {
+    let deadline = StreamRecoveryDeadline(limit: .milliseconds(300))
+    var failed = false
+    deadline.start(from: 60) { failed = true }
+    try await Task.sleep(for: .milliseconds(200))
+    deadline.suspend()
+    #expect(deadline.isActive && deadline.isSuspended)
+    try await Task.sleep(for: .milliseconds(50))
+    deadline.resume()  // 250 ms in: the old deadline had 50 ms left.
+    try await Task.sleep(for: .milliseconds(150))
+    #expect(!failed && deadline.isActive)  // Past the old 300 ms.
+    // The stream then plays on: recovered, never failed.
+    deadline.progressed(elapsed: 60.5, playing: true)
+    try await Task.sleep(for: .milliseconds(400))
+    #expect(!failed && !deadline.isActive)
+  }
+
+  /// #117: an interruption outlasting the deadline neither fails the stream
+  /// meanwhile nor drops the deadline: resumed, the recovery is still bounded.
+  @MainActor @Test func anInterruptionOutlastingTheDeadlineKeepsTheRecoveryBounded() async throws {
+    let deadline = StreamRecoveryDeadline(limit: .milliseconds(100))
+    var failed = false
+    deadline.start(from: 60) { failed = true }
+    deadline.suspend()
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(!failed && deadline.isActive)
+    // Resume without a running recovery does nothing; this one has one.
+    deadline.resume()
+    #expect(!deadline.isSuspended)
+    // The preparation or seek never completes: it still fails, in time.
+    try await Task.sleep(for: .milliseconds(400))
+    #expect(failed && !deadline.isActive)
+    // After a cancel (pause, new song) there is nothing to resume.
+    failed = false
+    deadline.start {}
+    deadline.suspend()
+    deadline.cancel()
+    deadline.resume()
+    #expect(!deadline.isActive)
+  }
+
   /// #97: after a failed preparation Play showed Pause and played nothing.
   @Test func playPreparesAgainAfterAFailure() {
     #expect(StreamWatch.playNeedsPreparation(hasItem: false, itemFailed: false, preparing: false))
