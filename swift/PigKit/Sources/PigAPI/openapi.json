@@ -6898,7 +6898,20 @@
     },
     "/api/v1/admin/library/organisation": {
       "get": {
+        "description": "With `tags`, each row's `tags_differ` says whether its file's tags\ndiffer from the library metadata (read from the files, #119).",
         "operationId": "organisation_plan_api_v1_admin_library_organisation_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tags",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Tags",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -6976,7 +6989,7 @@
                 }
               }
             },
-            "description": "Request error"
+            "description": "Validation Error"
           },
           "429": {
             "content": {
@@ -7129,7 +7142,33 @@
     },
     "/api/v1/admin/library/organisation/history": {
       "get": {
+        "description": "Operations that can be undone, newest first; `limit`/`offset` page\nthem (#119).",
         "operationId": "organisation_history_api_v1_admin_library_organisation_history_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "maximum": 1000,
+              "minimum": 1,
+              "nullable": true,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -7207,7 +7246,7 @@
                 }
               }
             },
-            "description": "Request error"
+            "description": "Validation Error"
           },
           "429": {
             "content": {

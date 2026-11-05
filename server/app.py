@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import (
     JSONResponse,
     FileResponse,
@@ -457,11 +457,14 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         tags: bool = False
 
     @app.get("/api/v1/admin/library/organisation/history")
-    def organisation_history():
+    def organisation_history(
+        limit: int | None = Query(None, ge=1, le=1000), offset: int = Query(0, ge=0)
+    ):
+        """Operations that can be undone, newest first; `limit`/`offset` page
+        them (#119)."""
         return [
             {"id": r["id"], "title": r["track"]["title"], "status": r["status"]}
-            for r in organisation.history()
-            if r["status"] in {"completed", "undoing"}
+            for r in organisation.undoable(limit, offset)
         ]
 
     @app.post("/api/v1/admin/library/organisation/{identity}/undo")
@@ -484,8 +487,10 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             scanner.lock.release()
 
     @app.get("/api/v1/admin/library/organisation")
-    async def organisation_plan():
-        return await asyncio.to_thread(organisation.plan)
+    async def organisation_plan(tags: bool = False):
+        """With `tags`, each row's `tags_differ` says whether its file's tags
+        differ from the library metadata (read from the files, #119)."""
+        return await asyncio.to_thread(organisation.plan, tags)
 
     def library_busy():
         if scan_task and not scan_task.done():

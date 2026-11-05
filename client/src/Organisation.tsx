@@ -10,15 +10,30 @@ type Job = {
 const JOB = "/api/v1/admin/library/organisation/job";
 const active = (job: Job | null) =>
   job?.status === "running" || job?.status === "stopping";
+const HISTORY = "/api/v1/admin/library/organisation/history";
+// The Undo list shows the newest operations a page at a time (#119).
+const PAGE = 50;
+type Undoable = { id: string; title: string };
 
 export function Organisation({ notify }: { notify: (s: string) => void }) {
-  const [history, setHistory] = useState<{ id: string; title: string }[]>([]);
+  const [history, setHistory] = useState<Undoable[]>([]);
+  const [more, setMore] = useState(false);
+  async function loadHistory(offset: number) {
+    // One extra row says whether there is another page.
+    const page: Undoable[] = await apiFetch(
+      `${HISTORY}?limit=${PAGE + 1}&offset=${offset}`,
+    ).then((r) => r.json());
+    setMore(page.length > PAGE);
+    setHistory((old) => {
+      const kept = offset ? old : [];
+      const known = new Set(kept.map((v) => v.id));
+      return [...kept, ...page.slice(0, PAGE).filter((v) => !known.has(v.id))];
+    });
+  }
   const [job, setJob] = useState<Job | null>(null);
   const watching = useRef(false);
   useEffect(() => {
-    void apiFetch("/api/v1/admin/library/organisation/history")
-      .then((r) => r.json())
-      .then(setHistory);
+    void loadHistory(0);
     // A job started earlier (or from another device) keeps showing its progress.
     void apiFetch(JOB)
       .then((r) => (r.ok ? r.json() : null))
@@ -52,11 +67,7 @@ export function Organisation({ notify }: { notify: (s: string) => void }) {
       notify(`${result.done ?? 0} songs organised.`);
     else setError(result.message || "Organisation stopped.");
     window.dispatchEvent(new Event("music-library-changed"));
-    setHistory(
-      await apiFetch("/api/v1/admin/library/organisation/history").then((r) =>
-        r.json(),
-      ),
-    );
+    await loadHistory(0);
     setItems([]);
     setSelected([]);
   }
@@ -68,16 +79,22 @@ export function Organisation({ notify }: { notify: (s: string) => void }) {
       rename: boolean;
       conflict: boolean;
       tag_supported: boolean;
+      tags_differ: boolean | null;
     }[]
   >([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [tags, setTags] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  async function review() {
+  // With tags, the server reads each file's tags to list only songs whose
+  // tags differ from the library metadata (#119).
+  async function review(withTags = tags) {
     setBusy(true);
+    setError("");
     try {
-      const r = await apiFetch("/api/v1/admin/library/organisation");
+      const r = await apiFetch(
+        "/api/v1/admin/library/organisation" + (withTags ? "?tags=true" : ""),
+      );
       const d = await r.json();
       if (!r.ok) throw new Error("Library review unavailable.");
       setItems(d.items);
@@ -156,7 +173,11 @@ export function Organisation({ notify }: { notify: (s: string) => void }) {
             <input
               type="checkbox"
               checked={tags}
-              onChange={(e) => setTags(e.target.checked)}
+              disabled={busy}
+              onChange={(e) => {
+                setTags(e.target.checked);
+                if (e.target.checked) void review(true);
+              }}
             />
             Apply consistent tags from current library metadata
           </label>
@@ -167,7 +188,9 @@ export function Organisation({ notify }: { notify: (s: string) => void }) {
                 items
                   .filter(
                     (i) =>
-                      !i.conflict && (i.rename || (tags && i.tag_supported)),
+                      !i.conflict &&
+                      (i.rename ||
+                        (tags && i.tag_supported && !!i.tags_differ)),
                   )
                   .map((i) => i.id),
               )
@@ -175,9 +198,16 @@ export function Organisation({ notify }: { notify: (s: string) => void }) {
           >
             Select eligible changes
           </button>
+          {!items.some((i) => i.rename || (tags && i.tags_differ)) && (
+            <p>
+              {tags
+                ? "Every song is named and tagged consistently."
+                : "Every song is named consistently."}
+            </p>
+          )}
           <div className="organisation-list">
             {items
-              .filter((i) => i.rename || tags)
+              .filter((i) => i.rename || (tags && i.tags_differ))
               .map((i) => (
                 <label className="result-row" key={i.id}>
                   <input
@@ -238,6 +268,15 @@ export function Organisation({ notify }: { notify: (s: string) => void }) {
           </button>
         </div>
       ))}
+      {more && (
+        <button
+          className="text-button"
+          disabled={busy}
+          onClick={() => void loadHistory(history.length)}
+        >
+          Show more
+        </button>
+      )}
       {error && <p role="alert">{error}</p>}
     </section>
   );

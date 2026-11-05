@@ -207,3 +207,130 @@ def test_a_selection_needing_review_is_refused_before_anything_changes(
         manager.start(["a1", "unknown"], False, lambda stopped: (lambda: None))
     assert manager.worker is None and manager.status() == {"status": "idle"}
     assert (root / "Artist/First/a1.mp3").exists()
+
+
+def tagged_song(tmp_path, monkeypatch, suffix=".mp3"):
+    """A real tagged file the library knows (the #119 rig)."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        pytest.skip("FFmpeg required for real audio integration")
+    root = tmp_path / "music"
+    (root / "Artist/Album").mkdir(parents=True)
+    monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(root))
+    path = root / ("Artist/Album/old" + suffix)
+    codec = {".mp3": "libmp3lame", ".flac": "flac", ".m4a": "aac"}[suffix]
+    subprocess.run(
+        [ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=duration=2"]
+        + ["-c:a", codec, "-metadata", "artist=Artist", "-metadata", "album=Album"]
+        + ["-metadata", "title=Song", str(path)],
+        check=True,
+        timeout=20,
+    )
+    track, _ = inspect_file(path, path.relative_to(root).as_posix())
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "library-snapshot.json").write_text(json.dumps({"tracks": [track]}))
+    return Store(data), root, track
+
+
+def edit_snapshot(store, **fields):
+    snapshot = json.loads((store.directory / "library-snapshot.json").read_text())
+    snapshot["tracks"][0].update(fields)
+    (store.directory / "library-snapshot.json").write_text(json.dumps(snapshot))
+    store.refresh_library()
+
+
+@pytest.mark.parametrize("suffix", [".mp3", ".flac", ".m4a"])
+def test_after_applying_tags_review_lists_nothing(tmp_path, monkeypatch, suffix):
+    # #119: Review listed every taggable song forever, so Apply rewrote them all.
+    store, root, track = tagged_song(tmp_path, monkeypatch, suffix)
+    manager = Organisation(store, Recovery(store))
+    [row] = manager.plan(tags=True)["items"]
+    assert row["rename"] and row["tags_differ"]
+    assert manager.apply([track["id"]], True)["applied"] == 1
+    [row] = manager.plan(tags=True)["items"]
+    assert not row["rename"] and row["tags_differ"] is False
+    # Selected anyway, the song is skipped: no rewrite and no new undo copy.
+    before = (root / row["from"]).read_bytes()
+    assert manager.apply([track["id"]], True)["applied"] == 0
+    assert (root / row["from"]).read_bytes() == before
+    assert len(manager.history()) == 1
+
+
+def test_review_lists_a_song_whose_tags_differ(tmp_path, monkeypatch):
+    store, root, track = tagged_song(tmp_path, monkeypatch)
+    manager = Organisation(store, Recovery(store))
+    manager.apply([track["id"]], True)
+    edit_snapshot(store, year=1999)
+    [row] = manager.plan(tags=True)["items"]
+    assert row["tags_differ"] and not row["rename"]
+    edit_snapshot(store, year=None, title="Song (Remastered)")
+    [row] = manager.plan(tags=True)["items"]
+    assert row["tags_differ"] and row["rename"]
+    # A song needing only new tags is applied, not skipped.
+    edit_snapshot(store, year=1999, title="Song")
+    assert manager.apply([track["id"]], True)["applied"] == 1
+    assert manager.plan(tags=True)["items"][0]["tags_differ"] is False
+
+
+def test_a_rename_is_listed_whatever_the_tags(tmp_path, monkeypatch):
+    store, root, track = tagged_song(tmp_path, monkeypatch)
+    manager = Organisation(store, Recovery(store))
+    manager.apply([track["id"]], True)
+    [row] = manager.plan(tags=True)["items"]
+    moved = "Artist/Album/elsewhere.mp3"
+    (root / row["from"]).rename(root / moved)
+    edit_snapshot(store, relative_path=moved)
+    [row] = manager.plan(tags=True)["items"]
+    assert row["rename"] and row["tags_differ"] is False
+    assert manager.apply([track["id"]], True)["applied"] == 1
+    assert not (root / moved).exists()
+
+
+def test_review_without_tags_reads_no_files(tmp_path, monkeypatch):
+    store, root, track = tagged_song(tmp_path, monkeypatch)
+    manager = Organisation(store, Recovery(store))
+    monkeypatch.setattr(
+        "server.organisation.file_tags", lambda path: pytest.fail("read tags")
+    )
+    [row] = manager.plan()["items"]
+    assert row["tags_differ"] is None
+
+
+def test_a_second_review_reuses_the_tags_read(tmp_path, monkeypatch):
+    store, root, track = tagged_song(tmp_path, monkeypatch)
+    manager = Organisation(store, Recovery(store))
+    manager.plan(tags=True)
+    monkeypatch.setattr(
+        "server.organisation.file_tags", lambda path: pytest.fail("read again")
+    )
+    [row] = manager.plan(tags=True)["items"]
+    assert row["tags_differ"]
+
+
+def test_undo_list_pages_newest_first(tmp_path, monkeypatch):
+    store, root, tracks = two_albums(tmp_path, monkeypatch)
+    manager = Organisation(store, Recovery(store))
+    for identity in ("a1", "a2", "b1"):
+        manager.apply([identity])
+    assert [r["track_id"] for r in manager.undoable()] == ["b1", "a2", "a1"]
+    assert [r["track_id"] for r in manager.undoable(2, 1)] == ["a2", "a1"]
+    manager.undo(manager.undoable(1)[0]["id"])
+    assert [r["track_id"] for r in manager.undoable(1)] == ["a2"]
+
+
+def test_tags_compare_the_way_apply_writes_them():
+    from server.organisation import tag_value, tags_differ
+
+    held = {
+        "title": "Song",
+        "track_number": tag_value("track_number", ["3/12"]),
+        "disc_number": tag_value("disc_number", [(1, 2)]),
+        "year": tag_value("year", ["2001-05-03"]),
+        "musicbrainz_release_id": tag_value("musicbrainz_release_id", [b"ABC"]),
+    }
+    wanted = {"title": "Song", "track_number": 3, "disc_number": 1, "year": 2001}
+    assert not tags_differ(held, {**wanted, "musicbrainz_release_id": "abc"})
+    assert not tags_differ(held, {**wanted, "year": 0, "artist": None})
+    assert tags_differ(held, {**wanted, "track_number": 4})
+    assert tags_differ({**held, "title": ("Song", "Other")}, wanted)

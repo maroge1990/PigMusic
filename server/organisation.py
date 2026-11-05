@@ -3,7 +3,11 @@
 from .lifecycle import coordinated
 
 import json, logging, os, shutil, threading, uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from mutagen.flac import FLAC
+from mutagen.id3 import ID3, ID3NoHeaderError
+from mutagen.mp4 import MP4
 from .library import load_json
 from .media import saved_track, track_file
 from .exporter import Exporter, contained
@@ -23,6 +27,94 @@ ALBUM_FIELDS = (
 TAG_SUFFIXES = {".mp3", ".flac", ".m4a"}
 
 log = logging.getLogger(__name__)
+
+# The fields `Downloader.tag` writes, with where each format keeps them.
+TAG_KEYS = {
+    "title": ("TIT2", "TITLE", "\xa9nam"),
+    "artist": ("TPE1", "ARTIST", "\xa9ART"),
+    "album": ("TALB", "ALBUM", "\xa9alb"),
+    "album_artist": ("TPE2", "ALBUMARTIST", "aART"),
+    "track_number": ("TRCK", "TRACKNUMBER", "trkn"),
+    "disc_number": ("TPOS", "DISCNUMBER", "disk"),
+    "year": ("TDRC", "DATE", "\xa9day"),
+    "musicbrainz_release_id": (
+        "TXXX:MusicBrainz Album Id",
+        "MUSICBRAINZ_ALBUMID",
+        "----:com.apple.iTunes:MusicBrainz Album Id",
+    ),
+    "musicbrainz_recording_id": (
+        "TXXX:MusicBrainz Track Id",
+        "MUSICBRAINZ_TRACKID",
+        "----:com.apple.iTunes:MusicBrainz Track Id",
+    ),
+}
+# Fields Apply writes only when set (a year of 0 is no year).
+OPTIONAL_TAGS = {"year", "musicbrainz_release_id", "musicbrainz_recording_id"}
+# Review reads this many files at once: each read is a few NAS round trips.
+TAG_READERS = 8
+
+
+def tag_value(field, value):
+    """One field as Apply would leave it, so a just-tagged file compares equal:
+    track "3/12" and (3, 0) are 3, a date is its year, IDs ignore case."""
+    while isinstance(value, (list, tuple)) and field in {"track_number", "disc_number"}:
+        value = value[0] if value else None
+    if isinstance(value, list):
+        if len(value) != 1:
+            return tuple(tag_value(field, v) for v in value) or None
+        value = value[0]
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", "replace")
+    if value is None:
+        return None
+    text = str(value).strip()
+    if field in {"track_number", "disc_number"}:
+        text = text.split("/")[0].strip()
+        return int(text) if text.isdigit() else text
+    if field == "year":
+        return text[:4] if text[:4].isdigit() else text
+    if field.startswith("musicbrainz"):
+        return text.lower()
+    return text
+
+
+def file_tags(path):
+    """The fields `Downloader.tag` writes, as `path` holds them now."""
+    suffix = path.suffix.lower()
+    if suffix == ".flac":
+        audio = FLAC(path).tags or {}
+        index = 1
+    elif suffix == ".m4a":
+        audio = MP4(path).tags or {}
+        index = 2
+    else:
+        try:
+            audio = ID3(path)
+        except ID3NoHeaderError:
+            audio = {}
+        index = 0
+    found = {}
+    for field, keys in TAG_KEYS.items():
+        key = keys[index]
+        if key not in audio:
+            found[field] = None
+            continue
+        value = audio[key]
+        if index == 0:
+            value = [str(v) for v in value.text]
+        found[field] = tag_value(field, value)
+    return found
+
+
+def tags_differ(current, track):
+    """Whether tagging `track` would change any field the file holds."""
+    for field in TAG_KEYS:
+        wanted = track.get(field)
+        if wanted is None or wanted == "" or (field in OPTIONAL_TAGS and not wanted):
+            continue  # Apply leaves such a field as the file has it.
+        if tag_value(field, wanted) != current.get(field):
+            return True
+    return False
 
 
 def file_name(raw, suffix):
@@ -51,9 +143,38 @@ class Organisation:
         self.job = None
         self.stopping = threading.Event()
         self.worker = None
+        self.tag_cache = {}
+        self.tag_cache_lock = threading.Lock()
 
-    def plan(self):
+    def current_tags(self, root, relative):
+        """`file_tags` of the library file at `relative`, kept by size and
+        modification time so a second Review costs one stat per file (the
+        containment check, several NAS round trips, runs on a first read
+        only). None when unreadable."""
+        try:
+            stat = (root / relative).stat()
+        except OSError:
+            return None
+        key = (str(root), relative, stat.st_size, stat.st_mtime_ns)
+        with self.tag_cache_lock:
+            cached = self.tag_cache.get(relative)
+        if cached and cached[0] == key:
+            return cached[1]
+        try:
+            found = file_tags(contained(root, relative))
+        except Exception:
+            log.info("Could not read tags of %s", relative, exc_info=True)
+            return None
+        with self.tag_cache_lock:
+            self.tag_cache[relative] = (key, found)
+        return found
+
+    def plan(self, tags=False, only=None):
+        """The review: every song's rename, and with `tags` whether its file's
+        tags differ from the library metadata (`tags_differ`, read for the
+        songs in `only` when given, else for all)."""
         rows = []
+        tracks = {}
         root = Path(os.environ.get("PIG_MUSIC_LIBRARY", "/library"))
         snapshot = load_json(self.store.directory / "library-snapshot.json")
         originals = {t["id"]: t for t in snapshot.get("tracks", [])}
@@ -74,6 +195,7 @@ class Organisation:
                     continue
                 suffix = Path(old).suffix.lower()
                 target = (Path(old).parent / file_name(raw, suffix)).as_posix()
+                tracks[raw["id"]] = raw
                 rows.append(
                     {
                         "id": raw["id"],
@@ -84,6 +206,7 @@ class Organisation:
                         "rename": old != target,
                         "tag_supported": suffix in TAG_SUFFIXES,
                         "conflict": old != target and contained(root, target).exists(),
+                        "tags_differ": None,
                     }
                 )
         targets = {}
@@ -93,6 +216,24 @@ class Organisation:
             if len(matches) > 1:
                 for row in matches:
                     row["conflict"] = True
+        if tags:
+            wanted = [
+                r
+                for r in rows
+                if r["tag_supported"] and (only is None or r["id"] in only)
+            ]
+
+            def read(row):
+                current = self.current_tags(root, row["from"])
+                # An unreadable file is listed, so it is never silently skipped.
+                return current is None or tags_differ(current, tracks[row["id"]])
+
+            with ThreadPoolExecutor(TAG_READERS) as pool:
+                for row, differ in zip(wanted, pool.map(read, wanted)):
+                    row["tags_differ"] = differ
+            for row in rows:
+                if row["tags_differ"] is None:
+                    row["tags_differ"] = False
         return {
             "items": rows,
             "note": "Existing album folders and release identities are retained. Tags use the current library metadata. Originals are preserved for recovery.",
@@ -182,7 +323,7 @@ class Organisation:
 
     @coordinated
     def apply(self, ids, tags=False):
-        rows = {r["id"]: r for r in self.plan()["items"]}
+        rows = {r["id"]: r for r in self.plan(tags, set(ids))["items"]}
         results = []
         for identity in ids:
             row = rows.get(identity)
@@ -190,8 +331,8 @@ class Organisation:
                 raise ValueError("A selected destination needs review.")
             if tags and not row["tag_supported"]:
                 raise ValueError("This audio format needs a separate tag review.")
-            if not row["rename"] and not tags:
-                continue
+            if not row["rename"] and not (tags and row["tags_differ"]):
+                continue  # Nothing to change (#119): no rewrite, no undo copy.
             results.append(self.move(identity, row["from"], row["to"], tags))
         self.store.refresh_library()
         return {"applied": len(results), "operations": results}
@@ -383,6 +524,19 @@ class Organisation:
             except (OSError, ValueError):
                 pass
         self.store.refresh_library()
+
+    def undoable(self, limit=None, offset=0):
+        """Operations that can be undone, newest first."""
+        with self.store.connect() as c:
+            return [
+                json.loads(v)
+                for (v,) in c.execute(
+                    "SELECT payload FROM documents WHERE name LIKE 'organisation:%' "
+                    "AND json_extract(payload,'$.status') IN ('completed','undoing') "
+                    "ORDER BY rowid DESC LIMIT ? OFFSET ?",
+                    (-1 if limit is None else limit, offset),
+                )
+            ]
 
     def history(self):
         with self.store.connect() as c:

@@ -798,6 +798,118 @@ test("organising runs in the background with progress and can be stopped", async
   expect(polls).toBeGreaterThan(1);
 });
 
+// #119: with tags, Review lists only songs whose tags differ (or that are
+// renamed), and the Undo list shows the newest 50 at a time.
+test("organising lists only songs that need a change and pages Undo", async ({
+  page,
+}) => {
+  const row = (id: string, rename: boolean, tags_differ: boolean | null) => ({
+    id,
+    title: "Song " + id,
+    artist: "A",
+    from: `A/X/${id}.mp3`,
+    to: rename ? `A/X/01 ${id}.mp3` : `A/X/${id}.mp3`,
+    rename,
+    tag_supported: true,
+    conflict: false,
+    tags_differ,
+  });
+  const reviews: string[] = [];
+  const pages: string[] = [];
+  let sent: unknown = null;
+  const undone = Array.from({ length: 120 }, (_, n) => ({
+    id: "op" + n,
+    title: "Done " + n,
+    status: "completed",
+  }));
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/admin/library/trash": (route) => route.fulfill({ json: [] }),
+      "/v1/admin/unassigned": (route) =>
+        route.fulfill({ json: { albums: [], next_offset: null } }),
+      "/v1/admin/library/organisation/history": (route) => {
+        const url = new URL(route.request().url());
+        pages.push(url.search);
+        const offset = Number(url.searchParams.get("offset"));
+        const limit = Number(url.searchParams.get("limit") ?? undone.length);
+        return route.fulfill({ json: undone.slice(offset, offset + limit) });
+      },
+      "/v1/admin/library/organisation/job": (route) =>
+        route.fulfill({ json: { status: "idle" } }),
+      "/v1/admin/library/organisation": (route) => {
+        if (route.request().method() === "POST") {
+          sent = route.request().postDataJSON();
+          return route.fulfill({
+            json: { status: "running", total: 2, done: 0, message: null },
+          });
+        }
+        const tags = new URL(route.request().url()).searchParams.get("tags");
+        reviews.push(tags ?? "");
+        return route.fulfill({
+          json: {
+            items: [
+              row("same", false, tags ? false : null),
+              row("retag", false, tags ? true : null),
+              row("rename", true, tags ? false : null),
+            ],
+            note: "",
+          },
+        });
+      },
+    },
+  });
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.goto("/#/admin/library");
+  const panel = page.locator(".system-panel").filter({
+    has: page.getByRole("heading", { name: "Organise existing music" }),
+  });
+  const undo = panel.getByRole("button", { name: "Undo organisation" });
+  await expect(undo).toHaveCount(50);
+  await expect(panel.getByText("Done 0", { exact: true })).toBeVisible();
+  await panel.getByRole("button", { name: "Show more" }).click();
+  await expect(undo).toHaveCount(100);
+  await panel.getByRole("button", { name: "Show more" }).click();
+  await expect(undo).toHaveCount(120);
+  await expect(panel.getByRole("button", { name: "Show more" })).toHaveCount(0);
+  expect(pages).toEqual([
+    "?limit=51&offset=0",
+    "?limit=51&offset=50",
+    "?limit=51&offset=100",
+  ]);
+
+  await panel.getByRole("button", { name: "Review library" }).click();
+  await expect(
+    panel.locator("strong", { hasText: "A/X/rename.mp3" }),
+  ).toBeVisible();
+  await expect(
+    panel.locator("strong", { hasText: "A/X/retag.mp3" }),
+  ).toHaveCount(0);
+  await panel
+    .getByLabel("Apply consistent tags from current library metadata")
+    .check();
+  await expect(
+    panel.locator("strong", { hasText: "A/X/retag.mp3" }),
+  ).toBeVisible();
+  await expect(
+    panel.locator("strong", { hasText: "A/X/rename.mp3" }),
+  ).toBeVisible();
+  await expect(
+    panel.locator("strong", { hasText: "A/X/same.mp3" }),
+  ).toHaveCount(0);
+  expect(reviews).toEqual(["", "true"]);
+  await panel.getByRole("button", { name: "Select eligible changes" }).click();
+  await panel
+    .getByRole("button", { name: "Apply reviewed changes · 2" })
+    .click();
+  await expect
+    .poll(() => sent)
+    .toEqual({
+      track_ids: ["retag", "rename"],
+      tags: true,
+    });
+});
+
 // #97: the whole household library loads only for the Admin pages that show it.
 test("Admin reads the server library only where it is shown", async ({
   page,
