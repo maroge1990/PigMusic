@@ -2,6 +2,7 @@ from .lifecycle import TimedRLock, coordinated
 import json
 import hashlib
 import os
+import re
 import time
 import threading
 import sqlite3
@@ -23,7 +24,13 @@ from .library import (
 from .media import settings as media_settings, public_settings
 from .quality import policy, actual_profile, rank, PROFILES, satisfies
 from .providers import REGISTRY, supports
-from .storage import file_sha256, library_root
+from .storage import (
+    download_root,
+    file_sha256,
+    library_root,
+    open_owned_folder,
+    unlink_regular,
+)
 from .matching import (
     LibraryIndex,
     compatible,
@@ -38,6 +45,13 @@ REVIEWABLE = {"failed", "waiting_for_sources"}
 
 # Statements that change a table's rows, as SQLite's authorizer reports them.
 ROW_WRITES = {sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE}
+
+
+# Audio a transfer stages: "<request id>-<claim token>.<ext>", the token a
+# claim's uuid4 hex (Downloader.attempt).
+STAGED_AUDIO = re.compile(
+    r"(?P<request>[^/]+)-(?P<claim>[0-9a-f]{32})\.[A-Za-z0-9]{1,8}"
+)
 
 
 class Store:
@@ -664,8 +678,48 @@ class Store:
             conn.execute(
                 "UPDATE queue SET status='waiting_for_sources' WHERE status IN ('searching','downloading','validating','importing')"
             )
+        # Every interrupted request now waits for a fresh claim, so audio its
+        # transfer staged can never be published (#96).
+        self.sweep_staged()
         self.refresh_library()
         self.cleanup_replacements()
+
+    @coordinated
+    def sweep_staged(self):
+        """Delete audio a transfer staged for a claim that no longer holds:
+        only `<request id>-<claim token>.<ext>` files whose request does not
+        hold that claim now, only regular files directly in the download
+        workspace's own staging folder, never through a link, and never a
+        journal. Runs under the lifecycle lock publication takes, so the
+        file a held claim is publishing is never touched. How many went."""
+        work = os.environ.get("PIG_MUSIC_DOWNLOAD_ROOT")
+        try:
+            if work:
+                download_root(self)  # The library mount must be the expected one.
+                folder = open_owned_folder(Path(work), "staging")
+            else:
+                folder = open_owned_folder(self.directory, "downloads", "staging")
+        except (OSError, ValueError):
+            return 0
+        removed = 0
+        try:
+            for name in os.listdir(folder):
+                match = STAGED_AUDIO.fullmatch(name)
+                if (
+                    not match
+                    or name.lower().endswith(".json")
+                    or self.request_active(match["request"], match["claim"])
+                ):
+                    continue
+                try:
+                    removed += unlink_regular(folder, name)
+                except OSError:
+                    pass
+        except OSError:
+            pass
+        finally:
+            os.close(folder)
+        return removed
 
     def cleanup_due(self, request_id, payloads, *paths):
         """Whether a replacement cleanup row must hash its files again: only

@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import stat
 from pathlib import Path
 import time
 
@@ -48,3 +49,31 @@ def file_sha256(path):
     """Hash a file in chunks, so large lossless files never load whole into memory."""
     with open(path, "rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def open_owned_folder(base, *names):
+    """A descriptor for the folder base/names..., opened without following a
+    link at any step from `base` on, `base` included: OSError when any of
+    them is a link or not a folder. Deleting through this descriptor can
+    never reach outside the folder (#96)."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    folder = os.open(base, flags)
+    try:
+        for name in names:
+            inner = os.open(name, flags, dir_fd=folder)
+            os.close(folder)
+            folder = inner
+    except BaseException:
+        os.close(folder)
+        raise
+    return folder
+
+
+def unlink_regular(folder, name):
+    """Delete `name` from the open folder only when it is a regular file
+    there, never following a link; whether it was deleted."""
+    info = os.stat(name, dir_fd=folder, follow_symlinks=False)
+    if not stat.S_ISREG(info.st_mode):
+        return False
+    os.unlink(name, dir_fd=folder)
+    return True

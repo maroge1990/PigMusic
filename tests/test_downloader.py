@@ -349,11 +349,10 @@ def test_a_lost_claim_leaves_no_publication_journal(tmp_path, audio):
     assert list(journals.glob("*.json")) == [] and not target.exists()
 
 
-def test_recovery_removes_orphan_journals_but_never_staged_audio(tmp_path, audio):
+def test_recovery_removes_orphan_journals_and_unclaimed_staged_audio(tmp_path, audio):
     """#96: a journal whose song never reached the library, or a torn one,
-    stayed in staging for good. Staged audio is left alone: a staging folder
-    can be a link elsewhere, and recovery deletes only journals it can read
-    as its own (Codex round 2, high)."""
+    stayed in staging for good; so did audio a restart's interrupted
+    transfer staged (its request waits for a fresh claim)."""
     store = Store(tmp_path / "data")
     job = queued(store)
     worker = Downloader(store)
@@ -364,26 +363,104 @@ def test_recovery_removes_orphan_journals_but_never_staged_audio(tmp_path, audio
     torn.write_text('{"title": "half wri')
     staged = worker.staging / f"{job['id']}-{job['claim_token']}.mp3"
     shutil.copyfile(audio, staged)
+    # Not a transfer's staged audio: a mix promotion's file and other names.
+    others = [
+        worker.staging / f"{job['id']}-mix.mp3",
+        worker.staging / f"{job['id']}-legacy.mp3",
+        worker.staging / "notes.txt",
+    ]
+    for path in others:
+        path.write_bytes(b"x")
     store.recover_requests()
-    assert not orphan.exists() and not torn.exists() and staged.exists()
+    assert not orphan.exists() and not torn.exists() and not staged.exists()
+    assert all(path.exists() for path in others)
     assert store.queue()["items"][0]["status"] == "waiting_for_sources"
+
+
+def test_staged_audio_of_a_held_claim_is_kept(tmp_path, audio):
+    store = Store(tmp_path / "data")
+    job = queued(store)
+    worker = Downloader(store)
+    store.request_state(job["id"], "validating")
+    held = worker.staging / f"{job['id']}-{job['claim_token']}.mp3"
+    shutil.copyfile(audio, held)
+    stale = worker.staging / f"{job['id']}-{'0' * 32}.mp3"
+    shutil.copyfile(audio, stale)
+    unknown = worker.staging / f"no-such-request-{'1' * 32}.flac"
+    shutil.copyfile(audio, unknown)
+    assert store.sweep_staged() == 2
+    assert held.exists() and not stale.exists() and not unknown.exists()
+
+
+def test_a_linked_staged_file_is_never_followed(tmp_path, audio):
+    store = Store(tmp_path / "data")
+    job = queued(store)
+    worker = Downloader(store)
+    outside = tmp_path / "outside.mp3"
+    shutil.copyfile(audio, outside)
+    link = worker.staging / f"{job['id']}-{'0' * 32}.mp3"
+    link.symlink_to(outside)
+    folder = worker.staging / f"{job['id']}-{'2' * 32}.mp3"
+    folder.mkdir()
+    (folder / "inside.mp3").write_bytes(b"x")
+    store.sweep_staged()
+    assert outside.exists() and (folder / "inside.mp3").exists()
 
 
 def test_recovery_deletes_nothing_behind_a_linked_staging_folder(tmp_path, audio):
     store = Store(tmp_path / "data")
-    queued(store)
+    job = queued(store)
     stage = store.directory / "downloads" / "staging"
     shutil.rmtree(stage, ignore_errors=True)
     stage.parent.mkdir(parents=True, exist_ok=True)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    keep = [elsewhere / "song.mp3", elsewhere / "notes.json", elsewhere / "torn.json"]
+    keep = [
+        elsewhere / "song.mp3",
+        elsewhere / "notes.json",
+        elsewhere / "torn.json",
+        elsewhere / f"{job['id']}-{'0' * 32}.mp3",
+    ]
     shutil.copyfile(audio, keep[0])
     keep[1].write_text(json.dumps({"relative_path": "never.mp3", "sha256": "x"}))
     keep[2].write_text("{not json")
+    shutil.copyfile(audio, keep[3])
     stage.symlink_to(elsewhere, target_is_directory=True)
     store.recover_requests()
     assert all(path.exists() for path in keep)
+
+
+@pytest.mark.parametrize("linked", [None, "work", "staging"])
+def test_staged_audio_behind_a_linked_work_root_is_kept(
+    tmp_path, audio, monkeypatch, linked
+):
+    """With a configured work root, its staging folder and the root itself
+    must be real folders: a link could lead into the library."""
+    library = tmp_path / "library"
+    library.mkdir()
+    real = tmp_path / "real-work"
+    (real / "staging").mkdir(parents=True)
+    work = tmp_path / "work"
+    if linked is None:
+        work = real
+    elif linked == "work":
+        work.symlink_to(real, target_is_directory=True)
+    else:
+        work.mkdir()
+        (work / "staging").symlink_to(real / "staging", target_is_directory=True)
+    monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(library))
+    monkeypatch.setenv("PIG_MUSIC_DOWNLOAD_ROOT", str(work))
+    (library / ".pig-music-library.json").write_text('{"library_id": "test"}')
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "library-export.json").write_text('{"library_id": "test"}')
+    store = Store(data)
+    job = queued(store)
+    staged = real / "staging" / f"{job['id']}-{'0' * 32}.mp3"
+    shutil.copyfile(audio, staged)
+    # Without a link the same file goes (the mount check passes).
+    assert store.sweep_staged() == (1 if linked is None else 0)
+    assert staged.exists() == (linked is not None)
 
 
 def test_pausing_returns_active_request_to_waiting(tmp_path):
