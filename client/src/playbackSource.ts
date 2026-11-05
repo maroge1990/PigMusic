@@ -10,6 +10,9 @@ export type Resolved = {
   saved_id?: string;
 };
 
+/** The song in the player, with its audio once resolved. */
+export type Playing = Song & Partial<Resolved>;
+
 /** Resolve the audio for one song: your file, or a stream when unsaved. */
 export async function resolve(s: Song): Promise<Resolved> {
   if (s.cache_id) {
