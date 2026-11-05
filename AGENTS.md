@@ -73,7 +73,9 @@ A plain review only reads the diff; ask for an adversarial one. If you can run i
 - The focus names the risky parts, the failure being fixed, what your tests prove and don't, and asks for reproductions (`swift test`, small `swiftc` or pytest programs against the real sources), not only reading. It repeats the fixture rules: disposable data, `PIG_MUSIC_DATA` and `PIG_MUSIC_LIBRARY` set explicitly, no push or deploy.
 - A reviewer in a read-only sandbox can't run tests; say what it couldn't verify. Before acting on a finding, check it against the code.
 
-How many rounds (D-59): one Codex round for an ordinary batch; two for a batch that meets either condition above (the risky list, or the size limit); none for docs-only, test-only or copy changes. Stopping rule, so review doesn't loop: never more than those. After the last round only high findings block the handoff; medium and low ones become issues labelled `finding` for Mark to prioritise; say so in the report. Security findings go to a draft security advisory instead (the repo is public): no exploit detail in public text.
+How many rounds (D-59): one Codex round for an ordinary batch; two for a batch that meets either condition above (the risky list, or the size limit); none for docs-only, test-only or copy changes. Stopping rule, so review doesn't loop hunting for new issues: never more than those. After the last round only high findings block the handoff; medium and low ones become issues labelled `finding` for Mark to prioritise; say so in the report.
+
+Every fix for a Codex finding is confirmed by Codex before it ships (D-71): a focused confirmation round on the fix commit(s) that quotes the finding and asks "fixed, and nothing new?", repeated until Codex confirms. Our own tests never stand in for that confirmation, even after the last round. Security findings go to a draft security advisory instead (the repo is public): no exploit detail in public text.
 
 ## Session checklist
 
