@@ -231,9 +231,15 @@ def test_ranges_are_served_as_far_as_the_relay_has_arrived(tmp_path, monkeypatch
         # HEAD: the length and range support, without waiting for anything.
         head = await transfer.response("HEAD", None)
         results["head"] = (head.status_code, dict(head.headers))
-        # Inside the arrived part: served at once.
+        # A player's probe inside the frame that proved the length: whole at once.
+        assert 100 < transfer.checked < 2000
+        probed = time.monotonic()
+        results["probe"] = await listen(await transfer.response("GET", "bytes=0-1"))
+        results["probe_seconds"] = time.monotonic() - probed
+        # Arrived but beyond that frame: served, except its own last byte,
+        # which waits for the validated file (here, out of time: ends short).
         results["inside"] = await listen(
-            await transfer.response("GET", "bytes=100-199")
+            await transfer.response("GET", "bytes=1000-1099")
         )
         # Past it: a bounded wait, then a clean retryable answer, no bytes.
         waited = time.monotonic()
@@ -258,9 +264,12 @@ def test_ranges_are_served_as_far_as_the_relay_has_arrived(tmp_path, monkeypatch
     results = asyncio.run(run())
     status, headers = results["head"]
     assert status == 200 and headers["content-length"] == str(len(data))
+    status, headers, chunks, completed = results["probe"]
+    assert status == 206 and completed and body(chunks) == data[:2]
+    assert results["probe_seconds"] < 0.2
     status, headers, chunks, completed = results["inside"]
-    assert status == 206 and completed and body(chunks) == data[100:200]
-    assert headers["content-range"] == f"bytes 100-199/{len(data)}"
+    assert status == 206 and not completed and body(chunks) == data[1000:1099]
+    assert headers["content-range"] == f"bytes 1000-1099/{len(data)}"
     status, headers, seconds = results["late"]
     assert status == 503 and headers["retry-after"] == "2"
     assert 0.25 < seconds < 2
@@ -418,15 +427,22 @@ def test_the_last_byte_waits_for_the_validated_file(tmp_path, monkeypatch, caplo
     async def run():
         found, _ = await play(resolver)
         transfer = resolver.relay(found["relay"], "member")
-        whole, tail = await asyncio.gather(
+        probe = await listen(await transfer.response("GET", "bytes=0-1"))
+        whole, tail, inside = await asyncio.gather(
             listen(await transfer.response("GET", None)),
             listen(await transfer.response("GET", f"bytes={len(data) - 10}-")),
+            # Beyond the proving frame (Codex #23: a bounded range completed
+            # before a rejection).
+            listen(await transfer.response("GET", "bytes=0-2999")),
         )
         await settled(resolver)
-        return found, whole, tail
+        return found, whole, tail, (probe, inside)
 
     with caplog.at_level("INFO", logger="pig_music.remote"):
-        found, whole, tail = asyncio.run(run())
+        found, whole, tail, (probe, inside) = asyncio.run(run())
+    assert probe[3] and body(probe[2]) == data[:2]
+    status, _, chunks, completed = inside
+    assert status == 206 and not completed and body(chunks) == data[:2999]
     status, _, chunks, completed = whole
     assert status == 200 and not completed
     assert body(chunks) == data[: len(body(chunks))]

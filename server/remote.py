@@ -731,7 +731,13 @@ def mp3_frame(data, at):
 
 
 def mp3_head(data, size):
-    """The playing time an MP3's first bytes prove for a file of `size` bytes,
+    """The playing time an MP3's first bytes prove (see mp3_proof)."""
+    proof = mp3_proof(data, size)
+    return proof and proof[0]
+
+
+def mp3_proof(data, size):
+    """(seconds, end of the proving frame): the playing time an MP3's first bytes prove for a file of `size` bytes,
     from its Xing/Info or VBRI frame count: None when more bytes are needed;
     NotProgressive when the head cannot prove it. Matching early frames never
     prove a constant bitrate, so a file without such a header arrives whole."""
@@ -772,11 +778,12 @@ def mp3_head(data, size):
         seconds = frames * first["samples"] / first["rate"]
     else:
         raise NotProgressive("No length header.")
+    checked = start + first["length"]
     # The header's own byte count, when given, must match the declared size
     # (trailing tags allowed).
     if stated is not None and abs(stated - audio) > max(4096, audio // 100):
         raise NotProgressive("A length header for another size.")
-    return seconds
+    return seconds, checked
 
 
 class RelayTransfer:
@@ -789,6 +796,8 @@ class RelayTransfer:
         self.ready = self.loop.create_future()
         self.size = 0
         self.arrived = 0
+        # Bytes 0 to the end of the frame that proved the length.
+        self.checked = 0
         self.complete = False
         self.error = None
         self.media_type = MEDIA_TYPES[".mp3"]
@@ -826,18 +835,19 @@ class RelayTransfer:
         with open(self.path, "rb") as head:
             data = head.read(min(arrived, HEAD_BYTES))
         try:
-            seconds = mp3_head(data, total)
+            proof = mp3_proof(data, total)
         except NotProgressive:
             self.decided = True
             return
-        if seconds is None:
+        if proof is None:
             self.decided = arrived >= HEAD_BYTES
             return
+        seconds, checked = proof
         self.decided = True
         if self.expected and abs(seconds - self.expected) > 5:
             raise ValueError("The remote file was not the expected recording.")
         self.playing = True
-        self._post(self._started, total, arrived)
+        self._post(self._started, total, arrived, checked)
 
     def _post(self, callback, *args):
         try:
@@ -862,8 +872,9 @@ class RelayTransfer:
 
     # Event loop.
 
-    def _started(self, size, arrived):
+    def _started(self, size, arrived, checked):
         self.size = size
+        self.checked = checked
         self._grew(arrived)
         if not self.ready.done():
             self.ready.set_result(None)
@@ -891,11 +902,21 @@ class RelayTransfer:
             return 0
         return self.arrived if self.complete else min(self.arrived, self.size - 1)
 
-    async def until(self, position, seconds):
-        """Whether byte `position` may be served within `seconds`; never once
-        the transfer has failed."""
+    def limit(self, end):
+        """Bytes a response ending at byte `end` may send. Until the whole
+        file is validated and published, a response holds back its own last
+        byte, so no body completes for audio later rejected; only a range
+        within the frame that proved the length (a player's `bytes=0-1`
+        probe) completes at once."""
+        if self.complete or end < self.checked:
+            return min(self.servable, end + 1)
+        return min(self.servable, end)
+
+    async def until(self, position, seconds, end):
+        """Whether byte `position` of a response ending at `end` may be served
+        within `seconds`; never once the transfer has failed."""
         deadline = self.loop.time() + seconds
-        while self.error is None and self.servable <= position and not self.complete:
+        while self.error is None and self.limit(end) <= position and not self.complete:
             remaining = deadline - self.loop.time()
             if remaining <= 0:
                 return False
@@ -903,7 +924,7 @@ class RelayTransfer:
                 await asyncio.wait_for(self._changed.wait(), remaining)
             except TimeoutError:
                 return False
-        return self.servable > position
+        return self.limit(end) > position
 
     async def response(self, method, range_header):
         size = self.size
@@ -928,7 +949,7 @@ class RelayTransfer:
             return Response(status_code=status, headers=headers)
         # A range past what has arrived waits for its first byte before any
         # header is sent, so running out of time is a clean, retryable answer.
-        if not await self.until(start, WAIT_SECONDS):
+        if not await self.until(start, WAIT_SECONDS, end):
             if self.error is not None:
                 return Response(status_code=404, headers={"Cache-Control": "no-store"})
             return Response(
@@ -968,7 +989,7 @@ def byte_range(header, size):
 
 class GrowingResponse(StreamingResponse):
     """A range of a relay file served as its bytes arrive, never past them.
-    Its last byte waits for the validated file; a failed, rejected or
+    Its own last byte waits for the validated file (see RelayTransfer.limit); a failed, rejected or
     stalled transfer ends the body short of its length, which closes the
     connection rather than presenting a whole song."""
 
@@ -986,10 +1007,12 @@ class GrowingResponse(StreamingResponse):
         )
         transfer, position = self.transfer, self.start
         while position <= self.end:
-            if not await transfer.until(position, WAIT_SECONDS):
+            if not await transfer.until(position, WAIT_SECONDS, self.end):
                 return
             count = min(
-                CHUNK_BYTES, self.end + 1 - position, transfer.servable - position
+                CHUNK_BYTES,
+                self.end + 1 - position,
+                transfer.limit(self.end) - position,
             )
             data = await asyncio.to_thread(transfer.read, position, count)
             if not data or transfer.error is not None:
