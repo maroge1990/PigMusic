@@ -431,16 +431,22 @@ class Recovery:
         put back under its name when it still holds the removal's content
         (never over another file; if the name is taken, the record points at
         the private name instead, so Restore and purge still find it). With
-        neither name there in the very folder recorded before the rename
-        (device and inode), the file was deleted before the purge was
-        recorded: the record is marked purged. In any other folder that
-        proves nothing: ValueError, and the intent stays (the song is then
-        listed as needing review). `verify=False` (the purge's
-        own rename just now) puts back whatever is there."""
+        neither name there, the file was deleted before the purge was
+        recorded: the record is marked purged. All of this only in the very
+        folder recorded before the rename (device and inode): any other
+        folder proves nothing about the song, so nothing is touched or
+        cleared (ValueError), and the intent stays (the song is listed as
+        needing review). `verify=False` (the purge's own rename just now)
+        puts back whatever is there."""
         parts = Path(record["trash"]).parts
         folders, name, quarantine = parts[:-1], parts[-1], record["quarantine"]
         folder = open_owned_folder(root, *folders)
         try:
+            info = os.fstat(folder)
+            if [info.st_dev, info.st_ino] != list(
+                record.get("quarantine_folder") or []
+            ):
+                raise ValueError("The Trash folder changed; needs review.")
             try:
                 there = os.stat(quarantine, dir_fd=folder, follow_symlinks=False)
             except FileNotFoundError:
@@ -449,11 +455,6 @@ class Recovery:
                 try:
                     os.stat(name, dir_fd=folder, follow_symlinks=False)
                 except FileNotFoundError:
-                    info = os.fstat(folder)
-                    if [info.st_dev, info.st_ino] != list(
-                        record.get("quarantine_folder") or []
-                    ):
-                        raise ValueError("The Trash folder changed; needs review.")
                     record["purged_at"] = int(time.time())
             elif not verify or self.held(folder, quarantine, record["sha256"]):
                 try:

@@ -383,3 +383,39 @@ def test_a_stopped_purge_whose_trash_folder_was_replaced_is_never_marked_purged(
     assert old["id"] not in [i["id"] for i in restarted.purge_plan(1)["items"]]
     with pytest.raises(ValueError, match="needs review"):
         restarted.restore(old["id"])
+
+
+def test_a_stopped_purge_whose_folder_was_replaced_with_a_same_named_file_needs_review(
+    tmp_path, monkeypatch
+):
+    """D-71 round: the replacement folder held another file under the song's
+    name, so recovery cleared the intent without checking the folder, and
+    the song's only copy was lost under its private name."""
+    import server.recovery as module
+
+    store, root, recovery, old, new = two_removed(tmp_path, monkeypatch)
+    trash = root / old["trash"]
+    moved = trash.parent.with_name("Album-moved")
+    plan = recovery.purge_plan(30)
+
+    def stop():
+        trash.parent.rename(moved)
+        trash.parent.mkdir()
+        trash.write_bytes(b"unrelated content")
+        raise Stop
+
+    monkeypatch.setattr(module, "hashlib", SwapAfterHashing(stop))
+    with pytest.raises(Stop):
+        recovery.purge(30, plan["fingerprint"])
+    monkeypatch.undo()
+    monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(root))
+    restarted = Recovery(Store(store.directory))
+    restarted.recover()
+    record = store.read_document("removed:" + old["id"])
+    assert record.get("quarantine") and record.get("quarantine_folder")
+    assert not record.get("purged_at") and record["trash"] == old["trash"]
+    assert list(moved.glob(".pig-music-purge-*"))
+    assert trash.read_bytes() == b"unrelated content"
+    assert old["id"] not in [i["id"] for i in restarted.purge_plan(1)["items"]]
+    with pytest.raises(ValueError, match="needs review"):
+        restarted.restore(old["id"])
