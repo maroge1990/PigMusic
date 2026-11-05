@@ -24,6 +24,7 @@ import {
 } from "./LibraryCollections";
 import type { Playlist, PlaylistSummary } from "./libraryTypes";
 import { LibrarySongs } from "./LibrarySongs";
+import { PlaylistOptions } from "./PlaylistOptions";
 import {
   RemovalDialog,
   UndoRemoval,
@@ -608,53 +609,29 @@ export function PersonalLibrary({
             </section>
           )}
           {detail.playlist && !detail.playlist.favourites && (
-            <details className="playlist-options">
-              <summary>Playlist options</summary>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const name = new FormData(e.currentTarget).get("name");
-                  void action(async () => {
-                    const p = detail.playlist!;
-                    await api(`/v1/playlists/${p.id}`, {
-                      method: "PATCH",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ revision: p.revision, name }),
-                    });
-                    await openPlaylist(p.id);
+            <PlaylistOptions
+              playlist={detail.playlist}
+              rename={(name) =>
+                void action(async () => {
+                  const p = detail.playlist!;
+                  await api(`/v1/playlists/${p.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ revision: p.revision, name }),
                   });
-                }}
-              >
-                <label>
-                  Playlist name
-                  <input
-                    name="name"
-                    defaultValue={detail.playlist.name}
-                    required
-                    maxLength={100}
-                  />
-                </label>
-                <button type="submit">Rename</button>
-              </form>
-              <button
-                onClick={() => {
-                  if (
-                    confirm(
-                      "Delete this playlist? Music files stay in your library.",
-                    )
-                  )
-                    void action(async () => {
-                      await api(
-                        `/v1/playlists/${detail.playlist!.id}?revision=${detail.playlist!.revision}`,
-                        { method: "DELETE" },
-                      );
-                      backToLibrary();
-                    }, "Playlist deleted");
-                }}
-              >
-                Delete playlist
-              </button>
-            </details>
+                  await openPlaylist(p.id);
+                })
+              }
+              remove={() =>
+                void action(async () => {
+                  await api(
+                    `/v1/playlists/${detail.playlist!.id}?revision=${detail.playlist!.revision}`,
+                    { method: "DELETE" },
+                  );
+                  backToLibrary();
+                }, "Playlist deleted")
+              }
+            />
           )}
           {owner && detail.quality?.scope === "album" && (
             <OwnerAlbumTools id={detail.quality.itemId} title={detail.title} />
