@@ -366,6 +366,70 @@ test("the owner tidies an album's editions and can undo it", async ({
   expect(undone).toBe(true);
 });
 
+test("the owner joins an album split across two editions", async ({ page }) => {
+  const join = (id: string, title: string, track: number) => ({
+    id,
+    title,
+    album: "Dude Ranch",
+    quality: "FLAC",
+    album_id: "dude-1997",
+    to: { track_number: track, disc_number: 1 },
+  });
+  const album = {
+    id: "dude-2008",
+    artist: "blink-182",
+    keep: { album_id: "dude-2008", title: "Dude Ranch", songs: 13 },
+    editions: [
+      { album_id: "dude-1997", title: "Dude Ranch", year: 1997, songs: 2 },
+    ],
+    replace: [],
+    remove: [],
+    join: [join("dammit", "Dammit", 3), join("josie", "Josie", 11)],
+    leftovers: [],
+    fingerprint: "a".repeat(64),
+  };
+  let joined: unknown = null;
+  let confirmed = "";
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/admin/library/tidy/dude-2008": (route) => {
+        joined = route.request().postDataJSON();
+        return route.fulfill({ json: { id: "run", status: "applied" } });
+      },
+      "/v1/admin/library/tidy": (route) =>
+        route.fulfill({
+          json: joined
+            ? { albums: [], history: [] }
+            : { albums: [album], history: [] },
+        }),
+      "/v1/admin/library/duplicates": (route) =>
+        route.fulfill({ json: { duplicates: [] } }),
+      "/v1/admin/library/trash": (route) => route.fulfill({ json: [] }),
+      "/v1/admin/library/organisation/history": (route) =>
+        route.fulfill({ json: [] }),
+      "/v1/admin/unassigned": (route) =>
+        route.fulfill({ json: { albums: [], next_offset: null } }),
+    },
+  });
+  page.on("dialog", (dialog) => {
+    confirmed = dialog.message();
+    return dialog.accept();
+  });
+  await page.goto("/#/admin/library");
+  const panel = page
+    .locator(".system-panel")
+    .filter({ has: page.getByRole("heading", { name: "Album editions" }) });
+  await panel.getByRole("button", { name: "Find editions" }).click();
+  await expect(panel).toContainText("Join 2 songs from Dude Ranch (1997)");
+  await expect(panel).toContainText("FLAC becomes track 3 of Dude Ranch");
+  await expect(panel).toContainText("FLAC becomes track 11 of Dude Ranch");
+  await panel.getByRole("button", { name: "Tidy Dude Ranch" }).click();
+  await expect(panel).toContainText("No albums on several editions.");
+  expect(confirmed).toContain("join 2 songs into it");
+  expect(joined).toEqual({ fingerprint: "a".repeat(64) });
+});
+
 test("a tidy-up or Undo that stops keeps its reason on screen", async ({
   page,
 }) => {

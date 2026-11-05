@@ -13,9 +13,20 @@ type Album = {
   id: string;
   artist: string;
   keep: { title: string; songs: number };
-  editions: { album_id: string; title: string; songs: number }[];
+  editions: {
+    album_id: string;
+    title: string;
+    year?: number | null;
+    songs: number;
+  }[];
   remove: (Song & { kept: Song })[];
   replace: (Song & { replaces: Song })[];
+  /** Songs of an album split across editions, each moving onto the kept
+   * album at its own track number. */
+  join?: (Song & {
+    album_id: string;
+    to: { track_number: number; disc_number: number };
+  })[];
   leftovers: Song[];
   fingerprint: string;
 };
@@ -72,9 +83,14 @@ export function TidyEditions({ notify }: { notify: (s: string) => void }) {
   }
   async function tidy(album: Album) {
     const moved = album.remove.length + album.replace.length * 2;
+    const joined = album.join?.length ?? 0;
+    const changes = [
+      moved ? `move ${moved} files to Removed music` : "",
+      joined ? `join ${joined} songs into it` : "",
+    ].filter(Boolean);
     if (
       !confirm(
-        `Keep ${album.keep.title} and move ${moved} files to Removed music? Listeners keep the kept copies, and you can undo this.`,
+        `Keep ${album.keep.title} and ${changes.join(" and ")}? Listeners keep their songs, and you can undo this.`,
       )
     )
       return;
@@ -152,6 +168,34 @@ export function TidyEditions({ notify }: { notify: (s: string) => void }) {
                   .join(", ")}
                 .
               </p>
+              {album.editions.map((edition) => {
+                const songs = (album.join ?? []).filter(
+                  (s) => s.album_id === edition.album_id,
+                );
+                if (!songs.length) return null;
+                return (
+                  <div key={"join-" + edition.album_id}>
+                    <p>
+                      Join {songs.length} songs from {edition.title}
+                      {edition.year ? ` (${edition.year})` : ""}
+                    </p>
+                    {songs.map((s) => (
+                      <div className="result-row" key={s.id}>
+                        <div>
+                          <strong>{s.title}</strong>
+                          <span>
+                            {s.quality} becomes track{" "}
+                            {s.to.disc_number > 1
+                              ? `${s.to.disc_number}-${s.to.track_number}`
+                              : s.to.track_number}{" "}
+                            of {album.keep.title}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
               {album.replace.map((s) => (
                 <div className="result-row" key={s.id}>
                   <div>
@@ -185,7 +229,14 @@ export function TidyEditions({ notify }: { notify: (s: string) => void }) {
               ))}
               <button
                 className="primary-button"
-                disabled={busy || !(album.remove.length + album.replace.length)}
+                disabled={
+                  busy ||
+                  !(
+                    album.remove.length +
+                    album.replace.length +
+                    (album.join?.length ?? 0)
+                  )
+                }
                 onClick={() => void tidy(album)}
               >
                 Tidy {album.keep.title}
