@@ -169,9 +169,13 @@ struct HomeView: View {
           Text("Songs").font(.title3.weight(.bold))
           let all = feed.songs.compactMap(\.playbackTrack)
           let tracks = Array(all.prefix(10))
-          ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
-            SongRow(model: model, track: track) { model.play(all, at: index) }
-            Divider()
+          // Packed like an album's songs, without the stack's gap around
+          // each divider (#126).
+          VStack(spacing: 0) {
+            ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
+              SongRow(model: model, track: track) { model.play(all, at: index) }
+              Divider()
+            }
           }
           // The chart holds up to 100 songs (#55); the rest are a tap away.
           if all.count > tracks.count {
@@ -412,18 +416,17 @@ struct MixArtwork: View {
   }
 }
 
-/// Every song in the popular chart, in chart order (#55).
+/// Every song in the popular chart, in chart order (#55), in the album
+/// page's compact rows rather than taller list cells (#126).
 private struct ChartSongsView: View {
   let model: AppModel
   let title: String
   let tracks: [Track]
   var body: some View {
-    List {
-      ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
-        SongRow(model: model, track: track, number: index + 1) {
-          model.play(tracks, at: index)
-        }
-      }
+    ScrollView {
+      AlbumSongList(model: model, tracks: tracks, number: { index, _ in index + 1 }) {
+        model.play(tracks, at: $0)
+      }.padding(.horizontal)
     }
     .pigCanvas().navigationTitle(title).navigationBarTitleDisplayMode(.inline)
     .toolbar {

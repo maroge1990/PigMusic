@@ -1308,6 +1308,16 @@ enum PlayOrigin: Hashable {
             repeating: snapshot.albums[index].id == "sunrise" ? "a" : "b", count: 64)
         }
         homeContent[.recent] = HomeContent(albums: snapshot.albums)
+        // A chart longer than Home's ten rows, so review screens show its rows
+        // and the See all link.
+        let chart = (1...12).map { rank in
+          #"{"id":"chart-\#(rank)","name":"Chart Song \#(rank)","artist":"The Orchard","artist_id":"orchard","kind":"songs","album":"Sunrise"}"#
+        }.joined(separator: ",")
+        homeContent[.popular] = try LibraryCodec.decoder().decode(
+          HomeContent.self,
+          from: Data(
+            #"{"albums":[],"feed":{"artists":[],"albums":[],"songs":[\#(chart)],"source":"","unavailable":false,"title":"Popular","state":"ready"}}"#
+              .utf8))
         try await database.replace(snapshot)
         let demoDirectory = try FileManager.default.url(
           for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true
