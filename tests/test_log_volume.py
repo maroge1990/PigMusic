@@ -36,7 +36,7 @@ def test_a_successful_health_check_is_left_out_of_the_access_log():
 
 def test_the_logging_config_quiets_httpx_and_filters_the_health_check():
     config = json.loads(
-        (Path(__file__).parent.parent / "server" / "logging.json").read_text()
+        (Path(auth_logging.__file__).with_name("logging.json")).read_text()
     )
     assert config["loggers"]["httpx"]["level"] == "WARNING"
     assert config["loggers"]["httpcore"]["level"] == "WARNING"
