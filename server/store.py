@@ -305,12 +305,24 @@ class Store:
             return None
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            # Fair between requesters (#130): the oldest waiting job of the
+            # requester with the fewest jobs in progress, so one person's
+            # song never waits behind another's whole album. A requester's
+            # own jobs (an album's songs) keep their order; jobs nobody
+            # asked for (quality upgrades) share as one more requester.
             row = conn.execute(
-                "SELECT id,payload,"
-                "(julianday('now')-julianday(updated_at))*86400 "
-                "FROM queue WHERE status='waiting_for_sources' "
-                "AND COALESCE(json_extract(payload,'$.retry_after'),0)<=? "
-                "ORDER BY created_at,id LIMIT 1",
+                "WITH active AS (SELECT "
+                "COALESCE(json_extract(payload,'$.requested_by[0]'),'') AS who,"
+                "COUNT(*) AS n FROM queue "
+                "WHERE status IN ('searching','downloading','validating','importing') "
+                "GROUP BY who) "
+                "SELECT q.id,q.payload,"
+                "(julianday('now')-julianday(q.updated_at))*86400 "
+                "FROM queue q LEFT JOIN active a "
+                "ON a.who=COALESCE(json_extract(q.payload,'$.requested_by[0]'),'') "
+                "WHERE q.status='waiting_for_sources' "
+                "AND COALESCE(json_extract(q.payload,'$.retry_after'),0)<=? "
+                "ORDER BY COALESCE(a.n,0),q.created_at,q.id LIMIT 1",
                 (time.time(),),
             ).fetchone()
             if row:

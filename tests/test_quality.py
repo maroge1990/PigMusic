@@ -289,6 +289,31 @@ def test_upgrade_scan_does_not_treat_unknown_quality_as_permission_to_downgrade(
         )
 
 
+def test_one_requesters_song_is_claimed_before_anothers_whole_album(tmp_path):
+    """#130: the queue was strictly first-come, so one person's single song
+    waited behind another person's album."""
+    store = Store(tmp_path)
+    enabled(store)
+    store.submit_catalogue(
+        [requested(store, title=f"Album song {i}") for i in range(12)],
+        user_id="alice",
+    )
+    store.submit_catalogue([requested(store, title="Single")], user_id="bob")
+    claimed = [store.claim_request()["title"] for _ in range(3)]
+    assert claimed[1] == "Single"
+    assert claimed[0].startswith("Album") and claimed[2].startswith("Album")
+
+
+def test_jobs_nobody_asked_for_share_the_queue_as_one_requester(tmp_path):
+    store = Store(tmp_path)
+    enabled(store)
+    store.submit_catalogue([requested(store, title=f"Upgrade {i}") for i in range(4)])
+    store.submit_catalogue([requested(store, title="Mine")], user_id="bob")
+    claimed = [store.claim_request()["title"] for _ in range(3)]
+    assert claimed[1] == "Mine"
+    assert claimed[0].startswith("Upgrade") and claimed[2].startswith("Upgrade")
+
+
 def test_workers_claim_distinct_jobs_and_respect_concurrency(tmp_path):
     store = Store(tmp_path)
     enabled(store)
