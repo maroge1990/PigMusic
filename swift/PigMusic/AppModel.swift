@@ -77,6 +77,8 @@ enum PlayOrigin: Hashable {
   @ObservationIgnored private let account = AccountFence()
   /// One refresh at a time; one asked for meanwhile runs after it (RV23).
   @ObservationIgnored private let refreshLoop = RefreshLoop()
+  /// Offline, every refresh fails the same way: one line and a count (#149).
+  @ObservationIgnored private var refreshFailures = FailureRun()
   @ObservationIgnored private var restoring = false
   /// Whether the scene is active and the foreground work runs (#97).
   @ObservationIgnored private var foreground = ForegroundGate()
@@ -451,7 +453,8 @@ enum PlayOrigin: Hashable {
   private func refreshOnce() async {
     guard let service, let sync else { return }
     let stamp = account.generation
-    let began = ContinuousClock.now
+    // Foreground time only: a refresh the phone slept through isn't 10 h (#149).
+    let began = DiagnosticsLog.shared.activeTime
     syncing = true
     defer { if account.isCurrent(stamp) { syncing = false } }
     do {
@@ -521,9 +524,10 @@ enum PlayOrigin: Hashable {
       await flushHistory()
       await refreshServerRequests()
       guard account.isCurrent(stamp) else { return }
+      for line in refreshFailures.succeeded() { DiagnosticsLog.shared.record("sync", line) }
       DiagnosticsLog.shared.record(
         "sync",
-        "refreshed library in \(Int((ContinuousClock.now - began) / .milliseconds(1))) ms"
+        "refreshed library in \(Int((DiagnosticsLog.shared.activeTime - began) / .milliseconds(1))) ms"
           + (changed.isEmpty
             ? "" : "; \(changed.count) changed songs" + (invalid ? ", playback stopped" : "")))
       message =
@@ -534,7 +538,10 @@ enum PlayOrigin: Hashable {
     } catch {
       guard account.isCurrent(stamp) else { return }
       // The cached library carries on quietly; the next foreground or pull retries.
-      DiagnosticsLog.shared.record("sync", "refresh failed: \(error.localizedDescription)")
+      let key = error.networkFailure.map { "offline \($0.code.rawValue)" } ?? error.localizedDescription
+      for line in refreshFailures.failed(key: key, line: "refresh failed: \(error.localizedDescription)") {
+        DiagnosticsLog.shared.record("sync", line)
+      }
       message = nil
     }
     // A category chosen during this sync, changed or failed, loads now;

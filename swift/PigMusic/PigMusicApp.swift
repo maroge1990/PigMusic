@@ -347,11 +347,21 @@ final class CrashReports: NSObject, MXMetricManagerSubscriber, @unchecked Sendab
       DiagnosticsLog.shared.record(
         "crash", "crash report received for a run ending \(payload.timeStampEnd)")
     }
-    let files = reports()
-    for old in files.dropLast(5) { try? FileManager.default.removeItem(at: old) }
+    // Earlier builds' reports go; this build keeps its newest five.
+    let current = Set(reports())
+    for old in files() where !current.contains(old) { try? FileManager.default.removeItem(at: old) }
+    for old in reports().dropLast(5) { try? FileManager.default.removeItem(at: old) }
   }
-  /// Oldest first.
+  /// This build's reports, oldest first. MetricKit also delivers crashes from
+  /// earlier builds; those are left out of the export and the count (#149).
   func reports() -> [URL] {
+    let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
+    return files().filter {
+      (try? Data(contentsOf: $0)).map { CrashReportBuild.matches($0, build: build) } ?? false
+    }
+  }
+  /// Every saved report, oldest first.
+  private func files() -> [URL] {
     ((try? FileManager.default.contentsOfDirectory(
       at: directory, includingPropertiesForKeys: nil)) ?? [])
       .filter { $0.pathExtension == "json" }
