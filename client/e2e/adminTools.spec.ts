@@ -237,6 +237,10 @@ test("Removed music lists songs and restores one", async ({ page }) => {
     panel.locator(".result-row").filter({ hasText: title });
   await row("Dreams").getByRole("button", { name: "Restore" }).click();
   await expect(page.locator(".toast")).toContainText("Song restored.");
+  // #154: centred on the page, not offset by a sidebar the layout no longer has.
+  const toast = await page.locator(".toast").boundingBox();
+  const width = page.viewportSize()!.width;
+  expect(Math.abs(toast!.x + toast!.width / 2 - width / 2)).toBeLessThan(2);
   await expect(panel).not.toContainText("Dreams");
   // A restore the server refuses keeps the song listed and says so.
   await row("Landslide").getByRole("button", { name: "Restore" }).click();

@@ -85,13 +85,13 @@
   border-top: 1px solid var(--border);
   margin-top: 8px;
 }
-.new-playlist-dialog {
+.new-playlist-dialog,
+.personal-app dialog.new-playlist-dialog {
   width: min(440px, calc(100vw - 32px));
   padding: 24px;
   background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: var(--radius-compact);
 }
 .new-playlist-dialog::backdrop {
   background: #0008;

@@ -50,7 +50,8 @@
 .toast {
   position: fixed;
   bottom: 30px;
-  left: calc(50% + 119px);
+  /* Centred: the layout has no sidebar to offset it by (#154). */
+  left: 50%;
   transform: translateX(-50%);
   z-index: 50;
   display: flex;
@@ -146,9 +147,6 @@
   padding-top: var(--space-24);
 }
 @media (max-width: 1100px) {
-  .toast {
-    left: calc(50% + 102px);
-  }
   .inventory-counts {
     gap: var(--space-8);
     flex-direction: column;
@@ -212,9 +210,6 @@
   }
   .detail-hero h1 {
     font-size: var(--type-title);
-  }
-  .toast {
-    left: calc(50% + 87px);
   }
 }
 @media (max-width: 600px) {

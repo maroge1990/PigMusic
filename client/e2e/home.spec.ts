@@ -165,6 +165,11 @@ for (const appearance of ["light", "dark"]) {
     await page.keyboard.press("Enter");
     const dialog = page.getByRole("dialog", { name: "Daily blend" });
     await expect(dialog).toBeVisible();
+    // #154: the mix dialog keeps its own width, not the generic 32rem cap.
+    const box = await dialog.boundingBox();
+    expect(box!.width).toBeGreaterThan(
+      Math.min(700, page.viewportSize()!.width - 40),
+    );
     await dialog.getByRole("button", { name: "Save this edition" }).click();
     await expect(dialog.getByRole("status")).toContainText("Playlist saved");
     await dialog.getByRole("button", { name: "Close mix" }).click();
