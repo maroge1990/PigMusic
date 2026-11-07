@@ -224,8 +224,10 @@
   gap: var(--space-16);
   margin-bottom: var(--space-24);
 }
-.page-header > div:first-child {
+/* The text column can shrink beside a cover; long names wrap. */
+.page-header-text {
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 .page-header .eyebrow {
   margin-bottom: var(--space-8);

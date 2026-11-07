@@ -260,3 +260,32 @@ test("#155: empty lines look the same; errors use the inline error", async ({
   await page.goto("/#/search?q=Charli");
   await expect(page.getByRole("alert").first()).toHaveClass(/inline-error/);
 });
+
+test("#150: a cover page's title column shrinks for a long unbroken name", async ({
+  page,
+}) => {
+  // Codex round 1: with the cover first, the title column lost min-width: 0.
+  const long = "Supercalifragilisticexpialidocious".repeat(4);
+  await mockApi(page, {
+    answers: {
+      "/v1/albums/album-1": (r: Route) =>
+        r.fulfill({ json: { ...album, title: long, artist: long } }),
+    },
+  });
+  await page.goto(`/#/library/album/${album.id}`);
+  await expect(page.locator("main h1")).toBeVisible();
+  const overflow = await page.evaluate(() => {
+    const main = document.querySelector("main")!;
+    const header = main.querySelector("header.page-header")!;
+    const right = main.getBoundingClientRect().right;
+    return [...header.querySelectorAll("h1, p")].map((el) =>
+      Math.round(el.getBoundingClientRect().right - right),
+    );
+  });
+  for (const px of overflow) expect(px).toBeLessThanOrEqual(0);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+});

@@ -18,7 +18,7 @@ export function PageHeader({
   return (
     <header className={cover ? "page-header has-cover" : "page-header"}>
       {cover}
-      <div>
+      <div className="page-header-text">
         {eyebrow && <div className="eyebrow">{eyebrow}</div>}
         <h1>{title}</h1>
         {subtitle && <p>{subtitle}</p>}
