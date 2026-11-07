@@ -780,3 +780,94 @@ def test_a_download_is_tagged_and_given_its_cover_in_one_save(
     tags = ID3(path)
     assert tags.getall("APIC")[0].data == store.covers.path(sha).read_bytes()
     assert str(tags["TIT2"]) == "Test Track"
+
+
+def slow_publication(tmp_path, audio, monkeypatch, during):
+    """A claimed, validated download whose move into the library takes
+    0.6 s, running `during()` from another thread meanwhile."""
+    import threading
+    import time
+
+    import server.store as store_module
+
+    store = Store(tmp_path / "data")
+    job = queued(store)
+    worker = Downloader(store)
+    store.request_state(job["id"], "validating", _claim_token=job["claim_token"])
+    staged = worker.staging / "staged.mp3"
+    shutil.copyfile(audio, staged)
+    real = store_module.os.replace
+    moving = threading.Event()
+
+    def slow_replace(source, target):
+        if Path(source) == staged:
+            moving.set()
+            time.sleep(0.6)
+        return real(source, target)
+
+    monkeypatch.setattr(store_module.os, "replace", slow_replace)
+    result = {}
+
+    def other():
+        moving.wait(5)
+        began = time.monotonic()
+        during(store, job)
+        result["seconds"] = time.monotonic() - began
+
+    thread = threading.Thread(target=other)
+    thread.start()
+    probe = {"codec": "mp3", "bitrate_kbps": 320, "duration": 3.0}
+    target = worker.library_root / "Test Artist" / "Test Album" / "song.mp3"
+    published = store.commit_request(
+        job, staged, target, probe, hashlib.sha256(audio.read_bytes()).hexdigest()
+    )
+    thread.join()
+    return store, job, staged, target, published, result
+
+
+def test_a_slow_move_into_the_library_does_not_hold_the_database(
+    tmp_path, audio, monkeypatch
+):
+    """#138: the rename over SMB ran inside BEGIN IMMEDIATE, so a request
+    submitted meanwhile waited for it (and failed past 10 s)."""
+    import plistlib
+
+    def submit(store, job):
+        inventory = plistlib.dumps(
+            {"Tracks": {"9": {"Name": "Other", "Artist": "B", "Album": "C"}}}
+        )
+        source = store.import_apple(inventory)
+        track = next(
+            t
+            for album in source["albums"]
+            for t in album["tracks"]
+            if t["title"] == "Other"
+        )
+        store.update_selection([track["id"]], True)
+        store.submit_migration()
+
+    store, job, staged, target, published, result = slow_publication(
+        tmp_path, audio, monkeypatch, submit
+    )
+    assert published and target.exists()
+    assert result["seconds"] < 0.4
+    assert {i["status"] for i in store.queue()["items"]} == {
+        "completed",
+        "waiting_for_sources",
+    }
+
+
+def test_a_request_cancelled_while_its_file_moves_is_not_published(
+    tmp_path, audio, monkeypatch
+):
+    def cancel(store, job):
+        store.cancel_request(job["id"])
+
+    store, job, staged, target, published, _ = slow_publication(
+        tmp_path, audio, monkeypatch, cancel
+    )
+    assert not published
+    assert not target.exists() and staged.exists()  # Back in staging.
+    assert store.queue()["items"][0]["status"] == "cancelled"
+    assert list(staged.parent.glob("*.json")) == []
+    assert Store(store.directory).library["stats"]["tracks"] == 0

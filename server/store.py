@@ -473,74 +473,105 @@ class Store:
             / "staging"
             / (job["id"] + "-" + job.get("claim_token", "legacy") + ".json")
         )
+
+        def holds(row):
+            return bool(
+                row
+                and row[0] == "validating"
+                and not (
+                    job.get("claim_token")
+                    and json.loads(row[1]).get("claim_token") != job["claim_token"]
+                )
+            )
+
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT status,payload FROM queue WHERE id=?", (job["id"],)
+            ).fetchone()
+        if not holds(row):
+            return
+        # The file moves on the NAS before the database write lock is taken
+        # (#138): a slow rename over SMB held it for seconds, and progress
+        # writes, submits and deferrals waited on it, then failed. The
+        # journal, written first, lets recovery finish a move whose
+        # database write never happened.
+        # Written only once the claim holds (#96): a request cancelled
+        # meanwhile left a journal recovery could never use. Never
+        # through a link: that would write outside appdata (D-71).
+        if not self.staging_owned() or journal.is_symlink():
+            raise ValueError("Download staging is not PigMusic's own folder")
+        journal.write_text(
+            json.dumps(
+                {**metadata, **({"_legacy_replacement": legacy} if legacy else {})}
+            ),
+            encoding="utf-8",
+        )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        moved = False
+        if target.exists():
+            if file_sha256(target) != sha:
+                self.drop_journal(journal)
+                raise ValueError(
+                    "Import collision: an existing file has different content"
+                )
+        else:
+            os.replace(source, target)
+            moved = True
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT status,payload FROM queue WHERE id=?", (job["id"],)
             ).fetchone()
-            if (
-                not row
-                or row[0] != "validating"
-                or (
-                    job.get("claim_token")
-                    and json.loads(row[1]).get("claim_token") != job["claim_token"]
-                )
-            ):
-                return
-            # Written only once the claim holds (#96): a request cancelled
-            # meanwhile left a journal recovery could never use. Never
-            # through a link: that would write outside appdata (D-71).
-            if not self.staging_owned() or journal.is_symlink():
-                raise ValueError("Download staging is not PigMusic's own folder")
-            journal.write_text(
-                json.dumps(
-                    {**metadata, **({"_legacy_replacement": legacy} if legacy else {})}
-                ),
-                encoding="utf-8",
-            )
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if target.exists():
-                if file_sha256(target) != sha:
-                    self.drop_journal(journal)
-                    raise ValueError(
-                        "Import collision: an existing file has different content"
-                    )
+            if holds(row):
+                self._record_publication(conn, job, metadata, legacy, row)
+                lost = False
             else:
-                os.replace(source, target)
-            old = conn.execute(
-                "SELECT payload FROM acquired WHERE id=?", (metadata["id"],)
-            ).fetchone()
-            if old:
-                conn.execute(
-                    "INSERT OR IGNORE INTO quality_versions VALUES (?,?,?)",
-                    (job["id"], metadata["id"], old[0]),
-                )
-                conn.execute(
-                    "INSERT OR IGNORE INTO quality_cleanup VALUES (?,?,?)",
-                    (job["id"], metadata["id"], old[0]),
-                )
-            elif legacy:
-                conn.execute(
-                    "INSERT OR IGNORE INTO quality_versions VALUES (?,?,?)",
-                    (job["id"], metadata["id"], json.dumps(legacy)),
-                )
-                conn.execute(
-                    "INSERT OR IGNORE INTO quality_cleanup VALUES (?,?,?)",
-                    (job["id"], metadata["id"], json.dumps(legacy)),
-                )
-            conn.execute(
-                "INSERT INTO acquired VALUES (?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",
-                (metadata["id"], json.dumps(metadata)),
-            )
-            self._grant_request_membership(conn, row[1], metadata["id"])
-            self._save_quality_policy(conn, metadata)
-            conn.execute(
-                "UPDATE queue SET status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (job["id"],),
-            )
+                lost = True
+        if lost:
+            # Cancelled (or claimed again) while the file moved: it goes
+            # back to staging, which the caller clears, and nothing is
+            # recorded.
+            if moved:
+                os.replace(target, source)
+            self.drop_journal(journal)
+            return
         self.drop_journal(journal)
         self.published += 1
         return True
+
+    def _record_publication(self, conn, job, metadata, legacy, row):
+        """The database side of a publication, in `conn`'s transaction."""
+        old = conn.execute(
+            "SELECT payload FROM acquired WHERE id=?", (metadata["id"],)
+        ).fetchone()
+        if old:
+            conn.execute(
+                "INSERT OR IGNORE INTO quality_versions VALUES (?,?,?)",
+                (job["id"], metadata["id"], old[0]),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO quality_cleanup VALUES (?,?,?)",
+                (job["id"], metadata["id"], old[0]),
+            )
+        elif legacy:
+            conn.execute(
+                "INSERT OR IGNORE INTO quality_versions VALUES (?,?,?)",
+                (job["id"], metadata["id"], json.dumps(legacy)),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO quality_cleanup VALUES (?,?,?)",
+                (job["id"], metadata["id"], json.dumps(legacy)),
+            )
+        conn.execute(
+            "INSERT INTO acquired VALUES (?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",
+            (metadata["id"], json.dumps(metadata)),
+        )
+        self._grant_request_membership(conn, row[1], metadata["id"])
+        self._save_quality_policy(conn, metadata)
+        conn.execute(
+            "UPDATE queue SET status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (job["id"],),
+        )
 
     def defer_request(self, job, seconds, attempts):
         """Put a claimed request back in the queue, not to be claimed again
