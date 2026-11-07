@@ -79,6 +79,8 @@ enum PlayOrigin: Hashable {
   @ObservationIgnored private let refreshLoop = RefreshLoop()
   /// Offline, every refresh fails the same way: one line and a count (#149).
   @ObservationIgnored private var refreshFailures = FailureRun()
+  /// A refresh failure still repeating, for a diagnostics export taken now.
+  var refreshFailurePending: String? { refreshFailures.pending }
   @ObservationIgnored private var restoring = false
   /// Whether the scene is active and the foreground work runs (#97).
   @ObservationIgnored private var foreground = ForegroundGate()

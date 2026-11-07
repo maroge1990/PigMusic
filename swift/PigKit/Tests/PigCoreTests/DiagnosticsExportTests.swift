@@ -53,6 +53,25 @@ struct DiagnosticsExportTests {
     #expect(run.succeeded() == [])
   }
 
+  /// Codex on 43e2844: during an outage the count lived only in memory, so an
+  /// export taken mid-outage, or after the app ended, showed none of it.
+  @Test func aLongRunShowsInTheLogAndInAnExportBeforeItEnds() {
+    var run = FailureRun()
+    #expect(run.pending == nil)
+    var logged: [String] = []
+    for _ in 0..<1001 { logged += run.failed(key: "offline", line: "refresh failed") }
+    #expect(
+      logged == [
+        "refresh failed",
+        "the same failure has repeated 10 times so far",
+        "the same failure has repeated 100 times so far",
+        "the same failure has repeated 1000 times so far",
+      ])
+    #expect(run.pending == "the same failure has repeated 1000 more times so far")
+    #expect(run.succeeded() == ["the same failure repeated 1000 more times"])
+    #expect(run.pending == nil)
+  }
+
   @Test func onlyThisBuildsCrashReportsAreExported() throws {
     func payload(_ build: String) throws -> Data {
       try JSONSerialization.data(withJSONObject: [
