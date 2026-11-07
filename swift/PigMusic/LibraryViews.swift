@@ -139,7 +139,7 @@ struct LibraryView: View {
             PlaylistView(model: model, playlist: playlist)
           } label: {
             HStack(spacing: 12) {
-              Image(systemName: playlist.favourites == true ? "heart.fill" : "music.note.list")
+              Image(systemName: playlist.favourites == true ? "star.fill" : "music.note.list")
                 .frame(width: 44, height: 44)
                 .foregroundStyle(PigBrand.accent(scheme))
                 .background(PigBrand.accent(scheme).opacity(0.12), in: .rect(cornerRadius: 10))
@@ -172,13 +172,18 @@ struct LibraryView: View {
   {
     if shown < total {
       Button("Show more") { Task { await model.more(collection) } }
-        .buttonStyle(ChipStyle(selected: false))
+        .buttonStyle(.pigSecondary)
         .disabled(model.loadingMore || model.syncing)
         .frame(maxWidth: .infinity)
         // Grids page in as they scroll into view.
         .onAppear { Task { await model.more(collection) } }
     }
   }
+}
+
+/// The one secondary button (#161): an unselected chip.
+extension ButtonStyle where Self == ChipStyle {
+  static var pigSecondary: ChipStyle { .init(selected: false) }
 }
 
 struct ChipStyle: ButtonStyle {
@@ -271,7 +276,7 @@ struct AlbumView: View {
                 "Request \(missing.count) missing song\(missing.count == 1 ? "" : "s")",
                 systemImage: "arrow.down.circle")
             }
-            .buttonStyle(ChipStyle(selected: false))
+            .buttonStyle(.pigSecondary)
             .disabled(requesting || !model.canMutate)
             if let requestMessage {
               Text(requestMessage).font(PigType.footnote).foregroundStyle(.secondary)
@@ -620,7 +625,7 @@ struct NowPlayingView: View {
         if player.seamlessEnabled {
           Button("Use streaming") { player.retry(streaming: true) }
         }
-      }.buttonStyle(.bordered)
+      }.buttonStyle(.pigSecondary)
     }
   }
   private var upNext: some View {

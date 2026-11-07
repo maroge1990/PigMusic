@@ -148,6 +148,7 @@ struct AddToPlaylistView: View {
 }
 
 struct PlaylistView: View {
+  @Environment(\.colorScheme) private var scheme
   @Bindable var model: AppModel
   @State private var playlist: Playlist
   @State private var name: String
@@ -195,7 +196,7 @@ struct PlaylistView: View {
         }) {
           VStack(alignment: .leading, spacing: 4) {
             Text(failed.message ?? "An edit to this playlist could not be applied.")
-              .font(PigType.footnote).foregroundStyle(Color("PigDanger"))
+              .font(PigType.footnote).foregroundStyle(PigBrand.danger(scheme))
             NavigationLink("Review edit") { PendingEditsView(model: model) }
               .font(PigType.footnote.weight(.semibold))
           }

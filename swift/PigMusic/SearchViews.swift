@@ -307,7 +307,7 @@ struct SavedArtistView: View {
         if let error { Text(error).font(PigType.footnote) }
         if more && !albums.isEmpty {
           Button("Show more albums") { Task { await load() } }.disabled(loading)
-            .buttonStyle(ChipStyle(selected: false)).frame(maxWidth: .infinity)
+            .buttonStyle(.pigSecondary).frame(maxWidth: .infinity)
         }
         if !songs.isEmpty {
           VStack(alignment: .leading, spacing: 0) {
@@ -464,13 +464,7 @@ private struct FoundResultsView: View {
       HStack(spacing: 8) {
         ForEach(kinds, id: \.self) { option in
           Button(option.rawValue) { kind = option }
-            .font(.subheadline.weight(.semibold))
-            .padding(.horizontal, 14).padding(.vertical, 7)
-            .foregroundStyle(option == kind ? Color.white : PigBrand.text(scheme))
-            .background(
-              Capsule().fill(option == kind ? PigBrand.accent(scheme) : Color.secondary.opacity(0.15))
-            )
-            .buttonStyle(.plain)
+            .buttonStyle(ChipStyle(selected: option == kind))
             .accessibilityAddTraits(option == kind ? .isSelected : [])
         }
       }.padding(.vertical, 4)
@@ -586,7 +580,8 @@ private struct FoundResultsView: View {
       // the server; nothing for music not on it yet.
       if mark == .library || mark == .server {
         Image(systemName: "cloud").font(.system(size: 13, weight: .semibold))
-          .foregroundStyle(mark == .library ? PigBrand.accent(scheme) : Color.secondary.opacity(0.5))
+          .foregroundStyle(
+            mark == .library ? PigBrand.accent(scheme) : PigBrand.secondary(scheme).opacity(0.5))
           .accessibilityLabel(mark == .library ? "In your library" : "On the server")
       }
     }
@@ -698,6 +693,7 @@ private struct RecentAlbumView: View {
 
 /// Apple's own artwork for an Apple Music playlist or song, fetched from Apple.
 private struct AppleArtwork: View {
+  @Environment(\.colorScheme) private var scheme
   let url: URL?
   var body: some View {
     AsyncImage(url: url) { image in
@@ -705,7 +701,7 @@ private struct AppleArtwork: View {
     } placeholder: {
       Image(systemName: "music.note.list").foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.secondary.opacity(0.12))
+        .background(PigBrand.raised(scheme))
     }
     .clipShape(RoundedRectangle(cornerRadius: 6))
     .accessibilityHidden(true)
@@ -752,7 +748,7 @@ private struct ApplePlaylistView: View {
         // copy came from, so the app can't offer "Update my copy". Adding it
         // again updates the copy on the server (D-69).
         Button("Add to my playlists", systemImage: "plus") { adding = true }
-          .buttonStyle(.bordered).buttonBorderShape(.capsule)
+          .buttonStyle(.pigSecondary)
           .disabled((songs ?? []).isEmpty || !model.canMutate)
         if let songs {
           if let summary {
@@ -1077,7 +1073,7 @@ private struct ShazamListenView: View {
             listeningPause = nil
             model.player.resume()
           }
-          .buttonStyle(.bordered).padding()
+          .buttonStyle(.pigSecondary).padding()
         }
       }
       .pigCanvas().navigationTitle("What's playing?").navigationBarTitleDisplayMode(.inline)
@@ -1182,8 +1178,8 @@ private struct ShazamFoundView: View {
           close()
         }
         if case .server = state {
-          Button("Add to library", systemImage: "plus") { Task { await add(track) } }
-            .buttonStyle(.bordered).buttonBorderShape(.capsule)
+          Button("Add to my library", systemImage: "plus") { Task { await add(track) } }
+            .buttonStyle(.pigSecondary)
             .disabled(adding || !model.canMutate)
         }
       }

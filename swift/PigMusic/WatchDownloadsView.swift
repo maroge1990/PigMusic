@@ -7,6 +7,7 @@ import SwiftUI
 /// Music sent to Apple Watch: transfers first, then what is on the Watch grouped
 /// by album and playlist. Music is chosen from album, artist, playlist and song pages.
 struct WatchDownloadsView: View {
+  @Environment(\.colorScheme) private var scheme
   let model: AppModel
   @State private var removing: DeviceGroup?
   var body: some View {
@@ -82,7 +83,7 @@ struct WatchDownloadsView: View {
           }
           Button("Retry Watch transfers") { Task { await watch.retry() } }
           if let error = watch.message ?? watch.link?.error {
-            Text(error).foregroundStyle(Color("PigDanger"))
+            Text(error).foregroundStyle(PigBrand.danger(scheme))
           }
           Text(
             "Playlists sent to the Watch update when they change. Copies keep downloading to this iPhone while it is locked; the system decides when to pass them to the Watch. AAC copies also use storage on this iPhone."
@@ -141,7 +142,7 @@ struct WatchDownloadsView: View {
       }
       if failed > 0 {
         Text("\(failed) failed. Tap the retry mark next to each song.")
-          .font(PigType.footnote).foregroundStyle(Color("PigDanger"))
+          .font(PigType.footnote).foregroundStyle(PigBrand.danger(scheme))
       }
       if let confirmed = watch.confirmedAt {
         Text("Watch confirmed \(confirmed.formatted(.relative(presentation: .named)))")
@@ -165,12 +166,12 @@ struct WatchDownloadsView: View {
     -> some View
   {
     if onWatch(record, watch: watch) {
-      Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
+      Image(systemName: "checkmark.circle.fill").foregroundStyle(PigBrand.accent(scheme))
     } else if record.state == "failed" {
       Button {
         Task { await watch.enqueue([record.track], origin: record.effectiveOrigins.last ?? .direct) }
       } label: {
-        Image(systemName: "exclamationmark.arrow.circlepath").foregroundStyle(Color("PigDanger"))
+        Image(systemName: "exclamationmark.arrow.circlepath").foregroundStyle(PigBrand.danger(scheme))
       }.buttonStyle(.borderless).accessibilityLabel("Retry")
     } else if record.state == "ready" {
       Image(systemName: "applewatch.radiowaves.left.and.right").foregroundStyle(.secondary)

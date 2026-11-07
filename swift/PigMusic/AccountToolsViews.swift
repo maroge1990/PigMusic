@@ -74,6 +74,7 @@ struct PasswordView: View {
   }
 }
 struct SessionsView: View {
+  @Environment(\.colorScheme) private var scheme
   let model: AppModel
   @State private var sessions: [AccountSession] = []
   @State private var loading = false
@@ -94,7 +95,7 @@ struct SessionsView: View {
             Text(session.deviceName.isEmpty ? session.kind : session.deviceName)
             if session.current == true {
               Text("This device").font(PigType.caption.weight(.semibold))
-                .foregroundStyle(.green)
+                .foregroundStyle(PigBrand.success(scheme))
             }
           }
           Text(
@@ -293,6 +294,7 @@ struct RemovalView: View {
 /// Versions, the Watch connection, and an export of both devices' lifecycle
 /// logs and any crash reports, for diagnosing crashes and stuck transfers.
 struct DiagnosticsView: View {
+  @Environment(\.colorScheme) private var scheme
   let model: AppModel
   @State private var server: ServerInfo?
   @State private var serverChecked = false
@@ -305,7 +307,7 @@ struct DiagnosticsView: View {
         LabeledContent("Crash reports", value: CrashReports.shared.reports().count.formatted())
         if DiagnosticsLog.shared.previousRunEndedUnexpectedly {
           Text("The last run on this iPhone ended unexpectedly.")
-            .font(PigType.footnote).foregroundStyle(Color("PigDanger"))
+            .font(PigType.footnote).foregroundStyle(PigBrand.danger(scheme))
         }
       }
       Section("Server") {
@@ -313,7 +315,7 @@ struct DiagnosticsView: View {
           LabeledContent("Version", value: server.version)
           LabeledContent("Build", value: server.revision)
           if server.apiLevel < ServerInfo.expectedLevel {
-            Text(Self.serverUpdate).font(PigType.footnote).foregroundStyle(Color("PigDanger"))
+            Text(Self.serverUpdate).font(PigType.footnote).foregroundStyle(PigBrand.danger(scheme))
           }
         } else if serverChecked {
           Text(serverError ?? Self.serverUpdate).font(PigType.footnote)
@@ -338,7 +340,7 @@ struct DiagnosticsView: View {
               "Watch log", value: diagnostics.sentAt.formatted(.relative(presentation: .named)))
             if diagnostics.endedUnexpectedly {
               Text("The Watch reported that its previous run ended unexpectedly.")
-                .font(PigType.footnote).foregroundStyle(Color("PigDanger"))
+                .font(PigType.footnote).foregroundStyle(PigBrand.danger(scheme))
             }
           }
           Button("Ask the Watch for its log") { watch.requestWatchDiagnostics() }

@@ -40,7 +40,7 @@ struct CatalogueArtistView: View {
             Label("In your library", systemImage: "checkmark.circle.fill")
               .font(.subheadline.weight(.semibold))
           }
-          .buttonStyle(ChipStyle(selected: false))
+          .buttonStyle(.pigSecondary)
           .accessibilityHint("Opens \(name) in your library")
         }
         if let description = profile?.description, !description.isEmpty {
@@ -84,7 +84,7 @@ struct CatalogueArtistView: View {
           if let error {
             Text(error).font(PigType.footnote).foregroundStyle(.secondary)
             Button("Try again") { Task { await loadAlbums() } }
-              .buttonStyle(ChipStyle(selected: false))
+              .buttonStyle(.pigSecondary)
           } else {
             ProgressView().frame(maxWidth: .infinity)
           }
@@ -401,7 +401,7 @@ struct CatalogueDiscographyView: View {
         ReleaseGrid(model: model, releases: orderedReleases, showType: true)
         if offset < total {
           Button("Show more releases") { Task { await load(reset: false) } }.disabled(loading)
-            .buttonStyle(ChipStyle(selected: false)).frame(maxWidth: .infinity)
+            .buttonStyle(.pigSecondary).frame(maxWidth: .infinity)
         }
       }.padding(.horizontal).padding(.bottom, 24)
     }
@@ -492,7 +492,7 @@ struct CatalogueAlbumView: View {
           }.listRowSeparator(.hidden)
           if let error {
             Text(error).foregroundStyle(.secondary)
-            Button("Try again") { Task { await load() } }
+            Button("Try again") { Task { await load() } }.buttonStyle(.pigSecondary)
           } else if editions != nil {
             Text("No catalogue results.").foregroundStyle(.secondary)
           } else {
@@ -639,7 +639,8 @@ struct CatalogueReleaseView: View {
             fallback: groupId.map { .releaseGroup($0) }, eyebrow: "ALBUM", title: title)
           if let error {
             Text(error).foregroundStyle(.secondary)
-            Button("Try again") { Task { await load() } }.disabled(loading)
+            Button("Try again") { Task { await load() } }.buttonStyle(.pigSecondary)
+              .disabled(loading)
           } else {
             ProgressView().frame(maxWidth: .infinity)
           }
@@ -746,7 +747,7 @@ private struct CatalogueStatus: View {
     if loading { ProgressView("Loading catalogue…") }
     if let error {
       Text(error).foregroundStyle(.secondary)
-      Button("Try again", action: retry).disabled(loading)
+      Button("Try again", action: retry).buttonStyle(.pigSecondary).disabled(loading)
     } else if loaded && empty {
       Text("No catalogue results.").foregroundStyle(.secondary)
     }

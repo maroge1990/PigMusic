@@ -201,6 +201,7 @@ struct HomeView: View {
         } else if let error = model.homeErrors[section] {
           Text(error).font(PigType.footnote).foregroundStyle(.secondary)
           Button("Try again") { Task { await model.refreshHome(force: true) } }
+            .buttonStyle(.pigSecondary)
         } else if let feed {
           Text(message(section, feed)).font(PigType.footnote).foregroundStyle(.secondary)
         }

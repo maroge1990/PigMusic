@@ -64,6 +64,7 @@ struct RootView: View {
 }
 
 struct SignInView: View {
+  @Environment(\.colorScheme) private var scheme
   @Bindable var model: AppModel
   @State private var username = ""
   @State private var password = ""
@@ -119,7 +120,7 @@ struct SignInView: View {
         }
         if let message = model.message {
           Section {
-            Text(message).foregroundStyle(Color("PigDanger")).accessibilityLabel(
+            Text(message).foregroundStyle(PigBrand.danger(scheme)).accessibilityLabel(
               "Sign-in status: " + message)
           }
         }
