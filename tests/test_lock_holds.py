@@ -449,3 +449,48 @@ def test_a_song_left_to_settle_is_tried_again_shortly_not_in_15_s(
     settle(source)
     assert exporter.process() is False
     assert len(list(root.rglob("*.mp3"))) == 1
+
+
+def test_a_rebuild_reads_the_snapshot_once_and_artists_in_one_query(
+    tmp_path, monkeypatch
+):
+    """#144: each rebuild parsed library-snapshot.json again and read one
+    document per artist (a connection each)."""
+    import server.store as store_module
+    from server.store import Store
+
+    tracks = [
+        {
+            "id": str(i),
+            "title": f"Song {i}",
+            "artist": f"Artist {i}",
+            "album_artist": f"Artist {i}",
+            "album": f"Album {i}",
+            "relative_path": f"a{i}.mp3",
+        }
+        for i in range(20)
+    ]
+    (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": tracks}))
+    store = Store(tmp_path)
+    assert len(store.library["artists"]) == 20
+    parses, single = [], []
+    real_load = store_module.load_json
+    monkeypatch.setattr(
+        store_module, "load_json", lambda path: parses.append(path) or real_load(path)
+    )
+    real_read = store.read_document
+    monkeypatch.setattr(
+        store,
+        "read_document",
+        lambda name: single.append(name) or real_read(name),
+    )
+    store.refresh_library()
+    store.refresh_library()
+    snapshot_parses = [p for p in parses if p.name == "library-snapshot.json"]
+    assert snapshot_parses == []
+    assert [n for n in single if n.startswith("library-artist:")] == []
+    assert len(store.library["artists"]) == 20
+    # A changed snapshot is read again.
+    (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": tracks[:5]}))
+    store.refresh_library()
+    assert len(store.library["artists"]) == 5

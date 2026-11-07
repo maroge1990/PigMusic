@@ -63,6 +63,10 @@ def cache_covers(store, snapshot_tracks, library=None):
     config = media_settings(store)
     from .portraits import portrait_target
 
+    # One read for every artist's saved identity, not one each (#144).
+    saved = store.read_documents(
+        ["library-artist:" + artist["id"] for artist in library["artists"]]
+    )
     for artist in library["artists"]:
         if not artist["cover_url"]:
             artist["cover_url"] = next(
@@ -74,7 +78,7 @@ def cache_covers(store, snapshot_tracks, library=None):
                 ),
                 None,
             )
-        known = store.read_document("library-artist:" + artist["id"])
+        known = saved.get("library-artist:" + artist["id"]) or {}
         portrait = (
             public_image(store, portrait_target(store, artist["name"], known.get("id")))
             if config["portraits"]

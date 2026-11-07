@@ -134,8 +134,23 @@ class Store:
         if self.projected < self.published:
             self.refresh_library()
 
+    def snapshot(self):
+        """The parsed library snapshot, read again only when its file changed
+        (#144): a rebuild parsed it every time. Its tracks are shared with
+        `snapshot_tracks` and only ever given defaults by a build."""
+        path = self.directory / "library-snapshot.json"
+        try:
+            info = os.stat(path)
+            key = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+        except OSError:
+            key = None
+        cached = getattr(self, "parsed_snapshot", None)
+        if key is None or cached is None or cached[0] != key:
+            cached = self.parsed_snapshot = (key, load_json(path))
+        return cached[1]
+
     def _build_library(self):
-        snapshot = load_json(self.directory / "library-snapshot.json")
+        snapshot = self.snapshot()
         with self.connect() as conn:
             extra = [
                 json.loads(r[0]) for r in conn.execute("SELECT payload FROM acquired")
