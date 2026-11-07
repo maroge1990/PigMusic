@@ -88,10 +88,6 @@ class Store:
         # Called (from any thread) after a download is committed, so the
         # exporter publishes it now rather than on its next pass (#136).
         self.publish_listeners = []
-        # Files this process moved into the downloads library, by path, with
-        # their fingerprint then: the exporter need not wait for them to
-        # settle (#136). Bounded; a missing entry only means a later pass.
-        self.fresh_files = {}
         self.retired_digests = {}
         self.library_lock = TimedRLock("library_lock")
         directory.mkdir(parents=True, exist_ok=True)
@@ -588,18 +584,6 @@ class Store:
         else:
             os.replace(source, target)
             moved = True
-            try:
-                stat = os.stat(target)
-                if len(self.fresh_files) > 1000:
-                    self.fresh_files.clear()
-                self.fresh_files[os.fspath(target)] = (
-                    stat.st_dev,
-                    stat.st_ino,
-                    stat.st_size,
-                    stat.st_mtime_ns,
-                )
-            except OSError:
-                pass
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(

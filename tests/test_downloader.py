@@ -909,28 +909,6 @@ def test_an_albums_publications_share_one_rebuild_and_one_revision(
     assert len(revisions) <= 2
 
 
-def test_the_exporter_takes_the_apps_own_fresh_download_at_once(tmp_path):
-    """#136: the exporter skipped files modified in the last 2 s and waited
-    for its next pass (15 s); a file this process moved into place, unchanged
-    since, needs no settling. Any other fresh file still waits."""
-    import os
-
-    from server.exporter import Exporter, fingerprint
-
-    store = Store(tmp_path / "data")
-    exporter = Exporter(store, tmp_path / "nas")
-    source = tmp_path / "data" / "fresh.mp3"
-    source.write_bytes(b"x" * 100)
-    exporter.paths = lambda track: (source, "a/fresh.mp3", tmp_path / "nas" / "x")
-    assert exporter.warm({"id": "t"}) is False  # Someone else's fresh file.
-    store.__dict__.setdefault("fresh_files", {})[os.fspath(source)] = fingerprint(
-        source
-    )
-    assert exporter.warm({"id": "t"}) is True
-    source.write_bytes(b"y" * 101)  # Changed since: it waits again.
-    assert exporter.warm({"id": "t"}) is False
-
-
 def test_recovery_undoes_the_move_of_a_request_cancelled_while_it_moved(
     tmp_path, audio, monkeypatch
 ):

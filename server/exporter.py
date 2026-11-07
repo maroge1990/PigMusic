@@ -76,6 +76,10 @@ def fingerprint(path):
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
 
 
+# Seconds before a pass that left a song to settle is run again (#136).
+SETTLE_RETRY = 2.5
+
+
 def settled(identity, now=None):
     return identity[3] < (time.time_ns() if now is None else now) - 2_000_000_000
 
@@ -130,21 +134,12 @@ class Exporter:
         started = time.time_ns()
         value = digest(path)
         # A file written moments ago could change again within one timestamp
-        # tick without its size changing: remember only settled files, and
-        # downloads this process moved into place, unchanged since (#136),
-        # so publication never reads them again under lifecycle_lock.
-        if fingerprint(path) == before and (
-            settled(before, started) or self.fresh(path, before)
-        ):
+        # tick without its size changing: remember only settled files.
+        if fingerprint(path) == before and settled(before, started):
             if len(self.digests) > 20000:
                 self.digests.clear()
             self.digests[key] = (before, value, self.pass_id)
         return value
-
-    def fresh(self, path, identity):
-        """Whether `path` is a download this process moved into place and
-        still has the fingerprint it had then (#136)."""
-        return self.store.fresh_files.get(os.fspath(path)) == identity
 
     def linked(self, path, source, expected):
         """Whether `path` holds the verified source's bytes: a hard link of it,
@@ -177,10 +172,7 @@ class Exporter:
             published = track.get("export_relative_path") and not source.is_file()
             for path in (source, target):
                 if path.is_file():
-                    identity = fingerprint(path)
-                    # A download this process moved into place, unchanged
-                    # since, needs no settling (#136).
-                    if not settled(identity) and not self.fresh(path, identity):
+                    if not settled(fingerprint(path)):
                         return False
                     self.digest(path, this_pass=not published)
         except (OSError, ValueError, KeyError):
@@ -563,6 +555,7 @@ class Exporter:
                 )
             else:
                 self.report(status="completed", files=completed, **pending)
+            return bool(unsettled)
         except (OSError, ValueError, KeyError) as exc:
             self.report(status="deferred", error=str(exc)[:180])
         finally:
@@ -583,14 +576,18 @@ class Exporter:
         try:
             while not self.stopping.is_set():
                 wake.clear()
-                await asyncio.to_thread(self.process)
+                settling = await asyncio.to_thread(self.process)
                 waits = [
                     asyncio.create_task(self.stopping.wait()),
                     asyncio.create_task(wake.wait()),
                 ]
                 try:
+                    # A song left to settle (written under 2 s ago, as a
+                    # just-published download is) is tried again shortly.
                     await asyncio.wait(
-                        waits, timeout=15, return_when=asyncio.FIRST_COMPLETED
+                        waits,
+                        timeout=SETTLE_RETRY if settling else 15,
+                        return_when=asyncio.FIRST_COMPLETED,
                     )
                 finally:
                     for task in waits:

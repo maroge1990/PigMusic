@@ -416,19 +416,36 @@ def test_a_long_export_hold_names_its_steps(tmp_path, monkeypatch, caplog):
     assert store.lifecycle_lock.steps == []
 
 
-def test_the_apps_fresh_download_is_published_at_once_without_hashing_under_the_lock(
+def test_a_song_left_to_settle_is_tried_again_shortly_not_in_15_s(
     tmp_path, monkeypatch
 ):
-    """Codex round 1 on #136: waiving the settle check for the app's own
-    fresh file let it through warm(), but its hash was not cached (only
-    settled files were), so publication read it again under lifecycle_lock."""
-    from server.exporter import fingerprint
+    """#136 (Codex on its first form): a just-published download is never
+    trusted before it settles, so the pass that skipped it runs again after
+    SETTLE_RETRY instead of the usual 15 s."""
+    import asyncio
 
     store, root = nas_with(tmp_path, monkeypatch, [])
     _, source = acquired(store, b"fresh", "fresh")
-    store.fresh_files[os.fspath(source)] = fingerprint(source)
     exporter = Exporter(store, root)
-    calls = counting(monkeypatch, store)
-    exporter.process()
-    assert len(list(root.rglob("*.mp3"))) == 1 and not source.exists()
-    assert calls and [path for path, held in calls if held] == []
+    assert exporter.process() is True  # Left to settle.
+    monkeypatch.setattr(exporter_module, "SETTLE_RETRY", 0.05)
+    passes = []
+    real = exporter.process
+
+    def counted():
+        passes.append(1)
+        return real()
+
+    exporter.process = counted
+
+    async def run_briefly():
+        task = asyncio.create_task(exporter.run())
+        await asyncio.sleep(0.5)
+        exporter.stopping.set()
+        await task
+
+    asyncio.run(run_briefly())
+    assert len(passes) >= 3
+    settle(source)
+    assert exporter.process() is False
+    assert len(list(root.rglob("*.mp3"))) == 1
