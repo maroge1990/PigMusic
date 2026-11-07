@@ -123,40 +123,6 @@
   flex-wrap: wrap;
 }
 
-.catalogue-heading {
-  display: flex;
-  align-items: center;
-  gap: var(--space-24);
-}
-.catalogue-heading > .cover {
-  width: 150px;
-  flex-shrink: 0;
-}
-.catalogue-heading > div:not(.cover) {
-  min-width: 0;
-}
-.catalogue-heading p,
-.page-heading.catalogue-heading > div > p {
-  color: var(--secondary);
-  font-size: var(--type-subhead);
-  line-height: 1.5;
-  margin-top: var(--space-8);
-}
-@media (max-width: 600px) {
-  .catalogue-heading {
-    gap: var(--space-16);
-    align-items: flex-start;
-  }
-  .catalogue-heading > .cover {
-    width: 80px;
-  }
-  .catalogue-heading h1 {
-    font-size: var(--type-title);
-  }
-  .catalogue-heading .eyebrow {
-    margin-bottom: var(--space-12);
-  }
-}
 .has-player .migration-footer {
   bottom: 122px;
 }

@@ -53,6 +53,19 @@
   font-size: var(--type-caption);
   color: var(--secondary);
 }
+.section-title > div {
+  min-width: 0;
+}
+.section-title p {
+  margin-top: var(--space-4);
+  color: var(--secondary);
+}
+.section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
 .section-description {
   font-size: var(--type-caption);
   color: var(--secondary);
@@ -127,20 +140,6 @@
 }
 .album-card .cover {
   margin-bottom: var(--space-12);
-}
-.page-heading {
-  margin: 10px 0 31px;
-}
-.page-heading h1 {
-  font-size: var(--type-display);
-  letter-spacing: -1.8px;
-}
-.page-heading > p,
-.page-heading > div > p {
-  font-size: var(--type-caption);
-  line-height: 1.8;
-  margin-top: 14px;
-  color: var(--secondary);
 }
 .back-button {
   display: flex;

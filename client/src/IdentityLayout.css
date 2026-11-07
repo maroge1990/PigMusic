@@ -52,7 +52,7 @@ select:focus-visible {
   }
 
   .detail-hero h1,
-  .page-heading h1 {
+  .page-header h1 {
     overflow-wrap: anywhere;
   }
 }

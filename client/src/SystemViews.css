@@ -166,12 +166,6 @@
   .brand small {
     font-size: var(--type-caption);
   }
-  .page-heading h1 {
-    font-size: var(--type-display);
-  }
-  .migration-heading {
-    align-items: flex-start;
-  }
   .migration-summary {
     padding: 18px;
   }
@@ -246,25 +240,6 @@
   }
   .cover-initials {
     font-size: var(--type-display);
-  }
-  .page-heading {
-    margin: 5px 0 26px;
-  }
-  .page-heading h1 {
-    font-size: var(--type-display);
-    letter-spacing: -1.7px;
-  }
-  .page-heading > p,
-  .page-heading > div > p {
-    font-size: var(--type-caption);
-    margin-top: 13px;
-  }
-  .migration-heading {
-    display: block;
-  }
-  .migration-heading .secondary-button {
-    margin-top: 21px;
-    font-size: var(--type-caption);
   }
   .migration-summary {
     display: block;

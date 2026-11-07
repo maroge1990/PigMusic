@@ -480,16 +480,14 @@ export function PersonalLibrary({
           back={{ label: "Library", go: backToLibrary }}
         />
       ) : detail?.albumInfo ? (
-        <div className="page-heading catalogue-heading">
-          <Cover title={detail.title} src={detail.cover} />
-          <div>
-            <div className="eyebrow">IN YOUR LIBRARY</div>
-            <h1>{detail.title}</h1>
-            <p>{albumMeta(detail.albumInfo)}</p>
-          </div>
-        </div>
+        <PageHeader
+          cover={<Cover title={detail.title} src={detail.cover} />}
+          eyebrow="IN YOUR LIBRARY"
+          title={detail.title}
+          subtitle={albumMeta(detail.albumInfo)}
+        />
       ) : detail ? (
-        <h1>{detail.title}</h1>
+        <PageHeader title={detail.title} />
       ) : (
         <PageHeader
           title="Your library"

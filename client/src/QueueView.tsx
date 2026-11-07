@@ -1,6 +1,7 @@
 import { ExternalLink, Music2 } from "lucide-react";
 import type { Library } from "./types";
 import { Empty } from "./EmptyState";
+import { SectionHeader } from "./PageHeader";
 import { sourceName } from "./sources";
 type QueueItem = {
   id: string;
@@ -128,39 +129,39 @@ export function QueueView({
 }) {
   return (
     <>
-      <div className="page-heading queue-heading">
-        <div>
-          <h2>Download queue</h2>
-          <p>
-            {queue?.downloads_enabled
-              ? "Downloads go directly to your SMB library."
-              : "Downloads are paused. Enable them in Download settings below."}
-          </p>
-        </div>
-        <div className="release-actions">
-          <button
-            className="secondary-button"
-            disabled={
-              busy ||
-              !queue?.items.some((t) =>
-                ["completed", "downloaded", "cancelled", "failed"].includes(
-                  t.status,
-                ),
-              )
-            }
-            onClick={() => clearQueue(true)}
-          >
-            Clear finished
-          </button>
-          <button
-            className="danger-text-button"
-            disabled={busy || !queue?.items.length}
-            onClick={() => clearQueue(false)}
-          >
-            Cancel all…
-          </button>
-        </div>
-      </div>
+      <SectionHeader
+        title="Download queue"
+        subtitle={
+          queue?.downloads_enabled
+            ? "Downloads go directly to your SMB library."
+            : "Downloads are paused. Enable them in Download settings below."
+        }
+        actions={
+          <>
+            <button
+              className="secondary-button"
+              disabled={
+                busy ||
+                !queue?.items.some((t) =>
+                  ["completed", "downloaded", "cancelled", "failed"].includes(
+                    t.status,
+                  ),
+                )
+              }
+              onClick={() => clearQueue(true)}
+            >
+              Clear finished
+            </button>
+            <button
+              className="danger-text-button"
+              disabled={busy || !queue?.items.length}
+              onClick={() => clearQueue(false)}
+            >
+              Cancel all…
+            </button>
+          </>
+        }
+      />
       {queue && (
         <SourceReviews
           items={queue.items}

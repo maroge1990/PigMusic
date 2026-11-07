@@ -29,12 +29,3 @@
 .system-panel .download-option input[type="checkbox"] {
   flex-shrink: 0;
 }
-.queue-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-}
-.queue-heading > div {
-  min-width: 0;
-}

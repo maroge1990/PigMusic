@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { api, updateArtworkRevision } from "./api";
 import { formatCount } from "./format";
-import { PageHeader } from "./PageHeader";
+import { PageHeader, SectionHeader } from "./PageHeader";
 import { Cover } from "./Cover";
 import { Empty } from "./EmptyState";
 import { MediaSettings } from "./MediaSettings";
@@ -307,9 +307,7 @@ export function AdminTools({ route }: { route: Route }) {
     if (!migration || !importLoaded)
       return (
         <>
-          <div className="page-heading">
-            <h2>Whole-library import</h2>
-          </div>
+          <SectionHeader title="Whole-library import" />
           <Empty
             title="Import an Apple Music export"
             description="Start from Library › Playlists › Import from Apple Music, then choose Admin: review the whole library."
@@ -334,14 +332,14 @@ export function AdminTools({ route }: { route: Route }) {
 
     return (
       <>
-        <div className="page-heading migration-heading">
-          <div>
-            <h2>Whole-library import</h2>
-          </div>
-          <a className="secondary-button" href="#/library/playlists">
-            <Upload size={16} aria-hidden="true" /> New import
-          </a>
-        </div>
+        <SectionHeader
+          title="Whole-library import"
+          actions={
+            <a className="secondary-button" href="#/library/playlists">
+              <Upload size={16} aria-hidden="true" /> New import
+            </a>
+          }
+        />
 
         <div className="migration-summary">
           <div className="inventory-name">

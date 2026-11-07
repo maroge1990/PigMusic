@@ -13,6 +13,7 @@ import {
   Shuffle,
 } from "lucide-react";
 import { Cover, catalogueCover } from "./Cover";
+import { PageHeader } from "./PageHeader";
 import { ArtistPopular } from "./ArtistPopular";
 import { MusicLink } from "./MusicLink";
 import { mergePage } from "./discography";
@@ -444,8 +445,8 @@ export function CatalogueBrowser({
         />
       )}
       {group && (
-        <div className="page-heading catalogue-heading">
-          {group && (
+        <PageHeader
+          cover={
             <Cover
               title={release?.title || group.title}
               src={catalogueCover(
@@ -453,24 +454,20 @@ export function CatalogueBrowser({
                 release?.id || group.id,
               )}
             />
-          )}
-          <div>
-            <div className="eyebrow">
-              {release ? "ALBUM & SONGS" : "ARTIST"}
-            </div>
-            <h1>{release?.title || group?.title || artist.name}</h1>
-            <p>
-              {release ? (
-                <>
-                  <MusicLink artist={release.artist} /> ·{" "}
-                  {formatDate(release.date)} {release.description}
-                </>
-              ) : (
-                "Albums first. Explore singles, EPs and other releases below."
-              )}
-            </p>
-          </div>
-        </div>
+          }
+          eyebrow={release ? "ALBUM & SONGS" : "ARTIST"}
+          title={release?.title || group?.title || artist.name}
+          subtitle={
+            release ? (
+              <>
+                <MusicLink artist={release.artist} /> ·{" "}
+                {formatDate(release.date)} {release.description}
+              </>
+            ) : (
+              "Albums first. Explore singles, EPs and other releases below."
+            )
+          }
+        />
       )}
       {error && (
         <p className="inline-error" role="alert">
