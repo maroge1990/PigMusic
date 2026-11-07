@@ -141,18 +141,6 @@
 .album-card .cover {
   margin-bottom: var(--space-12);
 }
-.back-button {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--secondary);
-  font-size: var(--type-caption);
-  padding: 5px 0;
-  margin: 0 0 28px;
-}
-.back-button:hover {
-  color: var(--text);
-}
 .detail-hero {
   display: flex;
   align-items: center;
@@ -310,66 +298,6 @@
   color: var(--danger);
   line-height: 1.7;
   padding: 10px 0;
-}
-.primary-button,
-.secondary-button,
-.small-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-8);
-  font-weight: 550;
-  line-height: 1.3;
-  white-space: nowrap;
-  border-radius: var(--radius-compact);
-  transition: background 0.15s;
-}
-.primary-button {
-  font-size: var(--type-caption);
-  background: var(--accent);
-  color: var(--on-accent);
-  padding: var(--space-12) 17px;
-  min-height: 40px;
-}
-.primary-button:hover {
-  background: var(--hover);
-}
-.primary-button:disabled {
-  opacity: 0.35;
-}
-.secondary-button {
-  font-size: var(--type-caption);
-  background: var(--raised);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 10px 14px;
-  min-height: 38px;
-}
-.secondary-button:hover {
-  background: var(--raised);
-}
-.small-button {
-  font-size: var(--type-caption);
-  background: var(--raised);
-  border: 1px solid var(--border);
-  padding: var(--space-8) 10px;
-  color: var(--text);
-}
-.small-button:hover {
-  background: var(--raised);
-}
-.selected-button {
-  background: var(--success-fill);
-  border-color: var(--success-fill);
-  color: var(--success);
-}
-.text-button {
-  font-size: var(--type-caption);
-  color: var(--text-accent);
-  padding: var(--space-8);
-}
-.text-button:hover {
-  color: var(--hover);
 }
 .empty-state {
   text-align: center;

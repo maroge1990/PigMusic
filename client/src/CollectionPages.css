@@ -6,9 +6,3 @@
   margin-bottom: var(--space-24);
   font-size: var(--type-caption);
 }
-.collection-pages button {
-  min-height: 44px;
-  padding: var(--space-8) var(--space-12);
-  border: 1px solid var(--control-border);
-  border-radius: var(--radius-control);
-}

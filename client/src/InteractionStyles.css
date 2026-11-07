@@ -1,11 +1,9 @@
 /* Selection remains separate from keyboard focus. */
 .tab-list button,
-.small-button,
 .migration-track {
   position: relative;
 }
 .tab-list button.active,
-.selected-button,
 .migration-track.chosen {
   background: var(--selected-fill);
   color: var(--text-accent);
@@ -20,8 +18,7 @@
   border-radius: var(--radius-compact);
   background: var(--accent);
 }
-.tab-list button.active:after,
-.selected-button:after {
+.tab-list button.active:after {
   content: "";
   position: absolute;
   bottom: 2px;
@@ -33,24 +30,6 @@
 }
 .tab-list button.active {
   border-color: transparent;
-}
-.primary-button {
-  color: var(--on-accent);
-  border-radius: var(--radius-capsule);
-}
-.primary-button:hover {
-  background: var(--hover);
-}
-.secondary-button,
-.small-button {
-  border: 1px solid var(--control-border);
-}
-.secondary-button,
-.small-button {
-  border-radius: var(--radius-capsule);
-}
-.selected-button {
-  border-color: var(--accent);
 }
 .migration-track input {
   appearance: none;
@@ -201,26 +180,6 @@
     bottom: calc(238px + env(safe-area-inset-bottom, 0px));
   }
 }
-.round-action {
-  border: 1px solid var(--control-border);
-  border-radius: 50%;
-  width: 34px;
-  height: 34px;
-  min-width: 34px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-}
-.round-action.complete {
-  color: var(--success);
-  border-color: var(--success);
-  opacity: 1;
-}
-.round-action.queued {
-  color: var(--text-accent);
-  opacity: 1;
-  border-color: var(--accent);
-}
 .catalogue-song {
   gap: var(--space-12);
 }
@@ -315,11 +274,6 @@
   }
   .catalogue-song span {
     font-size: var(--type-caption);
-  }
-  .round-action {
-    width: 32px;
-    height: 32px;
-    min-width: 32px;
   }
   .release-actions {
     gap: 14px;

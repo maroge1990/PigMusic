@@ -185,11 +185,6 @@
   .selection-count {
     display: none;
   }
-  .group-actions .small-button {
-    padding: 7px;
-    font-size: var(--type-caption);
-    gap: var(--space-4);
-  }
   .group-content {
     padding: 0 7px 10px;
   }
@@ -283,12 +278,6 @@
   .group-expand span:not(.cover-initials) {
     font-size: var(--type-caption);
   }
-  .group-actions .small-button {
-    font-size: var(--type-caption);
-    padding: 9px 7px;
-    gap: var(--space-4);
-    min-height: 33px;
-  }
   .group-expand > svg {
     width: 13px;
   }
@@ -347,11 +336,6 @@
     font-size: var(--type-caption);
     line-height: 1.6;
   }
-  .migration-footer .primary-button {
-    font-size: var(--type-caption);
-    padding: 11px var(--space-12);
-    gap: 6px;
-  }
   .result-row {
     gap: 10px;
     padding: 13px 2px;
@@ -367,11 +351,6 @@
   }
   .result-row span:not(.cover-initials):not(.status-text) {
     font-size: var(--type-caption);
-  }
-  .back-button {
-    font-size: var(--type-caption);
-    min-height: 30px;
-    margin-bottom: 22px;
   }
   .detail-hero {
     display: block;
@@ -429,11 +408,6 @@
   .modal-heading h2 {
     font-size: var(--type-headline);
     line-height: 1.2;
-  }
-  .modal-actions .primary-button,
-  .modal-actions .secondary-button {
-    font-size: var(--type-caption);
-    padding: var(--space-12);
   }
   .review-tracks strong {
     font-size: var(--type-caption);

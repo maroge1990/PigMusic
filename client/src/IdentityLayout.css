@@ -7,19 +7,12 @@
   object-fit: contain;
   margin: 0 auto var(--space-24);
 }
-button:focus-visible,
-a:focus-visible,
-input:focus-visible,
-select:focus-visible {
-  outline-width: 3px;
-}
 @media (pointer: coarse) {
   button,
   input,
   select {
     min-height: 44px;
   }
-  .round-action,
   .icon-button {
     min-width: 44px;
   }

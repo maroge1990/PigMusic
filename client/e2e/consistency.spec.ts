@@ -82,3 +82,95 @@ test("#150: Admin's queue and import sections use the section header", async ({
     ).toBe(true);
   }
 });
+
+/** Height and corner radius of every visible button in each family. */
+async function buttonLooks(page: Page) {
+  return page.evaluate(() => {
+    const families: Record<string, string> = {
+      full: ".primary-button, .secondary-button, .personal-main form button:not([class]), .account-section button:not([class])",
+      small: ".small-button",
+      round: ".round-action",
+    };
+    const out: Record<string, string[]> = {};
+    for (const [name, selector] of Object.entries(families))
+      out[name] = [...document.querySelectorAll<HTMLElement>(selector)]
+        .filter((el) => el.offsetParent)
+        .map((el) => {
+          const s = getComputedStyle(el);
+          const radius =
+            s.borderTopLeftRadius === s.borderBottomLeftRadius &&
+            parseFloat(s.borderTopLeftRadius) >= el.offsetHeight / 2
+              ? "pill"
+              : s.borderTopLeftRadius;
+          return `${Math.round(el.getBoundingClientRect().height)} ${radius}`;
+        });
+    return out;
+  });
+}
+
+test("#152: each button family has one height and one shape", async ({
+  page,
+}) => {
+  await owner(page);
+  const seen: Record<string, Set<string>> = {
+    full: new Set(),
+    small: new Set(),
+    round: new Set(),
+  };
+  for (const path of [
+    `/#/library/album/${album.id}`,
+    "/#/library/playlists",
+    "/#/account",
+    "/#/admin/downloads",
+    "/#/admin/migration",
+  ]) {
+    await page.goto(path);
+    await expect(page.locator("main h1").first()).toBeVisible();
+    for (const [family, looks] of Object.entries(await buttonLooks(page)))
+      for (const look of looks) seen[family].add(look);
+  }
+  // Every family is the 44px touch target; full and small are capsules.
+  expect([...seen.full]).toEqual(["44 pill"]);
+  expect([...seen.round]).toEqual(["44 pill"]);
+  for (const look of seen.small) expect(look).toBe("44 pill");
+});
+
+/** The keyboard focus ring drawn on the element a Tab press reaches. */
+async function tabRing(page: Page) {
+  await page.keyboard.press("Tab");
+  return page.evaluate(() => {
+    const s = getComputedStyle(document.activeElement!);
+    return `${s.outlineStyle} ${s.outlineWidth} ${s.outlineOffset}`;
+  });
+}
+
+test("#152: secondary buttons answer a hover", async ({ page }, info) => {
+  test.skip(info.project.name === "phone", "hover needs a mouse");
+  await owner(page);
+  await page.goto("/#/admin/downloads");
+  const clear = page.getByRole("button", { name: "Clear finished" });
+  const fill = () =>
+    clear.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const resting = await fill();
+  await clear.hover();
+  await expect.poll(fill).not.toBe(resting);
+});
+
+test("#152: sign-in and the app draw one focus ring", async ({ page }) => {
+  await mockApi(page, {
+    answers: {
+      "/v1/me": (r: Route) =>
+        r.fulfill({ status: 401, json: { detail: "Sign in", code: "auth" } }),
+    },
+  });
+  await page.goto("/#/home");
+  await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
+  const signIn = await tabRing(page);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await owner(page);
+  await page.goto("/#/home");
+  await expect(page.locator("main h1").first()).toBeVisible();
+  const app = await tabRing(page);
+  expect(signIn).toBe("solid 2px 3px");
+  expect(app).toBe(signIn);
+});

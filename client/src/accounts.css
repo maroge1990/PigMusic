@@ -302,10 +302,6 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
 }
-.personal-app :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
 
 .account-wordmark img {
   width: 100%;
@@ -725,30 +721,8 @@ main h1[tabindex="-1"]:focus {
   color: var(--danger);
   font-size: var(--type-footnote);
 }
-/* Form and settings actions without an explicit style read as buttons. */
-.account-section button:not([class]),
-.personal-main form button:not([class]),
-.playlist-options button:not([class]),
-.personal-app dialog button:not([class]) {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 2.75rem;
-  margin: var(--space-4) var(--space-8) var(--space-4) 0;
-  padding: var(--space-8) var(--space-16);
-  border: 1px solid var(--control-border);
-  border-radius: var(--radius-capsule);
-  background: var(--surface);
-  color: var(--text);
-  font-weight: 550;
-  cursor: pointer;
-}
-.account-section button:not([class]):hover,
-.personal-main form button:not([class]):hover,
-.playlist-options button:not([class]):hover,
-.personal-app dialog button:not([class]):hover {
-  background: var(--hover);
-}
+/* Form and settings actions without an explicit style read as buttons:
+ * Buttons.css styles them with the secondary family. */
 .account-section form button[type="submit"]:not([class]) {
   justify-self: start;
 }

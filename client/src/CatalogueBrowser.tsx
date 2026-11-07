@@ -425,8 +425,12 @@ export function CatalogueBrowser({
   return (
     <section aria-label="Artist discography">
       {group && (
-        <button className="back-button" onClick={back} disabled={busy}>
-          <ArrowLeft size={16} />
+        <button
+          className="text-button back-link"
+          onClick={back}
+          disabled={busy}
+        >
+          <ArrowLeft size={16} aria-hidden="true" />
           {choose ? "Selected edition" : artist.name}
         </button>
       )}

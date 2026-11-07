@@ -1,0 +1,116 @@
+/* The one home for button families (#152). Every button is the 2.75rem
+ * touch target (accounts.css gives any app button that minimum too) and
+ * takes the surrounding text. Full size (primary, secondary, a plain form
+ * button) and small are capsules, small with less padding; a round action
+ * is a 2.75rem circle. */
+.primary-button,
+.secondary-button,
+.small-button,
+.account-section button:not([class]),
+.personal-main form button:not([class]),
+.playlist-options button:not([class]),
+.personal-app dialog button:not([class]) {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-8);
+  min-height: 2.75rem;
+  padding: var(--space-8) var(--space-16);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-capsule);
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.account-section button:not([class]),
+.personal-main form button:not([class]),
+.playlist-options button:not([class]),
+.personal-app dialog button:not([class]) {
+  margin: var(--space-4) var(--space-8) var(--space-4) 0;
+}
+.small-button {
+  padding: var(--space-4) var(--space-12);
+}
+.primary-button {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.primary-button:hover {
+  border-color: var(--hover);
+  background: var(--hover);
+}
+.secondary-button:hover,
+.small-button:hover,
+.account-section button:not([class]):hover,
+.personal-main form button:not([class]):hover,
+.playlist-options button:not([class]):hover,
+.personal-app dialog button:not([class]):hover {
+  background: color-mix(in srgb, var(--text) 8%, var(--raised));
+}
+.primary-button:disabled,
+.secondary-button:disabled,
+.small-button:disabled {
+  opacity: 0.35;
+}
+.selected-button,
+.selected-button:hover {
+  border-color: var(--accent);
+  background: var(--selected-fill);
+  color: var(--text-accent);
+}
+.selected-button:after {
+  content: "";
+  position: absolute;
+  bottom: 2px;
+  left: calc(50% - 10px);
+  width: 20px;
+  height: 3px;
+  border-radius: var(--radius-compact);
+  background: var(--accent);
+}
+.round-action {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  min-width: 2.75rem;
+  padding: 0;
+  border: 1px solid var(--control-border);
+  border-radius: 50%;
+}
+.round-action.complete {
+  color: var(--success);
+  border-color: var(--success);
+  opacity: 1;
+}
+.round-action.queued {
+  color: var(--text-accent);
+  opacity: 1;
+  border-color: var(--accent);
+}
+.text-button {
+  font-size: var(--type-caption);
+  color: var(--text-accent);
+  padding: var(--space-8);
+}
+.text-button:hover {
+  color: var(--hover);
+}
+/* The one back control: a small link above the page's title. */
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin: var(--space-8) 0 0 calc(-1 * var(--space-8));
+  min-height: 0;
+}
+.back-link + .page-header,
+.back-link + .saved-artist-heading {
+  margin-top: var(--space-8);
+}

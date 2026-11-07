@@ -559,7 +559,7 @@ function MixDetails({
       </div>
       <div className="mix-actions">
         <button
-          className="primary"
+          className="primary-button"
           disabled={!queue.length}
           onClick={() => {
             player.play(queue);

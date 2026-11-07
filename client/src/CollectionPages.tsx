@@ -22,7 +22,11 @@ export function CollectionPages<T>({
     <>
       {pageCount > 1 && (
         <nav className="collection-pages" aria-label={`${label} pages`}>
-          <button disabled={page === 0} onClick={() => setPage(page - 1)}>
+          <button
+            className="secondary-button"
+            disabled={page === 0}
+            onClick={() => setPage(page - 1)}
+          >
             Previous
           </button>
           <span role="status" aria-live="polite">
@@ -30,6 +34,7 @@ export function CollectionPages<T>({
             {items.length}
           </span>
           <button
+            className="secondary-button"
             disabled={page === pageCount - 1}
             onClick={() => setPage(page + 1)}
           >

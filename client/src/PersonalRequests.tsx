@@ -169,6 +169,7 @@ export function PersonalRequests() {
           {(offset > 0 || page.next_offset !== null) && (
             <nav className="collection-pages" aria-label="Request pages">
               <button
+                className="secondary-button"
                 disabled={busy || offset === 0}
                 onClick={() => setOffset(Math.max(0, offset - PAGE))}
               >
@@ -179,6 +180,7 @@ export function PersonalRequests() {
                 {page.total}
               </span>
               <button
+                className="secondary-button"
                 disabled={busy || page.next_offset === null}
                 onClick={() => setOffset(page.next_offset!)}
               >
