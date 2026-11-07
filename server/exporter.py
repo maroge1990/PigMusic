@@ -168,7 +168,11 @@ class Exporter:
             published = track.get("export_relative_path") and not source.is_file()
             for path in (source, target):
                 if path.is_file():
-                    if not settled(fingerprint(path)):
+                    identity = fingerprint(path)
+                    # A download this process moved into place, unchanged
+                    # since, needs no settling (#136).
+                    fresh = self.store.fresh_files.get(os.fspath(path))
+                    if not settled(identity) and identity != fresh:
                         return False
                     self.digest(path, this_pass=not published)
         except (OSError, ValueError, KeyError):
@@ -535,8 +539,10 @@ class Exporter:
             if full:
                 self.verified_at, self.verified_config = now, config
             if changed:
-                self.store.refresh_library()
-            self.store.cleanup_replacements()
+                # Shared with the publication's own rebuild (#136).
+                self.store.request_refresh()
+            else:
+                self.store.cleanup_replacements()
             pending = {"pending": len(unsettled)} if unsettled else {}
             if waiting:
                 count = len(waiting)
@@ -555,9 +561,32 @@ class Exporter:
             self.lock.release()
 
     async def run(self):
-        while not self.stopping.is_set():
-            await asyncio.to_thread(self.process)
+        loop = asyncio.get_running_loop()
+        wake = asyncio.Event()
+
+        def published():
             try:
-                await asyncio.wait_for(self.stopping.wait(), timeout=15)
-            except TimeoutError:
-                pass
+                loop.call_soon_threadsafe(wake.set)
+            except RuntimeError:
+                pass  # The loop has closed.
+
+        # A committed download is exported now, not on the next pass (#136).
+        self.store.publish_listeners.append(published)
+        try:
+            while not self.stopping.is_set():
+                wake.clear()
+                await asyncio.to_thread(self.process)
+                waits = [
+                    asyncio.create_task(self.stopping.wait()),
+                    asyncio.create_task(wake.wait()),
+                ]
+                try:
+                    await asyncio.wait(
+                        waits, timeout=15, return_when=asyncio.FIRST_COMPLETED
+                    )
+                finally:
+                    for task in waits:
+                        task.cancel()
+                    await asyncio.gather(*waits, return_exceptions=True)
+        finally:
+            self.store.publish_listeners.remove(published)

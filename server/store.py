@@ -1,6 +1,7 @@
 from .lifecycle import TimedRLock, coordinated
 import json
 import hashlib
+import logging
 import os
 import re
 import time
@@ -40,6 +41,12 @@ from .matching import (
     song_key,
 )
 
+log = logging.getLogger("pig_music.library")
+
+# A download's publication rebuilds the library at most this long after it,
+# once for every publication (and export) in that time (#136).
+REBUILD_DEBOUNCE = 1.0
+
 # A held upload is decided only while its request has stopped (SC1).
 REVIEWABLE = {"failed", "waiting_for_sources"}
 
@@ -74,6 +81,17 @@ class Store:
         # Download publications committed, and the latest the library build
         # includes (#74): see catch_up.
         self.published = self.projected = 0
+        # The debounced rebuild (#136): whether one is wanted, and whether
+        # its thread is running.
+        self.rebuild_guard = threading.Lock()
+        self.rebuild_wanted = self.rebuild_running = False
+        # Called (from any thread) after a download is committed, so the
+        # exporter publishes it now rather than on its next pass (#136).
+        self.publish_listeners = []
+        # Files this process moved into the downloads library, by path, with
+        # their fingerprint then: the exporter need not wait for them to
+        # settle (#136). Bounded; a missing entry only means a later pass.
+        self.fresh_files = {}
         self.retired_digests = {}
         self.library_lock = TimedRLock("library_lock")
         directory.mkdir(parents=True, exist_ok=True)
@@ -398,10 +416,55 @@ class Store:
     def publish_request(self, job, source, target, probe, sha):
         # The library rebuild (1-2 s on a large library) and the replacement
         # cleanup each run outside this publication's hold on the lifecycle
-        # lock (#74); catch_up covers the gap.
+        # lock (#74); catch_up covers the gap. They are debounced (#136): an
+        # album's songs, and the export each starts, share one rebuild.
         if self.commit_request(job, source, target, probe, sha):
+            for listener in list(self.publish_listeners):
+                listener()
+            self.request_refresh()
+
+    def request_refresh(self):
+        """Rebuild the library, then clean up replaced files, within about
+        REBUILD_DEBOUNCE: once for every request made meanwhile (#136).
+        Lifecycle-locked operations never decide on a library behind a
+        publication: catch_up rebuilds first for them."""
+        if not REBUILD_DEBOUNCE:  # Tests: at once, in the caller's thread.
             self.refresh_library()
             self.cleanup_replacements()
+            return
+        with self.rebuild_guard:
+            self.rebuild_wanted = True
+            if self.rebuild_running:
+                return
+            self.rebuild_running = True
+        threading.Thread(
+            target=self._rebuild_when_quiet, name="library-rebuild", daemon=True
+        ).start()
+
+    def _rebuild_when_quiet(self):
+        while True:
+            time.sleep(REBUILD_DEBOUNCE or 0)
+            with self.rebuild_guard:
+                if not self.rebuild_wanted:
+                    self.rebuild_running = False
+                    return
+                self.rebuild_wanted = False
+            try:
+                self.refresh_library()
+                self.cleanup_replacements()
+            except Exception:
+                log.exception("Library rebuild after a publication failed")
+
+    def settle_rebuilds(self, timeout=10):
+        """Wait until no debounced rebuild is wanted or running (tests and
+        shutdown)."""
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            with self.rebuild_guard:
+                if not self.rebuild_running:
+                    return True
+            time.sleep(0.02)
+        return False
 
     @coordinated
     def commit_request(self, job, source, target, probe, sha):
@@ -517,6 +580,18 @@ class Store:
         else:
             os.replace(source, target)
             moved = True
+            try:
+                stat = os.stat(target)
+                if len(self.fresh_files) > 1000:
+                    self.fresh_files.clear()
+                self.fresh_files[os.fspath(target)] = (
+                    stat.st_dev,
+                    stat.st_ino,
+                    stat.st_size,
+                    stat.st_mtime_ns,
+                )
+            except OSError:
+                pass
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(

@@ -871,3 +871,61 @@ def test_a_request_cancelled_while_its_file_moves_is_not_published(
     assert store.queue()["items"][0]["status"] == "cancelled"
     assert list(staged.parent.glob("*.json")) == []
     assert Store(store.directory).library["stats"]["tracks"] == 0
+
+
+def test_an_albums_publications_share_one_rebuild_and_one_revision(
+    tmp_path, monkeypatch
+):
+    """#136: each publication rebuilt the library (1-2 s live) and changed
+    its revision, and the export of each rebuilt it again: a 12-song album
+    gave 24+ rebuilds and as many "library changed" events per device."""
+    import server.store as store_module
+
+    monkeypatch.setattr(store_module, "REBUILD_DEBOUNCE", 0.3, raising=False)
+    store = Store(tmp_path / "data")
+    builds = []
+    real = store.refresh_library
+
+    def counted():
+        builds.append(store.library_revision)
+        real()
+
+    monkeypatch.setattr(store, "refresh_library", counted)
+    monkeypatch.setattr(store, "commit_request", lambda *a: True)
+    exported = []
+    store.__dict__.setdefault("publish_listeners", []).append(
+        lambda: exported.append(1)
+    )
+    # What the exporter asks for once it has published the song.
+    export_rebuild = getattr(store, "request_refresh", store.refresh_library)
+    before = store.library_revision
+    for i in range(12):
+        store.publish_request({"id": str(i)}, None, None, None, None)
+        export_rebuild()
+    assert getattr(store, "settle_rebuilds", lambda: True)()
+    assert len(builds) == 1
+    assert len(exported) == 12  # The exporter is woken for each.
+    revisions = {before, store.library_revision}
+    assert len(revisions) <= 2
+
+
+def test_the_exporter_takes_the_apps_own_fresh_download_at_once(tmp_path):
+    """#136: the exporter skipped files modified in the last 2 s and waited
+    for its next pass (15 s); a file this process moved into place, unchanged
+    since, needs no settling. Any other fresh file still waits."""
+    import os
+
+    from server.exporter import Exporter, fingerprint
+
+    store = Store(tmp_path / "data")
+    exporter = Exporter(store, tmp_path / "nas")
+    source = tmp_path / "data" / "fresh.mp3"
+    source.write_bytes(b"x" * 100)
+    exporter.paths = lambda track: (source, "a/fresh.mp3", tmp_path / "nas" / "x")
+    assert exporter.warm({"id": "t"}) is False  # Someone else's fresh file.
+    store.__dict__.setdefault("fresh_files", {})[os.fspath(source)] = fingerprint(
+        source
+    )
+    assert exporter.warm({"id": "t"}) is True
+    source.write_bytes(b"y" * 101)  # Changed since: it waits again.
+    assert exporter.warm({"id": "t"}) is False

@@ -25,6 +25,14 @@ def collect_before_loop_timing(request):
 
 
 @pytest.fixture(autouse=True)
+def rebuild_at_once(monkeypatch):
+    # A publication's library rebuild is debounced in the app (#136); tests
+    # that read the library straight after one get it at once. The debounce
+    # has tests of its own, which set it back.
+    monkeypatch.setattr("server.store.REBUILD_DEBOUNCE", 0, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def isolate_startup_enrichment(monkeypatch, tmp_path_factory, request):
     # Provider tests supply their own mock HTTP transport after app startup.
     # Keep unrelated background requests out of those explicit scenarios.

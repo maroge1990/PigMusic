@@ -343,8 +343,10 @@ def test_a_shared_helper_is_named_with_what_called_it(tmp_path, monkeypatch, cap
     store.library_lock.warn_after = 0
     Exporter(store, root).process()
     holds = [r.message for r in caplog.records if "library_lock held" in r.message]
+    # The export's rebuild goes through the shared, debounced one (#136).
     assert any(
-        "store.Store.refresh_library via exporter.Exporter.process" in m for m in holds
+        "store.Store.refresh_library via store.Store.request_refresh" in m
+        for m in holds
     ), holds
 
 
