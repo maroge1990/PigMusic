@@ -127,13 +127,13 @@ private struct WatchLibraryView: View {
         Section("More") {
           NavigationLink("Phone remote") {
             List {
-              Button("Previous", systemImage: "backward.end.fill") {
+              Button("Previous", systemImage: "backward.fill") {
                 Task { await model.send("previous") }
               }
-              Button("Play / pause", systemImage: "playpause.fill") {
+              Button("Play or pause", systemImage: "playpause.fill") {
                 Task { await model.send("playPause") }
               }
-              Button("Next", systemImage: "forward.end.fill") { Task { await model.send("next") } }
+              Button("Next", systemImage: "forward.fill") { Task { await model.send("next") } }
             }.pigBrandedCanvas().navigationTitle("Phone remote")
           }
           NavigationLink("Storage & sync") {
@@ -156,14 +156,11 @@ private struct WatchLibraryView: View {
               }
               Button("Sync with phone") { Task { await model.send("sync") } }
               Button("Send diagnostics to iPhone") { model.sendDiagnostics() }
-              Picker("Repeat", selection: $model.repeatMode) {
-                Text("Off").tag(PlaybackRepeat.off)
-                Text("All").tag(PlaybackRepeat.all)
-                Text("One").tag(PlaybackRepeat.one)
-              }
               Toggle("Crossfade", isOn: $model.crossfade)
+              // The phone's words (#163). The Watch plays from its own files,
+              // so albums are always gapless and there is no Seamless switch.
               Text(
-                "Gapless playback preserves continuous albums. Crossfade blends other songs over 3 seconds. Changes apply to the next queue."
+                "Albums play gapless. Crossfade adds a three-second crossfade between unrelated songs. Changes apply to the next queue."
               ).font(.footnote)
               if let message = model.message ?? model.link?.error { Text(message).font(.footnote) }
             }.pigBrandedCanvas().navigationTitle("Storage & sync")
@@ -331,12 +328,13 @@ private struct WatchPlaybackDetails: View {
       if model.queue.indices.contains(model.playback.index) {
         Text(model.queue[model.playback.index].track.title).font(.headline)
         Text(model.queue[model.playback.index].track.artist).font(.caption)
+          .foregroundStyle(.secondary)
       }
       HStack {
         Button {
           model.previous()
         } label: {
-          Image(systemName: "backward.end.fill").frame(minWidth: 40, minHeight: 44)
+          Image(systemName: "backward.fill").frame(minWidth: 40, minHeight: 44)
         }.accessibilityLabel("Previous song")
         Button {
           model.toggle()
@@ -347,7 +345,7 @@ private struct WatchPlaybackDetails: View {
         Button {
           model.next()
         } label: {
-          Image(systemName: "forward.end.fill").frame(minWidth: 40, minHeight: 44)
+          Image(systemName: "forward.fill").frame(minWidth: 40, minHeight: 44)
         }.accessibilityLabel("Next song")
       }.buttonStyle(.plain).padding(8).pigFloatingControls().listRowBackground(Color.clear)
       Text("\(clock(model.playback.elapsed)) / \(clock(model.playback.duration))").font(.caption)
