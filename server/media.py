@@ -85,6 +85,7 @@ def save_settings(
     finally:
         temporary.unlink(missing_ok=True)
     store._media_settings_cache = None
+    getattr(store, "changed", lambda: None)()  # Event streams re-read (#142).
     return public_settings(store)
 
 

@@ -108,3 +108,49 @@ async def admin_journey(tmp_path):
     # A second Admin page within the interval shares the same snapshot.
     await messages("mark", "native fixture password")
     assert calls == [1]
+
+
+def test_an_idle_stream_reads_nothing_until_something_changes(tmp_path, monkeypatch):
+    """#142: each open stream read the session, the person's projection and
+    their queue every 2 s (three or more connections per device per tick)
+    though nothing had changed."""
+    asyncio.run(idle_journey(tmp_path, monkeypatch))
+
+
+async def idle_journey(tmp_path, monkeypatch):
+    store, owner, member = fixture(tmp_path)
+    auth = Auth(store)
+    token = auth.login(
+        "member", "native fixture password", "device", "fixture", "ios", "fixture"
+    )["token"]
+    user, session = auth.authenticate(token)
+    router = native_router(store, auth)
+    endpoint = next(
+        route.endpoint for route in router.routes if route.path == "/api/v1/events"
+    )
+    monkeypatch.setattr(native, "KEEPALIVE_SECONDS", 0)
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr(native.asyncio, "sleep", lambda _: real_sleep(0))
+
+    async def connected():
+        return False
+
+    request = SimpleNamespace(
+        state=SimpleNamespace(user=user, session=session), is_disconnected=connected
+    )
+    response = await endpoint(request)
+    stream = response.body_iterator
+    assert (await anext(stream)).startswith("event: revision")
+    await anext(stream)  # queue
+    await anext(stream)  # keepalive: the first tick is done.
+    opened = []
+    real = store.connect
+    monkeypatch.setattr(store, "connect", lambda: opened.append(1) or real())
+    for _ in range(5):  # Five idle ticks.
+        assert await anext(stream) == ": keepalive\n\n"
+    assert opened == []
+    # A change is read on the next tick: here, the session revoked.
+    monkeypatch.setattr(store, "connect", real)
+    auth.revoke(member, session["public_id"])
+    assert "event: revoked" in await anext(stream)
+    await stream.aclose()

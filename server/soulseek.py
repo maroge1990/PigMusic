@@ -230,14 +230,28 @@ class Soulseek:
             headers={"X-API-Key": config["api_key"]},
         )
 
+    def health_client(self):
+        """One engine client kept for the health check, asked every 15 s
+        (#142); a new one when the connection settings change."""
+        config = self.config()
+        key = (config["url"], config["api_key"])
+        with self.peer_guard:
+            kept = getattr(self, "kept_client", None)
+            if kept and kept[0] == key and not kept[1].is_closed:
+                return kept[1]
+            if kept:
+                kept[1].close()
+            client = self.client()
+            self.kept_client = (key, client)
+            return client
+
     def health(self):
         try:
-            with self.client() as client:
-                response = client.get("server")
-                response.raise_for_status()
-                data = response.json()
-                connected = bool(data.get("isConnected") and data.get("isLoggedIn"))
-                return {"configured": True, "connected": connected}
+            response = self.health_client().get("server")
+            response.raise_for_status()
+            data = response.json()
+            connected = bool(data.get("isConnected") and data.get("isLoggedIn"))
+            return {"configured": True, "connected": connected}
         except (ValueError, OSError, httpx.HTTPError):
             return {
                 "configured": (self.store.directory / "slskd-connection.json").exists(),

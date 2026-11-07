@@ -13,6 +13,10 @@ from ..auth import AuthError
 
 # A comment line keeps idle streams open through proxies; tests shorten it.
 KEEPALIVE_SECONDS = 25
+# An event stream re-reads the session, the library and the queue when the
+# store says something changed, and at least this often whatever it says
+# (#142): each was a database read per device every 2 s.
+REREAD_SECONDS = 30
 
 
 def native_router(store, auth, health_snapshot=None, admin_snapshot=None):
@@ -86,19 +90,33 @@ def native_router(store, auth, health_snapshot=None, admin_snapshot=None):
         async def stream():
             previous = {}
             heartbeat = time.monotonic()
+            seen, read_at = None, float("-inf")
+            summary = queue = None
             try:
                 while not await request.is_disconnected():
-                    # Revoked sessions cannot keep receiving events indefinitely.
-                    # Every open stream checks every 2 s, and a busy writer can
-                    # hold SQLite for seconds: check off the loop (LOOP1).
-                    valid = await asyncio.to_thread(session_valid)
-                    if not valid:
-                        yield "event: revoked\ndata: {}\n\n"
-                        return
-                    summary = await asyncio.to_thread(
-                        store.user_libraries.projection, user_id
-                    )
-                    queue = await asyncio.to_thread(store.user_libraries.queue, user_id)
+                    # Read before the data, so a change made while reading is
+                    # read again next time.
+                    version = getattr(store, "data_version", None)
+                    if (
+                        version is None
+                        or version != seen
+                        or time.monotonic() - read_at >= REREAD_SECONDS
+                    ):
+                        seen, read_at = version, time.monotonic()
+                        # Revoked sessions cannot keep receiving events: a
+                        # revocation is a write, so it is seen on the next
+                        # tick. A busy writer can hold SQLite for seconds:
+                        # check off the loop (LOOP1).
+                        valid = await asyncio.to_thread(session_valid)
+                        if not valid:
+                            yield "event: revoked\ndata: {}\n\n"
+                            return
+                        summary = await asyncio.to_thread(
+                            store.user_libraries.projection, user_id
+                        )
+                        queue = await asyncio.to_thread(
+                            store.user_libraries.queue, user_id
+                        )
                     # Every connection shares one health check and one Admin
                     # snapshot per interval, however many are open.
                     status = await shared_health.get() or {}

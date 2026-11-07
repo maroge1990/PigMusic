@@ -1,4 +1,5 @@
 from .lifecycle import TimedRLock, coordinated
+import itertools
 import json
 import hashlib
 import logging
@@ -70,6 +71,10 @@ class Store:
         # queue or its settings, so the downloader waits for that instead of
         # polling (#63).
         self.queue_listeners = []
+        # Changes on every committed row write and library rebuild: event
+        # streams read the database only when it moved (#142).
+        self.versions = itertools.count(1)
+        self.data_version = next(self.versions)
         # Holds over a second are logged with their holder (LOCK1).
         self.lifecycle_lock = TimedRLock("lifecycle_lock")
         # Mix playback leases against mix cache cleanup only. Playback must not
@@ -197,6 +202,7 @@ class Store:
         self.edition_anchors = anchors
         for name, value in built.items():
             setattr(self, name, value)
+        self.changed()
         from .household_policy import HouseholdPolicy
 
         with self.connect() as conn:
@@ -1378,12 +1384,14 @@ class Store:
     @contextmanager
     def connect(self):
         conn = sqlite3.connect(self.database, timeout=10)
-        wrote_queue = False
+        wrote_queue = wrote = False
 
         def authorise(action, table, *_):
-            nonlocal wrote_queue
-            if action in ROW_WRITES and table == "queue":
-                wrote_queue = True
+            nonlocal wrote_queue, wrote
+            if action in ROW_WRITES:
+                wrote = True
+                if table == "queue":
+                    wrote_queue = True
             return sqlite3.SQLITE_OK
 
         try:
@@ -1395,10 +1403,16 @@ class Store:
             # The authorizer sees statements, not rows: an UPDATE matching
             # nothing changes nothing.
             wrote_queue = wrote_queue and conn.total_changes > 0
+            if wrote and conn.total_changes > 0:
+                self.changed()
         finally:
             conn.close()
         if wrote_queue:
             self.queue_changed()
+
+    def changed(self):
+        """Something the database or library holds changed (#142)."""
+        self.data_version = next(self.versions)
 
     def queue_changed(self):
         for listener in list(self.queue_listeners):

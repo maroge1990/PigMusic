@@ -778,3 +778,29 @@ def test_an_album_search_ended_early_is_searched_again_for_a_song_it_lacked(
     # Complete now: a third song of the album reuses it without searching.
     adapter.search(first, lambda: None)
     assert len(posts) == 2
+
+
+def test_the_health_check_keeps_one_engine_client(tmp_path):
+    """#142: every 15 s health check opened (and closed) a new client."""
+    adapter = Soulseek(configured(tmp_path))
+    made = []
+
+    def handler(request):
+        return httpx.Response(200, json={"isConnected": True, "isLoggedIn": True})
+
+    def client():
+        made.append(1)
+        return httpx.Client(
+            base_url="http://engine/api/v0/", transport=httpx.MockTransport(handler)
+        )
+
+    adapter.client = client
+    for _ in range(3):
+        assert adapter.health() == {"configured": True, "connected": True}
+    assert len(made) == 1
+    # New connection settings get a new client.
+    (tmp_path / "slskd-connection.json").write_text(
+        json.dumps({"url": "http://other:5031", "api_key": "test-only-2"})
+    )
+    adapter.health()
+    assert len(made) == 2
