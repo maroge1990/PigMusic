@@ -461,14 +461,38 @@ def test_home_mixes_check_each_library_file_once(tmp_path, monkeypatch):
 
     monkeypatch.setattr(mix_module, "track_file", counted)
     monkeypatch.setattr("server.mix_cache.track_file", counted)
+    reads = []
+    real_filenames = (
+        mixes.cache.filenames if hasattr(mixes.cache, "filenames") else None
+    )
+    real_connect = mixes.cache.store.connect
+
+    def connect(*args, **kwargs):
+        reads.append(1)
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(mixes.cache.store, "connect", connect)
+    reads.clear()
     rows = mixes.list(owner)["mixes"][0]["tracks"]
-    assert sorted(checks) == ["gone", "owned"]
+    # Audit of 6 Nov: no song's file is looked up on the NAS for the list
+    # (playback opens it), and the mix cache is read once, not per song.
+    assert checks == []
     states = {r.title: (r.library_track_id, r.server_state) for r in rows}
+    # A library song is taken on its saved path, as library playback is: one
+    # whose file has gone lists as the household's (the next scan drops it),
+    # and its mix entry still plays the cached copy.
     assert states == {
         "Song 1": ("owned", "in_library"),
-        "Song 2": (None, "not_in_library"),
+        "Song 2": ("gone", "in_library"),
         "Song 3": (None, "not_in_library"),
     }
+    gone_row = next(r for r in rows if r.title == "Song 2")
+    assert mixes.playback(owner, gone_row.id).read_bytes() == b"fixture audio"
+    with_songs = len(reads)
+    single = ready(mixes, owner, [owned])
+    reads.clear()
+    mixes.list(owner)
+    assert len(reads) <= with_songs  # More songs, no more database reads.
 
 
 def test_yesterdays_mix_queue_still_plays_after_rotation(tmp_path, monkeypatch):

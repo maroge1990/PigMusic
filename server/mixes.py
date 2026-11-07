@@ -18,7 +18,7 @@ from .artist_identity import cached_identities
 from .catalogue import background_metadata, credit
 from .home import release_choice
 from .matching import compatible, recording_kind
-from .media import chart_region, settings, track_file
+from .media import chart_region, playable, settings, track_file
 from .mix_cache import MixCache, MixDownloader, song_key
 from .playlists import Playlists
 from .request_timing import phase
@@ -1417,6 +1417,7 @@ class Mixes:
         with phase("mix-list-hidden"):
             hidden = self.hidden(user)
         with phase("mix-list-tracks"):
+            cached = self.cache.filenames()
             result = []
             for identity, kind, day, raw in rows:
                 if "edition:" + identity in hidden:
@@ -1428,7 +1429,7 @@ class Mixes:
                     dto
                     for index, track in enumerate(payload["tracks"])
                     if song_key(track) not in hidden
-                    and (dto := self.track_dto(identity, index, track, members))
+                    and (dto := self.track_dto(identity, index, track, members, cached))
                 ]
                 if tracks:
                     result.append(
@@ -1454,21 +1455,24 @@ class Mixes:
                 }
         return {"mixes": result, "preparing": preparing, "radio": card}
 
-    def track_dto(self, identity, index, track, members):
+    def track_dto(self, identity, index, track, members, cached=None):
         """A playable mix entry, or None while its audio is unavailable.
-        The library file is checked once (a path resolve over the NAS for each
-        song, twice per song before #22); without one, the mix cache's copy."""
+        A library song is taken on its saved path, as playback addresses are
+        (`playable`: no NAS lookup, a missing file fails on open; each was a
+        mount check and path resolves over the NAS before, #22); without
+        one, the mix cache's copy. `cached`: the cache's files by key, read
+        once for a whole list."""
         library_id = None
         match = self.store.index.match(track).track
         if match:
             try:
-                track_file(self.store, match["id"])
+                playable(self.store, match["id"])
                 library_id = match["id"]
             except (FileNotFoundError, ValueError, OSError):
                 pass
         if not library_id:
             try:
-                self.cache.file(song_key(track))
+                self.cache.file(song_key(track), cached)
             except FileNotFoundError:
                 return None
         return TrackDTO(

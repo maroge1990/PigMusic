@@ -115,11 +115,20 @@ class MixCache:
             >= settings["reserve_bytes"]
         )
 
-    def file(self, key):
+    def filenames(self):
+        """Every cached song's file name by key: one read for a whole list
+        (#22), for `file`."""
         with self.store.connect() as conn:
-            row = conn.execute(
-                "SELECT filename FROM mix_audio WHERE key=?", (key,)
-            ).fetchone()
+            return dict(conn.execute("SELECT key,filename FROM mix_audio"))
+
+    def file(self, key, filenames=None):
+        if filenames is None:
+            with self.store.connect() as conn:
+                row = conn.execute(
+                    "SELECT filename FROM mix_audio WHERE key=?", (key,)
+                ).fetchone()
+        else:
+            row = (filenames[key],) if key in filenames else None
         if not row:
             raise FileNotFoundError()
         path = self.directory / row[0]
