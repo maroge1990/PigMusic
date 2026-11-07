@@ -980,3 +980,43 @@ def test_recovery_never_deletes_a_file_it_did_not_move_in(tmp_path, audio):
     journal.write_text(json.dumps(metadata))
     store.recover_requests()
     assert target.exists() and not journal.exists()
+
+
+@pytest.mark.parametrize("stale_first", [True, False])
+def test_a_stale_journal_never_deletes_a_later_claims_pending_file(
+    tmp_path, audio, stale_first, monkeypatch
+):
+    """Codex on #138's recovery fix: claim A moved the file in and lost its
+    claim; claim B found the same bytes there and stopped before recording.
+    Recovering A's journal first deleted the file B was about to record."""
+    store = Store(tmp_path / "data")
+    job = queued(store)
+    worker = Downloader(store)
+    store.request_state(job["id"], "validating", _claim_token=job["claim_token"])
+    target = worker.library_root / "shared.mp3"
+    shutil.copyfile(audio, target)
+    base = {
+        **job,
+        "codec": "mp3",
+        "bitrate": 320,
+        "relative_path": "shared.mp3",
+        "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+        "_request_id": job["id"],
+    }
+    stage = store.directory / "downloads" / "staging"
+    names = ("0", "1") if stale_first else ("1", "0")
+    # Journals are read in name order here, whatever the folder's order.
+    real_glob = Path.glob
+    monkeypatch.setattr(
+        Path, "glob", lambda self, pattern: iter(sorted(real_glob(self, pattern)))
+    )
+    (stage / f"{job['id']}-{names[0]}.json").write_text(
+        json.dumps({**base, "_claim_token": "claim-a-lost", "_moved": True})
+    )
+    (stage / f"{job['id']}-{names[1]}.json").write_text(
+        json.dumps({**base, "_claim_token": job["claim_token"], "_moved": False})
+    )
+    store.recover_requests()
+    assert target.exists()
+    assert store.queue()["items"][0]["status"] == "completed"
+    assert list(stage.glob("*.json")) == []

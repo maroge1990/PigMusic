@@ -739,7 +739,18 @@ class Store:
         # through a link to somewhere else (#96, Codex round 2).
         drop = self.drop_journal
         if stage.exists():
-            for journal in stage.glob("*.json"):
+            journals = sorted(stage.glob("*.json"))
+            # The file each journal publishes: a stale journal never deletes
+            # one another journal still names (Codex on #138).
+            named = {}
+            for journal in journals:
+                try:
+                    named[journal] = json.loads(journal.read_text(encoding="utf-8"))[
+                        "relative_path"
+                    ]
+                except (OSError, ValueError, KeyError, TypeError):
+                    pass
+            for journal in journals:
                 try:
                     try:
                         metadata = json.loads(journal.read_text(encoding="utf-8"))
@@ -811,7 +822,16 @@ class Store:
                                 "UPDATE queue SET status='completed' WHERE id=?",
                                 (request_id,),
                             )
-                        elif moved and not self._library_file_used(conn, metadata):
+                        elif (
+                            moved
+                            and not self._library_file_used(conn, metadata)
+                            and not any(
+                                other != journal
+                                and other.exists()
+                                and path == metadata["relative_path"]
+                                for other, path in named.items()
+                            )
+                        ):
                             # Its claim was lost while its file moved in, and
                             # the move was never undone (Codex round 1 on
                             # #138): the file it moved is deleted, so nothing
