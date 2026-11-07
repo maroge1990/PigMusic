@@ -475,35 +475,48 @@ def test_pausing_returns_active_request_to_waiting(tmp_path):
     assert store.claim_request() is None
 
 
-def paced_downloader(tmp_path, monkeypatch, results):
-    import server.downloader as module
+def paced_search(monkeypatch, results):
+    """freemp3cloud through the shared legacy search, its search process
+    replaced by one answering `results` (one list per search)."""
+    from server.providers import legacy
 
-    monkeypatch.setattr(module, "FREEMP3CLOUD_GAP", 0.05)
-    monkeypatch.setattr(module, "FREEMP3CLOUD_RETRY_PAUSE", 0.05)
-    monkeypatch.setattr(module, "_freemp3cloud_last", [0.0])
+    for name, value in (
+        ("FREEMP3CLOUD_GAP", 0.05),
+        ("FREEMP3CLOUD_RETRY_PAUSE", 0.05),
+        ("_freemp3cloud_last", [0.0]),
+    ):
+        monkeypatch.setattr(legacy, name, value, raising=False)
     state = {"active": 0, "max_active": 0, "starts": []}
 
-    def search(query, limit):
+    def run_checked(command, check, timeout, **_):
+        import json
         import time
+        import types
 
         state["starts"].append(time.monotonic())
         state["active"] += 1
         state["max_active"] = max(state["max_active"], state["active"])
         time.sleep(0.02)
         state["active"] -= 1
-        return results.pop(0) if results else []
+        found = results.pop(0) if results else []
+        return types.SimpleNamespace(
+            returncode=0, stdout=json.dumps({"candidates": found}).encode()
+        )
 
-    downloader = Downloader(Store(tmp_path), {"freemp3cloud": search})
-    downloader.check = lambda job_id: None
-    return downloader, state
+    monkeypatch.setattr(legacy, "run_checked", run_checked)
+    return legacy.search, state
 
 
 def test_freemp3cloud_searches_are_serialised_and_spaced(tmp_path, monkeypatch):
+    """#140: the pacing was dead code; every caller of the shared search
+    (downloads, mixes, the relay) is now paced."""
     import threading
 
-    downloader, state = paced_downloader(tmp_path, monkeypatch, [["a"]] * 4)
+    from server.providers.contracts import Context
+
+    search, state = paced_search(monkeypatch, [["a"]] * 4)
     threads = [
-        threading.Thread(target=downloader.paced_search, args=({"id": i}, "q"))
+        threading.Thread(target=search, args=("freemp3cloud", "q", Context("mp3_320")))
         for i in range(4)
     ]
     for thread in threads:
@@ -515,12 +528,25 @@ def test_freemp3cloud_searches_are_serialised_and_spaced(tmp_path, monkeypatch):
     assert all(b - a >= 0.04 for a, b in zip(starts, starts[1:]))
 
 
+def test_downloads_search_freemp3cloud_through_the_pacing(tmp_path, monkeypatch):
+    from server.providers import REGISTRY
+
+    search, state = paced_search(monkeypatch, [["a"]] * 4)
+    store = Store(tmp_path / "data")
+    job = queued(store)
+    worker = Downloader(store, {"freemp3cloud": REGISTRY["freemp3cloud"].search})
+    worker.attempt(job, "mp3_320", [])
+    assert len(state["starts"]) == 1
+
+
 def test_freemp3cloud_empty_result_is_retried_exactly_once(tmp_path, monkeypatch):
-    downloader, state = paced_downloader(tmp_path, monkeypatch, [[], ["hit"]])
-    assert downloader.paced_search({"id": 1}, "q") == ["hit"]
+    from server.providers.contracts import Context
+
+    search, state = paced_search(monkeypatch, [[], ["hit"]])
+    assert search("freemp3cloud", "q", Context("mp3_320")) == ["hit"]
     assert len(state["starts"]) == 2
-    downloader, state = paced_downloader(tmp_path, monkeypatch, [])
-    assert downloader.paced_search({"id": 1}, "q") == []
+    search, state = paced_search(monkeypatch, [])
+    assert search("freemp3cloud", "q", Context("mp3_320")) == []
     assert len(state["starts"]) == 2
 
 

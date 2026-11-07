@@ -172,12 +172,6 @@ def safe_name(value):
     return value
 
 
-# freemp3cloud silently returns empty pages when searched in parallel or too fast.
-FREEMP3CLOUD_GAP = 2.5
-FREEMP3CLOUD_RETRY_PAUSE = 10.0
-_freemp3cloud_lock = threading.Lock()
-_freemp3cloud_last = [0.0]
-
 # The queue loop's passes: at most one per PASS_GAP seconds, and the upgrade
 # scan (also the fallback for changes made outside this process) at least
 # every UPGRADE_SCAN_EVERY.
@@ -329,34 +323,6 @@ class Downloader:
         self.check(job_id)
         if time.monotonic() >= deadline:
             raise SourceDeadline()
-
-    def pause(self, job_id, seconds):
-        end = time.monotonic() + seconds
-        while (left := end - time.monotonic()) > 0:
-            self.check(job_id)
-            time.sleep(min(0.5, left))
-
-    def paced_search(self, job, query):
-        search = self.providers["freemp3cloud"]
-        for attempt in range(2):
-            while not _freemp3cloud_lock.acquire(timeout=0.5):
-                self.check(job["id"])
-            try:
-                self.check(job["id"])
-                self.pause(
-                    job["id"],
-                    _freemp3cloud_last[0] + FREEMP3CLOUD_GAP - time.monotonic(),
-                )
-                try:
-                    found = search(query, 20)
-                finally:
-                    _freemp3cloud_last[0] = time.monotonic()
-            finally:
-                _freemp3cloud_lock.release()
-            if found or attempt:
-                return found
-            self.pause(job["id"], FREEMP3CLOUD_RETRY_PAUSE)
-        return found
 
     def timings(self):
         timings = getattr(self.context, "timings", None)

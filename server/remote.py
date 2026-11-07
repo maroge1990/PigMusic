@@ -19,7 +19,7 @@ from starlette.responses import Response, StreamingResponse
 from .request_timing import add_phase, phase
 from .library import normalise
 from .providers.process import run_checked
-from .downloader import FREEMP3CLOUD_RETRY_PAUSE, matches
+from .downloader import matches
 from .matching import album_title, flavour, recording_kind
 from .providers.contracts import ProviderError
 from .vendor.jiosaavn import search_jiosaavn
@@ -488,11 +488,8 @@ class RemoteAudio:
             candidates = self.runtime.search(source, track, context)
         else:
             query = track["artist"] + " " + track["title"]
+            # Paced, and an empty freemp3cloud answer asked again (#140).
             candidates = legacy_search(source, query, context)
-            if not candidates and source == "freemp3cloud":
-                # It silently answers empty when busy; acquisition retries once too.
-                time.sleep(FREEMP3CLOUD_RETRY_PAUSE)
-                candidates = legacy_search(source, query, context)
         # Acquisition's identity rules decide the match. These sites list one
         # recording several times, so take the best copy as downloads do:
         # formats every Apple player opens first, then the higher bitrate.
