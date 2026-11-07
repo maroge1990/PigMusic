@@ -700,3 +700,39 @@ def test_source_breaker_opening_and_closing_is_logged(caplog):
     assert messages[0].startswith("Source soulseek paused for 300 s")
     assert messages[-1] == "Source soulseek available again"
     assert len(messages) == 2
+
+
+def test_job_checks_reuse_the_nas_check_and_settings_for_a_second(
+    tmp_path, monkeypatch
+):
+    """#135: check() runs every 50 ms during a decode; each call read the NAS
+    marker and the settings (about 1,200 marker reads in a 60 s decode)."""
+    import server.storage as storage
+
+    store = Store(tmp_path / "data")
+    job = queued(store)
+    monkeypatch.setenv("PIG_MUSIC_DOWNLOAD_ROOT", str(tmp_path / "work"))
+    reads = {"marker": 0, "settings": 0}
+    monkeypatch.setattr(
+        storage,
+        "require_library_mount",
+        lambda *a, **k: reads.__setitem__("marker", reads["marker"] + 1),
+    )
+    worker = Downloader(store, {})
+    worker.context.claim_token = job["claim_token"]
+    settings = store.download_settings
+    monkeypatch.setattr(
+        store,
+        "download_settings",
+        lambda: reads.__setitem__("settings", reads["settings"] + 1) or settings(),
+    )
+    reads.update(marker=0, settings=0)
+    monkeypatch.setattr(storage, "_MOUNT_CHECKED", {})
+    for _ in range(200):  # A 10 s decode's checks, in well under a second.
+        worker.check(job["id"])
+    assert reads == {"marker": 1, "settings": 1}
+    # Pausing downloads still stops the job within the second.
+    store.save_download_settings({"enabled": False})
+    worker.settings_cache = (float("-inf"), None)
+    with pytest.raises(Cancelled):
+        worker.check(job["id"])

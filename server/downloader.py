@@ -177,6 +177,8 @@ def safe_name(value):
 # every UPGRADE_SCAN_EVERY.
 PASS_GAP = 0.5
 UPGRADE_SCAN_EVERY = 60
+# Seconds a job's check may reuse the NAS identity check and the settings.
+CHECK_REUSE = 1
 
 
 class Cancelled(Exception):
@@ -287,6 +289,7 @@ class Downloader:
         # Set once staged downloads are recovered (and the library refreshed).
         self.recovered = threading.Event()
         self.deadlines = {}
+        self.settings_cache = (float("-inf"), None)
         self.context = threading.local()
         configured = Path(
             os.environ.get("PIG_MUSIC_DOWNLOAD_ROOT") or store.directory / "downloads"
@@ -305,16 +308,28 @@ class Downloader:
         self.staging.mkdir(parents=True, exist_ok=True)
 
     def check(self, job_id):
-        download_root(self.store)
+        # Called every 50 ms while a tool runs and per network chunk (#135):
+        # the NAS identity check and the settings are reused for a second
+        # (writes check the mount again themselves); cancellation is read
+        # each time.
+        download_root(self.store, max_age=CHECK_REUSE)
         if self.stopping.is_set() or not self.store.request_active(
             job_id, getattr(self.context, "claim_token", None)
         ):
             raise Cancelled()
         if self.deadlines.get(job_id, float("inf")) <= time.monotonic():
             raise QualityDeadline()
-        if not self.store.download_settings()["enabled"]:
+        if not self.recent_settings()["enabled"]:
             self.state(job_id, "waiting_for_sources")
             raise Cancelled()
+
+    def recent_settings(self):
+        """The download settings, read at most once per CHECK_REUSE."""
+        read_at, settings = self.settings_cache
+        if time.monotonic() - read_at >= CHECK_REUSE:
+            settings = self.store.download_settings()
+            self.settings_cache = (time.monotonic(), settings)
+        return settings
 
     def source_check(self, job_id, deadline):
         """`check`, and SourceDeadline once `deadline` (monotonic) passes:
