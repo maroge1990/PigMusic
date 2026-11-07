@@ -277,8 +277,31 @@ class NativeSync:
             "next_cursor": next_cursor,
         }
 
+    def unchanged(self, user_id):
+        """The latest stored revision when the person's library still has its
+        signature, else None. Answers without lifecycle_lock or reading the
+        stored objects (#141): the phone asks on every return to the
+        foreground, and a capture took both household locks."""
+        with self.store.library_lock:
+            projection = self.store.user_libraries.projection(user_id)
+        signature = f"{projection['revision']}:{schema_digest()}"
+        with self.store.connect() as conn:
+            previous = conn.execute(
+                "SELECT revision,signature,captured_at FROM sync_revisions WHERE user_id=? ORDER BY sequence DESC LIMIT 1",
+                (user_id,),
+            ).fetchone()
+        if (
+            previous
+            and previous[1] == signature
+            and previous[2] >= int(time.time()) - 30 * 86400
+        ):
+            return previous[0]
+        return None
+
     def changes(self, user_id, since):
-        current = self.capture(user_id)
+        # Only a library that changed is captured (under both locks) to
+        # write its revision (#141).
+        revision = self.unchanged(user_id) or self.capture(user_id)["revision"]
         with self.store.connect() as conn:
             start = conn.execute(
                 "SELECT sequence FROM sync_revisions WHERE user_id=? AND revision=? AND captured_at>=?",
@@ -302,7 +325,7 @@ class NativeSync:
                         upserts[kind].pop(key, None)
                         deletes[kind].add(key)
             return {
-                "revision": current["revision"],
+                "revision": revision,
                 "upserts": {k: list(v.values()) for k, v in upserts.items()},
                 "deletes": {k: sorted(v) for k, v in deletes.items()},
             }

@@ -257,3 +257,45 @@ def test_kept_captures_expire_and_stay_bounded(tmp_path, monkeypatch):
     sync.remember(member, {"revision": "now", "payloads": {}})
     # Everything older is released, whoever it belonged to.
     assert sync.captured == {member: sync.captured[member]}
+
+
+def test_an_unchanged_library_answers_changes_without_the_lifecycle_lock(tmp_path):
+    """#141: every return to the foreground captured the library under both
+    household locks (2.6 s server time at the median on the phone)."""
+    import threading
+    import time
+
+    store, owner, _ = fixture(tmp_path)
+    sync = NativeSync(store)
+    first = sync.page(owner, "tracks", limit=3)
+    held, release = threading.Event(), threading.Event()
+
+    def hold():
+        with store.lifecycle_lock:  # A publication in progress.
+            held.set()
+            release.wait(10)
+
+    holder = threading.Thread(target=hold)
+    holder.start()
+    try:
+        assert held.wait(5)
+        started = time.monotonic()
+        answer = sync.changes(owner, first["revision"])
+        assert time.monotonic() - started < 0.5
+        assert answer["revision"] == first["revision"]
+        assert all(not v for v in answer["upserts"].values())
+    finally:
+        release.set()
+        holder.join(5)
+    # A change is still captured, as before.
+    with store.connect() as conn:
+        conn.execute(
+            "DELETE FROM library_members WHERE user_id=? AND track_id='1'", (owner,)
+        )
+        conn.execute(
+            "UPDATE membership_versions SET revision=revision+1 WHERE user_id=?",
+            (owner,),
+        )
+    changed = sync.changes(owner, first["revision"])
+    assert changed["revision"] != first["revision"]
+    assert changed["deletes"]["tracks"] == ["1"]
