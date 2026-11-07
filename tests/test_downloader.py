@@ -605,3 +605,72 @@ def test_publication_never_writes_or_deletes_journals_through_links(tmp_path, au
         store.commit_request(job, staged, worker.library_root / "b.mp3", probe, sha)
     assert sorted(p.name for p in elsewhere.iterdir()) == ["theirs.json"]
     assert not (worker.library_root / "b.mp3").exists()
+
+
+def test_each_job_logs_one_timing_line_and_keeps_timings_in_the_queue(
+    tmp_path, audio, caplog
+):
+    """#134: where a download's time went is in the log and the payload."""
+    store = Store(tmp_path / "data")
+    job = queued(store)
+    assert job["queued_seconds"] >= 0
+    assert "queued_seconds" not in store.queue()["items"][0]
+
+    class FixtureDownloader(Downloader):
+        def transfer(self, job_id, candidate, path):
+            shutil.copyfile(audio, path)
+
+    candidate = {
+        "title": "Test Track",
+        "channel": "Test Artist",
+        "duration": "0:03",
+        "source_url": "fixture",
+        "quality": "320kbps",
+    }
+    worker = FixtureDownloader(store, {"freemp3cloud": lambda *_: [candidate]})
+    with caplog.at_level("INFO", logger="pig_music.downloads"):
+        worker.process(job)
+    lines = [r.getMessage() for r in caplog.records if r.name == "pig_music.downloads"]
+    assert len(lines) == 1
+    assert lines[0].startswith("Download: Test Artist - Test Track completed in ")
+    for part in ("queued ", "search freemp3cloud mp3_320 1 candidates ok"):
+        assert part in lines[0]
+    for step in ("transfer freemp3cloud", "validate ok", "decode ok", "commit ok"):
+        assert step in lines[0]
+    item = store.queue()["items"][0]
+    assert item["status"] == "completed"
+    steps = [s["step"] for s in item["timings"]["steps"]]
+    assert steps == ["search", "transfer", "validate", "tag", "decode", "hash"]
+    assert item["timings"]["steps"][1]["bytes"] == audio.stat().st_size
+    assert item["timings"]["queued_seconds"] is not None
+
+
+def test_a_failed_job_keeps_its_timings_and_says_why(tmp_path, caplog):
+    store = Store(tmp_path / "data")
+    job = queued(store)
+    worker = Downloader(store, {"freemp3cloud": lambda *_: []})
+    with caplog.at_level("INFO", logger="pig_music.downloads"):
+        worker.process(job)
+    item = store.queue()["items"][0]
+    assert item["status"] == "failed"
+    assert item["timings"]["steps"][0]["candidates"] == 0
+    (line,) = [
+        r.getMessage() for r in caplog.records if r.name == "pig_music.downloads"
+    ]
+    assert " failed in " in line and "0 candidates" in line
+
+
+def test_source_breaker_opening_and_closing_is_logged(caplog):
+    from server.providers.contracts import ProviderError
+    from server.providers.health import Health
+
+    now = [1000.0]
+    health = Health(clock=lambda: now[0])
+    with caplog.at_level("INFO", logger="pig_music.downloads"):
+        for _ in range(3):
+            health.outcome("soulseek", error=ProviderError("unavailable"))
+        health.outcome("soulseek")
+    messages = [r.getMessage() for r in caplog.records]
+    assert messages[0].startswith("Source soulseek paused for 300 s")
+    assert messages[-1] == "Source soulseek available again"
+    assert len(messages) == 2

@@ -7,6 +7,7 @@ and publication are app-owned. Preview/test storage remains isolated by default.
 import asyncio
 import base64
 import hashlib
+import logging
 import math
 import os
 import re
@@ -14,6 +15,7 @@ import shutil
 import time
 import threading
 import unicodedata
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -49,6 +51,7 @@ from .quality import CODEC_EXTENSIONS, policy, satisfies
 from .storage import download_root, file_sha256, library_root
 
 PROVIDERS = SEARCH_PROVIDERS
+log = logging.getLogger("pig_music.downloads")
 VERSION_WORDS = {
     "live",
     "remix",
@@ -187,6 +190,87 @@ class QualityDeadline(Exception):
     pass
 
 
+def outcome_of(exc):
+    if isinstance(exc, Cancelled):
+        return "cancelled"
+    if isinstance(exc, QualityDeadline):
+        return "time limit"
+    if isinstance(exc, ProviderError):
+        return exc.code
+    if isinstance(exc, ValueError):
+        return str(exc)[:80]
+    return type(exc).__name__
+
+
+class Timings:
+    """Where one acquisition's time went (#134): the queue wait, then each
+    step (resolve, search, transfer, validate, tag, decode, hash, commit) with
+    its source, outcome and seconds. Kept in the request's payload and logged
+    as one line when the job ends."""
+
+    # Steps kept in the payload; the log line has them all.
+    KEPT = 40
+
+    def __init__(self, queued=None, resolved=None):
+        self.began = time.monotonic()
+        self.queued = queued
+        self.steps = []
+        if resolved is not None:
+            self.steps.append(
+                {"step": "resolve", "outcome": "ok", "seconds": round(resolved, 2)}
+            )
+
+    @contextmanager
+    def step(self, name, **details):
+        entry = {"step": name, **details}
+        began = time.monotonic()
+        try:
+            yield entry
+            entry.setdefault("outcome", "ok")
+        except BaseException as exc:
+            entry.setdefault("outcome", outcome_of(exc))
+            raise
+        finally:
+            entry["seconds"] = round(time.monotonic() - began, 2)
+            self.steps.append(entry)
+
+    def payload(self):
+        return {
+            "queued_seconds": (
+                None if self.queued is None else round(max(0, self.queued), 1)
+            ),
+            "total_seconds": round(time.monotonic() - self.began, 1),
+            "steps": self.steps[-self.KEPT :],
+        }
+
+    def line(self, job, result):
+        parts = []
+        if self.queued is not None:
+            parts.append(f"queued {max(0, self.queued):.1f} s")
+        for entry in self.steps:
+            words = [entry["step"]]
+            words += [
+                str(entry[key])
+                for key in ("source", "profile", "peer", "state")
+                if entry.get(key) is not None
+            ]
+            if entry.get("candidates") is not None:
+                words.append(f"{entry['candidates']} candidates")
+            if entry.get("bytes"):
+                words.append(f"{entry['bytes'] / 1_000_000:.1f} MB")
+            words.append(entry["outcome"])
+            words.append(f"{entry['seconds']:.1f} s")
+            parts.append(" ".join(words))
+        log.info(
+            "Download: %s - %s %s in %.1f s (%s)",
+            job.get("artist"),
+            job.get("title"),
+            result,
+            time.monotonic() - self.began,
+            "; ".join(parts),
+        )
+
+
 class Downloader:
     def __init__(self, store, providers=None, runtime=None, resolver=None):
         self.store = store
@@ -258,6 +342,12 @@ class Downloader:
                 return found
             self.pause(job["id"], FREEMP3CLOUD_RETRY_PAUSE)
         return found
+
+    def timings(self):
+        timings = getattr(self.context, "timings", None)
+        if timings is None:
+            timings = self.context.timings = Timings()
+        return timings
 
     def state(self, request_id, status, **details):
         self.store.request_state(
@@ -388,9 +478,11 @@ class Downloader:
 
     async def handle(self, job):
         # Quality replacements keep the file's own identity.
+        resolved = None
         if self.resolver and not job.get("library_track_id"):
             from .editions import Deferred, Unresolved
 
+            began = time.monotonic()
             try:
                 changes = await self.resolver.prepare(job)
             except Deferred as later:
@@ -412,6 +504,7 @@ class Downloader:
                 return
             except Exception:
                 changes = {}
+            resolved = time.monotonic() - began
             if changes:
                 job = {**job, **changes}
                 await asyncio.to_thread(
@@ -427,17 +520,25 @@ class Downloader:
                 self.store.fulfil_request, job, found["id"]
             ):
                 return
+        if resolved is not None:
+            job = {**job, "resolve_seconds": resolved}
         await asyncio.to_thread(self.process, job)
 
     def transfer(self, job_id, candidate, path):
         source = candidate["source"]
         if source == "soulseek":
-            self.soulseek.transfer(
-                candidate,
-                path,
-                lambda: self.check(job_id),
-                lambda received, total: self.progress(job_id, received, total),
+            self.soulseek.reports.current = getattr(
+                self.context, "transfer_report", None
             )
+            try:
+                self.soulseek.transfer(
+                    candidate,
+                    path,
+                    lambda: self.check(job_id),
+                    lambda received, total: self.progress(job_id, received, total),
+                )
+            finally:
+                self.soulseek.reports.current = None
             return {}
         context = Context(
             candidate.get("effective_profile", "native_standard"),
@@ -672,18 +773,22 @@ class Downloader:
     def complete(self, job, path, extension, source, profile, provenance=None):
         self.check(job["id"])
         self.state(job["id"], "validating", effective_quality=profile)
-        probe = self.validate(
-            path, job, profile, decode=False, check=lambda: self.check(job["id"])
-        )
-        if (
-            job.get("exact_quality")
-            and profile == "mp3_128"
-            and probe["bitrate_kbps"] > 144
-        ):
-            raise ValueError("Replacement must be a genuine MP3 128 kbps source")
-        self.tag(path, job, source)
-        self.embed_cover(path, job.get("cover_sha"))
-        self.decode(path, lambda: self.check(job["id"]))
+        timings = self.timings()
+        with timings.step("validate"):
+            probe = self.validate(
+                path, job, profile, decode=False, check=lambda: self.check(job["id"])
+            )
+            if (
+                job.get("exact_quality")
+                and profile == "mp3_128"
+                and probe["bitrate_kbps"] > 144
+            ):
+                raise ValueError("Replacement must be a genuine MP3 128 kbps source")
+        with timings.step("tag"):
+            self.tag(path, job, source)
+            self.embed_cover(path, job.get("cover_sha"))
+        with timings.step("decode"):
+            self.decode(path, lambda: self.check(job["id"]))
         probe["acquisition"] = {
             "provider": source,
             "quality_profile": profile,
@@ -704,7 +809,13 @@ class Downloader:
             / safe_name(job["album"])
             / filename
         )
-        self.store.publish_request(job, path, target, probe, file_sha256(path))
+        with timings.step("hash"):
+            sha = file_sha256(path)
+        # The payload keeps where the time went; the commit's own time is in
+        # the log line only.
+        self.state(job["id"], "validating", timings=timings.payload())
+        with timings.step("commit"):
+            self.store.publish_request(job, path, target, probe, sha)
 
     def attempt(self, job, profile, errors):
         effective = {**job, "quality_profile": profile}
@@ -723,7 +834,11 @@ class Downloader:
                 ):
                     continue
                 self.state(
-                    job["id"], "searching", source=source, effective_quality=profile
+                    job["id"],
+                    "searching",
+                    source=source,
+                    effective_quality=profile,
+                    timings=self.timings().payload(),
                 )
                 context = Context(
                     profile,
@@ -733,29 +848,34 @@ class Downloader:
                         time.monotonic() + 90,
                     ),
                 )
-                if REGISTRY[source].adapter:
-                    candidates = self.runtime.search(source, effective, context)
-                else:
-                    with self.runtime.health.operation(source):
-                        if source == "soulseek":
-                            candidates = self.soulseek.search(
-                                effective, lambda: self.check(job["id"])
-                            )
-                        elif self.providers[source] is REGISTRY[source].search:
-                            candidates = legacy_search(
-                                source, f"{job['artist']} {job['title']}", context
-                            )
-                        else:
-                            candidates = self.providers[source](
-                                f"{job['artist']} {job['title']}", 20
-                            )
-                        self.runtime.health.outcome(source)
-                rejected = set(job.get("source_review_rejected") or [])
-                candidates = [
-                    c
-                    for c in candidates
-                    if matches(job, c) and c.get("provider_track_id") not in rejected
-                ]
+                with self.timings().step(
+                    "search", source=source, profile=profile
+                ) as searched:
+                    if REGISTRY[source].adapter:
+                        candidates = self.runtime.search(source, effective, context)
+                    else:
+                        with self.runtime.health.operation(source):
+                            if source == "soulseek":
+                                candidates = self.soulseek.search(
+                                    effective, lambda: self.check(job["id"])
+                                )
+                            elif self.providers[source] is REGISTRY[source].search:
+                                candidates = legacy_search(
+                                    source, f"{job['artist']} {job['title']}", context
+                                )
+                            else:
+                                candidates = self.providers[source](
+                                    f"{job['artist']} {job['title']}", 20
+                                )
+                            self.runtime.health.outcome(source)
+                    rejected = set(job.get("source_review_rejected") or [])
+                    candidates = [
+                        c
+                        for c in candidates
+                        if matches(job, c)
+                        and c.get("provider_track_id") not in rejected
+                    ]
+                    searched["candidates"] = len(candidates)
                 # Uploader-name credits wait for the owner unless approved,
                 # and only an exact name match is worth asking about. They are
                 # kept aside and offered only if everything stronger fails.
@@ -803,16 +923,28 @@ class Downloader:
                             "downloading",
                             source=source,
                             effective_quality=profile,
+                            timings=self.timings().payload(),
                         )
-                        provenance = self.transfer(
-                            job["id"],
-                            {
-                                **candidate,
-                                "source": source,
-                                "effective_profile": profile,
-                            },
-                            path,
-                        )
+                        with self.timings().step(
+                            "transfer", source=source, peer=candidate.get("username")
+                        ) as moved:
+                            self.context.transfer_report = moved
+                            try:
+                                provenance = self.transfer(
+                                    job["id"],
+                                    {
+                                        **candidate,
+                                        "source": source,
+                                        "effective_profile": profile,
+                                    },
+                                    path,
+                                )
+                            finally:
+                                self.context.transfer_report = None
+                                try:
+                                    moved["bytes"] = path.stat().st_size
+                                except OSError:
+                                    pass
                         transferred = True
                         self.complete(job, path, extension, source, profile, provenance)
                         self.runtime.health.outcome(source, transfer=True)
@@ -883,7 +1015,13 @@ class Downloader:
         return False
 
     def process(self, job):
+        # Measurements of this claim (#134), never stored with the request.
+        job = dict(job)
+        queued = job.pop("queued_seconds", None)
+        resolved = job.pop("resolve_seconds", None)
         self.context.claim_token = job.get("claim_token")
+        timings = self.context.timings = Timings(queued, resolved)
+        result = "interrupted"
         errors = []
         desired = job.get(
             "quality_policy",
@@ -897,6 +1035,7 @@ class Downloader:
             if mix_cache is not None and type(self) is Downloader:
                 try:
                     if mix_cache.promote(self, job, preferred):
+                        result = "completed from the mix cache"
                         return
                 except (Cancelled, QualityDeadline):
                     raise
@@ -907,6 +1046,7 @@ class Downloader:
             )
             try:
                 if self.attempt(job, preferred, errors):
+                    result = "completed"
                     return
             except QualityDeadline:
                 errors.append("Preferred quality attempt reached its time limit")
@@ -923,6 +1063,7 @@ class Downloader:
                 )
                 try:
                     if self.attempt(job, fallback, errors):
+                        result = "completed"
                         return
                 except QualityDeadline:
                     errors.append("Fallback quality attempt reached its time limit")
@@ -942,24 +1083,30 @@ class Downloader:
                 )
                 try:
                     if self.attempt(job, "aac_256", errors):
+                        result = "completed"
                         return
                 except QualityDeadline:
                     errors.append("AAC fallback attempt reached its time limit")
                 finally:
                     self.deadlines.pop(job["id"], None)
+            result = "failed"
             self.state(
                 job["id"],
                 "failed",
                 error="; ".join(errors)[-1000:]
                 or "No enabled source supports this request's quality profile",
+                timings=timings.payload(),
             )
         except Cancelled:
-            pass
+            result = "cancelled"
         except Exception:
             self.state(
                 job["id"],
                 "failed",
                 error="Acquisition interrupted; existing music retained. Retry this request.",
+                timings=timings.payload(),
             )
         finally:
             self.deadlines.pop(job["id"], None)
+            timings.line(job, result)
+            self.context.timings = None

@@ -130,9 +130,12 @@ def test_peer_failure_and_cancellation_do_not_read_uncompleted_files(tmp_path):
         "Failed peer data must not be imported"
     )
     candidate = candidate_for(song(), {"username": "peer"}, file())
+    report = adapter.reports.current = {}
     with pytest.raises(ValueError, match="peer transfer failed"):
         adapter.transfer(candidate, tmp_path / "bad.mp3", lambda: None, lambda *_: None)
     assert deletes == ["/api/v0/transfers/downloads/peer/owned-id"]
+    # The job's timings say what the peer did (#134).
+    assert report == {"state": "completed, errored"}
     with pytest.raises(Cancelled):
         adapter.transfer(
             candidate,

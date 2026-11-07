@@ -182,6 +182,9 @@ class Soulseek:
         self.files_lock = threading.Lock()
         self.active = {}
         self.swept_at = None
+        # Per thread, the dict a transfer records the peer's last state in,
+        # for the job's timings (#134); the downloader sets it.
+        self.reports = threading.local()
 
     def config(self):
         path = self.store.directory / "slskd-connection.json"
@@ -336,6 +339,8 @@ class Soulseek:
                     del self.active[key]
 
     def _transfer(self, candidate, destination, check, progress):
+        report = getattr(self.reports, "current", None)
+        report = {} if report is None else report
         username = quote(candidate["username"], safe="")
         transfer_id = None
         with self.client() as client:
@@ -377,6 +382,7 @@ class Soulseek:
                         state = str(
                             match.get("stateDescription", match.get("state", ""))
                         ).lower()
+                        report["state"] = state
                         progress(match.get("bytesTransferred", 0), candidate["size"])
                         if "succeeded" in state:
                             self.copy_completed(candidate, destination)

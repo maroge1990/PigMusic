@@ -306,7 +306,9 @@ class Store:
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT id,payload FROM queue WHERE status='waiting_for_sources' "
+                "SELECT id,payload,"
+                "(julianday('now')-julianday(updated_at))*86400 "
+                "FROM queue WHERE status='waiting_for_sources' "
                 "AND COALESCE(json_extract(payload,'$.retry_after'),0)<=? "
                 "ORDER BY created_at,id LIMIT 1",
                 (time.time(),),
@@ -319,13 +321,16 @@ class Store:
                     "received_bytes",
                     "total_bytes",
                     "source_review",  # Held again if the upload is still found.
+                    "timings",  # The last attempt's; this one starts afresh.
                 ):
                     payload.pop(key, None)
                 conn.execute(
                     "UPDATE queue SET status='searching',payload=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                     (json.dumps(payload), row[0]),
                 )
-                return {"id": row[0], **payload}
+                # How long it waited since it was queued (or requeued); not
+                # stored: the payload's timings carry it (#134).
+                return {"id": row[0], **payload, "queued_seconds": row[2]}
 
     def request_state(self, request_id, status, _claim_token=None, **details):
         with self.connect() as conn:
