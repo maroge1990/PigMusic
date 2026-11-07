@@ -145,6 +145,20 @@ def candidate_for(job, response, file):
 
 # Imports stream in pieces this size (#96).
 CHUNK = 1024 * 1024
+# A search is read this often, and ends once this many of its files would
+# do for the song or the engine says it is complete (#131), at the latest
+# after FIRST_SEARCH seconds (the album search) or LATER_SEARCH (each
+# fallback search, which follows a wait already spent).
+SEARCH_POLL = 2
+ENOUGH_FILES = 3
+FIRST_SEARCH = 35
+LATER_SEARCH = 15
+# A search is deleted only once the engine has said it is complete and has
+# had this long to finish storing it (#131): deleting it sooner fails inside
+# the engine. Ones never seen complete are dropped from the list after
+# FORGET_SEARCH; the engine's own retention has them then.
+DELETE_AFTER = 10
+FORGET_SEARCH = 3600
 # The engine's leftovers are swept at most this often (#96).
 SWEEP_EVERY = 3600
 # How the engine (slskd) reports a transfer that finished without success:
@@ -182,6 +196,10 @@ class Soulseek:
         self.files_lock = threading.Lock()
         self.active = {}
         self.swept_at = None
+        # Searches to delete: {engine id: (when we finished with it, whether
+        # the engine had said it was complete)} (#131).
+        self.finished = {}
+        self.finished_lock = threading.Lock()
         # Per thread, the dict a transfer records the peer's last state in,
         # for the job's timings (#134); the downloader sets it.
         self.reports = threading.local()
@@ -226,42 +244,90 @@ class Soulseek:
         finally:
             self.search_lock.release()
 
-    def _run_search(self, text, check):
+    def _run_search(self, text, check, enough=lambda responses: False, limit=None):
+        """The engine's responses to `text`, read every SEARCH_POLL seconds
+        until `enough(responses)`, the engine completes the search, or
+        `limit` seconds pass (#131)."""
         with self.client() as client:
+            self.tidy(client)
             check()
             started = client.post("searches", json={"searchText": text})
             started.raise_for_status()
             search_id = quote(started.json()["id"], safe="")
+            complete = False
             try:
-                deadline = time.monotonic() + 35
-                while time.monotonic() < deadline:
+                deadline = time.monotonic() + (limit or FIRST_SEARCH)
+                while True:
                     check()
                     status = client.get("searches/" + search_id)
                     status.raise_for_status()
-                    if status.json().get("isComplete"):
-                        break
-                    time.sleep(1)
-                result = client.get(f"searches/{search_id}/responses")
-                result.raise_for_status()
-                return result.json()
+                    complete = bool(status.json().get("isComplete"))
+                    result = client.get(f"searches/{search_id}/responses")
+                    result.raise_for_status()
+                    responses = result.json()
+                    if complete or enough(responses):
+                        return responses
+                    if time.monotonic() + SEARCH_POLL > deadline:
+                        return responses
+                    time.sleep(SEARCH_POLL)
             finally:
-                try:
-                    client.delete("searches/" + search_id)
-                except httpx.HTTPError:
-                    pass  # Cleanup must not discard results or mask cancellation.
+                # Deleted later, once the engine has finished with it.
+                with self.finished_lock:
+                    self.finished[search_id] = (time.monotonic(), complete)
+
+    def tidy(self, client, now=None):
+        """Delete the searches the engine has finished storing (#131)."""
+        now = time.monotonic() if now is None else now
+        with self.finished_lock:
+            pending = list(self.finished.items())
+        for search_id, (ended, complete) in pending:
+            if now - ended < DELETE_AFTER:
+                continue
+            try:
+                if not complete:
+                    status = client.get("searches/" + search_id)
+                    if status.status_code == 404:
+                        self.forget(search_id)
+                        continue
+                    status.raise_for_status()
+                    if not status.json().get("isComplete"):
+                        if now - ended > FORGET_SEARCH:
+                            self.forget(search_id)
+                        continue
+                    # Seen complete only now: it gets its own settling time.
+                    with self.finished_lock:
+                        self.finished[search_id] = (now, True)
+                    continue
+                client.delete("searches/" + search_id)
+                self.forget(search_id)
+            except (httpx.HTTPError, ValueError):
+                pass  # Tried again on the next search or sweep.
+
+    def forget(self, search_id):
+        with self.finished_lock:
+            self.finished.pop(search_id, None)
 
     def _search(self, job, check):
+        def enough(responses):
+            found = 0
+            for response in responses:
+                for file in response.get("files", []):
+                    found += bool(candidate_for(job, response, file))
+                    if found >= ENOUGH_FILES:
+                        return True
+            return False
+
         key = (job["artist"], job["album"])
         cached = self.cache.get(key)
         if cached and time.monotonic() - cached[0] < 600:
             responses = cached[1]
         else:
             primary = f"{job['artist']} {job['album']}"
-            responses = self._run_search(primary, check)
+            responses = self._run_search(primary, check, enough)
             album = (job["album"] or "").strip()
             if not responses and album and album.lower() != primary.lower():
                 # The Soulseek server silently filters some artist names.
-                responses = self._run_search(album, check)
+                responses = self._run_search(album, check, enough, LATER_SEARCH)
             self.cache[key] = (time.monotonic(), responses)
             if len(self.cache) > 50:
                 self.cache.pop(next(iter(self.cache)))
@@ -277,7 +343,7 @@ class Soulseek:
             if cached and time.monotonic() - cached[0] < 600:
                 responses = cached[1]
             else:
-                responses = self._run_search(text, check)
+                responses = self._run_search(text, check, enough, LATER_SEARCH)
                 self.cache[key] = (time.monotonic(), responses)
         siblings = [
             t
@@ -576,6 +642,13 @@ class Soulseek:
         if self.swept_at is not None and now - self.swept_at < SWEEP_EVERY:
             return 0
         self.swept_at = now
+        if self.finished:
+            # Searches left over from the last one this process ran (#131).
+            try:
+                with self.client() as client:
+                    self.tidy(client)
+            except (OSError, ValueError, httpx.HTTPError):
+                pass
         work = os.environ.get("PIG_MUSIC_DOWNLOAD_ROOT")
         try:
             config = self.config()

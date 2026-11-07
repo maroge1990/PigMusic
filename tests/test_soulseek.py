@@ -536,3 +536,90 @@ def test_sweep_deletes_nothing_when_the_engine_list_is_unreadable(
         base_url="http://engine/api/v0/", transport=httpx.MockTransport(reply)
     )
     assert adapter.sweep() == 0 and path.exists()
+
+
+class FakeSearchEngine:
+    """An engine whose search gains `hits` at `hit_tick` and completes at
+    `complete_tick` (counted in status reads)."""
+
+    def __init__(self, hits, hit_tick, complete_tick):
+        self.hits, self.hit_tick, self.complete_tick = hits, hit_tick, complete_tick
+        self.ticks = 0
+        self.log = []
+
+    def handler(self, request):
+        path = request.url.path
+        if request.method == "POST":
+            self.log.append(("POST", self.ticks))
+            return httpx.Response(200, json={"id": "s1"})
+        if request.method == "DELETE":
+            self.log.append(("DELETE", self.ticks))
+            return httpx.Response(204)
+        if path.endswith("/responses"):
+            return httpx.Response(
+                200, json=self.hits if self.ticks >= self.hit_tick else []
+            )
+        self.ticks += 1
+        return httpx.Response(
+            200, json={"isComplete": self.ticks >= self.complete_tick}
+        )
+
+    def attach(self, adapter):
+        adapter.client = lambda: httpx.Client(
+            base_url="http://engine/api/v0/",
+            transport=httpx.MockTransport(self.handler),
+        )
+
+
+def test_a_search_ends_once_enough_files_would_do_and_is_deleted_only_when_complete(
+    tmp_path, monkeypatch
+):
+    """#131: the search used to wait for the engine's isComplete (median 17 s)
+    and was deleted while the engine was still storing it."""
+    import server.soulseek as soulseek
+
+    monkeypatch.setattr(soulseek, "SEARCH_POLL", 0.01, raising=False)
+    store = configured(tmp_path)
+    store.submit_catalogue([song()])
+    hits = [
+        {"username": f"peer{i}", "queueLength": 0, "files": [file()]} for i in range(3)
+    ]
+    engine = FakeSearchEngine(hits, hit_tick=2, complete_tick=18)
+    adapter = Soulseek(store)
+    engine.attach(adapter)
+    candidates = adapter.search(song(), lambda: None)
+    assert len(candidates) == 3
+    assert engine.ticks == 2  # Returned at the tick the hits arrived.
+    assert not any(kind == "DELETE" for kind, _ in engine.log)
+    # Later: still not complete, so still not deleted.
+    with adapter.client() as client:
+        adapter.tidy(client, now=time.monotonic() + soulseek.DELETE_AFTER + 1)
+    assert not any(kind == "DELETE" for kind, _ in engine.log)
+    # Once the engine completes it, it is deleted after its settling time.
+    engine.ticks = engine.complete_tick
+    with adapter.client() as client:
+        later = time.monotonic() + soulseek.DELETE_AFTER + 1
+        adapter.tidy(client, now=later)
+        assert not any(kind == "DELETE" for kind, _ in engine.log)
+        adapter.tidy(client, now=later + soulseek.DELETE_AFTER + 1)
+    deletes = [tick for kind, tick in engine.log if kind == "DELETE"]
+    assert deletes and all(tick >= engine.complete_tick for tick in deletes)
+    assert adapter.finished == {}
+
+
+def test_a_fallback_search_is_shorter_than_the_first(tmp_path, monkeypatch):
+    import server.soulseek as soulseek
+
+    monkeypatch.setattr(soulseek, "SEARCH_POLL", 0.01)
+    monkeypatch.setattr(soulseek, "FIRST_SEARCH", 0.3)
+    monkeypatch.setattr(soulseek, "LATER_SEARCH", 0.1)
+    adapter = Soulseek(configured(tmp_path))
+    engine = FakeSearchEngine([], hit_tick=0, complete_tick=10_000)
+    engine.attach(adapter)
+    began = time.monotonic()
+    adapter._run_search("first", lambda: None)
+    first = time.monotonic() - began
+    began = time.monotonic()
+    adapter._run_search("later", lambda: None, limit=soulseek.LATER_SEARCH)
+    later = time.monotonic() - began
+    assert 0.25 < first < 1 and later < 0.2
