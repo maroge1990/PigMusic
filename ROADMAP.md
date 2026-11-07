@@ -5,21 +5,30 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 6 Nov 2026 (morning, Melbourne).*
+*Overwritten at the end of every session. 8 Nov 2026 (morning, Melbourne).*
 
-- **Live:** server `0b68d76` (checked 6 Nov; no server change on main since): batch 1 (#122, #118, #119, #120, #121 server, #63 cleanup) plus
-  #23 progressive remote relay (only `bytes=0-1` completes before a file is validated), #96 engine leftover sweep by
-  transfer state, staged-audio sweep by claim, owner-run Trash purge (descriptor-relative, restart-safe), #86 no pytest
-  in the image, journal ownership guard. Six releases on 5 Nov in all, under Mark's go-ahead.
-- **iPhone/Watch:** **0.2.0 (22)** on TestFlight (6 Nov): Shazam audio-session fixes (#123–#127), single-song download
-  pause/resume, compact Popular songs, #46 split. Build 21 (5 Nov) had Shazam A/B/C, #121, #116, #117, #97.
-- **Web:** #97 structure split (Player, PersonalLibrary) with queue unit tests and new Playwright coverage — live.
-- **Idle CPU (#63):** 3.9% of a core (7.8% this morning); server Python ~7× quieter; the rest is mostly slskd.
-- **Reviews (D-71):** every Codex finding's fix is confirmed by Codex before it ships. Today that took 3 passes for
-  the journal guard, 4 for #23 and 5 for the Trash purge.
-- **Mark checked live:** #119, #120 (Blink-182 albums joined), #109 B. **Waiting on Mark's devices:** build 21
-  (Shazam, Add to my playlists), #115, #112, #114, #108, #62, #59, #56 iPhone, #78, #76, #65, #55 See all, #95.
-- **Parked by Mark (31 Oct):** the four-mockup screen redesign and the brand audit.
+- **Live:** server `0b68d76` (unchanged since 5 Nov; checked 8 Nov, healthy). Nothing below is released yet.
+- **Pushed, not released (audit of 6 Nov, #129–#163):**
+  - Batch 0 `a91d67c`: native CI builds again on Xcode 26.6 (#129 closed). Two Swift timing tests fail on the CI
+    runner (#165, Swift batch).
+  - Batch 1 `7a0038c..3eb2f2c` downloads: one timing line per job and timings in the payload (#134), one length
+    tolerance (#139 closed), Soulseek searches end at 3 good files and are deleted only once complete (#131), queued
+    peers given up at 40 s and the per-source limit honoured (#132), 3 min a quality level and 6 a song (#133, D-72),
+    fair claims between requesters (#130). Two Codex rounds.
+  - Batch 2 `e57f32d..d8bc43e` per-song work: freemp3cloud paced for every caller (#140 closed), check() reuses the
+    NAS check (#135), one tag save (#137), fair claims with one slot (#164 closed), the file moves before the write
+    lock with crash recovery (#138), one debounced rebuild per album and no rebuild under the lifecycle lock (#136).
+    Two Codex rounds plus confirmations.
+  - Batch 3 idle/per-device: /library/changes without the lifecycle lock when unchanged (#141), Home mixes without
+    per-song NAS lookups (#22), quieter logs (#146), event streams read only on change (#142), snapshot parsed once
+    and artists in one query (#144), Home feeds kept a day (#145). #143 measured, unchanged.
+- **Release next:** batch 1 alone (D-52) so its effect shows in #134's lines, then batches 2–3. Live numbers are owed on
+  #130–#136, #138, #141, #22, #142, #146 before they close.
+- **Not started:** batch 3's #63 idle items and #145's artist re-warm; batch 4 web (#154 done locally, not pushed;
+  #150, #152, #151, #155, #153, #156); batch 5 iPhone/Watch (#157–#163, #149, #165).
+- **iPhone/Watch:** 0.2.0 (22) on TestFlight (6 Nov).
+- **Waiting on Mark:** #147, #148 and the two leftover `pig-music-test-*` containers (parked, one question each);
+  device checks as before.
 - **Ways of working:** area batches (D-50), Codex rounds per D-59 and D-71, Claude pushes; releases under D-52;
   D-58 closing. Household details live only in the gitignored `.private/` (D-45).
 
