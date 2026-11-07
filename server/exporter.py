@@ -130,12 +130,21 @@ class Exporter:
         started = time.time_ns()
         value = digest(path)
         # A file written moments ago could change again within one timestamp
-        # tick without its size changing: remember only settled files.
-        if fingerprint(path) == before and settled(before, started):
+        # tick without its size changing: remember only settled files, and
+        # downloads this process moved into place, unchanged since (#136),
+        # so publication never reads them again under lifecycle_lock.
+        if fingerprint(path) == before and (
+            settled(before, started) or self.fresh(path, before)
+        ):
             if len(self.digests) > 20000:
                 self.digests.clear()
             self.digests[key] = (before, value, self.pass_id)
         return value
+
+    def fresh(self, path, identity):
+        """Whether `path` is a download this process moved into place and
+        still has the fingerprint it had then (#136)."""
+        return self.store.fresh_files.get(os.fspath(path)) == identity
 
     def linked(self, path, source, expected):
         """Whether `path` holds the verified source's bytes: a hard link of it,
@@ -171,8 +180,7 @@ class Exporter:
                     identity = fingerprint(path)
                     # A download this process moved into place, unchanged
                     # since, needs no settling (#136).
-                    fresh = self.store.fresh_files.get(os.fspath(path))
-                    if not settled(identity) and identity != fresh:
+                    if not settled(identity) and not self.fresh(path, identity):
                         return False
                     self.digest(path, this_pass=not published)
         except (OSError, ValueError, KeyError):

@@ -414,3 +414,21 @@ def test_a_long_export_hold_names_its_steps(tmp_path, monkeypatch, caplog):
     for name in ("catch-up", "current", "source", "place", "verify", "commit", "rest"):
         assert f"{name} " in steps, message
     assert store.lifecycle_lock.steps == []
+
+
+def test_the_apps_fresh_download_is_published_at_once_without_hashing_under_the_lock(
+    tmp_path, monkeypatch
+):
+    """Codex round 1 on #136: waiving the settle check for the app's own
+    fresh file let it through warm(), but its hash was not cached (only
+    settled files were), so publication read it again under lifecycle_lock."""
+    from server.exporter import fingerprint
+
+    store, root = nas_with(tmp_path, monkeypatch, [])
+    _, source = acquired(store, b"fresh", "fresh")
+    store.fresh_files[os.fspath(source)] = fingerprint(source)
+    exporter = Exporter(store, root)
+    calls = counting(monkeypatch, store)
+    exporter.process()
+    assert len(list(root.rglob("*.mp3"))) == 1 and not source.exists()
+    assert calls and [path for path, held in calls if held] == []
