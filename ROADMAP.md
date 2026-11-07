@@ -5,30 +5,28 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 8 Nov 2026 (morning, Melbourne).*
+*Overwritten at the end of every session. 8 Nov 2026 (afternoon, Melbourne).*
 
-- **Live:** server `0b68d76` (unchanged since 5 Nov; checked 8 Nov, healthy). Nothing below is released yet.
+- **Live:** server `0b68d76` (unchanged since 5 Nov). Nothing below is released yet.
 - **Pushed, not released (audit of 6 Nov, #129–#163):**
-  - Batch 0 `a91d67c`: native CI builds again on Xcode 26.6 (#129 closed). Two Swift timing tests fail on the CI
-    runner (#165, Swift batch).
-  - Batch 1 `7a0038c..3eb2f2c` downloads: one timing line per job and timings in the payload (#134), one length
-    tolerance (#139 closed), Soulseek searches end at 3 good files and are deleted only once complete (#131), queued
-    peers given up at 40 s and the per-source limit honoured (#132), 3 min a quality level and 6 a song (#133, D-72),
-    fair claims between requesters (#130). Two Codex rounds.
-  - Batch 2 `e57f32d..d8bc43e` per-song work: freemp3cloud paced for every caller (#140 closed), check() reuses the
-    NAS check (#135), one tag save (#137), fair claims with one slot (#164 closed), the file moves before the write
-    lock with crash recovery (#138), one debounced rebuild per album and no rebuild under the lifecycle lock (#136).
-    Two Codex rounds plus confirmations.
-  - Batch 3 idle/per-device: /library/changes without the lifecycle lock when unchanged (#141), Home mixes without
-    per-song NAS lookups (#22), quieter logs (#146), event streams read only on change (#142), snapshot parsed once
-    and artists in one query (#144), Home feeds kept a day (#145). #143 measured, unchanged.
-- **Release next:** batch 1 alone (D-52) so its effect shows in #134's lines, then batches 2–3. Live numbers are owed on
-  #130–#136, #138, #141, #22, #142, #146 before they close.
-- **Not started:** batch 3's #63 idle items and #145's artist re-warm; batch 4 web (#154 done locally, not pushed;
-  #150, #152, #151, #155, #153, #156); batch 5 iPhone/Watch (#157–#163, #149, #165).
+  - Batch 0 `a91d67c`: native CI builds on Xcode 26.6 (#129 closed).
+  - Batch 1 `7a0038c..3eb2f2c` downloads: timing lines (#134), one length tolerance (#139 closed), Soulseek
+    searches and queued peers (#131, #132), 3 min a quality level (#133, D-72), fair claims (#130). Two Codex rounds.
+  - Batch 2 `e57f32d..d8bc43e` per-song work (#140 closed, #135, #137, #164 closed, #138, #136). Two Codex rounds.
+  - Batch 3 idle/per-device (#141, #22, #146, #142, #144, part of #145; #143 measured, unchanged).
+  - Batch 4 web `9224aa4..9cd9ad5`: PageHeader/SectionHeader everywhere (#150), one button file and focus ring
+    (#152), one section heading and panel (#151), shared loading/empty/error (#155), spacing/type/shadow scales (#153),
+    one home per selector and dead CSS gone (#156); #154 earlier (`5e2a51b`). Two Codex rounds plus a confirmation.
+  - Batch 5a Swift `d1e9f16..69bb4bf`: CI timing races in two Swift tests (#165), diagnostics export (#149), Watch
+    settings (#163). One Codex round plus a confirmation.
+  - CI fixes: two order/layout bugs in the #146 tests (`72d1e48`, `6a73cf3`).
+- **In progress:** batch 5b iPhone consistency, branch `claude/batch5b-iphone` (#161 done locally); #157, #158,
+  #159, #160, #162 to do, then the simulator tap-through and two Codex rounds.
+- **Release next:** batch 1 alone (D-52), then batches 2–4. Live numbers owed on #130–#136, #138, #141, #22, #142,
+  #146; #150–#156 need a look in the real app; #149/#163/#165 need the next TestFlight build and CI.
+- **Measure first:** #63's remaining timer loops and #145's artist re-warm, after batch 3 is live.
 - **iPhone/Watch:** 0.2.0 (22) on TestFlight (6 Nov).
-- **Waiting on Mark:** #147, #148 and the two leftover `pig-music-test-*` containers (parked, one question each);
-  device checks as before.
+- **Waiting on Mark:** #147, #148 and the two leftover `pig-music-test-*` containers (parked, one question each).
 - **Ways of working:** area batches (D-50), Codex rounds per D-59 and D-71, Claude pushes; releases under D-52;
   D-58 closing. Household details live only in the gitignored `.private/` (D-45).
 
