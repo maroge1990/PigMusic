@@ -563,15 +563,23 @@ class Store:
         # through a link: that would write outside appdata (D-71).
         if not self.staging_owned() or journal.is_symlink():
             raise ValueError("Download staging is not PigMusic's own folder")
+        # Whether this publication moves its file in (or finds the same
+        # bytes already there): recovery undoes only its own move when the
+        # claim is gone (Codex round 1 on #138).
+        moving = not target.exists()
         journal.write_text(
             json.dumps(
-                {**metadata, **({"_legacy_replacement": legacy} if legacy else {})}
+                {
+                    **metadata,
+                    **({"_legacy_replacement": legacy} if legacy else {}),
+                    "_moved": moving,
+                }
             ),
             encoding="utf-8",
         )
         target.parent.mkdir(parents=True, exist_ok=True)
         moved = False
-        if target.exists():
+        if not moving:
             if file_sha256(target) != sha:
                 self.drop_journal(journal)
                 raise ValueError(
@@ -601,18 +609,29 @@ class Store:
                 self._record_publication(conn, job, metadata, legacy, row)
                 lost = False
             else:
+                # Cancelled (or claimed again) while the file moved: it goes
+                # back to staging, which the caller clears, and nothing is
+                # recorded. A failed move back keeps the journal: recovery
+                # undoes it (recover_requests).
                 lost = True
+                if moved and not self._library_file_used(conn, metadata):
+                    os.replace(target, source)
         if lost:
-            # Cancelled (or claimed again) while the file moved: it goes
-            # back to staging, which the caller clears, and nothing is
-            # recorded.
-            if moved:
-                os.replace(target, source)
             self.drop_journal(journal)
             return
         self.drop_journal(journal)
         self.published += 1
         return True
+
+    @staticmethod
+    def _library_file_used(conn, metadata):
+        """Whether an acquired song is recorded at `metadata`'s file."""
+        return bool(
+            conn.execute(
+                "SELECT 1 FROM acquired WHERE json_extract(payload,'$.relative_path')=? LIMIT 1",
+                (metadata["relative_path"],),
+            ).fetchone()
+        )
 
     def _record_publication(self, conn, job, metadata, legacy, row):
         """The database side of a publication, in `conn`'s transaction."""
@@ -741,6 +760,7 @@ class Store:
                     try:
                         metadata = json.loads(journal.read_text(encoding="utf-8"))
                         legacy = metadata.pop("_legacy_replacement", None)
+                        moved = metadata.pop("_moved", False) is True
                         target = (root / metadata["relative_path"]).resolve()
                         sha = metadata["sha256"]
                     except (ValueError, KeyError, TypeError, AttributeError):
@@ -807,6 +827,13 @@ class Store:
                                 "UPDATE queue SET status='completed' WHERE id=?",
                                 (request_id,),
                             )
+                        elif moved and not self._library_file_used(conn, metadata):
+                            # Its claim was lost while its file moved in, and
+                            # the move was never undone (Codex round 1 on
+                            # #138): the file it moved is deleted, so nothing
+                            # sits in the library unrecorded. On failure the
+                            # journal stays for the next start.
+                            target.unlink()
                     drop(journal)
                 except (ValueError, KeyError, OSError):
                     continue

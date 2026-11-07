@@ -929,3 +929,76 @@ def test_the_exporter_takes_the_apps_own_fresh_download_at_once(tmp_path):
     assert exporter.warm({"id": "t"}) is True
     source.write_bytes(b"y" * 101)  # Changed since: it waits again.
     assert exporter.warm({"id": "t"}) is False
+
+
+def test_recovery_undoes_the_move_of_a_request_cancelled_while_it_moved(
+    tmp_path, audio, monkeypatch
+):
+    """Codex round 1 on #138: cancelled while its file moved in, then stopped
+    before the move was undone (here: the move back fails); recovery found
+    the file, saw the request cancelled and only dropped the journal,
+    leaving the file in the library unrecorded."""
+    import threading
+    import time
+
+    import server.store as store_module
+
+    store = Store(tmp_path / "data")
+    job = queued(store)
+    worker = Downloader(store)
+    store.request_state(job["id"], "validating", _claim_token=job["claim_token"])
+    staged = worker.staging / "staged.mp3"
+    shutil.copyfile(audio, staged)
+    real = store_module.os.replace
+    moving = threading.Event()
+
+    def replace(source, target):
+        if Path(source) == staged:
+            moving.set()
+            time.sleep(0.3)
+            return real(source, target)
+        raise OSError("stopped before the move was undone")
+
+    monkeypatch.setattr(store_module.os, "replace", replace)
+    canceller = threading.Thread(
+        target=lambda: (moving.wait(5), store.cancel_request(job["id"]))
+    )
+    canceller.start()
+    target = worker.library_root / "Test Artist" / "Test Album" / "song.mp3"
+    probe = {"codec": "mp3", "bitrate_kbps": 320, "duration": 3.0}
+    with pytest.raises(OSError):
+        store.commit_request(
+            job, staged, target, probe, hashlib.sha256(audio.read_bytes()).hexdigest()
+        )
+    canceller.join()
+    monkeypatch.setattr(store_module.os, "replace", real)
+    assert target.exists()  # The move was never undone.
+    store.recover_requests()
+    assert not target.exists()
+    assert list((store.directory / "downloads" / "staging").glob("*.json")) == []
+    assert store.queue()["items"][0]["status"] == "cancelled"
+
+
+def test_recovery_never_deletes_a_file_it_did_not_move_in(tmp_path, audio):
+    """A journal whose publication found the same bytes already in place
+    (an earlier copy) leaves that file alone when its claim is gone."""
+    store = Store(tmp_path / "data")
+    job = queued(store)
+    worker = Downloader(store)
+    target = worker.library_root / "kept.mp3"
+    shutil.copyfile(audio, target)
+    metadata = {
+        **job,
+        "codec": "mp3",
+        "bitrate": 320,
+        "relative_path": "kept.mp3",
+        "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+        "_request_id": job["id"],
+        "_claim_token": "an-older-claim",
+        "_moved": False,
+    }
+    (worker.staging.parent.parent / "downloads").mkdir(exist_ok=True)
+    journal = store.directory / "downloads" / "staging" / (job["id"] + "-x.json")
+    journal.write_text(json.dumps(metadata))
+    store.recover_requests()
+    assert target.exists() and not journal.exists()
