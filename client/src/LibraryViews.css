@@ -299,19 +299,24 @@
   margin-top: var(--space-4);
   line-height: 1.6;
 }
+/* Shared states (#155): Loading, EmptyLine and InlineError in EmptyState.tsx;
+ * a page-wide failure is an .error-banner. */
 .subtle-loading {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-8);
   color: var(--secondary);
   font-size: var(--type-caption);
-  margin: 20px 0;
+  margin: var(--space-16) 0;
+}
+.empty-line {
+  color: var(--secondary);
 }
 .inline-error {
   font-size: var(--type-caption);
   color: var(--danger);
-  line-height: 1.7;
-  padding: 10px 0;
+  line-height: 1.5;
+  padding: var(--space-8) 0;
 }
 .empty-state {
   text-align: center;

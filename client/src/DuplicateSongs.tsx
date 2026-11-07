@@ -1,5 +1,6 @@
 import { apiFetch } from "./api";
 import { useState } from "react";
+import { EmptyLine, InlineError } from "./EmptyState";
 
 type Song = { id: string; title: string; artist: string };
 type Duplicate = {
@@ -77,7 +78,7 @@ export function DuplicateSongs({ notify }: { notify: (s: string) => void }) {
       >
         Find duplicates
       </button>
-      {items && !items.length && <p>No duplicate songs.</p>}
+      {items && !items.length && <EmptyLine>No duplicate songs.</EmptyLine>}
       {!!items?.length && (
         <>
           <div className="organisation-list">
@@ -116,7 +117,7 @@ export function DuplicateSongs({ notify }: { notify: (s: string) => void }) {
           </button>
         </>
       )}
-      {error && <p role="alert">{error}</p>}
+      {error && <InlineError>{error}</InlineError>}
     </section>
   );
 }

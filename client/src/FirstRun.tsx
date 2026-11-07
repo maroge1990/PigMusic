@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api, clearSessionReads } from "./api";
+import { InlineError } from "./EmptyState";
 
 export function FirstRun({ complete }: { complete: () => void }) {
   const [busy, setBusy] = useState(false);
@@ -108,7 +109,7 @@ export function FirstRun({ complete }: { complete: () => void }) {
             {busy ? "Creating your account…" : "Create administrator account"}
           </button>
         </form>
-        {error && <p role="alert">{error}</p>}
+        {error && <InlineError>{error}</InlineError>}
         <p>
           Existing server music and playlists will belong to this account. You
           can invite other people afterwards.

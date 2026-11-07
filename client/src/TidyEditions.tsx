@@ -1,5 +1,6 @@
 import { apiFetch } from "./api";
 import { useState } from "react";
+import { EmptyLine, InlineError } from "./EmptyState";
 
 type Song = {
   id: string;
@@ -153,7 +154,9 @@ export function TidyEditions({ notify }: { notify: (s: string) => void }) {
       >
         Find editions
       </button>
-      {albums && !albums.length && <p>No albums on several editions.</p>}
+      {albums && !albums.length && (
+        <EmptyLine>No albums on several editions.</EmptyLine>
+      )}
       {!!albums?.length && (
         <div className="organisation-list">
           {albums.map((album) => (
@@ -295,7 +298,7 @@ export function TidyEditions({ notify }: { notify: (s: string) => void }) {
           ))}
         </>
       )}
-      {error && <p role="alert">{error}</p>}
+      {error && <InlineError>{error}</InlineError>}
     </section>
   );
 }

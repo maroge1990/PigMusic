@@ -75,7 +75,11 @@ export function PersonalSongActions({
           }
         />
       )}
-      {error && <span role="alert">{error}</span>}
+      {error && (
+        <span className="inline-error" role="alert">
+          {error}
+        </span>
+      )}
     </>
   );
 }

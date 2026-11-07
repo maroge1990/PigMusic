@@ -6,7 +6,6 @@ import {
   ChevronRight,
   ArrowLeft,
   ArrowRight,
-  LoaderCircle,
   ArrowDown,
   Check,
   Play,
@@ -27,6 +26,7 @@ import { SongRow } from "./SongRow";
 import { usePlayer } from "./Player";
 import { shuffled } from "./shuffle";
 import { songBody, withLibrary, type Song as Row } from "./songs";
+import { EmptyLine, InlineError, Loading } from "./EmptyState";
 
 function releaseSongs(release: Release, artistId: string): Row[] {
   const cover = catalogueCover("release", release.id);
@@ -473,16 +473,8 @@ export function CatalogueBrowser({
           }
         />
       )}
-      {error && (
-        <p className="inline-error" role="alert">
-          {error}
-        </p>
-      )}
-      {busy && (
-        <p className="subtle-loading">
-          <LoaderCircle size={16} className="spin" /> Loading release…
-        </p>
-      )}
+      {error && <InlineError>{error}</InlineError>}
+      {busy && <Loading>Loading release…</Loading>}
       {choose ? (
         <>
           <SectionHeader title="Choose another edition" />
@@ -754,7 +746,7 @@ export function CatalogueBrowser({
             </button>
           )}
           {!groupBusy && !groups.length && !error && (
-            <p className="muted">No releases in this section.</p>
+            <EmptyLine>No releases in this section.</EmptyLine>
           )}
         </>
       ) : null}

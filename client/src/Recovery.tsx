@@ -44,7 +44,11 @@ export function RemoveFromServer({
       >
         Remove from server…
       </button>
-      {error && <span role="alert">{error}</span>}
+      {error && (
+        <span className="inline-error" role="alert">
+          {error}
+        </span>
+      )}
     </>
   );
 }

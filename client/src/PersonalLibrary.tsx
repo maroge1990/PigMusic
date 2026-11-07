@@ -34,6 +34,7 @@ import {
 } from "./RemoveFromLibrary";
 import { go, type Route } from "./routes";
 import { OwnerAlbumTools, OwnerArtistTools } from "./OwnerTools";
+import { InlineError, Loading } from "./EmptyState";
 
 function albumMeta(info: {
   artist?: string;
@@ -430,9 +431,11 @@ export function PersonalLibrary({
   if (!library)
     return (
       <main className="personal-main">
-        <p role={error ? "alert" : "status"}>
-          {error || "Loading your library…"}
-        </p>
+        {error ? (
+          <InlineError>{error}</InlineError>
+        ) : (
+          <Loading>Loading your library…</Loading>
+        )}
       </main>
     );
   // While the next page loads, the previous one is not shown: its Play
@@ -448,7 +451,7 @@ export function PersonalLibrary({
         <button className="text-button back-link" onClick={backToLibrary}>
           <ArrowLeft size={16} aria-hidden="true" /> Library
         </button>
-        <p role={error ? "alert" : "status"}>{error || "Loading…"}</p>
+        {error ? <InlineError>{error}</InlineError> : <Loading />}
       </main>
     );
   const owned = detail?.tracks || [];
@@ -494,7 +497,7 @@ export function PersonalLibrary({
           subtitle={`${user.display_name} · ${formatCount(library.stats.tracks)} songs`}
         />
       )}
-      {error && <p role="alert">{error}</p>}
+      {error && <InlineError>{error}</InlineError>}
       {notice && <p role="status">{notice}</p>}
       {undo && (
         <UndoRemoval

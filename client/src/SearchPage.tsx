@@ -15,6 +15,7 @@ import {
 } from "./searchAnswers";
 import type { Album, Artist, Library, Track } from "./types";
 import { SectionHeader } from "./PageHeader";
+import { EmptyLine, InlineError, Loading } from "./EmptyState";
 
 const fold = (value: string) => value.toLocaleLowerCase().normalize("NFKD");
 const clean = (value: string) => value.trim().slice(0, 150);
@@ -194,14 +195,14 @@ export function SearchPage({
           Search
         </button>
       </form>
-      {error && <p role="alert">{error}</p>}
-      {active && !local && !error && <p role="status">Searching…</p>}
+      {error && <InlineError>{error}</InlineError>}
+      {active && !local && !error && <Loading>Searching…</Loading>}
       {active && (
         <>
           <section className="search-group" aria-labelledby="search-library">
             <SectionHeader id="search-library" title="In your library" />
             {nothingLocal && (
-              <p className="muted">Nothing in your library yet.</p>
+              <EmptyLine>Nothing in your library yet.</EmptyLine>
             )}
             {(artists.length > 0 || albums.length > 0) && (
               <div className="personal-grid">
@@ -268,7 +269,7 @@ export function SearchPage({
           <section className="search-group" aria-labelledby="search-discover">
             <SectionHeader id="search-discover" title="Discover" />
             {catalogue === null ? (
-              <p role="status">Searching the music catalogue…</p>
+              <Loading>Searching the music catalogue…</Loading>
             ) : catalogueFailed ? (
               <p className="muted">
                 The music catalogue is unavailable right now. Your library
@@ -308,7 +309,7 @@ export function SearchPage({
                 Type another letter to search the catalogue.
               </p>
             ) : (
-              <p className="muted">No catalogue artists match “{active}”.</p>
+              <EmptyLine>No catalogue artists match “{active}”.</EmptyLine>
             )}
           </section>
         </>

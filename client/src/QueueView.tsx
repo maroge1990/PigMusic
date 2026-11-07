@@ -1,6 +1,6 @@
 import { ExternalLink, Music2 } from "lucide-react";
 import type { Library } from "./types";
-import { Empty } from "./EmptyState";
+import { Empty, Loading } from "./EmptyState";
 import { SectionHeader } from "./PageHeader";
 import { sourceName } from "./sources";
 type QueueItem = {
@@ -170,7 +170,7 @@ export function QueueView({
         />
       )}
       {!queue ? (
-        <p>Loading requests...</p>
+        <Loading>Loading requests…</Loading>
       ) : !queue.items.length ? (
         <Empty
           title="Ready when you are"

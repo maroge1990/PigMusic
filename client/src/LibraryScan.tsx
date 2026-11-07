@@ -1,6 +1,7 @@
 import { apiFetch } from "./api";
 import { useEffect, useState } from "react";
 import { formatCount, formatDateTime } from "./format";
+import { InlineError } from "./EmptyState";
 type Scan = {
   status?: string;
   files?: number;
@@ -80,7 +81,9 @@ export function LibraryScan({ refresh }: { refresh: () => void }) {
           {scan.read_failures ? ` · ${scan.read_failures} need attention` : ""}
         </p>
       )}
-      {(error || scan.error) && <p role="alert">{error || scan.error}</p>}
+      {(error || scan.error) && (
+        <InlineError>{error || scan.error}</InlineError>
+      )}
     </section>
   );
 }

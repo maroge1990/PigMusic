@@ -126,8 +126,7 @@
 .song-error {
   grid-column: 1 / -1;
   margin: 0 0 var(--space-8) 3.75rem;
-  font-size: var(--type-footnote);
-  color: var(--danger);
+  padding: 0;
 }
 
 /* ---------- Song menu ---------- */
@@ -413,9 +412,9 @@
   border-radius: 50%;
   color: var(--media-text);
 }
-.np-error {
+/* On the media background the shared inline error takes the media accent. */
+.inline-error.np-error {
   color: var(--media-accent);
-  font-size: var(--type-footnote);
   text-align: center;
 }
 .np-queue h3 {

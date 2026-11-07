@@ -33,6 +33,7 @@ import {
   installHintPending,
 } from "./invite";
 import "./accounts.css";
+import { Loading } from "./EmptyState";
 
 const AdminTools = lazy(() =>
   import("./AdminTools").then((m) => ({ default: m.AdminTools })),
@@ -333,7 +334,7 @@ export function AppShell() {
           </div>
         )}
         {(error || denied) && (
-          <p className="personal-notice" role="alert">
+          <p className="error-banner" role="alert">
             {error || "You do not have access to that action."}
           </p>
         )}
@@ -356,7 +357,7 @@ export function AppShell() {
             <Suspense
               fallback={
                 <main className="personal-main">
-                  <p role="status">Loading admin…</p>
+                  <Loading>Loading admin…</Loading>
                 </main>
               }
             >

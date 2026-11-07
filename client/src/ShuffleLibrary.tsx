@@ -4,6 +4,7 @@ import { api } from "./api";
 import { usePlayer } from "./Player";
 import { shuffled } from "./shuffle";
 import type { Track } from "./types";
+import { InlineError } from "./EmptyState";
 
 type Page = { items: Track[]; total: number };
 const SAMPLE_PAGES = 5;
@@ -50,7 +51,7 @@ export function ShuffleLibrary({ total }: { total: number }) {
       >
         <Shuffle size={18} /> <span>Shuffle all</span>
       </button>
-      {error && <p role="alert">{error}</p>}
+      {error && <InlineError>{error}</InlineError>}
     </>
   );
 }

@@ -7,6 +7,7 @@ import { SongRow } from "./SongRow";
 import { withLibrary, type Song } from "./songs";
 import { warmArtist, whenIdle } from "./prefetch";
 import { Mixes } from "./Mixes";
+import { InlineError, Loading } from "./EmptyState";
 
 function songRows(items: Item[]): Song[] {
   return items.map((item) => ({
@@ -125,7 +126,12 @@ function HomeSection({ kind }: { kind: "popular" | "recommended" }) {
         title={heading}
         subtitle={!feed || collections.length > 0 ? caption : undefined}
       />
-      {!feed && <p role="status">{error || "Finding music\u2026"}</p>}
+      {!feed &&
+        (error ? (
+          <InlineError>{error}</InlineError>
+        ) : (
+          <Loading>Finding music…</Loading>
+        ))}
       {feed && !collections.length && empty && <p role="status">{empty}</p>}
       {collections.map((collection) => (
         <section key={collection}>

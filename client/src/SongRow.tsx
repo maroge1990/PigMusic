@@ -26,6 +26,7 @@ import {
   type Song,
   type SongState,
 } from "./songs";
+import { InlineError } from "./EmptyState";
 
 const duration = (n?: number) =>
   n
@@ -150,11 +151,7 @@ export function SongRow({
       >
         {menu}
       </SongMenu>
-      {error && (
-        <p className="song-error" role="alert">
-          {error}
-        </p>
-      )}
+      {error && <InlineError className="song-error">{error}</InlineError>}
     </div>
   );
 }

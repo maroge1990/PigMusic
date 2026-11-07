@@ -4,6 +4,7 @@ import { discoverUrl } from "./navigation";
 import { useOwner } from "./person";
 import type { Artist } from "./types";
 import { useState } from "react";
+import { InlineError } from "./EmptyState";
 
 type Candidate = { id: string; name: string; disambiguation?: string };
 
@@ -100,7 +101,7 @@ export function FindMore({ artist }: { artist: Artist }) {
                 the right artist.
               </p>
             ))}
-          {error && <p role="alert">{error}</p>}
+          {error && <InlineError>{error}</InlineError>}
         </div>
       )}
     </>

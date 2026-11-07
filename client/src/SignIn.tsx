@@ -6,6 +6,7 @@ import {
   pendingInvite,
   setupErrorMessage,
 } from "./invite";
+import { InlineError } from "./EmptyState";
 
 export function SignIn({
   signedIn,
@@ -180,7 +181,7 @@ export function SignIn({
         >
           {setup ? "Back to sign in" : "Have a setup code?"}
         </button>
-        {error && <p role="alert">{error}</p>}
+        {error && <InlineError>{error}</InlineError>}
       </section>
     </main>
   );

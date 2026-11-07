@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ListPlus, Plus, X } from "lucide-react";
+import { EmptyLine, InlineError } from "./EmptyState";
 
 type Playlist = { id: string; name: string };
 export function PlaylistPicker({
@@ -99,7 +100,7 @@ export function PlaylistPicker({
             {p.name}
           </button>
         ))}
-        {!items.length && <p className="muted">No playlists yet</p>}
+        {!items.length && <EmptyLine>No playlists yet</EmptyLine>}
         <button
           className="new-playlist-option"
           onClick={() => {
@@ -109,7 +110,7 @@ export function PlaylistPicker({
         >
           <Plus size={16} /> New playlist
         </button>
-        {error && <p role="alert">{error}</p>}
+        {error && <InlineError>{error}</InlineError>}
       </div>
       {creating && (
         <dialog
@@ -154,7 +155,7 @@ export function PlaylistPicker({
               Create playlist
             </button>
           </form>
-          {error && <p role="alert">{error}</p>}
+          {error && <InlineError>{error}</InlineError>}
         </dialog>
       )}
       <span className="sr-only" role="status">

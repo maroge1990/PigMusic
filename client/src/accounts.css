@@ -706,10 +706,6 @@ main h1[tabindex="-1"]:focus {
     display: none;
   }
 }
-.request-error {
-  color: var(--danger);
-  font-size: var(--type-footnote);
-}
 /* Form and settings actions without an explicit style read as buttons:
  * Buttons.css styles them with the secondary family. */
 .account-section form button[type="submit"]:not([class]) {

@@ -13,7 +13,7 @@ import { api, updateArtworkRevision } from "./api";
 import { formatCount } from "./format";
 import { PageHeader, SectionHeader } from "./PageHeader";
 import { Cover } from "./Cover";
-import { Empty } from "./EmptyState";
+import { Empty, Loading } from "./EmptyState";
 import { MediaSettings } from "./MediaSettings";
 import { AdminGlance } from "./AdminGlance";
 import { QueueView, type Queue, type QueueAction } from "./QueueView";
@@ -812,7 +812,7 @@ export function AdminTools({ route }: { route: Route }) {
         </>
       )}
       {(section === "people" || section === "library") && (
-        <Suspense fallback={<p role="status">Loading…</p>}>
+        <Suspense fallback={<Loading />}>
           {section === "people" ? (
             <AdminPeople />
           ) : (

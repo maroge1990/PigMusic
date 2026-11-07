@@ -217,3 +217,46 @@ test("#151: one section heading and one panel shape", async ({ page }) => {
   expect([...headings]).toHaveLength(1);
   expect([...radii]).toHaveLength(1);
 });
+
+test("#155: loading is announced, with one ellipsis", async ({ page }) => {
+  await mockApi(page, {
+    role: "owner",
+    // The queue never answers, so its loading line stays.
+    answers: { "/v1/admin/queue": () => new Promise<void>(() => {}) },
+  });
+  await page.goto("/#/admin/downloads");
+  await expect(
+    page.getByRole("status").filter({ hasText: "Loading requests" }),
+  ).toHaveText("Loading requests…");
+});
+
+test("#155: empty lines look the same; errors use the inline error", async ({
+  page,
+}) => {
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/search": (r: Route) =>
+        r.fulfill({ json: { tracks: [], household_tracks: [] } }),
+      "/v1/catalogue/artists": (r: Route) =>
+        r.fulfill({ json: { artists: [] } }),
+      "/v1/admin/library/trash": (r: Route) => r.fulfill({ json: [] }),
+    },
+  });
+  const colour = (text: string | RegExp) =>
+    page.getByText(text).evaluate((el) => getComputedStyle(el).color);
+  await page.goto("/#/search?q=Zzzz");
+  const looks = [
+    await colour("Nothing in your library yet."),
+    await colour(/No catalogue artists match/),
+  ];
+  await page.goto("/#/admin/library");
+  looks.push(await colour("No music is waiting for assignment."));
+  expect(new Set(looks).size).toBe(1);
+
+  // A failed search shows the shared inline error.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await mockApi(page);
+  await page.goto("/#/search?q=Charli");
+  await expect(page.getByRole("alert").first()).toHaveClass(/inline-error/);
+});

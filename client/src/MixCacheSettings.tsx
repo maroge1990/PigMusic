@@ -7,6 +7,7 @@ import {
   formatRelative,
 } from "./format";
 import { QualitySelect, defaultQualityOptions } from "./QualitySelect";
+import { EmptyLine, Loading } from "./EmptyState";
 
 type Settings = {
   budget_bytes: number;
@@ -66,7 +67,7 @@ const songLabels: Record<SongStatus, string> = {
 };
 function MixPersonDetail({ detail }: { detail: PersonMixes }) {
   if (!detail.editions.length)
-    return <p>No mixes are planned for {detail.person} yet.</p>;
+    return <EmptyLine>No mixes are planned for {detail.person} yet.</EmptyLine>;
   return (
     <div className="mix-editions">
       {detail.editions.map((edition) => {
@@ -244,7 +245,7 @@ export function MixCacheSettings() {
               {detail ? (
                 <MixPersonDetail detail={detail} />
               ) : (
-                <p>Loading mixes…</p>
+                <Loading>Loading mixes…</Loading>
               )}
             </>
           )}

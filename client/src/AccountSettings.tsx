@@ -8,6 +8,7 @@ import { api } from "./api";
 import type { Person } from "./AppShell";
 import { PageHeader } from "./PageHeader";
 import { formatRelative } from "./format";
+import { InlineError } from "./EmptyState";
 
 type Session = {
   id: string;
@@ -78,7 +79,7 @@ export function AccountSettings({
         subtitle="Appearance, password, devices and your music settings."
       />
       {message && <p role="status">{message}</p>}
-      {error && <p role="alert">{error}</p>}
+      {error && <InlineError>{error}</InlineError>}
       <section className="account-section">
         <h2>Appearance</h2>
         <label>

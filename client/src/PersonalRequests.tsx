@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { api } from "./api";
 import { Cover, catalogueCover } from "./Cover";
-import { Empty } from "./EmptyState";
+import { Empty, InlineError } from "./EmptyState";
 import { formatRelative } from "./format";
 import { friendlyRequestError } from "./requestError";
 import { sourceName } from "./sources";
@@ -156,7 +156,7 @@ export function PersonalRequests() {
   const finished = page?.groups.some((g) => g.done || g.failed);
   return (
     <section className="request-groups">
-      {error && <p role="alert">{error}</p>}
+      {error && <InlineError>{error}</InlineError>}
       {notice && <p role="status">{notice}</p>}
       {page && !page.total && (
         <Empty
@@ -258,7 +258,7 @@ export function PersonalRequests() {
                               />
                             )}
                           {tone === "failed" && item.error && (
-                            <p className="request-error">
+                            <p className="inline-error">
                               {friendlyRequestError(item.error)}
                             </p>
                           )}

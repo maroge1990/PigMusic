@@ -1,5 +1,6 @@
 import { apiFetch } from "./api";
 import { useEffect, useRef, useState } from "react";
+import { InlineError } from "./EmptyState";
 
 type Job = {
   status: "idle" | "running" | "stopping" | "completed" | "stopped";
@@ -277,7 +278,7 @@ export function Organisation({ notify }: { notify: (s: string) => void }) {
           Show more
         </button>
       )}
-      {error && <p role="alert">{error}</p>}
+      {error && <InlineError>{error}</InlineError>}
     </section>
   );
 }

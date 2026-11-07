@@ -4,6 +4,7 @@ import { formatDateTime } from "./format";
 import type { Person } from "./AppShell";
 import { InvitePanel, type Invite } from "./InvitePanel";
 import { guessedAccounts, type Activity } from "./accountAlerts";
+import { EmptyLine, InlineError } from "./EmptyState";
 
 type InboxAlbum = {
   id: string;
@@ -59,7 +60,7 @@ function useAdminData(inboxOffset = 0) {
   const notices = (
     <>
       {message && <p role="status">{message}</p>}
-      {error && <p role="alert">{error}</p>}
+      {error && <InlineError>{error}</InlineError>}
     </>
   );
   return { people, events, warnings, inbox, inboxNext, action, notices };
@@ -197,7 +198,9 @@ export function UnassignedMusic() {
           Newly scanned music waits here until you choose whose library it
           belongs in.
         </p>
-        {!inbox.length && <p>No music is waiting for assignment.</p>}
+        {!inbox.length && (
+          <EmptyLine>No music is waiting for assignment.</EmptyLine>
+        )}
         {inbox.map((a) => (
           <form
             key={a.id}

@@ -1,6 +1,7 @@
 import { apiFetch } from "./api";
 import { formatCount, formatDateTime } from "./format";
 import { useEffect, useState } from "react";
+import { EmptyLine } from "./EmptyState";
 
 type Purge = {
   days: number;
@@ -109,7 +110,7 @@ export function RemovedMusic({ notify }: { notify: (s: string) => void }) {
     <section className="system-panel">
       <h2>Removed music</h2>
       {!items.length ? (
-        <p>No removed music.</p>
+        <EmptyLine>No removed music.</EmptyLine>
       ) : (
         items.map((item) => (
           <div className="result-row" key={item.id}>
@@ -161,7 +162,7 @@ export function RemovedMusic({ notify }: { notify: (s: string) => void }) {
         Review
       </button>
       {purge && !purge.items.length && (
-        <p>No songs in Trash longer than {purge.days} days.</p>
+        <EmptyLine>No songs in Trash longer than {purge.days} days.</EmptyLine>
       )}
       {purge && !!purge.items.length && (
         <>

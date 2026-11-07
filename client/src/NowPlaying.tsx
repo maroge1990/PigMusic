@@ -18,6 +18,7 @@ import { PersonalSongActions } from "./PersonalSongActions";
 import type { Playing } from "./playbackSource";
 import type { RepeatMode } from "./queue";
 import { goToAlbum, goToPlayingArtist, type Song } from "./songs";
+import { InlineError } from "./EmptyState";
 
 const time = (n: number) =>
   `${Math.floor((n || 0) / 60)}:${String(Math.floor((n || 0) % 60)).padStart(2, "0")}`;
@@ -248,11 +249,7 @@ export function NowPlaying({
           <Square size={18} />
         </button>
       </div>
-      {error && (
-        <p className="np-error" role="alert">
-          {error}
-        </p>
-      )}
+      {error && <InlineError className="np-error">{error}</InlineError>}
       <UpNext
         songs={songs}
         index={index}
