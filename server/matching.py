@@ -36,6 +36,10 @@ FEATURE = re.compile(r"^\s*(feat\.?|ft\.?|featuring|with)\s", re.I)
 QUALIFIER = re.compile(r"\s*(?:[\(\[]([^\)\]]*)[\)\]]|\s-\s([^\(\)\[\]]*))\s*$")
 # Songs on two editions of one recording rarely differ by more than this.
 SONG_TOLERANCE = 8
+# A downloaded file is accepted only this close to the requested length
+# (seconds): source selection and validation share it (#139), so no file
+# is transferred that validation would then reject.
+ACQUISITION_TOLERANCE = 5
 
 
 def strip_edition(title):

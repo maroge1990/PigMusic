@@ -68,6 +68,16 @@ def test_filename_recording_album_and_quality_gates():
     )
 
 
+def test_a_file_validation_would_reject_for_its_length_is_never_a_candidate():
+    """#139: selection used 8 s, validation 5 s; a 7 s-off file was
+    transferred in full and then rejected."""
+    response = {"username": "peer"}
+    job = {**song(), "duration": 200}
+    assert candidate_for(job, response, {**file(), "length": 205})
+    assert candidate_for(job, response, {**file(), "length": 207}) is None
+    assert candidate_for(job, response, {**file(), "length": 193}) is None
+
+
 def test_album_search_prefers_folder_coverage_and_reuses_results(tmp_path):
     store = configured(tmp_path)
     store.submit_catalogue([song(), song("Second", 2)])

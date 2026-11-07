@@ -62,7 +62,8 @@ def candidate_for(job, response, file):
     size = file.get("size", 0)
     if not isinstance(size, int) or not 0 < size <= 256_000_000:
         return None
-    from .matching import lead_artist, recording_kind, same_length, strip_edition
+    from .matching import ACQUISITION_TOLERANCE, duration_of, lead_artist
+    from .matching import recording_kind, strip_edition
 
     path_words = set(words(name))
     # Any edition's folder and title will do unless this edition was asked
@@ -112,9 +113,8 @@ def candidate_for(job, response, file):
     length = file.get("length", 0)
     if not isinstance(length, (int, float)) or length <= 0:
         return None
-    if strict and job.get("duration") and abs(length - job["duration"]) > 5:
-        return None
-    if not strict and not same_length({"duration": length}, job):
+    wanted = duration_of(job)
+    if wanted and abs(length - wanted) > ACQUISITION_TOLERANCE:
         return None
     bitrate = file.get("bitRate", 0) or 0
     if profile == "native_standard" and not satisfies(

@@ -46,7 +46,8 @@ from .providers.contracts import Context, ProviderError
 from .providers.runtime import Runtime
 from .providers.legacy import search as legacy_search
 from .providers.network import transfer as http_transfer
-from .matching import primary_artist, recording_kind, title_key
+from .matching import ACQUISITION_TOLERANCE, primary_artist, recording_kind
+from .matching import title_key
 from .quality import CODEC_EXTENSIONS, policy, satisfies
 from .storage import download_root, file_sha256, library_root
 
@@ -146,7 +147,9 @@ def matches(target, candidate):
     expected, actual = duration(target.get("duration")), duration(
         candidate.get("duration")
     )
-    return actual > 0 and (not expected or abs(actual - expected) <= 5)
+    return actual > 0 and (
+        not expected or abs(actual - expected) <= ACQUISITION_TOLERANCE
+    )
 
 
 def reviewable(job, candidate):
@@ -613,7 +616,10 @@ class Downloader:
             raise ValueError("Downloaded codec does not match its audio container")
         if probe["duration"] <= 0:
             raise ValueError("Downloaded recording has no readable duration")
-        if target.get("duration") and abs(probe["duration"] - target["duration"]) > 5:
+        if (
+            target.get("duration")
+            and abs(probe["duration"] - target["duration"]) > ACQUISITION_TOLERANCE
+        ):
             raise ValueError("Downloaded recording has the wrong duration")
         if decode:
             self.decode(path, check)
