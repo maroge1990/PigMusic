@@ -46,6 +46,20 @@ class CredentialFilter(logging.Filter):
         return True
 
 
+class HealthCheckFilter(logging.Filter):
+    """Leaves a successful /api/health out of the access log: the container
+    health check asks every 2 minutes (686 lines a day, #146). A failing one
+    is still logged."""
+
+    def filter(self, record):
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 5:
+            path, status = str(args[2]).split("?", 1)[0], args[4]
+            if path == "/api/health" and isinstance(status, int) and status < 400:
+                return False
+        return True
+
+
 def install_validation_redaction(app):
     @app.exception_handler(RequestValidationError)
     async def invalid(request, exc):

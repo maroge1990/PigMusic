@@ -241,8 +241,15 @@ class HomeDiscovery:
             )
         except asyncio.CancelledError:
             raise
-        except (httpx.HTTPError, ValueError, KeyError, TypeError):
-            log.warning("Building the %s chart failed", region, exc_info=True)
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            # A provider timing out is routine: one line, no traceback (#146).
+            timeout = isinstance(exc, httpx.TimeoutException)
+            log.warning(
+                "Building the %s chart failed%s",
+                region,
+                f" ({type(exc).__name__})" if timeout else "",
+                exc_info=not timeout,
+            )
             data = (previous or {}).get("data") or self.chart(
                 region, state="unavailable"
             )

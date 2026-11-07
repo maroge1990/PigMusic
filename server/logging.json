@@ -1,19 +1,24 @@
 {
   "version": 1,
   "disable_existing_loggers": false,
-  "filters": {"credentials": {"()": "server.auth_logging.CredentialFilter"}},
+  "filters": {
+    "credentials": {"()": "server.auth_logging.CredentialFilter"},
+    "health": {"()": "server.auth_logging.HealthCheckFilter"}
+  },
   "formatters": {
     "default": {"format": "%(levelname)s: %(message)s"},
     "access": {"format": "%(levelname)s: %(message)s"}
   },
   "handlers": {
     "default": {"class": "logging.StreamHandler", "formatter": "default", "filters": ["credentials"], "stream": "ext://sys.stderr"},
-    "access": {"class": "logging.StreamHandler", "formatter": "access", "filters": ["credentials"], "stream": "ext://sys.stdout"}
+    "access": {"class": "logging.StreamHandler", "formatter": "access", "filters": ["health", "credentials"], "stream": "ext://sys.stdout"}
   },
   "loggers": {
     "uvicorn": {"handlers": ["default"], "level": "INFO", "propagate": false},
     "uvicorn.error": {"level": "INFO"},
-    "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": false}
+    "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": false},
+    "httpx": {"level": "WARNING"},
+    "httpcore": {"level": "WARNING"}
   },
   "root": {"handlers": ["default"], "level": "INFO"}
 }
