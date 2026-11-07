@@ -64,3 +64,33 @@ def test_a_chart_timeout_is_one_line_without_a_traceback(tmp_path, caplog):
     (record,) = [r for r in caplog.records if "chart failed" in r.getMessage()]
     assert record.getMessage() == "Building the au chart failed (ReadTimeout)"
     assert not record.exc_info
+
+
+def test_the_warmer_does_not_refetch_a_home_feed_within_the_day(tmp_path, monkeypatch):
+    """#145: Home feeds were kept an hour and renewed by the warmer 20
+    minutes early, so every seed was fetched every hour (195 calls a day)."""
+    import server.home as home_module
+
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        return httpx.Response(200, json={"payload": {"jspf": {}}})
+
+    home = HomeDiscovery(Store(tmp_path), None)
+    now = [1_000_000.0]
+    monkeypatch.setattr(home_module.time, "time", lambda: now[0])
+
+    async def run():
+        token = home_module.warming.set(True)
+        try:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+                await home.feed(c, "explore/lb-radio", prompt="tag:rock")
+                for hours in (1, 2, 6, 12, 23):
+                    now[0] = 1_000_000.0 + hours * 3600
+                    await home.feed(c, "explore/lb-radio", prompt="tag:rock")
+        finally:
+            home_module.warming.reset(token)
+
+    asyncio.run(run())
+    assert len(calls) == 1

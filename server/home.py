@@ -112,8 +112,13 @@ def studio_rank(recording):
     return (bool(words & VERSION_WORDS), not plain)
 
 
+# A ListenBrainz feed is kept a day (#145): kept an hour, the warmer
+# refetched all 21 Home seeds every hour whether anyone opened Home or not.
+FEED_SECONDS = 24 * 3600
+
+
 def renew_margin():
-    # Hour-long feeds are renewed by the warmer with 20 minutes to spare.
+    # Feeds are renewed by the warmer with 20 minutes to spare.
     return 1200 if warming.get() else 0
 
 
@@ -162,7 +167,7 @@ class HomeDiscovery:
                 await settled(
                     self.store.write_document,
                     key,
-                    {"until": time.time() + 3600, "data": data},
+                    {"until": time.time() + FEED_SECONDS, "data": data},
                 )
                 return data, False
             except (httpx.HTTPError, ValueError):
