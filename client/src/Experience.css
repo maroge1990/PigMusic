@@ -597,6 +597,9 @@
     font-size: var(--type-footnote);
     font-weight: 600;
   }
+  .personal-header .app-nav a.nav-account {
+    display: none;
+  }
   .shuffle-library {
     width: 2.75rem;
     height: 2.75rem;

@@ -55,9 +55,17 @@ test("every class the CSS styles is rendered somewhere", () => {
     for (const [selector] of rules(css))
       for (const m of selector.matchAll(/\.([a-zA-Z][\w-]*)/g))
         styled.add(m[1]);
-  const unused = [...styled].filter(
-    (name) => !new RegExp(`(?<![\\w-])${name}(?![\\w-])`).test(code),
-  );
+  // Classes built in code: "nav-" + id, `migration-status ${track.status}`.
+  // Such a class counts when its prefix is built and the rest is a literal.
+  const prefixes = [
+    ...code.matchAll(/className=\{"([\w-]+)" \+/g),
+    ...code.matchAll(/`([\w-]+-)\$\{/g),
+  ].map((m) => m[1]);
+  const literal = (word) => new RegExp(`["'\`]${word}["'\`]`).test(code);
+  const rendered = (name) =>
+    new RegExp(`(?<![\\w-])${name}(?![\\w-])`).test(code) ||
+    prefixes.some((p) => name.startsWith(p) && literal(name.slice(p.length)));
+  const unused = [...styled].filter((name) => !rendered(name));
   assert.deepEqual(unused, []);
 });
 

@@ -289,3 +289,15 @@ test("#150: a cover page's title column shrinks for a long unbroken name", async
     ),
   ).toBe(true);
 });
+
+test("#156: the phone tab bar leaves Account to the header avatar", async ({
+  page,
+}, info) => {
+  await mockApi(page);
+  await page.goto("/#/home");
+  const nav = page.getByRole("navigation", { name: "Main navigation" });
+  await expect(nav.getByRole("link", { name: "Home" })).toBeVisible();
+  const account = nav.getByRole("link", { name: "Account" });
+  if (info.project.name === "phone") await expect(account).toBeHidden();
+  else await expect(account).toBeVisible();
+});
