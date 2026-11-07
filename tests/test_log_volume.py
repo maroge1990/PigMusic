@@ -41,12 +41,28 @@ def test_the_logging_config_quiets_httpx_and_filters_the_health_check():
     assert config["loggers"]["httpx"]["level"] == "WARNING"
     assert config["loggers"]["httpcore"]["level"] == "WARNING"
     assert config["handlers"]["access"]["filters"][0] == "health"
+    # The config sets the root logger to INFO with its own handler; leaving
+    # that behind let later tests capture the test client's request lines
+    # (CI on 72d1e48: a signed link in test_request_timing), so every logger
+    # it touches is put back.
+    names = ["", *config["loggers"]]
+    saved = {
+        name: (
+            logging.getLogger(name).level,
+            list(logging.getLogger(name).handlers),
+            logging.getLogger(name).propagate,
+        )
+        for name in names
+    }
     logging.config.dictConfig({**config, "disable_existing_loggers": False})
     try:
         assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
     finally:
-        logging.getLogger("httpx").setLevel(logging.NOTSET)
-        logging.getLogger("httpcore").setLevel(logging.NOTSET)
+        for name, (level, handlers, propagate) in saved.items():
+            logger = logging.getLogger(name)
+            logger.setLevel(level)
+            logger.handlers[:] = handlers
+            logger.propagate = propagate
 
 
 def test_a_chart_timeout_is_one_line_without_a_traceback(tmp_path, caplog):
