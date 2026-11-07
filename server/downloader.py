@@ -193,10 +193,14 @@ class QualityDeadline(Exception):
     pass
 
 
+class SourceDeadline(Exception):
+    """One source's time is up; the next source is tried (#132)."""
+
+
 def outcome_of(exc):
     if isinstance(exc, Cancelled):
         return "cancelled"
-    if isinstance(exc, QualityDeadline):
+    if isinstance(exc, (QualityDeadline, SourceDeadline)):
         return "time limit"
     if isinstance(exc, ProviderError):
         return exc.code
@@ -317,6 +321,14 @@ class Downloader:
         if not self.store.download_settings()["enabled"]:
             self.state(job_id, "waiting_for_sources")
             raise Cancelled()
+
+    def source_check(self, job_id, deadline):
+        """`check`, and SourceDeadline once `deadline` (monotonic) passes:
+        what the Soulseek engine is given, whose waits ignored the
+        per-source limit (#132)."""
+        self.check(job_id)
+        if time.monotonic() >= deadline:
+            raise SourceDeadline()
 
     def pause(self, job_id, seconds):
         end = time.monotonic() + seconds
@@ -533,11 +545,12 @@ class Downloader:
             self.soulseek.reports.current = getattr(
                 self.context, "transfer_report", None
             )
+            deadline = getattr(self.context, "source_deadline", float("inf"))
             try:
                 self.soulseek.transfer(
                     candidate,
                     path,
-                    lambda: self.check(job_id),
+                    lambda: self.source_check(job_id, deadline),
                     lambda received, total: self.progress(job_id, received, total),
                 )
             finally:
@@ -863,7 +876,10 @@ class Downloader:
                         with self.runtime.health.operation(source):
                             if source == "soulseek":
                                 candidates = self.soulseek.search(
-                                    effective, lambda: self.check(job["id"])
+                                    effective,
+                                    lambda: self.source_check(
+                                        job["id"], context.deadline
+                                    ),
                                 )
                             elif self.providers[source] is REGISTRY[source].search:
                                 candidates = legacy_search(
@@ -955,7 +971,7 @@ class Downloader:
                         self.complete(job, path, extension, source, profile, provenance)
                         self.runtime.health.outcome(source, transfer=True)
                         return True
-                    except (Cancelled, QualityDeadline):
+                    except (Cancelled, QualityDeadline, SourceDeadline):
                         raise
                     except Exception as exc:
                         # Re-extraction found only an uploader's credit. Judge
@@ -1013,6 +1029,10 @@ class Downloader:
                     )
             except (Cancelled, QualityDeadline):
                 raise
+            except SourceDeadline:
+                # Not the source's fault (a slow peer, a busy engine): its
+                # health is left alone.
+                errors.append(f"{source}: time limit reached")
             except ProviderError as exc:
                 errors.append(f"{source}: {exc}")
             except Exception:

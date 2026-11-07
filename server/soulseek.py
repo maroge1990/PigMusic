@@ -159,6 +159,15 @@ LATER_SEARCH = 15
 # FORGET_SEARCH; the engine's own retention has them then.
 DELETE_AFTER = 10
 FORGET_SEARCH = 3600
+# A transfer is read this often. A peer that has sent nothing after
+# QUEUED_LIMIT seconds (queued behind its other uploads, usually) is given
+# up for the next candidate (#132); one sending data has up to
+# TRANSFER_LIMIT. A peer with more than BUSY_QUEUE uploads waiting ranks
+# after every less busy one, whatever share of the album it has.
+TRANSFER_POLL = 1
+QUEUED_LIMIT = 40
+TRANSFER_LIMIT = 240
+BUSY_QUEUE = 10
 # The engine's leftovers are swept at most this often (#96).
 SWEEP_EVERY = 3600
 # How the engine (slskd) reports a transfer that finished without success:
@@ -375,6 +384,7 @@ class Soulseek:
         return sorted(
             candidates,
             key=lambda c: (
+                c["queue_length"] > BUSY_QUEUE,
                 -c["album_coverage"],
                 c["queue_length"],
                 c["username"],
@@ -419,7 +429,9 @@ class Soulseek:
                     ],
                 )
                 response.raise_for_status()
-                deadline = time.monotonic() + 240
+                began = time.monotonic()
+                deadline = began + TRANSFER_LIMIT
+                received = 0
                 while time.monotonic() < deadline:
                     check()
                     response = client.get("transfers/downloads/" + username)
@@ -449,7 +461,8 @@ class Soulseek:
                             match.get("stateDescription", match.get("state", ""))
                         ).lower()
                         report["state"] = state
-                        progress(match.get("bytesTransferred", 0), candidate["size"])
+                        received = match.get("bytesTransferred", 0) or 0
+                        progress(received, candidate["size"])
                         if "succeeded" in state:
                             self.copy_completed(candidate, destination)
                             check()
@@ -465,7 +478,9 @@ class Soulseek:
                             )
                         ):
                             raise ValueError("Soulseek peer transfer failed")
-                    time.sleep(1)
+                    if not received and time.monotonic() - began >= QUEUED_LIMIT:
+                        raise ValueError("Soulseek peer sent nothing; trying another")
+                    time.sleep(TRANSFER_POLL)
                 raise ValueError("Soulseek peer transfer timed out")
             finally:
                 if transfer_id is None:

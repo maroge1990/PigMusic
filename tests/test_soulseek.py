@@ -623,3 +623,112 @@ def test_a_fallback_search_is_shorter_than_the_first(tmp_path, monkeypatch):
     adapter._run_search("later", lambda: None, limit=soulseek.LATER_SEARCH)
     later = time.monotonic() - began
     assert 0.25 < first < 1 and later < 0.2
+
+
+def queued_engine(adapter, states):
+    """Transfers whose state for each file name is `states[name]` (bytes
+    sent: 0 unless the state says Succeeded)."""
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.path))
+        if request.method in {"POST", "DELETE"}:
+            return httpx.Response(204)
+        return httpx.Response(
+            200,
+            json={
+                "directories": [
+                    {
+                        "files": [
+                            {
+                                **file(name),
+                                "id": f"id-{name}",
+                                "stateDescription": state,
+                                "bytesTransferred": 0,
+                            }
+                            for name, state in states.items()
+                        ]
+                    }
+                ]
+            },
+        )
+
+    adapter.client = lambda: httpx.Client(
+        base_url="http://engine/api/v0/", transport=httpx.MockTransport(handler)
+    )
+    return calls
+
+
+def test_a_peer_that_keeps_the_file_queued_is_given_up_at_the_soft_limit(
+    tmp_path, monkeypatch
+):
+    """#132: a queued peer held the song for the full 240 s."""
+    import server.soulseek as soulseek
+
+    monkeypatch.setattr(soulseek, "TRANSFER_POLL", 0.01, raising=False)
+    monkeypatch.setattr(soulseek, "QUEUED_LIMIT", 0.2, raising=False)
+    adapter = Soulseek(configured(tmp_path))
+    calls = queued_engine(adapter, {"Song": "Queued, Remotely"})
+    candidate = candidate_for(song(), {"username": "peer"}, file())
+    began = time.monotonic()
+    with pytest.raises(ValueError):
+        adapter.transfer(candidate, tmp_path / "x.mp3", lambda: None, lambda *_: None)
+    assert time.monotonic() - began < 5
+    # Its queued transfer is withdrawn, as for any other failure.
+    assert ("DELETE", "/api/v0/transfers/downloads/peer/id-Song") in calls
+
+
+def test_a_busy_peer_ranks_after_a_free_one_whatever_album_share_it_has(tmp_path):
+    store = configured(tmp_path)
+    store.submit_catalogue([song(), song("Second", 2)])
+    responses = [
+        {"username": "busy", "queueLength": 50, "files": [file(), file("Second")]},
+        {"username": "free", "queueLength": 0, "files": [file()]},
+        {"username": "short", "queueLength": 2, "files": [file(), file("Second")]},
+    ]
+
+    def handler(request):
+        if request.method == "POST":
+            return httpx.Response(200, json={"id": "s"})
+        if request.url.path.endswith("responses"):
+            return httpx.Response(200, json=responses)
+        return httpx.Response(200, json={"isComplete": True})
+
+    adapter = Soulseek(store)
+    adapter.client = lambda: httpx.Client(
+        base_url="http://engine/api/v0/", transport=httpx.MockTransport(handler)
+    )
+    order = [c["username"] for c in adapter.search(song(), lambda: None)]
+    assert order == ["short", "free", "busy"]
+
+
+def test_soulseek_waits_honour_the_per_source_time_limit(tmp_path, monkeypatch):
+    """#132: the Soulseek search and transfer ignored source_deadline, so a
+    stuck engine held the job past the source's limit."""
+    store = configured(tmp_path / "data")
+    store.save_download_settings(
+        {"enabled": True, "profile": "mp3_320", "sources": ["soulseek"]}
+    )
+    store.submit_catalogue([song()])
+    job = store.claim_request()
+    worker = Downloader(store)
+    waited = []
+
+    def stuck_search(target, check):
+        while len(waited) < 500:  # An engine that never answers.
+            check()
+            waited.append(1)
+            time.sleep(0.01)
+        pytest.fail("the search was never given up")
+
+    worker.soulseek.search = stuck_search
+    real = time.monotonic
+    began = real()
+    # The source's 240 s and the search's 90 s pass in a fraction of a second.
+    monkeypatch.setattr(
+        "server.downloader.time.monotonic", lambda: began + (real() - began) * 1000
+    )
+    errors = []
+    assert worker.attempt(job, "mp3_320", errors) is False
+    assert errors == ["soulseek: time limit reached"]
+    assert worker.runtime.health.snapshot("soulseek")["reason"] is None
