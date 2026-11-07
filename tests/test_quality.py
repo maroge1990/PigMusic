@@ -642,3 +642,62 @@ def test_a_symlinked_trash_keeps_the_replaced_file_and_its_cleanup_row(
     assert not any(elsewhere.iterdir())
     with store.connect() as conn:
         assert conn.execute("SELECT 1 FROM quality_cleanup").fetchall()
+
+
+def test_a_song_no_source_can_find_fails_within_the_job_ceiling(tmp_path, monkeypatch):
+    """#133 (D-72): each quality level had 10 minutes, one after another, so
+    a song whose sources were all stuck took half an hour to fail. Now 3
+    minutes a level and at most 6 for the job."""
+    import types
+
+    import server.downloader as downloader
+
+    real = time.monotonic
+    began = real()
+    # A minute passes in 0.06 s.
+    monkeypatch.setattr(
+        downloader,
+        "time",
+        types.SimpleNamespace(
+            monotonic=lambda: began + (real() - began) * 1000,
+            time=time.time,
+            sleep=time.sleep,
+        ),
+    )
+    store = Store(tmp_path)
+    (store.directory / "slskd-connection.json").write_text("{}")
+    store.save_download_settings(
+        {
+            "enabled": True,
+            "profile": "lossless",
+            "fallback_profile": "mp3_320",
+            "sources": ["soulseek", "jiosaavn"],
+        }
+    )
+    store.submit_catalogue([requested(store)])
+    job = store.claim_request()
+    levels = []
+
+    class Stuck(Downloader):
+        def attempt(self, job, profile, errors):
+            levels.append(profile)
+            while True:  # Every source hangs until the budget ends it.
+                self.check(job["id"])
+                time.sleep(0.002)
+
+    worker = Stuck(store)
+    started = downloader.time.monotonic()
+    worker.process(job)
+    minutes = (downloader.time.monotonic() - started) / 60
+    assert store.queue()["items"][0]["status"] == "failed"
+    assert levels == ["lossless", "mp3_320", "aac_256"]
+    assert minutes < 6.5
+
+
+def test_a_saved_old_default_budget_becomes_three_minutes(tmp_path):
+    store = Store(tmp_path)
+    store.write_document("downloads", {"enabled": False, "fallback_minutes": 10})
+    assert store.download_settings()["fallback_minutes"] == 3
+    # A budget chosen since is kept, 10 included.
+    store.save_download_settings({"fallback_minutes": 10})
+    assert store.download_settings()["fallback_minutes"] == 10

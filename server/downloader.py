@@ -1055,6 +1055,14 @@ class Downloader:
         )
         if desired["preferred"] == "mp3_128":
             job = {**job, "exact_quality": True}
+        # Each quality level gets its budget, and the whole job at most two
+        # (#133): three full budgets in a row made a song with no live
+        # source take half an hour to fail.
+        ceiling = time.monotonic() + 2 * desired["fallback_minutes"] * 60
+
+        def budget():
+            return min(time.monotonic() + desired["fallback_minutes"] * 60, ceiling)
+
         try:
             preferred = desired["preferred"]
             mix_cache = getattr(self.store, "mix_cache", None)
@@ -1067,9 +1075,7 @@ class Downloader:
                     raise
                 except (OSError, ValueError):
                     pass  # A stale/unsuitable cache copy never blocks acquisition.
-            self.deadlines[job["id"]] = (
-                time.monotonic() + desired["fallback_minutes"] * 60
-            )
+            self.deadlines[job["id"]] = budget()
             try:
                 if self.attempt(job, preferred, errors):
                     result = "completed"
@@ -1084,9 +1090,7 @@ class Downloader:
                 and fallback != "none"
                 and not job.get("upgrade_only")
             ):
-                self.deadlines[job["id"]] = (
-                    time.monotonic() + desired["fallback_minutes"] * 60
-                )
+                self.deadlines[job["id"]] = budget()
                 try:
                     if self.attempt(job, fallback, errors):
                         result = "completed"
@@ -1104,9 +1108,7 @@ class Downloader:
                 and preferred != "aac_256"
                 and not (preferred == "lossless" and fallback == "none")
             ):
-                self.deadlines[job["id"]] = (
-                    time.monotonic() + desired["fallback_minutes"] * 60
-                )
+                self.deadlines[job["id"]] = budget()
                 try:
                     if self.attempt(job, "aac_256", errors):
                         result = "completed"

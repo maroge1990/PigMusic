@@ -104,6 +104,6 @@ def policy(settings, preferred=None):
         # Marks requests made since AAC became the last resort; older
         # queued requests keep their original fallback behaviour.
         "aac_fallback": True,
-        "fallback_minutes": settings.get("fallback_minutes", 10),
+        "fallback_minutes": settings.get("fallback_minutes", 3),
         "recheck_hours": settings.get("recheck_hours", 24),
     }

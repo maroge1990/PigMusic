@@ -1632,7 +1632,7 @@
             "type": "boolean"
           },
           "fallback_minutes": {
-            "default": 10,
+            "default": 3,
             "maximum": 60.0,
             "minimum": 1.0,
             "title": "Fallback Minutes",

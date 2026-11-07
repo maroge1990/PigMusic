@@ -206,15 +206,22 @@ class Store:
         return self.summary()
 
     def download_settings(self):
+        stored = self.read_document("downloads")
+        # D-72: each quality level's budget became 3 minutes (was 10). A
+        # saved 10 from before is that old default, not a choice; a budget
+        # saved since (budget_version 2) is kept as chosen.
+        if stored.get("budget_version", 1) < 2 and stored.get("fallback_minutes") == 10:
+            stored = {**stored, "fallback_minutes": 3}
         settings = {
             "enabled": False,
             "profile": "mp3_320",
             "sources": ["freemp3cloud", "zvu4no"],
             "concurrent_downloads": 3,
             "fallback_profile": "mp3_320",
-            "fallback_minutes": 10,
+            "fallback_minutes": 3,
             "recheck_hours": 24,
-            **self.read_document("downloads"),
+            **stored,
+            "budget_version": 2,
         }
         # Saved settings can name a source since removed (YouTube, D-60).
         if isinstance(settings["sources"], list):

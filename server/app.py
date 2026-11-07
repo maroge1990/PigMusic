@@ -1063,7 +1063,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         sources: list[str]
         concurrent_downloads: int = Field(default=3, ge=1, le=6)
         fallback_profile: str = "mp3_320"
-        fallback_minutes: int = Field(default=10, ge=1, le=60)
+        fallback_minutes: int = Field(default=3, ge=1, le=60)
         recheck_hours: int = Field(default=24, ge=1, le=168)
 
     @app.put("/api/v1/admin/settings/downloads")
