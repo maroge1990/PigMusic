@@ -18,7 +18,7 @@ from .artist_identity import cached_identities
 from .catalogue import background_metadata, credit
 from .home import release_choice
 from .matching import compatible, recording_kind
-from .media import chart_region, playable, settings, track_file
+from .media import chart_region, present, settings, track_file
 from .mix_cache import MixCache, MixDownloader, song_key
 from .playlists import Playlists
 from .request_timing import phase
@@ -1457,16 +1457,16 @@ class Mixes:
 
     def track_dto(self, identity, index, track, members, cached=None):
         """A playable mix entry, or None while its audio is unavailable.
-        A library song is taken on its saved path, as playback addresses are
-        (`playable`: no NAS lookup, a missing file fails on open; each was a
-        mount check and path resolves over the NAS before, #22); without
-        one, the mix cache's copy. `cached`: the cache's files by key, read
-        once for a whole list."""
+        A library song's file is checked once a minute at most (`present`:
+        one file check, no marker read or path resolve; each was a mount
+        check and path resolves over the NAS before, #22); without one, the
+        mix cache's copy. `cached`: the cache's files by key, read once for
+        a whole list."""
         library_id = None
         match = self.store.index.match(track).track
         if match:
             try:
-                playable(self.store, match["id"])
+                present(self.store, match["id"])
                 library_id = match["id"]
             except (FileNotFoundError, ValueError, OSError):
                 pass

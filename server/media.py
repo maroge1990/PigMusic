@@ -154,6 +154,29 @@ def playable(store, track_id):
     saved_relative(track)
 
 
+_PRESENT = {}
+
+
+def present(store, track_id):
+    """Whether the saved song's file is there, for a listing (#22): its saved
+    path, then one file check, remembered for PLAYBACK_CACHE_SECONDS, with
+    the mount check reused as for playback: no marker read or path resolve
+    per song. Playback still opens and checks the file itself. Raises
+    FileNotFoundError when it is not there."""
+    track, root = saved_track(store, track_id, PLAYBACK_CACHE_SECONDS)
+    path = os.path.join(root, saved_relative(track))
+    cached = _PRESENT.get(path)
+    if cached and time.monotonic() - cached[1] < PLAYBACK_CACHE_SECONDS:
+        found = cached[0]
+    else:
+        found = os.path.isfile(path)
+        if len(_PRESENT) > 20000:
+            _PRESENT.clear()
+        _PRESENT[path] = (found, time.monotonic())
+    if not found:
+        raise FileNotFoundError
+
+
 def resolved_root(root):
     key = str(root)
     cached = _ROOTS.get(key)

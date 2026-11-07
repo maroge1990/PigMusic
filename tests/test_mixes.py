@@ -478,12 +478,11 @@ def test_home_mixes_check_each_library_file_once(tmp_path, monkeypatch):
     # (playback opens it), and the mix cache is read once, not per song.
     assert checks == []
     states = {r.title: (r.library_track_id, r.server_state) for r in rows}
-    # A library song is taken on its saved path, as library playback is: one
-    # whose file has gone lists as the household's (the next scan drops it),
-    # and its mix entry still plays the cached copy.
+    # A library song whose file has gone plays the cached copy (Codex on the
+    # first form of this change, which trusted the saved path).
     assert states == {
         "Song 1": ("owned", "in_library"),
-        "Song 2": ("gone", "in_library"),
+        "Song 2": (None, "not_in_library"),
         "Song 3": (None, "not_in_library"),
     }
     gone_row = next(r for r in rows if r.title == "Song 2")
@@ -493,6 +492,26 @@ def test_home_mixes_check_each_library_file_once(tmp_path, monkeypatch):
     reads.clear()
     mixes.list(owner)
     assert len(reads) <= with_songs  # More songs, no more database reads.
+
+
+def test_a_library_song_whose_file_has_gone_and_no_cached_copy_is_left_out(
+    tmp_path, monkeypatch
+):
+    """Codex round 1 on #22: trusting the saved path listed a song whose NAS
+    file had gone and that the mix cache did not hold: it could not play."""
+    nas = tmp_path / "nas"
+    nas.mkdir()
+    (nas / "song.mp3").write_bytes(b"fixture audio")
+    owned = track(id="owned", relative_path="song.mp3")
+    gone = track(2, id="gone", relative_path="gone.mp3")
+    (tmp_path / "library-snapshot.json").write_text(
+        json.dumps({"tracks": [owned, gone]})
+    )
+    app, owner = protected(tmp_path, monkeypatch)
+    mixes = app.state.store.mixes
+    ready(mixes, owner, [owned, gone])
+    rows = mixes.list(owner)["mixes"][0]["tracks"]
+    assert [r.title for r in rows] == ["Song 1"]
 
 
 def test_yesterdays_mix_queue_still_plays_after_rotation(tmp_path, monkeypatch):
