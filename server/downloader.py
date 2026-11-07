@@ -643,9 +643,11 @@ class Downloader:
         if result.returncode:
             raise ValueError("The downloaded audio failed complete decoding")
 
-    def tag(self, path, target, source, clear=()):
+    def tag(self, path, target, source, clear=(), cover=None):
         """Write `target`'s fields; a field named in `clear` that `target`
-        lacks is removed rather than left as the file had it."""
+        lacks is removed rather than left as the file had it. `cover`: the
+        stored cover's SHA, embedded in the same save (#137)."""
+        art = self.cover_bytes(cover)
         if path.suffix in {".flac", ".opus", ".ogg"}:
             audio = {".flac": FLAC, ".opus": OggOpus, ".ogg": OggVorbis}[path.suffix](
                 path
@@ -668,6 +670,8 @@ class Downloader:
                 elif field in clear and key in audio:
                     del audio[key]
             audio["PIG_MUSIC_SOURCE"] = source
+            if art is not None:
+                self.put_cover(audio, path.suffix, art)
             audio.save()
             return
         if path.suffix == ".m4a":
@@ -703,6 +707,8 @@ class Downloader:
                     ]
                 elif field in clear:
                     audio.pop("----:com.apple.iTunes:" + description, None)
+            if art is not None:
+                self.put_cover(audio, path.suffix, art)
             audio.save()
             return
         try:
@@ -737,38 +743,53 @@ class Downloader:
                 tags.add(TXXX(encoding=3, desc=description, text=target[field]))
             elif field in clear:
                 tags.delall("TXXX:" + description)
+        if art is not None:
+            self.put_cover(tags, path.suffix, art)
         tags.save(path, v2_version=3)
 
-    def embed_cover(self, path, sha):
-        """Write the stored cover into the file, replacing any it carried."""
-        cover = self.store.covers.path(sha)
-        if not cover:
-            return
-        data = cover.read_bytes()
-        if path.suffix == ".flac":
-            audio = FLAC(path)
+    def cover_bytes(self, sha):
+        cover = self.store.covers.path(sha) if sha else None
+        return cover.read_bytes() if cover else None
+
+    @staticmethod
+    def put_cover(audio, suffix, data):
+        """Put `data` (JPEG) in `audio`'s tags as the front cover, replacing
+        any it carried; the caller saves."""
+        if suffix == ".flac":
             picture = Picture()
             picture.type, picture.mime, picture.data = 3, "image/jpeg", data
             audio.clear_pictures()
             audio.add_picture(picture)
-            audio.save()
-        elif path.suffix == ".m4a":
-            audio = MP4(path)
+        elif suffix == ".m4a":
             audio["covr"] = [MP4Cover(data, imageformat=MP4Cover.FORMAT_JPEG)]
-            audio.save()
-        elif path.suffix in {".opus", ".ogg"}:
+        elif suffix in {".opus", ".ogg"}:
             picture = Picture()
             picture.type, picture.mime, picture.data = 3, "image/jpeg", data
-            audio = {".opus": OggOpus, ".ogg": OggVorbis}[path.suffix](path)
             audio["METADATA_BLOCK_PICTURE"] = [
                 base64.b64encode(picture.write()).decode("ascii")
             ]
-            audio.save()
         else:
-            tags = ID3(path)
-            tags.delall("APIC")
-            tags.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="", data=data))
-            tags.save(path, v2_version=3)
+            audio.delall("APIC")
+            audio.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="", data=data))
+
+    def embed_cover(self, path, sha):
+        """Write the stored cover into the file, replacing any it carried."""
+        data = self.cover_bytes(sha)
+        if data is None:
+            return
+        if path.suffix == ".flac":
+            audio = FLAC(path)
+        elif path.suffix == ".m4a":
+            audio = MP4(path)
+        elif path.suffix in {".opus", ".ogg"}:
+            audio = {".opus": OggOpus, ".ogg": OggVorbis}[path.suffix](path)
+        else:
+            audio = ID3(path)
+        self.put_cover(audio, path.suffix, data)
+        if isinstance(audio, ID3):
+            audio.save(path, v2_version=3)
+        else:
+            audio.save()
 
     def complete(self, job, path, extension, source, profile, provenance=None):
         self.check(job["id"])
@@ -785,8 +806,7 @@ class Downloader:
             ):
                 raise ValueError("Replacement must be a genuine MP3 128 kbps source")
         with timings.step("tag"):
-            self.tag(path, job, source)
-            self.embed_cover(path, job.get("cover_sha"))
+            self.tag(path, job, source, cover=job.get("cover_sha"))
         with timings.step("decode"):
             self.decode(path, lambda: self.check(job["id"]))
         probe["acquisition"] = {

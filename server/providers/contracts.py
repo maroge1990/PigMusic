@@ -78,6 +78,9 @@ class Context:
     progress: Callable = lambda received, total: None
     deadline: float = field(default_factory=lambda: time.monotonic() + 180)
     max_bytes: int = 160_000_000
+    # A listener plays the file while it arrives (the relay, #23): each
+    # chunk is flushed for it. Ordinary downloads leave the writes buffered.
+    live: bool = False
 
     def remaining(self):
         self.check()

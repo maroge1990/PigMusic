@@ -736,3 +736,47 @@ def test_job_checks_reuse_the_nas_check_and_settings_for_a_second(
     worker.settings_cache = (float("-inf"), None)
     with pytest.raises(Cancelled):
         worker.check(job["id"])
+
+
+def test_a_download_is_tagged_and_given_its_cover_in_one_save(
+    tmp_path, audio, monkeypatch
+):
+    """#137: tags and the cover were two saves; an ID3 tag that grows
+    rewrites the whole file each time."""
+    import io
+
+    from mutagen.id3 import ID3
+    from PIL import Image
+
+    store = Store(tmp_path / "data")
+    job = queued(store)
+    picture = io.BytesIO()
+    Image.new("RGB", (600, 600), "red").save(picture, "JPEG")
+    sha = store.covers.save(picture.getvalue())
+    job = {**job, "cover_sha": sha}
+
+    class FixtureDownloader(Downloader):
+        def transfer(self, job_id, candidate, path):
+            shutil.copyfile(audio, path)
+
+    saves = []
+    original = ID3.save
+    monkeypatch.setattr(
+        ID3, "save", lambda self, *a, **k: saves.append(1) or original(self, *a, **k)
+    )
+    candidate = {
+        "title": "Test Track",
+        "channel": "Test Artist",
+        "duration": "0:03",
+        "source_url": "fixture",
+        "quality": "320kbps",
+    }
+    worker = FixtureDownloader(store, {"freemp3cloud": lambda *_: [candidate]})
+    worker.process(job)
+    assert store.queue()["items"][0]["status"] == "completed"
+    assert len(saves) == 1
+    track = Store(store.directory).library["albums"][0]["tracks"][0]
+    path = store.directory / "downloads" / "library" / track["relative_path"]
+    tags = ID3(path)
+    assert tags.getall("APIC")[0].data == store.covers.path(sha).read_bytes()
+    assert str(tags["TIT2"]) == "Test Track"

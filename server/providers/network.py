@@ -189,7 +189,8 @@ def transfer(url, hosts, path, context):
                         output.write(chunk)
                         # Progress means the bytes are in the file: a relay serves
                         # them while the rest arrives (#23).
-                        output.flush()
+                        if context.live:
+                            output.flush()
                         context.progress(size, expected)
                 if not size or expected and size != expected:
                     raise ProviderError("invalid_response")

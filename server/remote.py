@@ -523,6 +523,7 @@ class RemoteAudio:
         if live is not None and extension == ".mp3":
             live.arriving(path, final, expected)
             context.progress = live.progress
+            context.live = True
         else:
             live = None
         try:
