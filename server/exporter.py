@@ -371,7 +371,7 @@ class Exporter:
                 (json.dumps(value),),
             )
 
-    @coordinated
+    @coordinated(catch_up=False)
     def publish(self, track):
         # Each step is named in a long lifecycle_lock hold's warning (#17).
         lock = self.store.lifecycle_lock

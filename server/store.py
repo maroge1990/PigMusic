@@ -462,7 +462,7 @@ class Store:
             time.sleep(0.02)
         return False
 
-    @coordinated
+    @coordinated(catch_up=False)
     def commit_request(self, job, source, target, probe, sha):
         target = target.resolve()
         root = library_root(self).resolve()

@@ -1020,3 +1020,69 @@ def test_a_stale_journal_never_deletes_a_later_claims_pending_file(
     assert target.exists()
     assert store.queue()["items"][0]["status"] == "completed"
     assert list(stage.glob("*.json")) == []
+
+
+def test_an_albums_real_publications_never_rebuild_under_the_lifecycle_lock(
+    tmp_path, audio, monkeypatch
+):
+    """Codex round 2 on #136: each commit raised `published`, so the next
+    coordinated publication caught the library up synchronously under
+    lifecycle_lock: 11 rebuilds for 12 songs despite the debounce."""
+    import plistlib
+
+    import server.store as store_module
+
+    monkeypatch.setattr(store_module, "REBUILD_DEBOUNCE", 0.3, raising=False)
+    store = Store(tmp_path / "data")
+    inventory = plistlib.dumps(
+        {
+            "Tracks": {
+                str(i): {
+                    "Name": f"Song {i}",
+                    "Artist": "Test Artist",
+                    "Album": "Test Album",
+                    "Total Time": 3000,
+                    "Track Number": i,
+                }
+                for i in range(1, 6)
+            }
+        }
+    )
+    source = store.import_apple(inventory)
+    store.update_selection([t["id"] for t in source["albums"][0]["tracks"]], True)
+    store.submit_migration()
+    store.save_download_settings(
+        {"enabled": True, "profile": "mp3_320", "sources": ["freemp3cloud"]}
+    )
+    builds = []
+    real = store.refresh_library
+
+    def counted():
+        builds.append(store.lifecycle_lock.owned())
+        real()
+
+    monkeypatch.setattr(store, "refresh_library", counted)
+
+    class FixtureDownloader(Downloader):
+        def transfer(self, job_id, candidate, path):
+            shutil.copyfile(audio, path)
+
+    def search(query, limit):
+        return [
+            {
+                "title": query.removeprefix("Test Artist "),
+                "channel": "Test Artist",
+                "duration": "0:03",
+                "source_url": "fixture",
+                "quality": "320kbps",
+            }
+        ]
+
+    worker = FixtureDownloader(store, {"freemp3cloud": search})
+    while job := store.claim_request():
+        worker.process(job)
+    assert getattr(store, "settle_rebuilds", lambda: True)()
+    assert {i["status"] for i in store.queue()["items"]} == {"completed"}
+    assert not any(builds), "a rebuild ran under lifecycle_lock"
+    assert len(builds) < 5  # Fewer than one per song (timing allowing).
+    assert Store(store.directory).library["stats"]["tracks"] == 5

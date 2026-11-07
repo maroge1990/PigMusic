@@ -108,7 +108,15 @@ def step(lock, name):
         lock.step(name)
 
 
-def coordinated(method):
+def coordinated(method=None, *, catch_up=True):
+    """Run the method under lifecycle_lock, after catching the library up
+    with any publication (#74). `catch_up=False` is for a method that
+    decides only on database state, never the library projection (a
+    download's commit, an export's publication): it must not rebuild the
+    library under the lock for every song of an album (#136)."""
+    if method is None:
+        return lambda method: coordinated(method, catch_up=catch_up)
+    wanted = catch_up
     # The wrapper takes the lock before the method runs, so it names the
     # method itself (a worker thread would otherwise show as the holder).
     label = f"{method.__module__.rsplit('.', 1)[-1]}.{method.__qualname__}"
@@ -120,6 +128,8 @@ def coordinated(method):
         # A download's library rebuild runs after its publication releases
         # the lock; whoever takes the lock in between rebuilds first (#74).
         catch_up = getattr(store, "catch_up", lambda: None)
+        if not wanted:
+            catch_up = lambda: None  # noqa: E731
         if not isinstance(lock, TimedRLock):
             with lock:
                 catch_up()
