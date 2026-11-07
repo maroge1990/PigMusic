@@ -56,8 +56,7 @@
 }
 .has-background .artist-hero h1 {
   font-size: clamp(2.25rem, 5vw, 4rem);
-  line-height: 1.08;
-  letter-spacing: -1.5px;
+  line-height: 1.1;
 }
 .artist-identity h1 {
   overflow-wrap: anywhere;
@@ -84,12 +83,12 @@
 @media (max-width: 600px) {
   .artist-scene.has-background {
     min-height: 420px;
-    margin-left: -22px;
-    margin-right: -22px;
+    margin-left: calc(-1 * var(--space-24));
+    margin-right: calc(-1 * var(--space-24));
     border-radius: 0;
   }
   .has-background .artist-hero {
-    padding: 240px 22px var(--space-16);
+    padding: 240px var(--space-24) var(--space-16);
   }
   .has-background .artist-hero h1 {
     font-size: var(--type-display);
@@ -187,8 +186,8 @@
 }
 
 .popular-song > .cover {
-  flex: 0 0 40px;
-  width: 40px;
+  flex: 0 0 2.75rem;
+  width: 2.75rem;
 }
 
 .music-text-link {
@@ -208,8 +207,8 @@
 }
 @media (max-width: 600px) {
   .popular-song > .cover {
-    flex-basis: 32px;
-    width: 32px;
+    flex-basis: 2.5rem;
+    width: 2.5rem;
   }
 }
 

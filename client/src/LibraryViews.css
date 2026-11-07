@@ -2,20 +2,20 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 25px;
+  margin-bottom: var(--space-24);
   gap: var(--space-12);
 }
 .tab-list {
   display: flex;
-  gap: 7px;
+  gap: var(--space-8);
   align-items: center;
 }
 .tab-list button {
   font-size: var(--type-caption);
   color: var(--secondary);
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.3;
-  padding: 9px 15px;
+  padding: var(--space-8) var(--space-16);
   min-height: 35px;
   border-radius: var(--radius-compact);
   border: 1px solid transparent;
@@ -35,7 +35,7 @@
   background: var(--border);
   padding: 2px var(--space-4);
   border-radius: var(--radius-compact);
-  margin-left: 7px;
+  margin-left: var(--space-8);
   color: var(--text);
   vertical-align: middle;
 }
@@ -83,8 +83,8 @@
 .section-description {
   font-size: var(--type-caption);
   color: var(--secondary);
-  margin: -7px 0 22px;
-  line-height: 1.7;
+  margin: calc(-1 * var(--space-8)) 0 var(--space-24);
+  line-height: 1.5;
 }
 .album-card {
   padding: 0;
@@ -124,13 +124,13 @@
 .cover-initials {
   font-size: clamp(1.25rem, 2.7vw, 2.375rem);
   color: var(--text-accent);
-  font-weight: 550;
+  font-weight: 600;
   letter-spacing: -1px;
 }
 .card-name {
   font-size: var(--type-caption);
   line-height: 1.4;
-  font-weight: 550;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -140,7 +140,7 @@
   color: var(--text-accent);
 }
 .card-caption {
-  margin-top: 5px;
+  margin-top: var(--space-4);
   font-size: var(--type-caption);
   color: var(--secondary);
   line-height: 1.5;
@@ -149,7 +149,7 @@
   white-space: nowrap;
 }
 .card-caption span {
-  margin: 0 3px;
+  margin: 0 var(--space-4);
   color: var(--control-border);
 }
 .album-card .cover {
@@ -158,27 +158,27 @@
 .detail-hero {
   display: flex;
   align-items: center;
-  gap: 34px;
-  padding: var(--space-8) 0 35px;
+  gap: var(--space-32);
+  padding: var(--space-8) 0 var(--space-32);
   border-bottom: 1px solid var(--border);
 }
 .detail-hero > .cover {
   width: 210px;
   flex-shrink: 0;
-  box-shadow: 0 12px 30px var(--shadow-soft);
+  box-shadow: var(--elevation-soft);
 }
 .detail-hero h1 {
   font-size: clamp(1.75rem, 3.6vw, 3.25rem);
   max-width: 780px;
 }
 .detail-hero p {
-  margin: 17px 0;
+  margin: var(--space-16) 0;
   color: var(--secondary);
   font-size: var(--type-caption);
-  line-height: 1.8;
+  line-height: 1.5;
 }
 .detail-hero p > span {
-  padding: 0 5px;
+  padding: 0 var(--space-4);
   color: var(--control-border);
 }
 /* One state badge for every "where is this song" answer: icon plus words. */
@@ -230,7 +230,7 @@
 .track-name strong {
   display: block;
   font-size: var(--type-caption);
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -238,7 +238,7 @@
   display: block;
   font-size: var(--type-caption);
   color: var(--secondary);
-  margin-top: 3px;
+  margin-top: var(--space-4);
 }
 .track-time {
   font-size: var(--type-caption);
@@ -257,7 +257,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 7px;
+  padding: var(--space-8);
   flex-shrink: 0;
   color: var(--secondary);
   border-radius: var(--radius-compact);
@@ -269,17 +269,17 @@
 .result-row {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: var(--space-12);
   text-align: left;
   width: 100%;
-  padding: 13px var(--space-8);
+  padding: var(--space-12) var(--space-8);
   border-bottom: 1px solid var(--border);
 }
 .result-row:hover {
   background: var(--surface);
 }
 .result-row > .cover {
-  width: 45px;
+  width: 2.75rem;
   flex-shrink: 0;
 }
 .result-row > div:not(.cover) {
@@ -288,7 +288,7 @@
 }
 .result-row strong {
   font-size: var(--type-caption);
-  font-weight: 550;
+  font-weight: 600;
   display: block;
   line-height: 1.5;
 }
@@ -297,7 +297,7 @@
   color: var(--secondary);
   font-size: var(--type-caption);
   margin-top: var(--space-4);
-  line-height: 1.6;
+  line-height: 1.5;
 }
 /* Shared states (#155): Loading, EmptyLine and InlineError in EmptyState.tsx;
  * a page-wide failure is an .error-banner. */
@@ -320,12 +320,12 @@
 }
 .empty-state {
   text-align: center;
-  padding: var(--space-48) 20px;
+  padding: var(--space-48) var(--space-16);
   background: var(--surface);
   border: 1px dashed var(--raised);
   border-radius: var(--radius-control);
   color: var(--secondary);
-  margin-top: 20px;
+  margin-top: var(--space-16);
 }
 .empty-state > svg {
   color: var(--secondary);
@@ -333,19 +333,19 @@
 .empty-state h3 {
   font-size: var(--type-body);
   color: var(--text);
-  margin: 15px 0 var(--space-8);
-  font-weight: 500;
+  margin: var(--space-16) 0 var(--space-8);
+  font-weight: 600;
 }
 .empty-state p {
   font-size: var(--type-caption);
-  line-height: 1.7;
+  line-height: 1.5;
   max-width: 440px;
   margin: auto;
 }
 .error-banner {
   display: flex;
   align-items: center;
-  gap: 15px;
+  gap: var(--space-16);
   justify-content: space-between;
   background: var(--danger-fill);
   border: 1px solid var(--danger-fill);
@@ -353,6 +353,6 @@
   font-size: var(--type-caption);
   color: var(--danger);
   padding: var(--space-12) var(--space-16);
-  margin-bottom: 25px;
-  line-height: 1.7;
+  margin-bottom: var(--space-24);
+  line-height: 1.5;
 }

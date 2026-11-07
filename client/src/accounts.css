@@ -2,7 +2,7 @@
   min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 2rem 1rem;
+  padding: var(--space-32) var(--space-16);
 }
 .sign-in-card {
   position: relative;
@@ -35,22 +35,22 @@
 .account-pig {
   display: block;
   width: 5rem;
-  margin: 0 auto 1rem;
+  margin: 0 auto var(--space-16);
 }
 .account-wordmark {
   width: 11rem;
   display: block;
-  margin: 0 auto 1rem;
+  margin: 0 auto var(--space-16);
 }
 .sign-in-card form,
 .account-section form {
   display: grid;
-  gap: 1rem;
+  gap: var(--space-16);
 }
 .sign-in-card label,
 .account-section label {
   display: grid;
-  gap: 0.5rem;
+  gap: var(--space-8);
 }
 .sign-in-card input,
 .account-section input,
@@ -58,7 +58,7 @@
 .personal-app select {
   min-height: 2.75rem;
   max-width: 100%;
-  padding: 0.5rem;
+  padding: var(--space-8);
   font: inherit;
   color: var(--text);
   background: var(--raised);
@@ -69,14 +69,14 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 1rem;
-  padding: 1rem;
+  gap: var(--space-16);
+  padding: var(--space-16);
   border-bottom: 1px solid var(--border);
 }
 .personal-header a {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-8);
   color: var(--text);
   text-decoration: none;
 }
@@ -95,7 +95,7 @@
   align-items: center;
   gap: var(--space-8);
   min-height: 2.75rem;
-  padding: 0.5rem 1rem;
+  padding: var(--space-8) var(--space-16);
   border-radius: var(--radius-compact);
   color: var(--text);
   text-decoration: none;
@@ -115,7 +115,7 @@
   background: var(--accent);
   color: var(--on-accent);
   font-size: var(--type-caption);
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
@@ -145,7 +145,7 @@
 }
 .personal-header button,
 .personal-tabs button {
-  padding: 0.5rem 1rem;
+  padding: var(--space-8) var(--space-16);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
@@ -154,13 +154,14 @@
 .personal-main {
   max-width: 75rem;
   margin: auto;
-  padding: 1.5rem 1rem calc(var(--player-height, 6rem) + 2rem);
+  padding: var(--space-24) var(--space-16)
+    calc(var(--player-height, 6rem) + var(--space-32));
 }
 .personal-tabs {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--space-8);
   overflow-x: auto;
-  padding-bottom: 0.75rem;
+  padding-bottom: var(--space-12);
   scrollbar-width: none;
 }
 .personal-tabs::-webkit-scrollbar {
@@ -172,9 +173,9 @@
 .personal-track {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--space-12);
   border-bottom: 1px solid var(--border);
-  padding: 0.75rem 0;
+  padding: var(--space-12) 0;
 }
 .personal-track > div {
   flex: 1;
@@ -186,16 +187,16 @@
   flex: 0 0 3rem;
 }
 .personal-track p {
-  margin: 0.25rem 0;
+  margin: var(--space-4) 0;
   color: var(--secondary);
 }
 .personal-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 10rem), 1fr));
-  gap: 1rem;
+  gap: var(--space-16);
 }
 .personal-grid button {
-  padding: 0.5rem;
+  padding: var(--space-8);
   text-align: left;
   color: var(--text);
   background: var(--surface);
@@ -218,7 +219,7 @@
 }
 .personal-grid .grid-card-title {
   font-size: var(--type-body);
-  font-weight: 700;
+  font-weight: 600;
 }
 /* Cards share one rhythm: 16px padding (24px from 768px), 12px under the heading. */
 .account-section,
@@ -285,8 +286,8 @@
 }
 .personal-notice,
 .personal-status {
-  margin: 1rem;
-  padding: 0.75rem;
+  margin: var(--space-16);
+  padding: var(--space-12);
   border: 1px solid var(--border);
   border-radius: var(--radius-compact);
 }
@@ -367,10 +368,10 @@
 }
 
 .first-run-card > p {
-  margin: 0.75rem 0 1rem;
+  margin: var(--space-12) 0 var(--space-16);
 }
 .first-run-card details p {
-  margin-top: 0.5rem;
+  margin-top: var(--space-8);
 }
 .first-run-card summary {
   cursor: pointer;
@@ -416,7 +417,8 @@
 
   .personal-main {
     padding-bottom: calc(
-      var(--mobile-nav-height, 4rem) + var(--player-height, 0px) + 2rem
+      var(--mobile-nav-height, 4rem) + var(--player-height, 0px) +
+        var(--space-32)
     );
   }
 }
@@ -438,7 +440,7 @@
   gap: var(--space-8);
 }
 .owner-tools summary {
-  font-weight: 650;
+  font-weight: 600;
 }
 .owner-tools-body {
   display: grid;
@@ -467,8 +469,8 @@
 }
 .owner-label {
   font-size: var(--type-caption);
-  font-weight: 650;
-  letter-spacing: 0.06em;
+  font-weight: 600;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-accent);
 }
@@ -551,7 +553,7 @@ main h1[tabindex="-1"]:focus {
 }
 .discover-list a {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) auto;
+  grid-template-columns: 2.75rem minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-12);
   padding: var(--space-12) var(--space-16);
@@ -562,7 +564,7 @@ main h1[tabindex="-1"]:focus {
   text-decoration: none;
 }
 .discover-list .cover {
-  width: 48px;
+  width: 2.75rem;
 }
 .discover-text {
   display: grid;
@@ -629,7 +631,7 @@ main h1[tabindex="-1"]:focus {
 }
 .request-group > summary {
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) auto auto;
+  grid-template-columns: 2.75rem minmax(0, 1fr) auto auto;
   align-items: center;
   gap: var(--space-12);
   padding: var(--space-12);
@@ -640,7 +642,7 @@ main h1[tabindex="-1"]:focus {
   display: none;
 }
 .request-group > summary .cover {
-  width: 56px;
+  width: 2.75rem;
 }
 .request-group-text {
   min-width: 0;
@@ -697,10 +699,10 @@ main h1[tabindex="-1"]:focus {
 }
 @media (max-width: 600px) {
   .request-group > summary {
-    grid-template-columns: 48px minmax(0, 1fr) auto;
+    grid-template-columns: 2.5rem minmax(0, 1fr) auto;
   }
   .request-group > summary .cover {
-    width: 48px;
+    width: 2.5rem;
   }
   .request-group-chevron {
     display: none;

@@ -2,7 +2,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
+  gap: var(--space-16);
   background: linear-gradient(
     110deg,
     var(--selected-fill),
@@ -11,7 +11,7 @@
   border: 1px solid var(--selected-fill);
   border-radius: var(--radius-card);
   padding: var(--space-16);
-  margin-bottom: 18px;
+  margin-bottom: var(--space-16);
 }
 @media (min-width: 768px) {
   .migration-summary {
@@ -21,7 +21,7 @@
 .inventory-name {
   display: flex;
   align-items: center;
-  gap: 13px;
+  gap: var(--space-12);
 }
 .inventory-icon {
   display: flex;
@@ -37,18 +37,18 @@
 .inventory-name strong {
   font-size: var(--type-subhead);
   display: block;
-  font-weight: 550;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 .inventory-name span:not(.inventory-icon) {
   display: block;
   font-size: var(--type-caption);
-  margin-top: 5px;
+  margin-top: var(--space-4);
   color: var(--secondary);
 }
 .inventory-counts {
   display: flex;
-  gap: 17px;
+  gap: var(--space-16);
   color: var(--secondary);
   font-size: var(--type-caption);
   flex-wrap: wrap;
@@ -56,7 +56,7 @@
 .inventory-counts > span {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-4);
   white-space: nowrap;
 }
 .green-dot,
@@ -76,11 +76,11 @@
 .review-note {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: var(--space-12);
   color: var(--secondary);
-  padding: var(--space-8) 1px 25px;
+  padding: var(--space-8) 1px var(--space-24);
   font-size: var(--type-caption);
-  line-height: 1.7;
+  line-height: 1.5;
 }
 .review-note > svg {
   color: var(--success);
@@ -89,7 +89,7 @@
 .migration-groups {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-8);
 }
 .migration-group {
   border: 1px solid var(--border);
@@ -103,13 +103,13 @@
 .group-head {
   display: flex;
   align-items: center;
-  gap: 15px;
-  padding: 14px 18px;
+  gap: var(--space-16);
+  padding: var(--space-12) var(--space-16);
 }
 .group-expand {
   display: flex;
   align-items: center;
-  gap: 13px;
+  gap: var(--space-12);
   flex: 1;
   padding: 0;
   text-align: left;
@@ -117,7 +117,7 @@
   min-height: 46px;
 }
 .group-expand .cover {
-  width: 44px;
+  width: 2.75rem;
   flex-shrink: 0;
 }
 .group-expand > div:not(.cover) {
@@ -126,7 +126,7 @@
 }
 .group-expand strong {
   font-size: var(--type-caption);
-  font-weight: 550;
+  font-weight: 600;
   display: block;
   line-height: 1.5;
 }
@@ -141,7 +141,7 @@
   color: var(--secondary);
   transition: transform 0.2s;
   flex-shrink: 0;
-  margin-right: 9px;
+  margin-right: var(--space-8);
 }
 .expanded .group-expand > svg {
   transform: rotate(180deg);
@@ -159,16 +159,16 @@
 .group-content {
   border-top: 1px solid var(--border);
   background: var(--canvas);
-  padding: 0 17px 13px;
+  padding: 0 var(--space-16) var(--space-12);
 }
 .migration-album {
-  padding-top: 20px;
+  padding-top: var(--space-16);
 }
 .migration-album-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 10px var(--space-12);
+  gap: var(--space-8);
+  padding: 0 var(--space-8) var(--space-12);
   color: var(--secondary);
 }
 .migration-album-head > div {
@@ -179,7 +179,7 @@
   display: block;
   font-size: var(--type-caption);
   color: var(--text);
-  font-weight: 550;
+  font-weight: 600;
 }
 .migration-album-head span {
   font-size: var(--type-caption);
@@ -191,7 +191,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-12);
-  padding: var(--space-12) 10px;
+  padding: var(--space-12) var(--space-8);
   border-top: 1px solid var(--border);
   cursor: pointer;
   border-radius: var(--radius-compact);
@@ -222,7 +222,7 @@
 .migration-track small {
   font-size: var(--type-caption);
   color: var(--warning);
-  line-height: 1.7;
+  line-height: 1.5;
   display: block;
   margin-top: var(--space-4);
 }
@@ -250,18 +250,18 @@
   backdrop-filter: blur(20px);
   border: 1px solid var(--selected-fill);
   border-radius: var(--radius-control);
-  padding: var(--space-16) 20px;
+  padding: var(--space-16) var(--space-16);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  box-shadow: 0 10px 30px var(--shadow-card);
-  margin-top: 35px;
+  gap: var(--space-16);
+  box-shadow: var(--elevation-card);
+  margin-top: var(--space-32);
 }
 .migration-footer > div {
   display: flex;
   align-items: center;
-  gap: 13px;
+  gap: var(--space-12);
 }
 .footer-icon {
   width: 36px;
@@ -277,11 +277,11 @@
 .migration-footer strong {
   display: block;
   font-size: var(--type-caption);
-  font-weight: 550;
+  font-weight: 600;
 }
 .migration-footer > div > div > span {
   display: block;
   font-size: var(--type-caption);
   color: var(--secondary);
-  margin-top: 5px;
+  margin-top: var(--space-4);
 }

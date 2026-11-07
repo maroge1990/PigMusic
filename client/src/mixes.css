@@ -1,13 +1,13 @@
 .mix-row {
   display: flex;
-  gap: 20px;
+  gap: var(--space-16);
   /* Covers line up even when one card's caption runs longer. */
   align-items: flex-start;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scroll-snap-type: x proximity;
-  padding: 12px 6px 20px;
-  margin-inline: -6px;
+  padding: var(--space-12) var(--space-4) var(--space-16);
+  margin-inline: calc(-1 * var(--space-4));
 }
 .mix-card {
   flex: 0 0 170px;
@@ -27,12 +27,12 @@
   display: block;
 }
 .mix-card strong {
-  margin-top: 10px;
+  margin-top: var(--space-8);
 }
 .mix-card span {
   color: var(--secondary);
   font-size: var(--type-subhead);
-  margin: 4px 0;
+  margin: var(--space-4) 0;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -49,7 +49,7 @@
   max-height: 85dvh;
   width: min(740px, calc(100% - 24px));
   max-width: 740px;
-  padding: 24px;
+  padding: var(--space-24);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
@@ -63,33 +63,33 @@
 .mix-heading {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: var(--space-16);
   clear: both;
-  padding-top: 8px;
+  padding-top: var(--space-8);
 }
 .mix-heading > .mix-artwork {
   width: 110px;
   flex: 0 0 110px;
 }
 .mix-heading h2 {
-  margin: 8px 0;
+  margin: var(--space-8) 0;
 }
 .mix-heading p {
   color: var(--secondary);
 }
 .mix-actions {
   display: flex;
-  gap: 12px;
-  margin: 20px 0;
+  gap: var(--space-12);
+  margin: var(--space-16) 0;
   flex-wrap: wrap;
 }
 .mix-actions button {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 .mix-options {
-  margin-block: 16px;
+  margin-block: var(--space-16);
 }
 /* A mix card plays on a click; its ⋯ sits over the cover's corner (#56). */
 .mix-card-wrap {
@@ -116,6 +116,6 @@
     flex-basis: 150px;
   }
   .mix-dialog {
-    padding: 16px;
+    padding: var(--space-16);
   }
 }

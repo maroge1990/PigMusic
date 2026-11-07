@@ -24,9 +24,6 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.nav-count {
-  line-height: 1.4;
-}
 
 @media (max-width: 600px) {
   .migration-footer,

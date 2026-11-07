@@ -86,7 +86,7 @@
 }
 .song-text strong {
   font-size: var(--type-subhead);
-  font-weight: 500;
+  font-weight: 600;
 }
 .song-text small {
   font-size: var(--type-footnote);
@@ -143,7 +143,7 @@
   background: color-mix(in srgb, var(--surface) 94%, transparent);
   backdrop-filter: blur(24px) saturate(1.6);
   -webkit-backdrop-filter: blur(24px) saturate(1.6);
-  box-shadow: 0 1rem 2.5rem var(--shadow-floating);
+  box-shadow: var(--elevation-floating);
   color: var(--text);
 }
 .song-menu-group + .song-menu-group {
@@ -210,7 +210,7 @@
   background: color-mix(in srgb, var(--media-solid-panel) 88%, transparent);
   backdrop-filter: blur(24px) saturate(1.6);
   -webkit-backdrop-filter: blur(24px) saturate(1.6);
-  box-shadow: 0 0.75rem 2rem var(--shadow-floating);
+  box-shadow: var(--elevation-floating);
   color: var(--media-text);
   overflow: hidden;
   transition:
@@ -343,7 +343,7 @@
 .now-playing .np-cover {
   width: min(100%, 26rem, 46dvh);
   border-radius: var(--radius-card);
-  box-shadow: 0 1.5rem 3rem var(--shadow-dialog);
+  box-shadow: var(--elevation-dialog);
 }
 .np-meta h2 {
   margin: 0;
@@ -490,7 +490,7 @@
 }
 .personal-grid > a {
   display: block;
-  padding: 0.5rem;
+  padding: var(--space-8);
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -506,8 +506,8 @@
   overflow-x: auto;
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
-  margin-right: -1rem;
-  padding-right: 1rem;
+  margin-right: calc(-1 * var(--space-16));
+  padding-right: var(--space-16);
 }
 .home-songs::-webkit-scrollbar {
   display: none;
@@ -568,7 +568,7 @@
   margin-bottom: var(--space-8);
   /* Most Fanart wordmarks are light; the shadow keeps them legible on a
    * light canvas while the photo fades away. */
-  filter: drop-shadow(0 1px 0.5rem rgb(0 0 0 / 0.45));
+  filter: drop-shadow(0 1px 0.5rem var(--shadow-dialog));
 }
 .artist-identity h1.has-logo {
   position: absolute;
@@ -595,7 +595,7 @@
     background: var(--selected-fill);
     color: var(--text-accent);
     font-size: var(--type-footnote);
-    font-weight: 700;
+    font-weight: 600;
   }
   .personal-header .app-nav a.nav-account {
     display: none;
@@ -627,7 +627,7 @@
     background: var(--dock-surface);
     backdrop-filter: blur(24px) saturate(1.6);
     -webkit-backdrop-filter: blur(24px) saturate(1.6);
-    box-shadow: 0 0.5rem 1.5rem var(--shadow-soft);
+    box-shadow: var(--elevation-soft);
     grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
   }
   /* The tab row and the player row share one height. */
@@ -726,8 +726,8 @@
     padding-top: 0;
   }
   .artist-scene.has-background {
-    margin-left: -1rem;
-    margin-right: -1rem;
+    margin-left: calc(-1 * var(--space-16));
+    margin-right: calc(-1 * var(--space-16));
     min-height: min(125vw, 80dvh);
   }
   .has-background .artist-hero {

@@ -1,6 +1,14 @@
 @import "./tokens.css";
 @import "./brand/pig-radiance.css";
 
+/* The four shadow recipes (#153), bound to the brand's --shadow-* colours. */
+:root {
+  --elevation-soft: 0 0.5rem 1.5rem var(--shadow-soft);
+  --elevation-card: 0 0.75rem 2rem var(--shadow-card);
+  --elevation-floating: 0 1rem 2.5rem var(--shadow-floating);
+  --elevation-dialog: 0 1.5rem 3rem var(--shadow-dialog);
+}
+
 :root {
   font-family:
     system-ui,
@@ -75,7 +83,7 @@ h1 {
   line-height: 1.1;
 }
 h2 {
-  font-weight: 600;
+  font-weight: 650;
   letter-spacing: -0.5px;
 }
 img {
@@ -114,24 +122,24 @@ img {
   align-items: center;
   gap: var(--space-12);
   text-align: left;
-  margin: 0 5px 56px;
+  margin: 0 var(--space-4) var(--space-48);
   padding: 0;
 }
 .nav-count {
   margin-left: auto;
-  line-height: 17px;
-  padding: 0 5px;
+  line-height: 1.4;
+  padding: 0 var(--space-4);
   border-radius: var(--radius-compact);
   font-size: var(--type-caption);
   background: var(--selected-fill);
 }
 .eyebrow {
   font-size: var(--type-caption);
-  font-weight: 650;
-  letter-spacing: 1.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
   color: var(--text-accent);
   display: flex;
   align-items: center;
-  gap: 7px;
-  margin-bottom: 18px;
+  gap: var(--space-8);
+  margin-bottom: var(--space-16);
 }

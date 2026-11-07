@@ -56,7 +56,7 @@
   color: var(--text);
   border: 1px solid var(--control-border);
   border-radius: var(--radius-compact);
-  padding: 10px;
+  padding: var(--space-8);
 }
 .import-actions {
   display: flex;
@@ -85,7 +85,7 @@
   align-items: center;
   gap: var(--space-12);
   font-size: var(--type-caption);
-  margin: 18px 0;
+  margin: var(--space-16) 0;
   flex-wrap: wrap;
 }
 .download-option input {
@@ -95,7 +95,7 @@
   background: var(--raised);
   color: var(--text);
   border: 1px solid var(--control-border);
-  padding: 10px;
+  padding: var(--space-8);
   border-radius: var(--radius-compact);
 }
 .library-controls .tab-list {
@@ -113,7 +113,7 @@
   background: var(--raised);
   color: var(--text);
   border: 1px solid var(--control-border);
-  padding: 10px;
+  padding: var(--space-8);
   border-radius: var(--radius-compact);
   max-width: 100%;
   width: 300px;
@@ -130,14 +130,14 @@
   display: flex;
   align-items: center;
   gap: var(--space-8);
-  padding: 6px 8px;
+  padding: var(--space-4) var(--space-8);
   background: var(--raised);
   border: 1px solid var(--control-border);
   border-radius: var(--radius-compact);
 }
 .source-order li.dragging {
   border-color: var(--accent);
-  box-shadow: 0 4px 14px rgb(0 0 0 / 0.18);
+  box-shadow: var(--elevation-soft);
 }
 .source-order-name {
   flex: 1;
@@ -145,7 +145,7 @@
 }
 .source-grip {
   display: inline-flex;
-  padding: 6px 2px;
+  padding: var(--space-4) 2px;
   cursor: grab;
   touch-action: none;
   color: var(--secondary);
@@ -155,7 +155,7 @@
 }
 .source-order button {
   display: inline-flex;
-  padding: 6px;
+  padding: var(--space-4);
   background: none;
   border: 0;
   color: var(--text);
@@ -166,7 +166,7 @@
   cursor: default;
 }
 .download-panel .import-actions {
-  margin-top: 20px;
+  margin-top: var(--space-16);
 }
 .download-panel a {
   text-decoration: underline;
@@ -196,9 +196,9 @@
 .release-actions {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: var(--space-16);
   flex-wrap: wrap;
-  margin: 26px 0;
+  margin: var(--space-24) 0;
 }
 .release-actions label {
   display: flex;
@@ -213,7 +213,7 @@
   background: var(--raised);
   color: var(--text);
   border: 1px solid var(--control-border);
-  padding: 9px;
+  padding: var(--space-8);
   border-radius: var(--radius-compact);
   max-width: 100%;
 }
@@ -221,17 +221,17 @@
   margin: var(--space-24) 0;
 }
 .discography-tabs {
-  margin-bottom: 18px;
+  margin-bottom: var(--space-16);
   flex-wrap: wrap;
 }
 .discography-saved {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-4);
   font-size: var(--type-caption);
 }
 .album-quality {
-  margin: 18px 0;
+  margin: var(--space-16) 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-compact);
   padding: var(--space-16);
@@ -243,7 +243,7 @@
 }
 .album-quality p {
   margin-top: var(--space-16);
-  line-height: 1.8;
+  line-height: 1.5;
   color: var(--secondary);
   max-width: 700px;
 }
@@ -262,7 +262,7 @@
 }
 @media (max-width: 600px) {
   .catalogue-song {
-    padding: 14px 0;
+    padding: var(--space-12) 0;
     gap: var(--space-8);
   }
   .catalogue-song .song-number {
@@ -276,7 +276,7 @@
     font-size: var(--type-caption);
   }
   .release-actions {
-    gap: 14px;
+    gap: var(--space-12);
     margin: var(--space-24) 0;
   }
   .album-quality {

@@ -6,7 +6,7 @@
   margin-bottom: var(--space-24);
 }
 .system-panel .import-actions {
-  margin-top: 20px;
+  margin-top: var(--space-16);
   gap: var(--space-12);
   flex-wrap: wrap;
 }
@@ -24,7 +24,7 @@
   margin: var(--space-16) 0;
 }
 .system-panel p {
-  line-height: 1.6;
+  line-height: 1.5;
 }
 .system-panel .download-option input[type="checkbox"] {
   flex-shrink: 0;
