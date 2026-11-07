@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 import { Cover, catalogueCover } from "./Cover";
 import { discoverUrl } from "./navigation";
-import { PageHeader } from "./PageHeader";
+import { PageHeader, SectionHeader } from "./PageHeader";
 import { SongRow } from "./SongRow";
 import { withLibrary, type Song } from "./songs";
 import { warmArtist, whenIdle } from "./prefetch";
@@ -121,8 +121,10 @@ function HomeSection({ kind }: { kind: "popular" | "recommended" }) {
     : "";
   return (
     <section className="home-section">
-      <h2>{heading}</h2>
-      {(!feed || collections.length > 0) && <p>{caption}</p>}
+      <SectionHeader
+        title={heading}
+        subtitle={!feed || collections.length > 0 ? caption : undefined}
+      />
       {!feed && <p role="status">{error || "Finding music\u2026"}</p>}
       {feed && !collections.length && empty && <p role="status">{empty}</p>}
       {collections.map((collection) => (
@@ -203,7 +205,7 @@ function RecentlyAdded() {
   if (!albums.length) return null;
   return (
     <section className="home-section">
-      <h2>Recently added</h2>
+      <SectionHeader title="Recently added" />
       <div className="home-grid">
         {albums.map((album) => (
           <a

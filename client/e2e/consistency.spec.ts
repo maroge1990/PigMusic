@@ -174,3 +174,46 @@ test("#152: sign-in and the app draw one focus ring", async ({ page }) => {
   expect(signIn).toBe("solid 2px 3px");
   expect(app).toBe(signIn);
 });
+
+const PANELS =
+  ".system-panel, .account-section, .migration-summary, .owner-links";
+
+test("#151: one section heading and one panel shape", async ({ page }) => {
+  await owner(page);
+  const headings = new Set<string>();
+  const radii = new Set<string>();
+  for (const path of [
+    "/#/home",
+    "/#/search?q=Charli",
+    "/#/library/artist/artist-1",
+    "/#/account",
+    "/#/admin",
+    "/#/admin/people",
+    "/#/admin/migration",
+  ]) {
+    await page.goto(path);
+    await expect(page.locator("main h1").first()).toBeVisible();
+    await expect(page.locator("main h2").first()).toBeVisible();
+    const found = await page.evaluate((panels) => {
+      const loose: string[] = [];
+      const looks: string[] = [];
+      for (const h2 of document.querySelectorAll<HTMLElement>("main h2")) {
+        if (h2.closest("dialog") || !h2.offsetParent) continue;
+        const inPanel = h2.parentElement?.matches(panels);
+        if (!inPanel && !h2.closest("header.section-title"))
+          loose.push(h2.textContent || "");
+        const s = getComputedStyle(h2);
+        looks.push(`${s.fontSize} ${s.fontWeight} ${s.letterSpacing}`);
+      }
+      const radii = [...document.querySelectorAll<HTMLElement>(panels)]
+        .filter((el) => el.offsetParent)
+        .map((el) => getComputedStyle(el).borderTopLeftRadius);
+      return { loose, looks, radii };
+    }, PANELS);
+    expect(found.loose, path).toEqual([]);
+    found.looks.forEach((look) => headings.add(look));
+    found.radii.forEach((radius) => radii.add(radius));
+  }
+  expect([...headings]).toHaveLength(1);
+  expect([...radii]).toHaveLength(1);
+});

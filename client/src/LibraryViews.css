@@ -39,15 +39,29 @@
   color: var(--text);
   vertical-align: middle;
 }
+/* The one section heading (#151): in the page's flow it leads its section;
+ * inside a panel the same h2 style sits on the panel's first line. */
 .section-title {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  margin: var(--space-32) 0 20px;
-  gap: 15px;
+  margin: var(--space-32) 0 var(--space-16);
+  gap: var(--space-12);
 }
-.section-title h2 {
+.section-title:first-child {
+  margin-top: 0;
+}
+.section-title h2,
+.account-section > h2,
+.system-panel > h2,
+.owner-links > h2 {
   font-size: var(--type-headline);
+}
+.account-section > h2,
+.system-panel > h2,
+.owner-links > h2 {
+  margin: 0 0 var(--space-12);
 }
 .section-title > span {
   font-size: var(--type-caption);

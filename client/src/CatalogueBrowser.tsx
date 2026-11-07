@@ -13,7 +13,7 @@ import {
   Shuffle,
 } from "lucide-react";
 import { Cover, catalogueCover } from "./Cover";
-import { PageHeader } from "./PageHeader";
+import { PageHeader, SectionHeader } from "./PageHeader";
 import { ArtistPopular } from "./ArtistPopular";
 import { MusicLink } from "./MusicLink";
 import { mergePage } from "./discography";
@@ -485,7 +485,7 @@ export function CatalogueBrowser({
       )}
       {choose ? (
         <>
-          <h2>Choose another edition</h2>
+          <SectionHeader title="Choose another edition" />
           {editions.map((e) => (
             <button
               className="result-row"

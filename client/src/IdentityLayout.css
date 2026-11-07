@@ -24,10 +24,6 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.section-title {
-  flex-wrap: wrap;
-  gap: var(--space-8);
-}
 .nav-count {
   line-height: 1.4;
 }

@@ -41,7 +41,9 @@ test("Home order, with no song recommendations", async ({ page }) => {
     },
   });
   await page.goto("/#/home");
-  const sections = page.locator(".home-page > .home-section > h2");
+  const sections = page.locator(
+    ".home-page > .home-section > .section-title h2",
+  );
   await expect(sections).toHaveText([
     "Your mixes",
     "Recently added",

@@ -8,7 +8,7 @@
   position: relative;
   isolation: isolate;
   width: min(100%, 28rem);
-  padding: 2rem;
+  padding: var(--space-24);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   background: var(--surface);
@@ -229,11 +229,6 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
 }
-.account-section h2,
-.system-panel h2 {
-  margin: 0 0 var(--space-12);
-  font-size: var(--type-headline);
-}
 @media (min-width: 768px) {
   .account-section,
   .system-panel {
@@ -441,8 +436,8 @@
   align-items: center;
   justify-content: flex-start;
   gap: var(--space-8);
-  margin: 0;
-  font-size: var(--type-body);
+}
+.owner-tools summary {
   font-weight: 650;
 }
 .owner-tools-body {
@@ -458,7 +453,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-8) var(--space-24);
-  margin: var(--space-12) 0 0;
+  margin: 0;
 }
 .owner-links a {
   color: var(--text-accent);
@@ -533,9 +528,6 @@ a.album-card {
 .home-section {
   margin-top: var(--space-32);
 }
-.home-section > h2 {
-  margin: 0;
-}
 .home-section > p {
   margin: var(--space-4) 0 var(--space-16);
   color: var(--secondary);
@@ -549,9 +541,6 @@ main h1[tabindex="-1"]:focus {
 }
 .search-group {
   margin-top: var(--space-32);
-}
-.search-group > h2 {
-  margin: 0 0 var(--space-12);
 }
 .discover-list {
   display: grid;

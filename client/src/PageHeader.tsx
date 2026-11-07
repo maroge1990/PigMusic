@@ -33,15 +33,18 @@ export function SectionHeader({
   title,
   subtitle,
   actions,
+  id,
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
   actions?: ReactNode;
+  /** The h2's id, for a section labelled by its heading. */
+  id?: string;
 }) {
   return (
     <header className="section-title">
       <div>
-        <h2>{title}</h2>
+        <h2 id={id}>{title}</h2>
         {subtitle && <p>{subtitle}</p>}
       </div>
       {actions && <div className="section-actions">{actions}</div>}

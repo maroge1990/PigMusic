@@ -1,4 +1,5 @@
 import { Cover } from "./Cover";
+import { SectionHeader } from "./PageHeader";
 import { go } from "./routes";
 import type { Album } from "./types";
 
@@ -13,7 +14,7 @@ export function ArtistAlbums({
 }) {
   return (
     <>
-      {albums.length > 0 && <h2>Albums</h2>}
+      {albums.length > 0 && <SectionHeader title="Albums" />}
       <div className="personal-grid">
         {albums.map((a) => (
           <button key={a.id} onClick={() => go("/library/album/" + a.id)}>
@@ -31,7 +32,7 @@ export function ArtistAlbums({
           </button>
         ))}
       </div>
-      {hasSongs && <h2>Songs</h2>}
+      {hasSongs && <SectionHeader title="Songs" />}
     </>
   );
 }

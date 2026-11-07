@@ -9,9 +9,14 @@
     var(--selected-fill)
   );
   border: 1px solid var(--selected-fill);
-  border-radius: var(--radius-control);
-  padding: 22px;
+  border-radius: var(--radius-card);
+  padding: var(--space-16);
   margin-bottom: 18px;
+}
+@media (min-width: 768px) {
+  .migration-summary {
+    padding: var(--space-24);
+  }
 }
 .inventory-name {
   display: flex;

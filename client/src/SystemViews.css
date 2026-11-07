@@ -1,7 +1,7 @@
 .system-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 22px;
+  gap: var(--space-24);
 }
 .system-panel > svg {
   color: var(--text-accent);
@@ -166,9 +166,6 @@
   .brand small {
     font-size: var(--type-caption);
   }
-  .migration-summary {
-    padding: 18px;
-  }
   .group-head {
     padding: var(--space-12);
     gap: 6px;
@@ -238,7 +235,6 @@
   }
   .migration-summary {
     display: block;
-    padding: 18px;
   }
   .inventory-counts {
     flex-direction: row;

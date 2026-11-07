@@ -14,6 +14,7 @@ import {
   type Local,
 } from "./searchAnswers";
 import type { Album, Artist, Library, Track } from "./types";
+import { SectionHeader } from "./PageHeader";
 
 const fold = (value: string) => value.toLocaleLowerCase().normalize("NFKD");
 const clean = (value: string) => value.trim().slice(0, 150);
@@ -198,7 +199,7 @@ export function SearchPage({
       {active && (
         <>
           <section className="search-group" aria-labelledby="search-library">
-            <h2 id="search-library">In your library</h2>
+            <SectionHeader id="search-library" title="In your library" />
             {nothingLocal && (
               <p className="muted">Nothing in your library yet.</p>
             )}
@@ -247,7 +248,7 @@ export function SearchPage({
           </section>
           {local && local.household.length > 0 && (
             <section className="search-group" aria-labelledby="search-server">
-              <h2 id="search-server">On the server</h2>
+              <SectionHeader id="search-server" title="On the server" />
               <p className="muted">
                 Already on the server. Tap to play; adding to your library is
                 instant.
@@ -265,7 +266,7 @@ export function SearchPage({
             </section>
           )}
           <section className="search-group" aria-labelledby="search-discover">
-            <h2 id="search-discover">Discover</h2>
+            <SectionHeader id="search-discover" title="Discover" />
             {catalogue === null ? (
               <p role="status">Searching the music catalogue…</p>
             ) : catalogueFailed ? (

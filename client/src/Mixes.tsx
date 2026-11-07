@@ -17,6 +17,7 @@ import { SongRow } from "./SongRow";
 import { fromMixTrack, type Song } from "./songs";
 import type { Track } from "./types";
 import "./mixes.css";
+import { SectionHeader } from "./PageHeader";
 
 type Mix = {
   id: string;
@@ -436,8 +437,10 @@ export function Mixes() {
   }, [revision]);
   return (
     <section className="home-section" aria-label="Your mixes">
-      <h2>Your mixes</h2>
-      <p>Familiar favourites. Something new. Made for today.</p>
+      <SectionHeader
+        title="Your mixes"
+        subtitle="Familiar favourites. Something new. Made for today."
+      />
       {feed?.mixes.length || feed?.radio ? (
         <div className="mix-row">
           {feed.radio && (
