@@ -117,6 +117,7 @@ img {
     transform: rotate(360deg);
   }
 }
+
 .brand {
   display: flex;
   align-items: center;
@@ -124,6 +125,7 @@ img {
   text-align: left;
   margin: 0 var(--space-4) var(--space-48);
   padding: 0;
+  min-height: 44px;
 }
 .nav-count {
   margin-left: auto;

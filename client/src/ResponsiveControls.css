@@ -1,11 +1,7 @@
 .album-quality > div {
   margin-top: var(--space-16);
 }
-.release-actions {
-  align-items: center;
-  gap: var(--space-16);
-  margin: var(--space-24) 0;
-}
+
 @media (max-width: 600px) {
   .system-panel .release-actions {
     align-items: stretch;
@@ -22,6 +18,8 @@
 
 @media (max-width: 600px) {
   .library-controls {
+    margin-bottom: var(--space-24);
+    gap: var(--space-8);
     flex-wrap: wrap;
   }
   .library-controls .tab-list {
@@ -81,7 +79,7 @@
   border: 1px solid var(--border);
 }
 .new-playlist-dialog::backdrop {
-  background: #0008;
+  background: var(--scrim);
 }
 .new-playlist-dialog form,
 .new-playlist-dialog label {
@@ -125,18 +123,6 @@
   color: var(--secondary);
   font-size: var(--type-subhead);
 }
-.saved-artist-heading {
-  display: flex;
-  gap: var(--space-16);
-  align-items: center;
-  margin: var(--space-24) 0;
-}
-.saved-artist-heading > .cover {
-  width: 88px;
-  height: 88px;
-  flex: 0 0 88px;
-  border-radius: 50%;
-}
 .artist-choice ul {
   list-style: none;
   margin: var(--space-8) 0 0;
@@ -158,6 +144,9 @@
  * compact row of actions, so the music starts high on the screen. Per-item
  * settings sit below the songs. */
 .release-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-8);
   margin: var(--space-12) 0;
 }

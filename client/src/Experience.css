@@ -542,7 +542,7 @@
   justify-content: center;
   margin: 0;
   border-radius: 50%;
-  color: #fff;
+  color: var(--media-text);
   background: color-mix(in srgb, var(--media-canvas) 35%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -597,9 +597,6 @@
     font-size: var(--type-footnote);
     font-weight: 600;
   }
-  .personal-header .app-nav a.nav-account {
-    display: none;
-  }
   .shuffle-library {
     width: 2.75rem;
     height: 2.75rem;
@@ -614,14 +611,18 @@
     overflow: hidden;
     clip: rect(0, 0, 0, 0);
   }
-  /* One floating dock, as streaming apps do: the tab bar is its base and,
-   * while something is playing, the mini player is its top row. They share
-   * one surface and never overlap each other or the page. */
+
+  /* The tab row and the player row share one height. */
   .personal-header .app-nav {
+    position: fixed;
+    z-index: 20;
+    margin: 0;
+    display: grid;
+    gap: 0;
+    border-top: 1px solid var(--border);
     left: var(--space-12);
     right: var(--space-12);
     bottom: var(--dock-gap);
-    padding: var(--space-4);
     border: 1px solid var(--border);
     border-radius: var(--radius-dock);
     background: var(--dock-surface);
@@ -629,9 +630,6 @@
     -webkit-backdrop-filter: blur(24px) saturate(1.6);
     box-shadow: var(--elevation-soft);
     grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
-  }
-  /* The tab row and the player row share one height. */
-  .personal-header .app-nav {
     padding: 2px var(--space-4);
   }
   .personal-header .app-nav a {
@@ -726,6 +724,7 @@
     padding-top: 0;
   }
   .artist-scene.has-background {
+    border-radius: 0;
     margin-left: calc(-1 * var(--space-16));
     margin-right: calc(-1 * var(--space-16));
     min-height: min(125vw, 80dvh);

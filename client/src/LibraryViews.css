@@ -11,6 +11,7 @@
   align-items: center;
 }
 .tab-list button {
+  position: relative;
   font-size: var(--type-caption);
   color: var(--secondary);
   font-weight: 600;
@@ -25,9 +26,19 @@
   color: var(--text);
 }
 .tab-list button.active {
-  color: var(--text);
-  background: var(--raised);
-  border-color: var(--border);
+  color: var(--text-accent);
+  background: var(--selected-fill);
+  border-color: transparent;
+}
+.tab-list button.active:after {
+  content: "";
+  position: absolute;
+  bottom: 2px;
+  left: calc(50% - 10px);
+  width: 20px;
+  height: 3px;
+  border-radius: var(--radius-compact);
+  background: var(--accent);
 }
 .tab-list button > span {
   display: inline-block;
@@ -131,9 +142,8 @@
   font-size: var(--type-caption);
   line-height: 1.4;
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
   transition: color 0.15s;
 }
 .album-card:hover .card-name {
@@ -144,9 +154,8 @@
   font-size: var(--type-caption);
   color: var(--secondary);
   line-height: 1.5;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .card-caption span {
   margin: 0 var(--space-4);

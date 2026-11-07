@@ -188,6 +188,7 @@
   color: var(--secondary);
 }
 .migration-track {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-12);
@@ -198,16 +199,19 @@
 }
 .migration-track.chosen {
   background: var(--selected-fill);
+  color: var(--text-accent);
 }
+
 .migration-track input {
   accent-color: var(--accent);
   width: 16px;
   height: 16px;
   flex-shrink: 0;
   cursor: pointer;
-}
-.migration-track input:disabled {
-  cursor: default;
+  appearance: none;
+  border: 1px solid var(--control-border);
+  border-radius: 50%;
+  background: var(--surface);
 }
 .migration-track .track-position {
   min-width: 15px;

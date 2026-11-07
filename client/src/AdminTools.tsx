@@ -25,7 +25,6 @@ import {
 } from "./SystemView";
 import { go, type Route } from "./routes";
 import type { Album, Library, Migration } from "./types";
-import "./styles.css";
 
 const AdminPeople = lazy(() =>
   import("./AdminPeople").then((m) => ({ default: m.AdminPeople })),

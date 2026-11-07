@@ -170,26 +170,6 @@
 .personal-tabs button {
   flex-shrink: 0;
 }
-.personal-track {
-  display: flex;
-  align-items: center;
-  gap: var(--space-12);
-  border-bottom: 1px solid var(--border);
-  padding: var(--space-12) 0;
-}
-.personal-track > div {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.personal-track .cover {
-  width: 3rem;
-  flex: 0 0 3rem;
-}
-.personal-track p {
-  margin: var(--space-4) 0;
-  color: var(--secondary);
-}
 .personal-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 10rem), 1fr));
@@ -318,15 +298,6 @@
 .personal-header .header-wordmark img {
   width: 100%;
 }
-.personal-track {
-  flex-wrap: wrap;
-}
-.personal-track > div {
-  flex-basis: 8rem;
-}
-.personal-track > .cover {
-  flex: 0 0 3rem;
-}
 
 .personal-app summary {
   min-height: 2.75rem;
@@ -383,21 +354,7 @@
   .personal-header {
     flex-wrap: nowrap;
   }
-  .personal-header .app-nav {
-    position: fixed;
-    z-index: 20;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    margin: 0;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(3.5rem, 1fr));
-    gap: 0;
-    padding: var(--space-4) var(--space-4)
-      calc(var(--space-4) + env(safe-area-inset-bottom));
-    border-top: 1px solid var(--border);
-    background: var(--surface);
-  }
+
   .app-nav a {
     flex-direction: column;
     justify-content: center;
@@ -413,13 +370,6 @@
     min-width: 1rem;
     height: 1rem;
     font-size: var(--type-caption);
-  }
-
-  .personal-main {
-    padding-bottom: calc(
-      var(--mobile-nav-height, 4rem) + var(--player-height, 0px) +
-        var(--space-32)
-    );
   }
 }
 
