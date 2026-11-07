@@ -732,3 +732,49 @@ def test_soulseek_waits_honour_the_per_source_time_limit(tmp_path, monkeypatch):
     assert worker.attempt(job, "mp3_320", errors) is False
     assert errors == ["soulseek: time limit reached"]
     assert worker.runtime.health.snapshot("soulseek")["reason"] is None
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_an_album_search_ended_early_is_searched_again_for_a_song_it_lacked(
+    tmp_path, monkeypatch, explicit
+):
+    """Codex round 1 on #131: the album search ended once the first song had
+    enough files and was cached; the second song, whose files came later,
+    found nothing (an explicit edition then failed outright)."""
+    import server.soulseek as soulseek
+
+    monkeypatch.setattr(soulseek, "SEARCH_POLL", 0.01)
+    store = configured(tmp_path)
+    first, second = song("First", 1), song("Second", 2)
+    if explicit:
+        first, second = (
+            {**first, "explicit_edition": True},
+            {**second, "explicit_edition": True},
+        )
+    store.submit_catalogue([first, second])
+    posts = []
+    early = [
+        {"username": f"peer{i}", "queueLength": 0, "files": [file("First")]}
+        for i in range(3)
+    ]
+    later = early + [{"username": "late", "queueLength": 0, "files": [file("Second")]}]
+
+    def handler(request):
+        if request.method == "POST":
+            posts.append(json.loads(request.content)["searchText"])
+            return httpx.Response(200, json={"id": f"s{len(posts)}"})
+        if request.url.path.endswith("responses"):
+            return httpx.Response(200, json=early if len(posts) == 1 else later)
+        return httpx.Response(200, json={"isComplete": len(posts) > 1})
+
+    adapter = Soulseek(store)
+    adapter.client = lambda: httpx.Client(
+        base_url="http://engine/api/v0/", transport=httpx.MockTransport(handler)
+    )
+    assert adapter.search(first, lambda: None)
+    found = adapter.search(second, lambda: None)
+    assert [c["username"] for c in found] == ["late"]
+    assert posts == ["Example Studio", "Example Studio"]
+    # Complete now: a third song of the album reuses it without searching.
+    adapter.search(first, lambda: None)
+    assert len(posts) == 2

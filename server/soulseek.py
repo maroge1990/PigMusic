@@ -256,7 +256,8 @@ class Soulseek:
     def _run_search(self, text, check, enough=lambda responses: False, limit=None):
         """The engine's responses to `text`, read every SEARCH_POLL seconds
         until `enough(responses)`, the engine completes the search, or
-        `limit` seconds pass (#131)."""
+        `limit` seconds pass (#131); and whether the engine had completed
+        it."""
         with self.client() as client:
             self.tidy(client)
             check()
@@ -274,10 +275,12 @@ class Soulseek:
                     result = client.get(f"searches/{search_id}/responses")
                     result.raise_for_status()
                     responses = result.json()
-                    if complete or enough(responses):
-                        return responses
-                    if time.monotonic() + SEARCH_POLL > deadline:
-                        return responses
+                    if (
+                        complete
+                        or enough(responses)
+                        or time.monotonic() + SEARCH_POLL > deadline
+                    ):
+                        return responses, complete
                     time.sleep(SEARCH_POLL)
             finally:
                 # Deleted later, once the engine has finished with it.
@@ -326,34 +329,48 @@ class Soulseek:
                         return True
             return False
 
-        key = (job["artist"], job["album"])
-        cached = self.cache.get(key)
-        if cached and time.monotonic() - cached[0] < 600:
-            responses = cached[1]
-        else:
+        def found(responses):
+            return any(
+                candidate_for(job, r, f) for r in responses for f in r.get("files", [])
+            )
+
+        def cached(key, run):
+            """A search's responses, reused for ten minutes. One that ended
+            early (enough files for another song of the album) is searched
+            again when it has nothing for this song (#131)."""
+            entry = self.cache.get(key)
+            if (
+                entry
+                and time.monotonic() - entry[0] < 600
+                and (entry[2] or found(entry[1]))
+            ):
+                return entry[1]
+            responses, complete = run()
+            self.cache.pop(key, None)
+            self.cache[key] = (time.monotonic(), responses, complete)
+            if len(self.cache) > 50:
+                self.cache.pop(next(iter(self.cache)))
+            return responses
+
+        def album_search():
             primary = f"{job['artist']} {job['album']}"
-            responses = self._run_search(primary, check, enough)
+            responses, complete = self._run_search(primary, check, enough)
             album = (job["album"] or "").strip()
             if not responses and album and album.lower() != primary.lower():
                 # The Soulseek server silently filters some artist names.
-                responses = self._run_search(album, check, enough, LATER_SEARCH)
-            self.cache[key] = (time.monotonic(), responses)
-            if len(self.cache) > 50:
-                self.cache.pop(next(iter(self.cache)))
-        if not job.get("explicit_edition") and not any(
-            candidate_for(job, r, f) for r in responses for f in r.get("files", [])
-        ):
+                return self._run_search(album, check, enough, LATER_SEARCH)
+            return responses, complete
+
+        responses = cached((job["artist"], job["album"]), album_search)
+        if not job.get("explicit_edition") and not found(responses):
             # No folder of that album has it: look for the song on any album.
             from .matching import lead_artist, strip_edition
 
             text = f"{lead_artist(job['artist'])} {strip_edition(job['title'])}"
-            key = ("song", text)
-            cached = self.cache.get(key)
-            if cached and time.monotonic() - cached[0] < 600:
-                responses = cached[1]
-            else:
-                responses = self._run_search(text, check, enough, LATER_SEARCH)
-                self.cache[key] = (time.monotonic(), responses)
+            responses = cached(
+                ("song", text),
+                lambda: self._run_search(text, check, enough, LATER_SEARCH),
+            )
         siblings = [
             t
             for t in self.store.queue()["items"]
