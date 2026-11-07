@@ -36,9 +36,13 @@ private actor AheadSource: DeviceCopySource {
     self.ready = ready
     self.preparing = preparing
   }
+  /// "one" answers `preparing` when asked to create it; with `stuck`, on
+  /// every poll too, so it can't become ready however late a test acts.
+  var stuck = false
+  func keepPreparing() { stuck = true }
   func deviceCopy(trackId: String, quality: String, create: Bool) async throws -> DeviceCopy {
     calls.append((create ? "create " : "poll ") + trackId)
-    return trackId == "one" && create ? preparing : ready
+    return trackId == "one" && (create || stuck) ? preparing : ready
   }
   func copyRequest(trackId: String, quality: String) async throws -> URLRequest {
     URLRequest(url: URL(string: "https://server.invalid/" + trackId)!)
@@ -363,8 +367,11 @@ private actor Flag {
     preparing["state"] = "preparing"
     let stuck = try LibraryCodec.decoder().decode(
       DeviceCopy.self, from: JSONSerialization.data(withJSONObject: preparing))
-    // "one" is still being prepared on every ask.
+    // "one" is still being prepared on every ask. Its polls answered ready
+    // before (#165): on a slow runner the 2 s poll could finish "one" before
+    // the pause took effect.
     let source = AheadSource(ready: try copy(), preparing: stuck)
+    await source.keepPreparing()
     let controller = DownloadController(archive: archive, source: source)
     controller.resume()
     for _ in 0..<100 where !(await source.calls.contains("create one")) {

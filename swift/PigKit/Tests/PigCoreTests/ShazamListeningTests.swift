@@ -64,7 +64,10 @@ private final class FakeSession: ShazamListeningSession, @unchecked Sendable {
     Issue.record("expected a timeout, got \(end)")
     return
   }
-  #expect(ContinuousClock.now - started < .seconds(5))
+  // The given limit ended it, not the 15 s default. A wall-clock bound near
+  // the limit failed on a loaded CI runner (5.3 s for 300 ms, #165).
+  #expect(ContinuousClock.now - started < ShazamListening.limit)
+  #expect(probe.lines.contains { $0.hasPrefix("timed out after 0.3 seconds") })
   // The microphone is closed and the app's audio session put back.
   #expect(session.wasCancelled)
   #expect(probe.began == 1 && probe.ended == 1)
