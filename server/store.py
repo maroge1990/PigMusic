@@ -313,27 +313,33 @@ class Store:
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             # Fair between requesters (#130): the oldest waiting job of the
-            # requester with the fewest jobs in progress, so one person's
+            # requester with the fewest jobs in progress and, among those,
+            # the one served longest ago (#164: with one download slot
+            # nobody has a job in progress at a claim), so one person's
             # song never waits behind another's whole album. A requester's
             # own jobs (an album's songs) keep their order; jobs nobody
             # asked for (quality upgrades) share as one more requester.
             row = conn.execute(
-                "WITH active AS (SELECT "
+                "WITH requesters AS (SELECT "
                 "COALESCE(json_extract(payload,'$.requested_by[0]'),'') AS who,"
-                "COUNT(*) AS n FROM queue "
-                "WHERE status IN ('searching','downloading','validating','importing') "
-                "GROUP BY who) "
+                "SUM(status IN ('searching','downloading','validating','importing')) AS n,"
+                "MAX(COALESCE(json_extract(payload,'$.claimed_at'),0)) AS served "
+                "FROM queue GROUP BY who) "
                 "SELECT q.id,q.payload,"
                 "(julianday('now')-julianday(q.updated_at))*86400 "
-                "FROM queue q LEFT JOIN active a "
-                "ON a.who=COALESCE(json_extract(q.payload,'$.requested_by[0]'),'') "
+                "FROM queue q JOIN requesters r "
+                "ON r.who=COALESCE(json_extract(q.payload,'$.requested_by[0]'),'') "
                 "WHERE q.status='waiting_for_sources' "
                 "AND COALESCE(json_extract(q.payload,'$.retry_after'),0)<=? "
-                "ORDER BY COALESCE(a.n,0),q.created_at,q.id LIMIT 1",
+                "ORDER BY r.n,r.served,q.created_at,q.id LIMIT 1",
                 (time.time(),),
             ).fetchone()
             if row:
-                payload = {**json.loads(row[1]), "claim_token": uuid.uuid4().hex}
+                payload = {
+                    **json.loads(row[1]),
+                    "claim_token": uuid.uuid4().hex,
+                    "claimed_at": time.time(),
+                }
                 for key in (
                     "error",
                     "source",

@@ -304,6 +304,24 @@ def test_one_requesters_song_is_claimed_before_anothers_whole_album(tmp_path):
     assert claimed[0].startswith("Album") and claimed[2].startswith("Album")
 
 
+def test_fairness_holds_with_one_download_slot(tmp_path):
+    """#164 (Codex on #130): with one slot the last job has finished before
+    the next claim, so counting jobs in progress fell back to first-come."""
+    store = Store(tmp_path)
+    enabled(store)
+    store.submit_catalogue(
+        [requested(store, title=f"Album song {i}") for i in range(3)],
+        user_id="alice",
+    )
+    store.submit_catalogue([requested(store, title="Single")], user_id="bob")
+    claimed = []
+    for _ in range(4):
+        job = store.claim_request()
+        claimed.append(job["title"])
+        store.request_state(job["id"], "completed")
+    assert claimed[1] == "Single"
+
+
 def test_jobs_nobody_asked_for_share_the_queue_as_one_requester(tmp_path):
     store = Store(tmp_path)
     enabled(store)
