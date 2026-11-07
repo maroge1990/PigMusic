@@ -259,11 +259,18 @@
       -> ShazamSong
     {
       var apple: MusicKit.Song?
-      if #available(iOS 27.0, *) {
-        apple = try? await item.songs().first
-      } else {
+      // `songs()` exists only in the iOS 27 SDK (Swift 6.4, Xcode 27); an
+      // older SDK has just the property, and `#available` doesn't stop it
+      // compiling the newer call.
+      #if compiler(>=6.4)
+        if #available(iOS 27.0, *) {
+          apple = try? await item.songs().first
+        } else {
+          apple = item.songs.first
+        }
+      #else
         apple = item.songs.first
-      }
+      #endif
       let base = song(item, found: found)
       return ShazamSong(
         shazamId: base.shazamId, appleId: base.appleId, title: base.title, artist: base.artist,
