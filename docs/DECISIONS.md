@@ -151,3 +151,11 @@ The rules these decisions produce, as they stand today, are in [PRODUCT.md](PROD
 **D-71 (5 Nov 2026)** — Every fix for a Codex finding is validated by Codex before it ships: a focused confirmation round on the fix commit(s), naming the finding, repeated until Codex confirms it fixed with nothing new at high. This replaces D-59's "after the last round, fixes go out on our own tests": the round limit still stops reviews from hunting for new issues forever, but it never lets a fix skip Codex. A finding left unfixed (medium or low) still becomes a `finding` issue. Reason: Mark — "we can't be marking our own homework".
 
 **D-72 (8 Nov 2026)** — A download tries each quality level for 3 minutes (was 10), and a song gives up after 6 minutes in total, so a song no source can find fails in about 6 minutes instead of up to 30 (#133). A saved budget of 10 from before is treated as the old default and becomes 3; a budget chosen in Settings since is kept. Reason: Mark chose 3 minutes a level (most songs are found in 10–20 s).
+
+**D-73 (8 Nov 2026)** — Audit batches 1 to 5a go live together in one release on the night of 8 Nov (around midnight Melbourne), under D-52's other conditions (CI, Codex, Unraid verify, nobody playing). Reason: Mark chose one release over batch 1 alone, accepting that the download timing lines are harder to attribute.
+
+**D-74 (8 Nov 2026)** — The download engine's leftover files (#147: 18 files, 269 MB in its downloads folder, none used by the library) are deleted during that release, after listing each and checking that the library does not use it. Reason: Mark agreed; nothing reads them.
+
+**D-75 (8 Nov 2026)** — The server keeps its log in a rotating file in its own data folder (#148, about 10 MB, oldest lines dropped), besides the container log, so a restart no longer loses it. Reason: Mark chose option A.
+
+**D-76 (8 Nov 2026)** — The leftover `pig-music-test-app` and `pig-music-test-fake` containers and their test folder are removed (done 8 Nov). Reason: Mark agreed; they were test leftovers.
