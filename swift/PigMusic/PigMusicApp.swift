@@ -273,13 +273,14 @@ struct LibraryShell: View {
 private struct AccountAvatar: View {
   let name: String
   @Environment(\.colorScheme) private var scheme
+  @ScaledMetric(relativeTo: .footnote) private var size: CGFloat = 34
   var body: some View {
     Text(
       name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined()
         .uppercased()
     )
     .font(.footnote.weight(.bold)).foregroundStyle(PigBrand.textAccent(scheme))
-    .frame(width: 34, height: 34)
+    .frame(width: size, height: size)
     .background(PigBrand.accent(scheme).opacity(0.16), in: Circle())
   }
 }

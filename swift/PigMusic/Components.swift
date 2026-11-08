@@ -246,11 +246,14 @@ struct RoundIcon: View {
 
 struct RoundIconLabel: View {
   let systemImage: String
+  // Grow with Dynamic Type (#162).
+  @ScaledMetric(relativeTo: .body) private var size: CGFloat = 40
+  @ScaledMetric(relativeTo: .body) private var glyph: CGFloat = 16
   @Environment(\.colorScheme) private var scheme
   @Environment(\.isEnabled) private var enabled
   var body: some View {
-    Image(systemName: systemImage).font(.system(size: 16, weight: .semibold))
-      .frame(width: 40, height: 40)
+    Image(systemName: systemImage).font(.system(size: glyph, weight: .semibold))
+      .frame(width: size, height: size)
       .foregroundStyle(enabled ? PigBrand.text(scheme) : PigBrand.secondary(scheme))
       .background(PigBrand.surface(scheme), in: Circle())
       .overlay(Circle().strokeBorder(PigBrand.controlBorder(scheme), lineWidth: 1))
@@ -268,6 +271,10 @@ struct SongRow: View {
   var showArtwork = true
   let play: () -> Void
   @Environment(\.colorScheme) private var scheme
+  // Grow with Dynamic Type (#162).
+  @ScaledMetric(relativeTo: .subheadline) private var numberWidth: CGFloat = 26
+  @ScaledMetric(relativeTo: .body) private var moreWidth: CGFloat = 32
+  @ScaledMetric(relativeTo: .footnote) private var markSize: CGFloat = 13
   private var current: Bool { model.player.queue.current?.track.actionTrack.id == track.actionTrack.id }
   private var caption: String {
     if number != nil { return track.durationText ?? track.artist }
@@ -287,7 +294,7 @@ struct SongRow: View {
               } else {
                 Text("\(number)").foregroundStyle(.secondary)
               }
-            }.font(.subheadline.monospacedDigit()).frame(width: 26)
+            }.font(.subheadline.monospacedDigit()).frame(minWidth: numberWidth)
           } else if showArtwork {
             ArtworkThumb(model: model, source: track.artworkSource, title: track.title)
           }
@@ -308,7 +315,7 @@ struct SongRow: View {
       Button {
         model.actionTrack = track
       } label: {
-        Image(systemName: "ellipsis").frame(width: 32, height: 44).foregroundStyle(.secondary)
+        Image(systemName: "ellipsis").frame(minWidth: moreWidth, minHeight: 44).foregroundStyle(.secondary)
       }.buttonStyle(.plain).accessibilityLabel("More actions for \(track.title)")
     }
     .frame(minHeight: 48)
@@ -339,7 +346,7 @@ struct SongRow: View {
     let copies = copies
     return HStack(spacing: 4) {
       if let watch = copies.watch {
-        Image(systemName: "applewatch").font(.system(size: 13, weight: .semibold))
+        Image(systemName: "applewatch").font(.system(size: markSize, weight: .semibold))
           .foregroundStyle(
             watch == .ready
               ? PigBrand.accent(scheme)

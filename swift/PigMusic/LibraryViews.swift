@@ -485,6 +485,7 @@ struct MiniPlayer: View {
 }
 
 struct NowPlayingView: View {
+  @ScaledMetric(relativeTo: .largeTitle) private var playSize: CGFloat = 64
   @Bindable var model: AppModel
   /// Opens the playing song's artist where playback started (library or catalogue).
   var openArtist: (ArtistRoute) -> Void = { _ in }
@@ -572,7 +573,7 @@ struct NowPlayingView: View {
       }.accessibilityLabel("Previous song")
       Button(action: player.toggle) {
         Image(systemName: player.wantsPlayback ? "pause.circle.fill" : "play.circle.fill")
-          .font(.system(size: 64)).frame(minWidth: 64, minHeight: 64)
+          .font(.system(size: playSize)).frame(minWidth: playSize, minHeight: playSize)
       }.accessibilityLabel(player.wantsPlayback ? "Pause" : "Play")
       Button(action: player.next) {
         Image(systemName: "forward.fill").font(.title).frame(minWidth: 44, minHeight: 44)
@@ -649,6 +650,7 @@ struct NowPlayingView: View {
 }
 
 private struct UpNextRow: View {
+  @ScaledMetric(relativeTo: .body) private var moreWidth: CGFloat = 32
   let model: AppModel
   let item: PlaybackOccurrence
   var body: some View {
@@ -672,7 +674,7 @@ private struct UpNextRow: View {
         Button("Move later") { model.player.moveUpcoming(item.id, by: 1) }
         Button("Remove from queue", role: .destructive) { model.player.removeUpcoming(item.id) }
       } label: {
-        Image(systemName: "ellipsis").frame(width: 32, height: 44)
+        Image(systemName: "ellipsis").frame(minWidth: moreWidth, minHeight: 44)
       }.accessibilityLabel("Queue actions for \(item.track.title)")
     }
   }

@@ -221,6 +221,7 @@ struct ArtistHero: View {
   @State private var logo: UIImage?
   @Environment(\.colorScheme) private var scheme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   init(model: AppModel, artistId: String, name: String, subtitle: String?) {
     self.model = model
     self.artistId = artistId
@@ -242,15 +243,18 @@ struct ArtistHero: View {
           .frame(width: proxy.size.width, height: Self.height + max(0, offset))
           .clipped()
           .mask {
+            // Reduce Transparency: the photograph ends instead of fading (#162).
             LinearGradient(
-              stops: [
-                .init(color: .black, location: 0.4),
-                .init(color: .black.opacity(0.3), location: 0.72),
-                .init(color: .clear, location: 1),
-              ], startPoint: .top, endPoint: .bottom)
+              stops: reduceTransparency
+                ? [.init(color: .black, location: 0), .init(color: .black, location: 1)]
+                : [
+                  .init(color: .black, location: 0.4),
+                  .init(color: .black.opacity(0.3), location: 0.72),
+                  .init(color: .clear, location: 1),
+                ], startPoint: .top, endPoint: .bottom)
           }
-          .opacity(1 - progress * 0.9)
-          .blur(radius: reduceMotion ? 0 : progress * 12)
+          .opacity(reduceTransparency ? 1 : 1 - progress * 0.9)
+          .blur(radius: reduceMotion || reduceTransparency ? 0 : progress * 12)
           .offset(y: offset > 0 ? -offset : (reduceMotion ? 0 : -offset * 0.45))
         HStack(alignment: .bottom, spacing: 14) {
           Artwork(model: model, source: .artist(artistId), title: name, width: 512, circle: true)
@@ -297,7 +301,7 @@ struct ArtistHero: View {
   @ViewBuilder private var backdrop: some View {
     if let background {
       Image(uiImage: background).resizable().scaledToFill()
-    } else if let portrait {
+    } else if let portrait, !reduceTransparency {
       Image(uiImage: portrait).resizable().scaledToFill().blur(radius: 40).saturation(1.3)
         .opacity(0.7)
     } else {
@@ -309,6 +313,8 @@ struct ArtistHero: View {
 /// The bottom-of-page link to an artist's complete catalogue.
 struct DiscographyLinkLabel: View {
   var title = "Full discography"
+  @Environment(\.colorScheme) private var scheme
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   var body: some View {
     HStack {
       Label(title, systemImage: "square.stack.3d.up")
@@ -317,7 +323,9 @@ struct DiscographyLinkLabel: View {
       Image(systemName: "chevron.right").foregroundStyle(.tertiary)
     }
     .padding(.vertical, 12).padding(.horizontal, 14)
-    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+    .background(
+      reduceTransparency ? AnyShapeStyle(PigBrand.raised(scheme)) : AnyShapeStyle(.quaternary.opacity(0.5)),
+      in: RoundedRectangle(cornerRadius: 12))
     .contentShape(Rectangle())
   }
 }

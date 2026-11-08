@@ -427,6 +427,7 @@ struct SearchArtistView: View {
 /// mixes every kind; each row is marked by where its music is, never listed
 /// apart for it. Updates as the person types.
 private struct FoundResultsView: View {
+  @ScaledMetric(relativeTo: .footnote) private var markSize: CGFloat = 13
   let model: AppModel
   @Bindable var search: FoundSearch
   @State private var kind: FoundKind = .top
@@ -579,7 +580,7 @@ private struct FoundResultsView: View {
       // The same marks as songs: a cloud for your library, a faded one for
       // the server; nothing for music not on it yet.
       if mark == .library || mark == .server {
-        Image(systemName: "cloud").font(.system(size: 13, weight: .semibold))
+        Image(systemName: "cloud").font(.system(size: markSize, weight: .semibold))
           .foregroundStyle(
             mark == .library ? PigBrand.accent(scheme) : PigBrand.secondary(scheme).opacity(0.5))
           .accessibilityLabel(mark == .library ? "In your library" : "On the server")

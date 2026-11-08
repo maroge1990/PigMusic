@@ -110,3 +110,27 @@ def test_row_subtitles_and_raw_fonts_use_the_type_roles():
     assert ".font(.footnote)" not in watch and ".font(.caption)" not in watch
     for name in ("DownloadsView.swift", "WatchDownloadsView.swift"):
         assert "PigType.caption).foregroundStyle(.secondary)" not in sources()[name]
+
+
+def test_the_artist_hero_respects_reduce_transparency():
+    """#162: the blurred portrait, the photo's fade and the translucent link
+    tile stayed under Reduce Transparency."""
+    hero = sources()["CatalogueViews.swift"]
+    assert hero.count("accessibilityReduceTransparency") >= 2
+    assert "} else if let portrait, !reduceTransparency {" in hero
+    assert "reduceMotion || reduceTransparency ? 0" in hero
+
+
+def test_fixed_sizes_follow_dynamic_type():
+    """#162: no @ScaledMetric anywhere; fixed frames and glyph sizes."""
+    app = sources()
+    for raw in (
+        ".frame(width: 26)",
+        ".frame(width: 32, height: 44)",
+        ".frame(width: 34, height: 34)",
+        "font(.system(size: 16, weight: .semibold))",
+        "font(.system(size: 13, weight: .semibold))",
+        ".font(.system(size: 64))",
+    ):
+        assert found(raw) == [], raw
+    assert sum(text.count("@ScaledMetric") for text in app.values()) >= 8
