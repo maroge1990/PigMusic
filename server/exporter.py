@@ -121,13 +121,17 @@ class Exporter:
         # and parse it once for every song it placed (#63).
         self.snapshot = (None, {})
 
+    def snapshot_key(self):
+        """The library snapshot file as it stands (inode, size, mtime)."""
+        try:
+            info = os.stat(self.store.directory / "library-snapshot.json")
+        except OSError:
+            return None
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+
     def library_snapshot(self):
         path = self.store.directory / "library-snapshot.json"
-        try:
-            info = os.stat(path)
-            key = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
-        except OSError:
-            key = None
+        key = self.snapshot_key()
         if key is None or self.snapshot[0] != key:
             self.snapshot = (key, load_json(path))
         return self.snapshot[1]
@@ -160,9 +164,15 @@ class Exporter:
         except OSError:
             return False
 
-    def paths(self, track, relative=None):
-        """The download's source and its NAS destination. `relative` is the
-        destination chosen before taking lifecycle_lock (`destination`)."""
+    def paths(self, track, chosen=None):
+        """The download's source and its NAS destination. `chosen` is the
+        destination picked before taking lifecycle_lock (`destination`); one
+        picked from a snapshot that has changed since is picked again."""
+        relative = None
+        if chosen:
+            relative, key = chosen
+            if key is not None and key != self.snapshot_key():
+                relative = None
         source_root = library_root(self.store)
         if not contained(source_root, track["relative_path"]).is_file():
             legacy = self.store.directory / "downloads" / "library"
@@ -173,18 +183,26 @@ class Exporter:
         return source, relative, contained(self.root, relative)
 
     def destination(self, track):
-        """Where the song goes: its recorded location, else the folder chosen
-        from the library snapshot. Chosen outside lifecycle_lock, once a
-        pass: a song whose folder needs a decision was retried under the
-        lock every pass, each try reading the whole snapshot (#166)."""
-        return track.get("export_relative_path") or self.relative(track)
+        """Where the song goes, with the snapshot it was chosen from: its
+        recorded location (no snapshot), else the folder chosen from the
+        library snapshot. Chosen outside lifecycle_lock, once a pass: a song
+        whose folder needs a decision was retried under the lock every pass,
+        each try reading the whole snapshot (#166)."""
+        if track.get("export_relative_path"):
+            return track["export_relative_path"], None
+        key = self.snapshot_key()
+        relative = self.relative(track)
+        # The snapshot changed while it was read: compare as unknown.
+        if key != self.snapshot_key():
+            key = ("changed",)
+        return relative, key
 
-    def warm(self, track, relative=None):
+    def warm(self, track, chosen=None):
         """Hash what publication will check, outside lifecycle_lock. False
         when a file was written moments ago: it waits for the next pass, so
         publication never hashes it under the lock."""
         try:
-            source, _, target = self.paths(track, relative)
+            source, _, target = self.paths(track, chosen)
             # A song already published whose download is gone only needs its
             # copy checked: an earlier pass's read will do. Anything else
             # publishes, so it is read in this pass.
@@ -391,14 +409,14 @@ class Exporter:
             )
 
     @coordinated(catch_up=False)
-    def publish(self, track, relative=None):
+    def publish(self, track, chosen=None):
         # Each step is named in a long lifecycle_lock hold's warning (#17).
         lock = self.store.lifecycle_lock
         with self.store.connect() as conn:
             if not self.current(conn, track):
                 return False  # Replaced or removed since this pass began.
         step(lock, "current")
-        source, relative, target = self.paths(track, relative)
+        source, relative, target = self.paths(track, chosen)
         step(lock, "paths")
         expected = track["sha256"]
         if not source.is_file():
@@ -528,18 +546,18 @@ class Exporter:
                 # One song that needs a decision (or whose file is refused)
                 # waits on its own; the rest still publish.
                 try:
-                    relative = self.destination(track)
+                    chosen = self.destination(track)
                 except (OSError, ValueError, KeyError) as exc:
                     waiting.append(review(track, exc))
                     continue
-                if not self.warm(track, relative):
+                if not self.warm(track, chosen):
                     unsettled.add(track.get("id"))
                     continue
                 try:
                     if self.confirmed(track):
                         completed += 1
                         continue
-                    published = self.publish(track, relative)
+                    published = self.publish(track, chosen)
                     if published is False:
                         continue
                 except (OSError, ValueError, KeyError) as exc:

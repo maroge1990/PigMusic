@@ -853,3 +853,31 @@ def test_a_song_needing_a_decision_never_takes_the_lifecycle_lock(
     status = store.read_document("library-export-status")
     assert [r["id"] for r in status["needs_review"]] == ["stuck"], status
     assert chosen_under_lock and not any(chosen_under_lock), chosen_under_lock
+
+
+def test_a_folder_chosen_before_the_lock_is_chosen_again_if_the_snapshot_changed(
+    tmp_path, monkeypatch
+):
+    """#166 (Codex, 9 Nov): the folder is chosen before lifecycle_lock; a
+    scan that replaced the snapshot meanwhile (here: a second matching album
+    folder, so the song now needs a decision) must not be published to the
+    obsolete choice, nor its download removed."""
+    store, root = nas_with(tmp_path, monkeypatch, [("Artist/Album (2020)", 1)])
+    track = download(store, "song")
+    exporter = Exporter(store, root)
+    (track,) = exporter.records()
+    chosen = exporter.destination(track)
+    snapshot = store.directory / "library-snapshot.json"
+    tracks = json.loads(snapshot.read_text())["tracks"]
+    tracks.append(
+        {
+            **tracks[0],
+            "id": "other",
+            "relative_path": "Artist/Album (2020 Remaster)/01 x.mp3",
+        }
+    )
+    snapshot.write_text(json.dumps({"tracks": tracks}))
+    with pytest.raises(ValueError, match="destination decision"):
+        exporter.publish(track, chosen)
+    assert not any(root.glob("Artist/Album (2020)/*song*"))
+    assert (store.directory / "downloads/library/Artist/Album/song.mp3").is_file()
