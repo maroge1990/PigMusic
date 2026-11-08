@@ -7,17 +7,22 @@ import sys
 import textwrap
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+import server
+
+# The folder that holds the server package: in the image, tests/ and server/
+# are not siblings, so the child process starts where `server` imports.
+ROOT = Path(server.__file__).resolve().parents[1]
 
 
 def run(data, script):
-    return subprocess.run(
+    done = subprocess.run(
         [sys.executable, "-c", textwrap.dedent(script), str(data)],
         cwd=ROOT,
         capture_output=True,
         text=True,
-        check=True,
     )
+    assert done.returncode == 0, done.stderr
+    return done
 
 
 def test_the_log_is_written_to_a_rotating_file_without_secrets(tmp_path):
