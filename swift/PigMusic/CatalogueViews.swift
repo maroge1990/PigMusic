@@ -82,7 +82,7 @@ struct CatalogueArtistView: View {
           ReleaseGrid(model: model, releases: albums.releases.sorted { $0.date > $1.date })
         } else if albums == nil {
           if let error {
-            Text(error).font(PigType.footnote).foregroundStyle(.secondary)
+            StatusText(error, kind: .error)
             Button("Try again") { Task { await loadAlbums() } }
               .buttonStyle(.pigSecondary)
           } else {
@@ -491,10 +491,10 @@ struct CatalogueAlbumView: View {
               artist: artist)
           }.listRowSeparator(.hidden)
           if let error {
-            Text(error).foregroundStyle(.secondary)
+            StatusText(error, kind: .error)
             Button("Try again") { Task { await load() } }.buttonStyle(.pigSecondary)
           } else if editions != nil {
-            Text("No catalogue results.").foregroundStyle(.secondary)
+            StatusText("No catalogue results.")
           } else {
             ProgressView().frame(maxWidth: .infinity)
           }
@@ -553,7 +553,8 @@ struct CatalogueEditionsView: View {
         }
       }
       if offset < total {
-        Button("Load more editions") { Task { await load(reset: false) } }.disabled(loading)
+        Button("Show more editions") { Task { await load(reset: false) } }.disabled(loading)
+          .buttonStyle(.pigSecondary)
       }
     }.pigCanvas().navigationTitle(title).task { await load(reset: true) }
   }
@@ -617,7 +618,7 @@ struct CatalogueReleaseView: View {
           ).preparesPlayback(release.songs.map(\.track), model: model)
           controls(release)
           if release.songs.isEmpty {
-            Text("No catalogue results.").foregroundStyle(.secondary)
+            StatusText("No catalogue results.")
           }
           AlbumSongList(
             model: model, tracks: release.songs.map(track),
@@ -638,7 +639,7 @@ struct CatalogueReleaseView: View {
             model: model, source: .release(releaseId),
             fallback: groupId.map { .releaseGroup($0) }, eyebrow: "ALBUM", title: title)
           if let error {
-            Text(error).foregroundStyle(.secondary)
+            StatusText(error, kind: .error)
             Button("Try again") { Task { await load() } }.buttonStyle(.pigSecondary)
               .disabled(loading)
           } else {
@@ -746,10 +747,10 @@ private struct CatalogueStatus: View {
   var body: some View {
     if loading { ProgressView("Loading catalogue…") }
     if let error {
-      Text(error).foregroundStyle(.secondary)
+      StatusText(error, kind: .error)
       Button("Try again", action: retry).buttonStyle(.pigSecondary).disabled(loading)
     } else if loaded && empty {
-      Text("No catalogue results.").foregroundStyle(.secondary)
+      StatusText("No catalogue results.")
     }
   }
 }

@@ -61,7 +61,7 @@ struct PlaylistToolsView: View {
         }
       }
       if loading { ProgressView() }
-      if let message { Text(message).font(PigType.footnote) }
+      if let message { StatusText(message) }
     }.pigCanvas().navigationTitle("Playlist tools")
       .fileImporter(isPresented: $selecting, allowedContentTypes: [.xml]) { result in
         do {
@@ -142,7 +142,7 @@ struct AddToPlaylistView: View {
       }
       NavigationLink("Create or import playlists") { PlaylistToolsView(model: model) }
       if loading { ProgressView() }
-      if let message { Text(message).font(PigType.footnote) }
+      if let message { StatusText(message) }
     }.pigCanvas().navigationTitle("Add to playlist")
   }
 }
@@ -189,7 +189,7 @@ struct PlaylistView: View {
           ) { await addMissing() }
           Spacer()
         }.buttonStyle(.plain)
-        if let message { Text(message).font(PigType.footnote) }
+        if let message { StatusText(message) }
         // Edits saved offline show here, and a rejected one says so where it was made.
         if let failed = model.pendingEdits.first(where: {
           $0.mutation.playlistId == playlist.id && $0.state != "queued"

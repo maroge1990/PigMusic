@@ -83,7 +83,7 @@ struct WatchDownloadsView: View {
           }
           Button("Retry Watch transfers") { Task { await watch.retry() } }
           if let error = watch.message ?? watch.link?.error {
-            Text(error).foregroundStyle(PigBrand.danger(scheme))
+            StatusText(error, kind: .error)
           }
           Text(
             "Playlists sent to the Watch update when they change. Copies keep downloading to this iPhone while it is locked; the system decides when to pass them to the Watch. AAC copies also use storage on this iPhone."

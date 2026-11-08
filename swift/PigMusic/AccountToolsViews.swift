@@ -18,7 +18,7 @@ struct PreferencesView: View {
         Text("Light").tag("light")
         Text("Dark").tag("dark")
       }
-      if let message { Text(message).font(PigType.footnote) }
+      if let message { StatusText(message) }
     }.pigCanvas().navigationTitle("Appearance").task {
       preferences = model.preferences
       loaded = true
@@ -69,7 +69,7 @@ struct PasswordView: View {
       }.disabled(
         loading || !model.canMutate || current.isEmpty || password.count < 12
           || password != repeatPassword)
-      if let message { Text(message).font(PigType.footnote) }
+      if let message { StatusText(message) }
     }.pigCanvas().navigationTitle("Password")
   }
 }
@@ -116,7 +116,7 @@ struct SessionsView: View {
         Button("Sign out other devices", role: .destructive) { signingOutOthers = true }
           .disabled(loading || !model.canMutate)
       }
-      if let message { Text(message).font(PigType.footnote) }
+      if let message { StatusText(message) }
       if loading { ProgressView() }
     }.pigCanvas().navigationTitle("Devices and sessions").task { await load() }
       .toolbar {
@@ -202,7 +202,7 @@ struct QualityView: View {
       } else {
         ProgressView()
       }
-      if let message { Text(message).font(PigType.footnote) }
+      if let message { StatusText(message) }
     }.pigCanvas().navigationTitle("Server quality").task {
       do {
         let value = try await model.readCatalogue { try await $0.quality() }
@@ -252,7 +252,7 @@ struct RemovalView: View {
           loading || !model.canMutate || tracks.count > 500)
       }
       if loading { ProgressView() }
-      if let message { Text(message).font(PigType.footnote) }
+      if let message { StatusText(message) }
     }.pigCanvas().navigationTitle("Remove music").task { await load() }
   }
   private func load() async {

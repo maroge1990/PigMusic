@@ -428,7 +428,7 @@ struct InlineQualityPicker: View {
           ProgressView()
         }
       }
-      if let message { Text(message).font(PigType.footnote).foregroundStyle(.secondary) }
+      if let message { StatusText(message) }
     }
     .task(id: id) {
       guard
@@ -530,5 +530,22 @@ struct AlbumSongList: View {
         Divider()
       }
     }
+  }
+}
+
+/// The one status line (#159): an error in the danger colour, anything else
+/// (a notice, a result) in secondary, both at footnote size.
+struct StatusText: View {
+  enum Kind { case error, info }
+  let text: String
+  var kind: Kind = .info
+  @Environment(\.colorScheme) private var scheme
+  init(_ text: String, kind: Kind = .info) {
+    self.text = text
+    self.kind = kind
+  }
+  var body: some View {
+    Text(text).font(PigType.footnote)
+      .foregroundStyle(kind == .error ? PigBrand.danger(scheme) : PigBrand.secondary(scheme))
   }
 }

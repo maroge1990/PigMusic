@@ -75,7 +75,7 @@ struct SongActionsView: View {
           )
         }
         if loading { ProgressView() }
-        if let message { Section { Text(message).font(PigType.footnote) } }
+        if let message { Section { StatusText(message) } }
       }.pigCanvas().navigationTitle("Song actions").navigationBarTitleDisplayMode(.inline)
         .toolbar { Button("Done") { dismiss() }.disabled(loading) }
         .task { await loadFavourite() }
@@ -144,8 +144,8 @@ struct RequestsView: View {
           PigType.footnote)
       }
       if loading && !loaded { ProgressView("Loading requests…") }
-      if let error { Text(error).font(PigType.footnote) }
-      if loaded && groups.isEmpty { Text("No music requests").foregroundStyle(.secondary) }
+      if let error { StatusText(error, kind: .error) }
+      if loaded && groups.isEmpty { StatusText("No music requests") }
       ForEach(groups) { group in
         DisclosureGroup {
           ForEach(group.items) { item in songRow(item) }
@@ -172,7 +172,8 @@ struct RequestsView: View {
         }
       }
       if next != nil {
-        Button("Load more requests") { Task { await load(reset: false) } }.disabled(loading)
+        Button("Show more requests") { Task { await load(reset: false) } }.disabled(loading)
+          .buttonStyle(.pigSecondary)
       }
     }.pigCanvas().navigationTitle("Music requests")
       .toolbar {
@@ -198,7 +199,7 @@ struct RequestsView: View {
         ProgressView(value: min(1, max(0, progress)))
       }
       if let error = item.error, !error.isEmpty {
-        Text(error).font(PigType.caption).foregroundStyle(.secondary)
+        StatusText(error, kind: .error)
       }
       if ["failed", "cancelled"].contains(item.status) {
         Button("Retry request") { Task { await retry([item]) } }

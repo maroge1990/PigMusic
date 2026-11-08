@@ -26,8 +26,9 @@ private struct DownloadList: View {
     let groups = DeviceGroup.build(downloads.records.filter { $0.state == "ready" })
     List {
       if downloads.records.isEmpty {
-        Text("No downloads yet. Choose songs, albums or playlists to download.").foregroundStyle(
-          .secondary)
+        ContentUnavailableView(
+          "No downloads yet", systemImage: "arrow.down.circle",
+          description: Text("Choose songs, albums or playlists to download."))
       }
       if !transfers.isEmpty {
         Section("Transfers") {

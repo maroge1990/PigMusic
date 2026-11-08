@@ -40,7 +40,7 @@ struct LibraryView: View {
               .joined(separator: " · ")
           ).font(PigType.subhead).foregroundStyle(.secondary)
           if let message = model.message {
-            Text(message).font(PigType.footnote).foregroundStyle(.secondary)
+            StatusText(message)
           }
         }
         HStack(spacing: 8) {
@@ -437,7 +437,7 @@ struct AccountView: View {
         Button("Sign out", role: .destructive) { Task { await model.signOut() } }.disabled(
           model.busy || model.mutationActive)
       }
-      if let message = model.message { Section { Text(message).font(PigType.footnote) } }
+      if let message = model.message { Section { StatusText(message) } }
     }.navigationTitle("Account")
   }
 }
@@ -617,7 +617,7 @@ struct NowPlayingView: View {
   }
   private func failure(_ error: String) -> some View {
     VStack(spacing: 8) {
-      Text(error).font(PigType.footnote).foregroundStyle(PigBrand.danger(scheme))
+      StatusText(error, kind: .error)
         .multilineTextAlignment(.center)
       HStack {
         Button("Retry") { player.retry() }

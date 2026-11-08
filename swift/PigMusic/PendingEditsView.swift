@@ -28,7 +28,7 @@ struct PendingEditsView: View {
             Text("\(track.title) · \(track.artist)").font(.caption)
           }
           Text(pending.state).font(.caption)
-          if let message = pending.message { Text(message).font(.footnote) }
+          if let message = pending.message { StatusText(message, kind: .error) }
           if let id = pending.mutation.playlistId,
             let playlist = model.playlists.first(where: { $0.id == id })
           {

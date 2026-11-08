@@ -64,6 +64,7 @@ private struct WatchReadiness: View {
 /// Like Apple Music and Spotify on the Watch: what is playing first, then the
 /// library by playlist, artist and album, with phone tools and storage last.
 private struct WatchLibraryView: View {
+  @Environment(\.colorScheme) private var scheme
   @Bindable var model: WatchModel
   var body: some View {
     NavigationStack {
@@ -71,12 +72,15 @@ private struct WatchLibraryView: View {
         WatchNowPlayingRow(model: model)
         if !model.manifest.songs.isEmpty { WatchReadiness(model: model) }
         if model.manifest.songs.isEmpty {
-          VStack(alignment: .leading, spacing: 6) {
-            Image("PigLockup").resizable().scaledToFit().frame(height: 32)
-              .accessibilityHidden(true)
-            Text("No music on your Watch yet").font(.headline)
+          ContentUnavailableView {
+            Label {
+              Text("No music on your Watch yet")
+            } icon: {
+              Image("PigLockup").resizable().scaledToFit().frame(height: 32)
+                .accessibilityHidden(true)
+            }
+          } description: {
             Text("On iPhone, use Send to Apple Watch on a playlist, artist or album.")
-              .font(.footnote).foregroundStyle(.secondary)
           }.listRowBackground(Color.clear)
         } else {
           let playlists = model.manifest.collections.filter { !$0.songIds.isEmpty }
@@ -162,7 +166,9 @@ private struct WatchLibraryView: View {
               Text(
                 "Albums play gapless. Crossfade adds a three-second crossfade between unrelated songs. Changes apply to the next queue."
               ).font(.footnote)
-              if let message = model.message ?? model.link?.error { Text(message).font(.footnote) }
+              if let message = model.message ?? model.link?.error {
+                Text(message).font(.footnote).foregroundStyle(PigBrand.secondary(scheme))
+              }
             }.pigBrandedCanvas().navigationTitle("Storage & sync")
           }
         }
@@ -322,6 +328,7 @@ private struct WatchNowPlaying: View {
   }
 }
 private struct WatchPlaybackDetails: View {
+  @Environment(\.colorScheme) private var scheme
   @Bindable var model: WatchModel
   var body: some View {
     List {
@@ -362,7 +369,7 @@ private struct WatchPlaybackDetails: View {
       }
       Slider(value: $model.volume, in: 0...1).accessibilityLabel("PigMusic level")
       if let error = model.playback.error ?? model.message {
-        Text(error).font(.footnote)
+        Text(error).font(.footnote).foregroundStyle(PigBrand.danger(scheme))
         Button("Retry playback") { Task { await model.retry() } }
       }
     }.pigBrandedCanvas().navigationTitle("Controls")

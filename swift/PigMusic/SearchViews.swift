@@ -125,8 +125,8 @@ private struct SearchResultsView: View {
             }
           }
           if session.localNext != nil {
-            Button("More library results") { Task { await session.moreLocal() } }.disabled(
-              session.localLoading)
+            Button("Show more library results") { Task { await session.moreLocal() } }
+              .buttonStyle(.pigSecondary).disabled(session.localLoading)
           }
         }
         if session.onlineEnabled {
@@ -141,8 +141,8 @@ private struct SearchResultsView: View {
               }
             }
             if session.householdNext != nil {
-              Button("More household results") { Task { await session.moreHousehold() } }.disabled(
-                session.householdLoading)
+              Button("Show more household results") { Task { await session.moreHousehold() } }
+                .buttonStyle(.pigSecondary).disabled(session.householdLoading)
             }
           }
           Section("Catalogue artists") {
@@ -242,8 +242,8 @@ private struct SearchResultsView: View {
   }
   @ViewBuilder private func status(loading: Bool, error: String?, empty: Bool) -> some View {
     if loading { ProgressView("Searching…") }
-    if let error { Text(error).font(PigType.footnote).foregroundStyle(.secondary) }
-    if !loading && error == nil && empty { Text("No matches").foregroundStyle(.secondary) }
+    if let error { StatusText(error, kind: .error) }
+    if !loading && error == nil && empty { StatusText("No matches") }
   }
 }
 
@@ -304,7 +304,7 @@ struct SavedArtistView: View {
           }
         }
         if loading { ProgressView().frame(maxWidth: .infinity) }
-        if let error { Text(error).font(PigType.footnote) }
+        if let error { StatusText(error, kind: .error) }
         if more && !albums.isEmpty {
           Button("Show more albums") { Task { await load() } }.disabled(loading)
             .buttonStyle(.pigSecondary).frame(maxWidth: .infinity)
@@ -441,7 +441,7 @@ private struct FoundResultsView: View {
           if search.loading {
             ProgressView("Searching…")
           } else {
-            Text("No matches").foregroundStyle(.secondary)
+            StatusText("No matches")
           }
         }
         if kind == .top || kind == .songs || kind == .albums, let state = search.online?.state,
@@ -656,7 +656,7 @@ private struct ServerAlbumView: View {
           model.play(tracks, at: $0, origin: .catalogue(artistId: nil))
         }
         if let failure {
-          Text(failure).font(PigType.footnote).foregroundStyle(.secondary)
+          StatusText(failure, kind: .error)
         } else if tracks.isEmpty {
           ProgressView().frame(maxWidth: .infinity)
         }
@@ -764,12 +764,12 @@ private struct ApplePlaylistView: View {
             Text("This playlist has no songs PigMusic can show.").foregroundStyle(.secondary)
           }
         } else if let failure {
-          Text(failure).font(PigType.footnote).foregroundStyle(.secondary)
+          StatusText(failure, kind: .error)
         } else {
           ProgressView().frame(maxWidth: .infinity)
         }
         if let statusFailure {
-          Text(statusFailure).font(PigType.footnote).foregroundStyle(.secondary)
+          StatusText(statusFailure, kind: .error)
         }
       }.padding(.horizontal).padding(.bottom, 24)
     }
@@ -941,7 +941,7 @@ private struct AppleImportSheet: View {
             )
             .font(PigType.footnote).foregroundStyle(.secondary)
           }
-          if let message { Text(message).font(PigType.footnote) }
+          if let message { StatusText(message) }
         }
         Section {
           if working {
@@ -1159,7 +1159,7 @@ private struct ShazamFoundView: View {
           Text(checkFailure).font(PigType.footnote).foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
         }
-        if let message { Text(message).font(PigType.footnote) }
+        if let message { StatusText(message) }
         if ShazamListener.shared.saveFailed {
           Text("This song couldn't be added to Shazamed.").font(PigType.footnote)
             .foregroundStyle(.secondary)
@@ -1283,9 +1283,9 @@ private struct ShazamInboxView: View {
               )
             }
           }
-          if let message { Text(message).font(PigType.footnote) }
+          if let message { StatusText(message) }
           if let statusFailure {
-            Text(statusFailure).font(PigType.footnote).foregroundStyle(.secondary)
+            StatusText(statusFailure, kind: .error)
           }
         }
         Section {

@@ -30,7 +30,7 @@ struct ArtistAcquisitionView: View {
           Text(
             "\(state.done.count) of \(state.total) releases reviewed · \(state.created) requests created"
           )
-          if let error = state.error { Text(error).foregroundStyle(.secondary) }
+          if let error = state.error { StatusText(error, kind: .error) }
         }
       }
       Section {
@@ -49,7 +49,7 @@ struct ArtistAcquisitionView: View {
         Button("Refresh status") { Task { await load() } }
       }.disabled(loading || !model.canMutate || !(albums || singles || eps))
       if loading { ProgressView() }
-      if let message { Text(message).font(.footnote) }
+      if let message { StatusText(message) }
     }.pigCanvas().navigationTitle("Artist requests").task { await load() }
   }
   private func apply(_ value: ArtistAcquisition) {

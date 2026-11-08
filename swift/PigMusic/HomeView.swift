@@ -63,13 +63,15 @@ struct HomeView: View {
         } else {
           VStack(alignment: .leading, spacing: 6) {
             Text("Your mixes").font(.title3.weight(.bold))
-            Text(
-              model.homeErrors[.mixes]
-                ?? (model.homeContent[.mixes]?.mixesPreparing == true
+            if let error = model.homeErrors[.mixes] {
+              StatusText(error, kind: .error)
+            } else {
+              StatusText(
+                model.homeContent[.mixes]?.mixesPreparing == true
                   ? "Preparing your mixes. They'll appear once their audio is ready."
-                  : "Your mixes appear as your library grows. Discoveries are prepared ahead of playback.")
-            )
-            .font(PigType.footnote).foregroundStyle(.secondary)
+                  : "Your mixes appear as your library grows. Discoveries are prepared ahead of playback."
+              )
+            }
           }.padding(.horizontal)
         }
         if let recent = model.homeContent[.recent]?.albums, !recent.isEmpty {
@@ -199,7 +201,7 @@ struct HomeView: View {
         if model.homeLoading.contains(section) {
           ProgressView("Finding music…")
         } else if let error = model.homeErrors[section] {
-          Text(error).font(PigType.footnote).foregroundStyle(.secondary)
+          StatusText(error, kind: .error)
           Button("Try again") { Task { await model.refreshHome(force: true) } }
             .buttonStyle(.pigSecondary)
         } else if let feed {
@@ -254,7 +256,7 @@ struct MixDetailView: View {
             saving = false
           }
         }.disabled(saving)
-        if let notice { Text(notice).font(PigType.footnote) }
+        if let notice { StatusText(notice) }
       }
       Section {
         ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
