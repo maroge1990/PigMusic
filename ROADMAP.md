@@ -5,20 +5,24 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 8 Nov 2026 (afternoon, Melbourne).*
+*Overwritten at the end of every session. 8 Nov 2026 (night, Melbourne).*
 
-- **Live:** release `audit-20261109-v1`, server `9c8e7e7`, since 8 Nov 15:33 Melbourne (D-73; Mark confirmed nobody
-  was using it). Healthy; rollback container `PigMusic-before-audit-20261109-v1` and backup kept.
-- **In that release / pushed (audit of 6 Nov, #129–#165), all issues commented:**
-  - Server: batch 1 downloads (#130–#134, #139 closed), batch 2 per-song work (#135–#138, #140/#164 closed), batch 3
-    idle/per-device (#141, #22, #142, #144, #146, part of #145), rotating log file (#148, D-75).
-  - Web, batch 4: #150–#156.
-  - Swift, batch 5a: #165 closed, #149, #163; batch 5b: #157–#162 (iPhone consistency).
-- **Owed after the release:** live numbers for #130–#136, #138, #141, #22, #142, #146; a look at the web (#150–#156);
-  the next TestFlight build for #149, #157–#163. #147 (leftover files deleted) and #148 (log file
-  in `/data/logs`) are closed.
-- **Measure first:** #63's remaining timer loops and #145's artist re-warm, once batch 3 is live.
-- **iPhone/Watch:** 0.2.0 (22) on TestFlight (6 Nov); nothing newer uploaded.
+- **Live:** release `audit-20261109-v1`, server `9c8e7e7`, since 8 Nov 15:33 Melbourne (D-73). Healthy; rollback
+  container `PigMusic-before-audit-20261109-v1` and backup kept.
+- **First live check (8 Nov, 22:17-23:00, 6¾ h after the release), numbers on each issue:**
+  - Closed on live evidence: #146 (392 log lines in 6¾ h against 10,149 a day; no httpx or health lines, chart
+    timeouts one line each), #134 (every job logs its stages), #133 (longest job 87 s, was up to 30 min), #141
+    (`/library/changes` all under 1 s, was a 2.6 s median).
+  - #131: no engine "Failed to finalize search" errors (was 1,763 a day); early stop not seen yet (no search had hits).
+  - Idle CPU: our server 0.97% of a core (was 1.2%), slskd 2.41% (was 3.1%). #63 and #142 stay open.
+  - Not exercised yet (no song acquired since the release): #130, #132, #135, #136, #138; #22 needs listing timed
+    during preparation. Only lock holds over 1 s were at startup (1.3 s, 2.2 s in `recover_requests`).
+  - The live download budget looks like 1 minute a quality level (the stage timings stop at 60 s), not the 3-minute
+    default; one 9 MB transfer was cut off. A setting for Mark, not a code change.
+- **Next:** the morning check of the overnight mix-download run (9 Nov) for the issues not yet exercised; then
+  #63's remaining timer loops and #145's artist re-warm.
+- **iPhone/Watch:** 0.2.0 (23) uploaded to TestFlight 8 Nov (#149, #157–#163, waiting on Mark's device check).
+  Mark also owes a look at the web (#150–#156).
 - **Ways of working:** area batches (D-50), Codex rounds per D-59 and D-71, Claude pushes; releases under D-52/D-73;
   D-58 closing. Household details live only in the gitignored `.private/` (D-45).
 
