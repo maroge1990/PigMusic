@@ -12,7 +12,7 @@ struct DownloadsView: View {
       } else {
         ContentUnavailableView("Connect your library", systemImage: "arrow.down.circle")
       }
-    }.pigCanvas().navigationTitle("On this device")
+    }.pigCanvas().navigationTitle("On this device").navigationBarTitleDisplayMode(.inline)
   }
 }
 private struct DownloadList: View {

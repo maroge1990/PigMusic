@@ -113,7 +113,6 @@ struct CatalogueArtistView: View {
       withAnimation(.easeInOut(duration: 0.2)) { scrolledPastHero = past }
     }
     .pigCanvas().navigationTitle(scrolledPastHero ? name : "").navigationBarTitleDisplayMode(.inline)
-    .toolbarBackground(scrolledPastHero ? .automatic : .hidden, for: .navigationBar)
     .navigationDestination(isPresented: $showingLibrary) {
       if let saved { SavedArtistView(model: model, artist: saved) }
     }
@@ -567,7 +566,7 @@ struct CatalogueEditionsView: View {
         Button("Show more editions") { Task { await load(reset: false) } }.disabled(loading)
           .buttonStyle(.pigSecondary)
       }
-    }.pigCanvas().navigationTitle(title).task { await load(reset: true) }
+    }.pigCanvas().navigationTitle(title).navigationBarTitleDisplayMode(.inline).task { await load(reset: true) }
   }
   private func load(reset: Bool) async {
     guard !loading else { return }
@@ -659,7 +658,7 @@ struct CatalogueReleaseView: View {
         }
       }.padding(.horizontal).padding(.bottom, 24)
     }
-    .pigCanvas().navigationTitle(release?.title ?? title)
+    .pigCanvas().navigationTitle(release?.title ?? title).navigationBarTitleDisplayMode(.inline)
     .navigationDestination(isPresented: $showingArtist) {
       if let release, let artistId = release.artistId {
         CatalogueArtistView(model: model, artistId: artistId, name: release.artist)

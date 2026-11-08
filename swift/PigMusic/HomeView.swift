@@ -231,29 +231,32 @@ struct MixDetailView: View {
   @State private var saving = false
   private var tracks: [Track] { mix.tracks.filter { !hidden.contains($0.id) } }
   var body: some View {
+    // A List (not the album pages' ScrollView) keeps swipe to hide; styled
+    // plain, with the shared header and action row, it reads as one (#158).
     List {
       Section {
-        HStack(spacing: 16) {
-          MixArtwork(kind: mix.kind, title: mix.title).frame(width: 112, height: 112)
-          VStack(alignment: .leading, spacing: 6) {
-            Text(mix.title).font(.title2.bold())
-            Text(mix.reason).font(PigType.footnote).foregroundStyle(.secondary)
-            Text(mix.day).font(PigType.footnote).foregroundStyle(.secondary)
-          }
-        }.listRowBackground(Color.clear)
-        Button("Play mix", systemImage: "play.fill") { model.play(tracks) }.disabled(tracks.isEmpty)
-        Button("Save this edition", systemImage: "plus") {
-          saving = true
-          Task {
-            do {
-              _ = try await model.performPersonal { try await $0.saveMix(mix.id) }
-              notice = Self.savedNotice
-            } catch { notice = error.userMessage }
-            saving = false
-          }
-        }.disabled(saving)
+        DetailHeader(
+          model: model, source: nil, eyebrow: "MIX", title: mix.title,
+          subtitle: [mix.reason, mix.day].filter { !$0.isEmpty }.joined(separator: " · "),
+          art: AnyView(MixArtwork(kind: mix.kind, title: mix.title)))
+        HStack(spacing: 10) {
+          PlayCapsule { model.play(tracks) }.disabled(tracks.isEmpty)
+          RoundIcon(label: "Shuffle", systemImage: "shuffle") { model.play(tracks.shuffled()) }
+            .disabled(tracks.isEmpty)
+          RoundIcon(label: "Save this edition", systemImage: "plus") {
+            saving = true
+            Task {
+              do {
+                _ = try await model.performPersonal { try await $0.saveMix(mix.id) }
+                notice = Self.savedNotice
+              } catch { notice = error.userMessage }
+              saving = false
+            }
+          }.disabled(saving)
+          Spacer()
+        }.buttonStyle(.plain)
         if let notice { StatusText(notice) }
-      }
+      }.listRowSeparator(.hidden).listRowBackground(Color.clear)
       Section {
         ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
           SongRow(model: model, track: track.actionTrack) { model.play(tracks, at: index) }
@@ -269,7 +272,7 @@ struct MixDetailView: View {
             }
         }
       }
-    }.pigCanvas().navigationTitle(mix.title).navigationBarTitleDisplayMode(.inline)
+    }.listStyle(.plain).pigCanvas().navigationTitle(mix.title).navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .topBarTrailing) {
           Menu {

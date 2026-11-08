@@ -19,7 +19,7 @@ struct PreferencesView: View {
         Text("Dark").tag("dark")
       }
       if let message { StatusText(message) }
-    }.pigCanvas().navigationTitle("Appearance").task {
+    }.pigCanvas().navigationTitle("Appearance").navigationBarTitleDisplayMode(.inline).task {
       preferences = model.preferences
       loaded = true
     }
@@ -70,7 +70,7 @@ struct PasswordView: View {
         loading || !model.canMutate || current.isEmpty || password.count < 12
           || password != repeatPassword)
       if let message { StatusText(message) }
-    }.pigCanvas().navigationTitle("Password")
+    }.pigCanvas().navigationTitle("Password").navigationBarTitleDisplayMode(.inline)
   }
 }
 struct SessionsView: View {
@@ -118,7 +118,7 @@ struct SessionsView: View {
       }
       if let message { StatusText(message) }
       if loading { ProgressView() }
-    }.pigCanvas().navigationTitle("Devices and sessions").task { await load() }
+    }.pigCanvas().navigationTitle("Devices and sessions").navigationBarTitleDisplayMode(.inline).task { await load() }
       .toolbar {
         Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }.disabled(
           loading)
@@ -203,7 +203,7 @@ struct QualityView: View {
         ProgressView()
       }
       if let message { StatusText(message) }
-    }.pigCanvas().navigationTitle("Server quality").task {
+    }.pigCanvas().navigationTitle("Server quality").navigationBarTitleDisplayMode(.inline).task {
       do {
         let value = try await model.readCatalogue { try await $0.quality() }
         quality = value
@@ -253,7 +253,7 @@ struct RemovalView: View {
       }
       if loading { ProgressView() }
       if let message { StatusText(message) }
-    }.pigCanvas().navigationTitle("Remove music").task { await load() }
+    }.pigCanvas().navigationTitle("Remove music").navigationBarTitleDisplayMode(.inline).task { await load() }
   }
   private func load() async {
     guard !loading else { return }
@@ -357,7 +357,7 @@ struct DiagnosticsView: View {
         )
       }
     }
-    .pigCanvas().navigationTitle("Diagnostics")
+    .pigCanvas().navigationTitle("Diagnostics").navigationBarTitleDisplayMode(.inline)
     .task {
       export = makeExport()
       do {

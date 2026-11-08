@@ -712,7 +712,7 @@ struct QueueEditorView: View {
           }
         }
       }
-    }.pigCanvas().navigationTitle("Playback queue")
+    }.pigCanvas().navigationTitle("Playback queue").navigationBarTitleDisplayMode(.inline)
   }
 }
 

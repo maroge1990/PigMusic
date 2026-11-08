@@ -43,6 +43,6 @@ struct PendingEditsView: View {
           }.disabled(loading)
         }
       }
-    }.pigCanvas().navigationTitle("Pending edits")
+    }.pigCanvas().navigationTitle("Pending edits").navigationBarTitleDisplayMode(.inline)
   }
 }

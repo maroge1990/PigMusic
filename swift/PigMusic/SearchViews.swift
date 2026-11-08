@@ -1311,7 +1311,7 @@ private struct ShazamInboxView: View {
         }
       }
     }
-    .pigCanvas().navigationTitle("Shazamed")
+    .pigCanvas().navigationTitle("Shazamed").navigationBarTitleDisplayMode(.inline)
     .task { await model.receiveShazamShares() }
     .task(id: ApplePlaylistStates.fingerprint(asked)) { await load(asked) }
   }

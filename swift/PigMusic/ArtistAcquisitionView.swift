@@ -51,7 +51,7 @@ struct ArtistAcquisitionView: View {
       }.disabled(loading || !model.canMutate || !(albums || singles || eps))
       if loading { ProgressView() }
       if let message { StatusText(message) }
-    }.pigCanvas().navigationTitle("Artist requests").task { await load() }
+    }.pigCanvas().navigationTitle("Artist requests").navigationBarTitleDisplayMode(.inline).task { await load() }
   }
   private func apply(_ value: ArtistAcquisition) {
     state = value

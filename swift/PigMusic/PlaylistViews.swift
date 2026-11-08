@@ -62,7 +62,7 @@ struct PlaylistToolsView: View {
       }
       if loading { ProgressView() }
       if let message { StatusText(message) }
-    }.pigCanvas().navigationTitle("Playlist tools")
+    }.pigCanvas().navigationTitle("Playlist tools").navigationBarTitleDisplayMode(.inline)
       .fileImporter(isPresented: $selecting, allowedContentTypes: [.xml]) { result in
         do {
           let url = try result.get()
@@ -143,7 +143,7 @@ struct AddToPlaylistView: View {
       NavigationLink("Create or import playlists") { PlaylistToolsView(model: model) }
       if loading { ProgressView() }
       if let message { StatusText(message) }
-    }.pigCanvas().navigationTitle("Add to playlist")
+    }.pigCanvas().navigationTitle("Add to playlist").navigationBarTitleDisplayMode(.inline)
   }
 }
 
@@ -204,7 +204,7 @@ struct PlaylistView: View {
           Label("Edits waiting to sync", systemImage: "clock.arrow.circlepath")
             .font(PigType.footnote).foregroundStyle(.secondary)
         }
-      }.listRowSeparator(.hidden)
+      }.listRowSeparator(.hidden).listRowBackground(Color.clear)
       Section {
         ForEach(Array((playlist.entries ?? []).enumerated()), id: \.element.entryId) {
           index, entry in
@@ -223,21 +223,23 @@ struct PlaylistView: View {
         .moveDisabled(locked || playlist.favourites == true)
       }
       if playlist.favourites != true {
-        Section("Settings") {
+        // The album pages' settings block. A List (not their ScrollView) keeps
+        // swipe to remove and drag to reorder (#158).
+        DetailSettings {
           HStack {
             TextField("Name", text: $name).submitLabel(.done)
               .onSubmit { Task { await edit(name: name) } }
-            Button("Rename") { Task { await edit(name: name) } }.disabled(
-              locked || name.isEmpty || name == playlist.name)
+            Button("Rename") { Task { await edit(name: name) } }.buttonStyle(.pigSecondary)
+              .disabled(locked || name.isEmpty || name == playlist.name)
           }
           // Anchored to its button, so it opens there rather than at the top.
           Button("Delete playlist", role: .destructive) { deleting = true }.disabled(locked)
             .confirmationDialog("Delete \(playlist.name)?", isPresented: $deleting) {
               Button("Delete playlist", role: .destructive) { Task { await delete() } }
             }
-        }
+        }.listRowSeparator(.hidden).listRowBackground(Color.clear)
       }
-    }.pigCanvas().navigationTitle(playlist.name)
+    }.listStyle(.plain).pigCanvas().navigationTitle(playlist.name).navigationBarTitleDisplayMode(.inline)
       .toolbar {
         if playlist.favourites != true { EditButton() }
         Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }.disabled(

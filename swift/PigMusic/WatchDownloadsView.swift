@@ -91,7 +91,7 @@ struct WatchDownloadsView: View {
         }
       }
     }
-    .pigCanvas().navigationTitle("Apple Watch")
+    .pigCanvas().navigationTitle("Apple Watch").navigationBarTitleDisplayMode(.inline)
     .toolbar {
       if let watch = model.watch {
         let records = watch.downloads?.records ?? []

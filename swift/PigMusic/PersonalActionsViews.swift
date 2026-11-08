@@ -175,7 +175,7 @@ struct RequestsView: View {
         Button("Show more requests") { Task { await load(reset: false) } }.disabled(loading)
           .buttonStyle(.pigSecondary)
       }
-    }.pigCanvas().navigationTitle("Music requests")
+    }.pigCanvas().navigationTitle("Music requests").navigationBarTitleDisplayMode(.inline)
       .toolbar {
         Button("Refresh", systemImage: "arrow.clockwise") { Task { await load(reset: true) } }
           .disabled(loading)

@@ -134,3 +134,38 @@ def test_fixed_sizes_follow_dynamic_type():
     ):
         assert found(raw) == [], raw
     assert sum(text.count("@ScaledMetric") for text in app.values()) >= 8
+
+
+ROOT_TITLES = {
+    '"Home"',
+    '"Search"',
+    '"Your library"',
+    '"Downloads"',
+    '"Account"',  # the account sheet's root
+    '"PigMusic"',  # sign-in
+    'result == nil ? "Add to my playlists" : "Added"',  # a sheet's root
+}
+
+
+def test_pushed_pages_have_inline_titles_and_one_toolbar_rule():
+    """#158: .inline on 15 screens, the default on 24; the artist hero
+    re-enabled the toolbar background PigCanvas hides everywhere else."""
+    large = []
+    for name, text in sources().items():
+        for m in re.finditer(
+            r"\.navigationTitle\(([^\n]*?)\)(\.navigationBarTitleDisplayMode)?", text
+        ):
+            if not m.group(2) and m.group(1) not in ROOT_TITLES:
+                large.append(f"{name}: {m.group(1)}")
+    assert large == []
+    assert found(".toolbarBackground(") == []
+
+
+def test_playlist_and_mix_pages_use_the_detail_layout():
+    """#158: inset-grouped cells, Section("Settings") and a hand-made header."""
+    playlist = sources()["PlaylistViews.swift"]
+    mix = sources()["HomeView.swift"]
+    assert 'Section("Settings")' not in playlist and "DetailSettings {" in playlist
+    assert playlist.count(".listStyle(.plain)") == 1
+    assert 'eyebrow: "MIX"' in mix and "Text(mix.title).font(.title2.bold())" not in mix
+    assert mix.count(".listStyle(.plain)") == 1

@@ -183,12 +183,20 @@ struct DetailHeader: View {
   /// An artist name shown above the subtitle that opens that artist's page.
   var artist: String?
   var openArtist: (() -> Void)?
+  /// Art drawn by the page itself (a mix's), in place of a cover (#158).
+  var art: AnyView?
   @Environment(\.colorScheme) private var scheme
   var body: some View {
     HStack(alignment: .center, spacing: 16) {
-      Artwork(
-        model: model, source: source, title: title, width: 512, circle: circle, fallback: fallback
-      )
+      Group {
+        if let art {
+          art
+        } else {
+          Artwork(
+            model: model, source: source, title: title, width: 512, circle: circle,
+            fallback: fallback)
+        }
+      }
       .frame(width: 112, height: 112)
         .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
       VStack(alignment: .leading, spacing: 4) {
