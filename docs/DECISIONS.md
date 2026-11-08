@@ -161,3 +161,5 @@ The rules these decisions produce, as they stand today, are in [PRODUCT.md](PROD
 **D-76 (8 Nov 2026)** — The leftover `pig-music-test-app` and `pig-music-test-fake` containers and their test folder are removed (done 8 Nov). Reason: Mark agreed; they were test leftovers.
 
 **D-77 (9 Nov 2026)** — The live download budget stays as saved (it reads as 1 minute a quality level from the stage timings, not the 3-minute default of D-72) for now, though it can cut off a slow transfer. Reason: Mark chose to leave it.
+
+**D-78 (9 Nov 2026)** — After the findings-20261109-v1 release, Unraid keeps only that release's rollback (the `PigMusic-before-<version>` container, its image and the `pre-<version>` backup); all older rollback containers, PigMusic images and appdata backups were removed. Reason: Mark chose to keep only today's.

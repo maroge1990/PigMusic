@@ -7,8 +7,9 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 *Overwritten at the end of every session. 9 Nov 2026 (morning, Melbourne).*
 
-- **Live:** release `audit-20261109-v1`, server `9c8e7e7`, since 8 Nov 15:33 Melbourne (D-73). Healthy; rollback
-  container `PigMusic-before-audit-20261109-v1` and backup kept.
+- **Live:** release `findings-20261109-v1`, server `4c0550d`, since 9 Nov 09:06 Melbourne (Mark asked; nobody was using
+  it). Healthy. Only this release's rollback is kept on Unraid (D-78): container `PigMusic-before-findings-20261109-v1`
+  and backup `pre-findings-20261109-v1`.
 - **Live checks done (8 Nov night, 9 Nov after the mix-download run), numbers on each issue:**
   - Closed: #146 logs, #134 timing lines, #133 budgets, #141 library sync, #131 searches (0 engine errors in 445,
     38% with hits under 5 s), #132 queued peers (none past 40 s), #138 commit lock (0 holds in 57 commits), #135.
@@ -18,11 +19,10 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   - Still open: #136 and the new **#166** (export pass holds lifecycle_lock up to 10 s, about twice the baseline, and
     the warning can't name the step); **#167** (7 of 64 finished Soulseek transfers not found on disk); #130, #22,
     #142 not exercised (one requester, nobody on Home or connected); #63.
-- **Pushed, not released (9 Nov, 340cf6a..1dba943):** #167 a finished Soulseek file is waited for (the engine moves
-  it about a second after reporting it done); #166 a song's export folder is chosen before the lifecycle lock (the long
-  holds were a song needing a folder decision, retried under the lock every pass), and hold warnings name failures
-  and cleanup steps. Two Codex rounds plus a confirmation, no finding left. Recheck both in a mix run after release.
-- **Next:** release this batch with the next one; then #63's remaining timer loops and #145's artist re-warm.
+- **In that release:** #167 a finished Soulseek file is waited for (the engine moves it about a second after reporting
+  it done); #166 a song's export folder is chosen before the lifecycle lock, and hold warnings name failures and
+  cleanup steps. Recheck both in the next mix run (tonight).
+- **Next:** tonight's mix run for #166/#167; Mark to pick the folder for the song waiting in the export status; then #63's remaining timer loops and #145's artist re-warm.
 - **iPhone/Watch:** 0.2.0 (23) on TestFlight since 8 Nov (#149, #157–#163, waiting on Mark's device check). Mark also
   owes a look at the web (#150–#156).
 - **Ways of working:** area batches (D-50), Codex rounds per D-59 and D-71, Claude pushes; releases under D-52/D-73;
