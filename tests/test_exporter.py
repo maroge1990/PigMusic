@@ -648,7 +648,9 @@ def test_published_songs_are_rechecked_hourly_not_every_pass(tmp_path, monkeypat
     checked = []
     publish, confirmed = exporter.publish, exporter.confirmed
     monkeypatch.setattr(
-        exporter, "publish", lambda track: checked.append(track["id"]) or publish(track)
+        exporter,
+        "publish",
+        lambda track, *rest: checked.append(track["id"]) or publish(track, *rest),
     )
     # A published song is checked without publishing it again (#17).
     monkeypatch.setattr(
@@ -822,3 +824,32 @@ def test_a_pass_reads_the_library_snapshot_once_whatever_its_song_count(
         i["destination"].startswith("Artist/Album (2020) [Moved]/")
         for i in plan["items"]
     )
+
+
+def test_a_song_needing_a_decision_never_takes_the_lifecycle_lock(
+    tmp_path, monkeypatch
+):
+    """#166: a song whose destination needs a decision was retried under
+    lifecycle_lock on every pass, choosing its folder there (live: up to
+    9.4 s holds during the mix run, each ending in that error)."""
+    store, root = nas_with(
+        tmp_path,
+        monkeypatch,
+        [("Artist/Album (2020)", 1), ("Artist/Album (2020 Remaster)", 1)],
+    )
+    download(store, "stuck")
+    exporter = Exporter(store, root)
+    lock = store.lifecycle_lock
+    chosen_under_lock = []
+    relative = exporter.relative
+
+    def watched(track):
+        chosen_under_lock.append(lock.owned())
+        return relative(track)
+
+    monkeypatch.setattr(exporter, "relative", watched)
+    exporter.process()
+    exporter.process()  # The retry on the next pass.
+    status = store.read_document("library-export-status")
+    assert [r["id"] for r in status["needs_review"]] == ["stuck"], status
+    assert chosen_under_lock and not any(chosen_under_lock), chosen_under_lock

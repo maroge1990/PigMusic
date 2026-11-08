@@ -51,6 +51,17 @@ def disc_folder(candidates, disc):
     return found[0] if len(found) == 1 else None
 
 
+def review(track, error):
+    """A song the export pass left waiting, as its status lists it."""
+    return {
+        "id": track.get("id"),
+        "artist": track.get("album_artist"),
+        "album": track.get("album"),
+        "title": track.get("title"),
+        "error": str(error)[:180],
+    }
+
+
 def digest(path):
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
@@ -149,23 +160,31 @@ class Exporter:
         except OSError:
             return False
 
-    def paths(self, track):
-        """The download's source and its NAS destination."""
+    def paths(self, track, relative=None):
+        """The download's source and its NAS destination. `relative` is the
+        destination chosen before taking lifecycle_lock (`destination`)."""
         source_root = library_root(self.store)
         if not contained(source_root, track["relative_path"]).is_file():
             legacy = self.store.directory / "downloads" / "library"
             if contained(legacy, track["relative_path"]).is_file():
                 source_root = legacy
         source = contained(source_root, track["relative_path"])
-        relative = track.get("export_relative_path") or self.relative(track)
+        relative = track.get("export_relative_path") or relative or self.relative(track)
         return source, relative, contained(self.root, relative)
 
-    def warm(self, track):
+    def destination(self, track):
+        """Where the song goes: its recorded location, else the folder chosen
+        from the library snapshot. Chosen outside lifecycle_lock, once a
+        pass: a song whose folder needs a decision was retried under the
+        lock every pass, each try reading the whole snapshot (#166)."""
+        return track.get("export_relative_path") or self.relative(track)
+
+    def warm(self, track, relative=None):
         """Hash what publication will check, outside lifecycle_lock. False
         when a file was written moments ago: it waits for the next pass, so
         publication never hashes it under the lock."""
         try:
-            source, _, target = self.paths(track)
+            source, _, target = self.paths(track, relative)
             # A song already published whose download is gone only needs its
             # copy checked: an earlier pass's read will do. Anything else
             # publishes, so it is read in this pass.
@@ -372,14 +391,14 @@ class Exporter:
             )
 
     @coordinated(catch_up=False)
-    def publish(self, track):
+    def publish(self, track, relative=None):
         # Each step is named in a long lifecycle_lock hold's warning (#17).
         lock = self.store.lifecycle_lock
         with self.store.connect() as conn:
             if not self.current(conn, track):
                 return False  # Replaced or removed since this pass began.
         step(lock, "current")
-        source, relative, target = self.paths(track)
+        source, relative, target = self.paths(track, relative)
         step(lock, "paths")
         expected = track["sha256"]
         if not source.is_file():
@@ -508,26 +527,23 @@ class Exporter:
             for track in work:
                 # One song that needs a decision (or whose file is refused)
                 # waits on its own; the rest still publish.
-                if not self.warm(track):
+                try:
+                    relative = self.destination(track)
+                except (OSError, ValueError, KeyError) as exc:
+                    waiting.append(review(track, exc))
+                    continue
+                if not self.warm(track, relative):
                     unsettled.add(track.get("id"))
                     continue
                 try:
                     if self.confirmed(track):
                         completed += 1
                         continue
-                    published = self.publish(track)
+                    published = self.publish(track, relative)
                     if published is False:
                         continue
                 except (OSError, ValueError, KeyError) as exc:
-                    waiting.append(
-                        {
-                            "id": track.get("id"),
-                            "artist": track.get("album_artist"),
-                            "album": track.get("album"),
-                            "title": track.get("title"),
-                            "error": str(exc)[:180],
-                        }
-                    )
+                    waiting.append(review(track, exc))
                     continue
                 completed += 1
                 # Only a newly recorded location changes the library; an
