@@ -60,14 +60,9 @@ struct WatchDownloadsView: View {
                   }
                 }
               } label: {
-                HStack(spacing: 12) {
-                  ArtworkThumb(model: model, source: group.artwork, title: group.title, size: 44)
-                  VStack(alignment: .leading, spacing: 2) {
-                    Text(group.title).lineLimit(1)
-                    Text(group.caption).font(PigType.footnote).foregroundStyle(.secondary)
-                      .lineLimit(1)
-                  }
-                  Spacer(minLength: 0)
+                CollectionRow(group.title, subtitle: group.caption) {
+                  ArtworkThumb(model: model, source: group.artwork, title: group.title)
+                } trailing: {
                   RemoveButton(label: "Remove \(group.title) from Apple Watch") { removing = group }
                 }
               }

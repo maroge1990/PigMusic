@@ -324,7 +324,7 @@ struct DiscographyLinkLabel: View {
     .padding(.vertical, 12).padding(.horizontal, 14)
     .background(
       reduceTransparency ? AnyShapeStyle(PigBrand.raised(scheme)) : AnyShapeStyle(.quaternary.opacity(0.5)),
-      in: RoundedRectangle(cornerRadius: 12))
+      in: RoundedRectangle(cornerRadius: PigRadius.artwork))
     .contentShape(Rectangle())
   }
 }
@@ -543,22 +543,17 @@ struct CatalogueEditionsView: View {
         NavigationLink {
           CatalogueReleaseView(model: model, releaseId: edition.id, title: edition.title)
         } label: {
-          HStack(spacing: 12) {
-          ArtworkThumb(model: model, source: .release(edition.id), title: edition.title, size: 52)
-          VStack(alignment: .leading) {
-            Text(edition.title)
-            Text(
+          CollectionRow(
+            edition.title,
+            subtitle: [
               [edition.date, edition.country, edition.formats.joined(separator: ", ")]
-                .filter { !$0.isEmpty }.joined(separator: " · ")
-            )
-            .font(PigType.footnote).foregroundStyle(.secondary)
-            if !edition.description.isEmpty {
-              Text(edition.description).font(PigType.footnote).foregroundStyle(.secondary)
-            }
-            Text("\(edition.trackCount) songs · \(edition.status)").font(PigType.footnote)
-              .foregroundStyle(.secondary)
-              .foregroundStyle(.secondary)
-          }
+                .filter { !$0.isEmpty }.joined(separator: " · "),
+              edition.description,
+              "\(edition.trackCount) songs · \(edition.status)",
+            ].filter { !$0.isEmpty }.joined(separator: "\n"),
+            subtitleLines: 4
+          ) {
+            ArtworkThumb(model: model, source: .release(edition.id), title: edition.title)
           }
         }
       }

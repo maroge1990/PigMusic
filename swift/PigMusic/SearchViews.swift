@@ -98,10 +98,7 @@ private struct SearchResultsView: View {
               SearchArtistView(model: model, artist: artist)
                 .onAppear { model.rememberSearch(.artist(artist)) }
             } label: {
-              HStack(spacing: 12) {
-                SavedArtistThumb(model: model, artist: artist)
-                Text(artist.name)
-              }
+              CollectionRow(artist.name) { SavedArtistThumb(model: model, artist: artist) }
             }
           }
           ForEach(session.albums) { album in
@@ -109,17 +106,13 @@ private struct SearchResultsView: View {
               AlbumView(model: model, album: album)
                 .onAppear { model.rememberSearch(.album(album)) }
             } label: {
-              HStack(spacing: 12) {
+              CollectionRow(album.title, subtitle: album.artist) {
                 ArtworkThumb(model: model, source: album.artworkSource, title: album.title)
-                VStack(alignment: .leading) {
-                  Text(album.title)
-                  Text(album.artist).font(PigType.footnote).foregroundStyle(.secondary)
-                }
               }
             }
           }
           ForEach(session.tracks) { song in
-            SongButton(model: model, track: song) {
+            SongRow(model: model, track: song) {
               model.rememberSearch(.song(song))
               model.play([song])
             }
@@ -135,7 +128,7 @@ private struct SearchResultsView: View {
               loading: session.householdLoading, error: session.householdError,
               empty: session.household.isEmpty)
             ForEach(session.household) { song in
-              SongButton(model: model, track: song) {
+              SongRow(model: model, track: song) {
                 model.rememberSearch(.song(song))
                 model.play([song], origin: .catalogue(artistId: nil))
               }
@@ -159,15 +152,9 @@ private struct SearchResultsView: View {
                       model.rememberSearch(.catalogueArtist(id: artist.id, name: artist.name))
                     }
                 } label: {
-                  HStack(spacing: 12) {
-                    Artwork(model: model, source: .artist(artist.id), title: artist.name, circle: true)
-                      .frame(width: 44, height: 44)
-                    VStack(alignment: .leading) {
-                      Text(artist.name)
-                      if !artist.description.isEmpty {
-                        Text(artist.description).font(PigType.caption).foregroundStyle(.secondary)
-                      }
-                    }
+                  CollectionRow(artist.name, subtitle: artist.description) {
+                    ArtworkThumb(
+                      model: model, source: .artist(artist.id), title: artist.name, circle: true)
                   }
                 }
               }
@@ -188,7 +175,7 @@ private struct SearchResultsView: View {
       ForEach(model.recentSearches.picks) { pick in
         switch pick {
         case .song(let song):
-          SongButton(model: model, track: song) {
+          SongRow(model: model, track: song) {
             // Played as the library holds it now, so a newer download is used.
             Task { await model.replayRecent(pick) }
           }
@@ -196,24 +183,16 @@ private struct SearchResultsView: View {
           NavigationLink {
             RecentAlbumView(model: model, album: album).onAppear { model.rememberSearch(pick) }
           } label: {
-            HStack(spacing: 12) {
+            CollectionRow(album.title, subtitle: "Album · " + album.artist) {
               ArtworkThumb(model: model, source: album.artworkSource, title: album.title)
-              VStack(alignment: .leading) {
-                Text(album.title)
-                Text("Album · " + album.artist).font(PigType.footnote).foregroundStyle(.secondary)
-              }
             }
           }
         case .artist(let artist):
           NavigationLink {
             SearchArtistView(model: model, artist: artist).onAppear { model.rememberSearch(pick) }
           } label: {
-            HStack(spacing: 12) {
+            CollectionRow(artist.name, subtitle: "Artist") {
               SavedArtistThumb(model: model, artist: artist)
-              VStack(alignment: .leading) {
-                Text(artist.name)
-                Text("Artist").font(PigType.footnote).foregroundStyle(.secondary)
-              }
             }
           }
         case .catalogueArtist(let id, let name):
@@ -221,13 +200,8 @@ private struct SearchResultsView: View {
             CatalogueArtistView(model: model, artistId: id, name: name)
               .onAppear { model.rememberSearch(pick) }
           } label: {
-            HStack(spacing: 12) {
-              Artwork(model: model, source: .artist(id), title: name, circle: true)
-                .frame(width: 44, height: 44)
-              VStack(alignment: .leading) {
-                Text(name)
-                Text("Artist").font(PigType.footnote).foregroundStyle(.secondary)
-              }
+            CollectionRow(name, subtitle: "Artist") {
+              ArtworkThumb(model: model, source: .artist(id), title: name, circle: true)
             }
           }
         }
@@ -252,8 +226,7 @@ struct SavedArtistThumb: View {
   let artist: Artist
   @State private var sha: String?
   var body: some View {
-    Artwork(model: model, source: sha.map { .stored($0) }, title: artist.name, circle: true)
-      .frame(width: 44, height: 44)
+    ArtworkThumb(model: model, source: sha.map { .stored($0) }, title: artist.name, circle: true)
       .task(id: artist.id) { sha = await model.artistCover(artist) }
   }
 }
@@ -474,7 +447,7 @@ private struct FoundResultsView: View {
   @ViewBuilder private func row(_ item: FoundItem) -> some View {
     switch item {
     case .song(let song):
-      SongButton(model: model, track: song) {
+      SongRow(model: model, track: song) {
         model.rememberSearch(.song(song))
         model.play(
           [song],
@@ -510,7 +483,7 @@ private struct FoundResultsView: View {
         PlaylistView(model: model, playlist: playlist)
       } label: {
         label(
-          Image(systemName: "music.note.list").frame(width: 44, height: 44), playlist.name,
+          SymbolThumb(systemImage: "music.note.list"), playlist.name,
           "Playlist", mark: .library)
       }
     case .mix(let mix):
@@ -518,7 +491,7 @@ private struct FoundResultsView: View {
         MixDetailView(model: model, mix: mix)
       } label: {
         label(
-          MixArtwork(kind: mix.kind, title: mix.title).frame(width: 44, height: 44), mix.title,
+          RowThumb { MixArtwork(kind: mix.kind, title: mix.title) }, mix.title,
           "Mix · " + mix.reason, mark: .library)
       }
     case .applePlaylist(let playlist):
@@ -526,7 +499,7 @@ private struct FoundResultsView: View {
         ApplePlaylistView(model: model, playlist: playlist)
       } label: {
         label(
-          AppleArtwork(url: playlist.artworkURL).frame(width: 44, height: 44), playlist.name,
+          RowThumb { AppleArtwork(url: playlist.artworkURL) }, playlist.name,
           ["Apple Music playlist", playlist.curator].compactMap { $0 }.joined(separator: " · "),
           mark: .apple)
       }
@@ -555,8 +528,7 @@ private struct FoundResultsView: View {
           }
       } label: {
         label(
-          Artwork(model: model, source: .artist(artist.id), title: artist.name, circle: true)
-            .frame(width: 44, height: 44),
+          ArtworkThumb(model: model, source: .artist(artist.id), title: artist.name, circle: true),
           artist.name, artist.description.isEmpty ? "Artist" : "Artist · " + artist.description,
           mark: .elsewhere)
       }
@@ -567,16 +539,11 @@ private struct FoundResultsView: View {
   private func label(_ thumb: some View, _ title: String, _ caption: String, mark: Mark)
     -> some View
   {
-    HStack(spacing: 12) {
+    CollectionRow(
+      title, subtitle: mark == .elsewhere ? caption + " · Not on the server yet" : caption
+    ) {
       thumb
-      VStack(alignment: .leading, spacing: 2) {
-        Text(title).lineLimit(1)
-        Text(caption).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
-        if mark == .elsewhere {
-          Text("Not on the server yet").font(PigType.caption).foregroundStyle(.secondary)
-        }
-      }
-      Spacer(minLength: 0)
+    } trailing: {
       // The same marks as songs: a cloud for your library, a faded one for
       // the server; nothing for music not on it yet.
       if mark == .library || mark == .server {
@@ -587,6 +554,7 @@ private struct FoundResultsView: View {
       }
     }
   }
+
 }
 
 /// An Apple result opens as the exact MusicBrainz version (#103): a song on
@@ -704,7 +672,7 @@ private struct AppleArtwork: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(PigBrand.raised(scheme))
     }
-    .clipShape(RoundedRectangle(cornerRadius: 6))
+    .clipShape(RoundedRectangle(cornerRadius: PigRadius.artwork))
     .accessibilityHidden(true)
   }
 }

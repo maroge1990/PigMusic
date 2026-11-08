@@ -413,7 +413,7 @@ struct MixArtwork: View {
       line.addLine(to: CGPoint(x: 182, y: 182))
       context.stroke(line, with: ink, lineWidth: 2)
       context.fill(Path(ellipseIn: CGRect(x: 176, y: 14, width: 10, height: 10)), with: ink)
-    }.aspectRatio(1, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 12))
+    }.aspectRatio(1, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: PigRadius.artwork))
       .accessibilityHidden(true)
   }
 }

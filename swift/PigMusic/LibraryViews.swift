@@ -138,21 +138,17 @@ struct LibraryView: View {
           NavigationLink {
             PlaylistView(model: model, playlist: playlist)
           } label: {
-            HStack(spacing: 12) {
-              Image(systemName: playlist.favourites == true ? "star.fill" : "music.note.list")
-                .frame(width: 44, height: 44)
-                .foregroundStyle(PigBrand.accent(scheme))
-                .background(PigBrand.accent(scheme).opacity(0.12), in: .rect(cornerRadius: 10))
-              VStack(alignment: .leading) {
-                Text(playlist.name).foregroundStyle(PigBrand.text(scheme))
-                if let count = playlist.trackCount ?? playlist.entries?.count {
-                  Text("\(count) song\(count == 1 ? "" : "s")").font(PigType.footnote)
-                    .foregroundStyle(.secondary)
-                }
+            CollectionRow(
+              playlist.name,
+              subtitle: (playlist.trackCount ?? playlist.entries?.count).map {
+                "\($0) song\($0 == 1 ? "" : "s")"
               }
-              Spacer()
+            ) {
+              SymbolThumb(
+                systemImage: playlist.favourites == true ? "star.fill" : "music.note.list")
+            } trailing: {
               Image(systemName: "chevron.right").foregroundStyle(.tertiary)
-            }.frame(minHeight: 56).contentShape(Rectangle())
+            }.padding(.vertical, 4)
           }.buttonStyle(.plain)
           Divider()
         }
@@ -384,13 +380,6 @@ struct DownloadMenu: View {
   }
 }
 
-/// Kept for screens that list songs inside a `List`.
-struct SongButton: View {
-  let model: AppModel
-  let track: Track
-  let play: () -> Void
-  var body: some View { SongRow(model: model, track: track, play: play) }
-}
 
 struct AccountView: View {
   @Bindable var model: AppModel
@@ -448,14 +437,17 @@ struct MiniPlayer: View {
   @Bindable var model: AppModel
   private var player: PlayerController { model.player }
   let open: () -> Void
+  @ScaledMetric(relativeTo: .subheadline) private var miniThumb: CGFloat = 32
   @Environment(\.colorScheme) private var scheme
   var body: some View {
     HStack(spacing: 10) {
       Button(action: open) {
         HStack(spacing: 10) {
-          ArtworkThumb(
+          // The mini player's own smaller thumb, still growing with the text.
+          Artwork(
             model: model, source: player.queue.current?.track.artworkSource,
-            title: player.queue.current?.track.title ?? "", size: 32)
+            title: player.queue.current?.track.title ?? "", width: 128
+          ).frame(width: miniThumb, height: miniThumb)
           VStack(alignment: .leading, spacing: 0) {
             Text(player.queue.current?.track.title ?? "").font(.subheadline.weight(.semibold))
               .lineLimit(1)
@@ -634,7 +626,7 @@ struct NowPlayingView: View {
       HStack {
         Text("Up next").font(PigType.sectionTitle)
         Spacer()
-        NavigationLink("Edit") { QueueEditorView(player: player) }
+        NavigationLink("Edit") { QueueEditorView(model: model) }
       }.padding(.bottom, 6)
       ForEach(player.queue.items.dropFirst(player.queue.index + 1).prefix(50)) { item in
         UpNextRow(model: model, item: item)
@@ -659,15 +651,9 @@ private struct UpNextRow: View {
       Button {
         model.player.jump(to: item.id)
       } label: {
-        HStack(spacing: 12) {
-          ArtworkThumb(
-            model: model, source: item.track.artworkSource, title: item.track.title, size: 40)
-          VStack(alignment: .leading) {
-            Text(item.track.title).lineLimit(1)
-            Text(item.track.artist).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
-          }
-          Spacer()
-        }.contentShape(Rectangle())
+        CollectionRow(item.track.title, subtitle: item.track.artist) {
+          ArtworkThumb(model: model, source: item.track.artworkSource, title: item.track.title)
+        }
       }.buttonStyle(.plain).accessibilityHint("Plays from this song")
       Menu {
         Button("Move earlier") { model.player.moveUpcoming(item.id, by: -1) }
@@ -690,26 +676,22 @@ private struct AirPlayButton: UIViewRepresentable {
 }
 
 struct QueueEditorView: View {
-  @Bindable var player: PlayerController
+  let model: AppModel
+  private var player: PlayerController { model.player }
   var body: some View {
     List {
       if let current = player.queue.current {
-        Section("Current song") { Text(current.track.title) }
+        Section("Current song") {
+          CollectionRow(current.track.title, subtitle: current.track.artist) {
+            ArtworkThumb(
+              model: model, source: current.track.artworkSource, title: current.track.title)
+          }
+        }
       }
+      // The same row, menu and wording as Up next under the player (#157).
       Section("Up next") {
         ForEach(player.queue.items.dropFirst(player.queue.index + 1)) { item in
-          HStack {
-            VStack(alignment: .leading) {
-              Text(item.track.title)
-              Text(item.track.artist).font(PigType.footnote).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Menu("Queue actions", systemImage: "ellipsis") {
-              Button("Move earlier") { player.moveUpcoming(item.id, by: -1) }
-              Button("Move later") { player.moveUpcoming(item.id, by: 1) }
-              Button("Remove", role: .destructive) { player.removeUpcoming(item.id) }
-            }.labelStyle(.iconOnly)
-          }
+          UpNextRow(model: model, item: item)
         }
       }
     }.pigCanvas().navigationTitle("Playback queue").navigationBarTitleDisplayMode(.inline)

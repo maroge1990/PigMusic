@@ -169,3 +169,25 @@ def test_playlist_and_mix_pages_use_the_detail_layout():
     assert playlist.count(".listStyle(.plain)") == 1
     assert 'eyebrow: "MIX"' in mix and "Text(mix.title).font(.title2.bold())" not in mix
     assert mix.count(".listStyle(.plain)") == 1
+
+
+def test_collection_rows_share_one_component_thumb_and_radius():
+    """#157: inline rows with 32/40/44/48/52 pt thumbs, radii 6, 10 and 12, the
+    queue listed twice with different rows, and a SongButton alias."""
+    app = sources()
+    assert "struct CollectionRow" in app["Components.swift"]
+    assert found("SongButton") == []
+    assert re.findall(r"ArtworkThumb\([^)]*size:", "".join(app.values())) == []
+    assert re.findall(r"cornerRadius: (?:6|10|12)\)", "".join(app.values())) == []
+    for name in (
+        "SearchViews.swift",
+        "LibraryViews.swift",
+        "CatalogueViews.swift",
+        "PersonalActionsViews.swift",
+        "DownloadsView.swift",
+        "WatchDownloadsView.swift",
+    ):
+        assert "CollectionRow(" in app[name], name
+    editor = app["LibraryViews.swift"].split("struct QueueEditorView", 1)[1]
+    assert "UpNextRow(model: model, item: item)" in editor.split("\n}\n", 1)[0]
+    assert '"Remove", role: .destructive' not in app["LibraryViews.swift"]

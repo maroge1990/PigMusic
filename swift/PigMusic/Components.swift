@@ -29,7 +29,8 @@ struct Artwork: View {
           placeholder
         }
       }
-      .clipShape(RoundedRectangle(cornerRadius: circle ? 9999 : 10, style: .continuous))
+      .clipShape(
+        RoundedRectangle(cornerRadius: circle ? 9999 : PigRadius.artwork, style: .continuous))
       .accessibilityHidden(true)
       .task(id: identity) {
         // Another item (cell reuse): forget the old picture first.
@@ -75,10 +76,12 @@ struct ArtworkThumb: View {
   let model: AppModel
   let source: AppModel.ArtworkSource?
   let title: String
-  var size: CGFloat = 44
+  var circle = false
   var width = 128
+  // The one row thumb: 44 pt, growing with the text (#157).
+  @ScaledMetric(relativeTo: .body) private var size: CGFloat = 44
   var body: some View {
-    Artwork(model: model, source: source, title: title, width: width).frame(
+    Artwork(model: model, source: source, title: title, width: width, circle: circle).frame(
       width: size, height: size)
   }
 }
@@ -575,4 +578,67 @@ extension PigType {
 enum PigSpacing {
   /// Between the blocks of a scrolling page.
   static let page: CGFloat = 16
+}
+
+/// One corner radius for artwork of every kind: covers, Apple artwork, mixes (#157).
+enum PigRadius {
+  static let artwork: CGFloat = 10
+}
+
+/// The one row for albums, artists, playlists, editions, requests and
+/// downloads (#157): a 44 pt thumb that grows with the text, a title, an
+/// optional footnote subtitle and anything trailing. Songs use SongRow.
+struct CollectionRow<Thumb: View, Trailing: View>: View {
+  let title: String
+  var subtitle: String?
+  var subtitleLines = 2
+  var thumb: Thumb
+  var trailing: Trailing
+  @Environment(\.colorScheme) private var scheme
+  init(
+    _ title: String, subtitle: String? = nil, subtitleLines: Int = 2,
+    @ViewBuilder thumb: () -> Thumb,
+    @ViewBuilder trailing: () -> Trailing = { EmptyView() }
+  ) {
+    self.title = title
+    self.subtitle = subtitle
+    self.subtitleLines = subtitleLines
+    self.thumb = thumb()
+    self.trailing = trailing()
+  }
+  var body: some View {
+    HStack(spacing: 12) {
+      thumb
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title).foregroundStyle(PigBrand.text(scheme)).lineLimit(2)
+        if let subtitle, !subtitle.isEmpty {
+          Text(subtitle).font(PigType.footnote).foregroundStyle(.secondary)
+            .lineLimit(subtitleLines)
+        }
+      }
+      Spacer(minLength: 0)
+      trailing
+    }.contentShape(Rectangle())
+  }
+}
+
+/// A 44 pt symbol tile for rows without artwork (playlists, groups).
+struct SymbolThumb: View {
+  let systemImage: String
+  @ScaledMetric(relativeTo: .body) private var size: CGFloat = 44
+  @Environment(\.colorScheme) private var scheme
+  var body: some View {
+    Image(systemName: systemImage)
+      .frame(width: size, height: size)
+      .foregroundStyle(PigBrand.accent(scheme))
+      .background(PigBrand.accent(scheme).opacity(0.12), in: .rect(cornerRadius: PigRadius.artwork))
+      .accessibilityHidden(true)
+  }
+}
+
+/// Any artwork at the one row-thumb size (44 pt, growing with the text).
+struct RowThumb<Content: View>: View {
+  @ViewBuilder let content: Content
+  @ScaledMetric(relativeTo: .body) private var size: CGFloat = 44
+  var body: some View { content.frame(width: size, height: size) }
 }

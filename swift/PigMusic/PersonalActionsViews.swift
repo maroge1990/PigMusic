@@ -155,17 +155,13 @@ struct RequestsView: View {
               .disabled(loading || !model.canMutate)
           }
         } label: {
-          HStack(spacing: 12) {
-            ArtworkThumb(
-              model: model, source: group.releaseId.map { .release($0) }, title: group.title,
-              size: 48)
-            VStack(alignment: .leading, spacing: 2) {
-              Text(group.title).lineLimit(1)
-              Text(group.artist).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
-              Text(group.summary).font(PigType.caption).foregroundStyle(.secondary)
-              if group.state != "done" {
-                ProgressView(value: min(1, max(0, group.progress)))
-              }
+          VStack(alignment: .leading, spacing: 4) {
+            CollectionRow(group.title, subtitle: group.artist + " · " + group.summary) {
+              ArtworkThumb(
+                model: model, source: group.releaseId.map { .release($0) }, title: group.title)
+            }
+            if group.state != "done" {
+              ProgressView(value: min(1, max(0, group.progress)))
             }
           }
           .accessibilityElement(children: .combine)
