@@ -18,7 +18,11 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   - Still open: #136 and the new **#166** (export pass holds lifecycle_lock up to 10 s, about twice the baseline, and
     the warning can't name the step); **#167** (7 of 64 finished Soulseek transfers not found on disk); #130, #22,
     #142 not exercised (one requester, nobody on Home or connected); #63.
-- **Next:** #166 and #167 (one server batch with #136), then #63's remaining timer loops and #145's artist re-warm.
+- **Pushed, not released (9 Nov, 340cf6a..1dba943):** #167 a finished Soulseek file is waited for (the engine moves
+  it about a second after reporting it done); #166 a song's export folder is chosen before the lifecycle lock (the long
+  holds were a song needing a folder decision, retried under the lock every pass), and hold warnings name failures
+  and cleanup steps. Two Codex rounds plus a confirmation, no finding left. Recheck both in a mix run after release.
+- **Next:** release this batch with the next one; then #63's remaining timer loops and #145's artist re-warm.
 - **iPhone/Watch:** 0.2.0 (23) on TestFlight since 8 Nov (#149, #157–#163, waiting on Mark's device check). Mark also
   owes a look at the web (#150–#156).
 - **Ways of working:** area batches (D-50), Codex rounds per D-59 and D-71, Claude pushes; releases under D-52/D-73;
