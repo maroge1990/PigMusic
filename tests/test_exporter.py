@@ -881,3 +881,45 @@ def test_a_folder_chosen_before_the_lock_is_chosen_again_if_the_snapshot_changed
         exporter.publish(track, chosen)
     assert not any(root.glob("Artist/Album (2020)/*song*"))
     assert (store.directory / "downloads/library/Artist/Album/song.mp3").is_file()
+
+
+def test_a_folder_chosen_with_no_snapshot_is_chosen_again_once_one_appears(
+    tmp_path, monkeypatch
+):
+    """#166 (Codex round 2, 9 Nov): a choice made before the first scan wrote
+    a snapshot was treated like a recorded location and never checked."""
+    store, root = nas_with(tmp_path, monkeypatch, [])
+    snapshot = store.directory / "library-snapshot.json"
+    snapshot.unlink()
+    download(store, "song")
+    exporter = Exporter(store, root)
+    (track,) = exporter.records()
+    chosen = exporter.destination(track)
+    existing = {
+        "artist": "Artist",
+        "album_artist": "Artist",
+        "album": "Album",
+        "year": 2020,
+        "disc_number": 1,
+    }
+    snapshot.write_text(
+        json.dumps(
+            {
+                "tracks": [
+                    {
+                        **existing,
+                        "id": "a",
+                        "relative_path": "Artist/Album (2020)/1.mp3",
+                    },
+                    {
+                        **existing,
+                        "id": "b",
+                        "relative_path": "Artist/Album (Remaster)/1.mp3",
+                    },
+                ]
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="destination decision"):
+        exporter.publish(track, chosen)
+    assert (store.directory / "downloads/library/Artist/Album/song.mp3").is_file()

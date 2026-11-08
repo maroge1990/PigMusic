@@ -171,7 +171,7 @@ class Exporter:
         relative = None
         if chosen:
             relative, key = chosen
-            if key is not None and key != self.snapshot_key():
+            if key is not None and key != ("snapshot", self.snapshot_key()):
                 relative = None
         source_root = library_root(self.store)
         if not contained(source_root, track["relative_path"]).is_file():
@@ -190,10 +190,12 @@ class Exporter:
         each try reading the whole snapshot (#166)."""
         if track.get("export_relative_path"):
             return track["export_relative_path"], None
-        key = self.snapshot_key()
+        # Tagged, so a choice made with no snapshot yet is still checked
+        # (Codex round 2): it is not a recorded location.
+        key = ("snapshot", self.snapshot_key())
         relative = self.relative(track)
         # The snapshot changed while it was read: compare as unknown.
-        if key != self.snapshot_key():
+        if key != ("snapshot", self.snapshot_key()):
             key = ("changed",)
         return relative, key
 
