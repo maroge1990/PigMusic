@@ -494,3 +494,32 @@ def test_a_rebuild_reads_the_snapshot_once_and_artists_in_one_query(
     (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": tracks[:5]}))
     store.refresh_library()
     assert len(store.library["artists"]) == 5
+
+
+def test_a_hold_that_ends_in_an_error_names_where_it_failed(tmp_path, caplog):
+    """#166: live export holds of up to 9 s read only 'current 0.01 s, rest
+    9.1 s': the publication raised after its first step, and the warning
+    could not say so."""
+    from server.lifecycle import coordinated, step
+    from server.store import Store
+
+    store = Store(tmp_path / "data")
+    store.lifecycle_lock.warn_after = 0
+
+    class Worker:
+        def __init__(self, store):
+            self.store = store
+
+        @coordinated(catch_up=False)
+        def run(self):
+            step(self.store.lifecycle_lock, "current")
+            raise ValueError("needs a decision")
+
+    caplog.set_level(logging.WARNING, "pig_music.timing")
+    with pytest.raises(ValueError):
+        Worker(store).run()
+    (message,) = [
+        r.getMessage() for r in caplog.records if "Worker.run" in r.getMessage()
+    ]
+    assert "current " in message and "raised ValueError " in message, message
+    assert store.lifecycle_lock.steps == []

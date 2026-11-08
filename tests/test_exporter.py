@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -184,7 +185,7 @@ def scanned(store, *tracks):
 
 
 def test_a_quality_replacement_never_shows_the_old_nas_copy_as_another_song(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, caplog
 ):
     """#68: replacing an exported song's quality dropped its export path, so
     the old NAS file (still in the snapshot) showed as a second song, then as
@@ -223,7 +224,19 @@ def test_a_quality_replacement_never_shows_the_old_nas_copy_as_another_song(
     exporter.publish(exporter.records()[0])
     store.refresh_library()
     assert store.library["stats"]["tracks"] == 1  # Exported, old not yet moved.
+    # A long cleanup hold names its steps (#166: live holds of up to 9.9 s
+    # read only "catch-up 0.00 s, rest 9.85 s").
+    store.lifecycle_lock.warn_after = 0
+    caplog.set_level(logging.WARNING, "pig_music.timing")
     store.cleanup_replacements()
+    store.lifecycle_lock.warn_after = 1.0
+    (message,) = [
+        r.getMessage()
+        for r in caplog.records
+        if "cleanup_replacements" in r.getMessage()
+    ]
+    for name in ("hash", "retire", "refresh"):
+        assert f"{name} " in message, message
     assert not (root / old["export_relative_path"]).exists()
     # Without a scan: no song that can't play.
     assert store.library["stats"]["tracks"] == 1

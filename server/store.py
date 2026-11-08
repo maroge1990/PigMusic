@@ -1,4 +1,4 @@
-from .lifecycle import TimedRLock, coordinated
+from .lifecycle import TimedRLock, coordinated, step
 import itertools
 import json
 import hashlib
@@ -1064,8 +1064,10 @@ class Store:
                         or digest(replacement) != current["sha256"]
                     ):
                         continue
+                    step(self.lifecycle_lock, "hash")
                     if not self.retire(original, trash, old["sha256"], nas):
                         continue
+                    step(self.lifecycle_lock, "retire")
                     with self.connect() as conn:
                         conn.execute(
                             "DELETE FROM quality_cleanup WHERE request_id=?",
@@ -1075,6 +1077,7 @@ class Store:
                     if not original.exists():
                         self.forget_retired(old_path)
                         self.refresh_library()
+                        step(self.lifecycle_lock, "refresh")
                     continue
                 original = (root / old["relative_path"]).resolve()
                 replacement = (root / current["relative_path"]).resolve()
@@ -1094,6 +1097,7 @@ class Store:
                         != current["sha256"]
                     ):
                         continue
+                step(self.lifecycle_lock, "hash")
                 # Export off: the old file still goes to Trash, never deleted.
                 # contained() refuses a symlinked or escaping Trash path; the
                 # row then stays for a later try.
@@ -1106,6 +1110,7 @@ class Store:
                     original, trash, old["sha256"], root
                 ):
                     continue
+                step(self.lifecycle_lock, "retire")
                 with self.connect() as conn:
                     conn.execute(
                         "DELETE FROM quality_cleanup WHERE request_id=?", (request_id,)

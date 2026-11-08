@@ -139,6 +139,10 @@ def coordinated(method=None, *, catch_up=True):
             catch_up()
             lock.step("catch-up")
             return method(self, *args, **kwargs)
+        except BaseException as exc:
+            # A hold that ends in an error says so, not "rest" (#166).
+            lock.step(f"raised {type(exc).__name__}")
+            raise
         finally:
             lock.release()
 
