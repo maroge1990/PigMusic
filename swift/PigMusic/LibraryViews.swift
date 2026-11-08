@@ -252,7 +252,7 @@ struct AlbumView: View {
   }
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 14) {
+      VStack(alignment: .leading, spacing: PigSpacing.page) {
         DetailHeader(
           model: model, source: album.artworkSource ?? tracks.first?.artworkSource,
           eyebrow: "IN YOUR LIBRARY", title: album.title, subtitle: albumSubtitle,
@@ -459,7 +459,7 @@ struct MiniPlayer: View {
           VStack(alignment: .leading, spacing: 0) {
             Text(player.queue.current?.track.title ?? "").font(.subheadline.weight(.semibold))
               .lineLimit(1)
-            Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(status).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
           }
           Spacer(minLength: 0)
         }.contentShape(Rectangle())
@@ -631,7 +631,7 @@ struct NowPlayingView: View {
   private var upNext: some View {
     VStack(alignment: .leading, spacing: 0) {
       HStack {
-        Text("Up next").font(.headline)
+        Text("Up next").font(PigType.sectionTitle)
         Spacer()
         NavigationLink("Edit") { QueueEditorView(player: player) }
       }.padding(.bottom, 6)
@@ -699,7 +699,7 @@ struct QueueEditorView: View {
           HStack {
             VStack(alignment: .leading) {
               Text(item.track.title)
-              Text(item.track.artist).font(.caption)
+              Text(item.track.artist).font(PigType.footnote).foregroundStyle(.secondary)
             }
             Spacer()
             Menu("Queue actions", systemImage: "ellipsis") {

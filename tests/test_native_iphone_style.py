@@ -66,7 +66,8 @@ def test_errors_and_notices_share_one_status_line():
         assert found(raw) == [], raw
     watch = (ROOT / "swift/PigMusicWatch/PigMusicWatchApp.swift").read_text()
     assert (
-        "Text(error).font(.footnote).foregroundStyle(PigBrand.danger(scheme))" in watch
+        "Text(error).font(PigType.footnote).foregroundStyle(PigBrand.danger(scheme))"
+        in watch
     )
 
 
@@ -84,3 +85,28 @@ def test_whole_screen_empties_use_content_unavailable_view():
         'ContentUnavailableView(\n          "No downloads yet"'
         in sources()["DownloadsView.swift"]
     )
+
+
+def test_one_section_heading_card_title_and_page_spacing():
+    """#160: headline for some section headings, a headline-sized mix card
+    beside semibold card titles, page spacing 14 on five pages and 16 on two."""
+    app = sources()
+    assert found(".font(.title3.weight(.bold))") == []
+    assert 'Text("Settings").font(PigType.sectionTitle)' in app["Components.swift"]
+    assert 'Text("Up next").font(PigType.sectionTitle)' in app["LibraryViews.swift"]
+    home = app["HomeView.swift"]
+    assert ".font(.headline)" not in home
+    assert home.count("PigType.cardTitle") == 2
+    assert found("VStack(alignment: .leading, spacing: 14)") == []
+    assert found("VStack(alignment: .leading, spacing: 16)") == []
+
+
+def test_row_subtitles_and_raw_fonts_use_the_type_roles():
+    """#160: caption subtitles on some rows; raw .footnote/.caption fonts."""
+    for name in ("PendingEditsView.swift", "ArtistAcquisitionView.swift"):
+        text = sources()[name]
+        assert ".font(.footnote)" not in text and ".font(.caption)" not in text
+    watch = (ROOT / "swift/PigMusicWatch/PigMusicWatchApp.swift").read_text()
+    assert ".font(.footnote)" not in watch and ".font(.caption)" not in watch
+    for name in ("DownloadsView.swift", "WatchDownloadsView.swift"):
+        assert "PigType.caption).foregroundStyle(.secondary)" not in sources()[name]

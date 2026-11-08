@@ -1,4 +1,5 @@
 import PigAPI
+import PigBrand
 import PigDomain
 import SwiftUI
 
@@ -22,7 +23,7 @@ struct ArtistAcquisitionView: View {
         Toggle("Monitor new releases", isOn: $monitor)
         Text(
           "Monitoring starts with the current catalogue as a baseline. Request the catalogue separately to acquire existing releases."
-        ).font(.footnote)
+        ).font(PigType.footnote)
       }
       if let state {
         Section("Server request") {

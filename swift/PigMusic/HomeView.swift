@@ -26,11 +26,9 @@ struct HomeView: View {
               } label: {
                 VStack(alignment: .leading, spacing: 6) {
                   MixArtwork(kind: "radio").frame(width: 150, height: 150)
-                  Text(radio.title).font(.headline).lineLimit(2)
-                  Text("Your library and new discoveries").font(PigType.footnote)
-                    .foregroundStyle(.secondary).lineLimit(2)
-                  Label("Endless · Start radio", systemImage: "dot.radiowaves.left.and.right")
-                    .font(PigType.footnote).foregroundStyle(.secondary)
+                  Text(radio.title).font(PigType.cardTitle).lineLimit(2)
+                  Label("Endless radio from your library", systemImage: "dot.radiowaves.left.and.right")
+                    .font(PigType.caption).foregroundStyle(.secondary).lineLimit(2)
                 }.frame(width: 150, alignment: .leading)
               }.buttonStyle(.plain)
             }
@@ -41,15 +39,13 @@ struct HomeView: View {
               } label: {
                 VStack(alignment: .leading, spacing: 6) {
                   MixArtwork(kind: mix.kind, title: mix.title).frame(width: 150, height: 150)
-                  Text(mix.title).font(.headline).lineLimit(2)
+                  Text(mix.title).font(PigType.cardTitle).lineLimit(2)
                   Text(
-                    Array(Set(mix.tracks.map(\.artist))).sorted().prefix(3).joined(separator: " · ")
+                    (["\(mix.tracks.count) \(mix.tracks.count == 1 ? "song" : "songs")"]
+                      + Array(Set(mix.tracks.map(\.artist))).sorted().prefix(3))
+                      .joined(separator: " · ")
                   )
-                  .font(PigType.footnote).foregroundStyle(.secondary).lineLimit(2)
-                  Text(
-                    "\(mix.tracks.count) \(mix.tracks.count == 1 ? "song" : "songs")"
-                  ).font(PigType.footnote)
-                    .foregroundStyle(.secondary)
+                  .font(PigType.caption).foregroundStyle(.secondary).lineLimit(2)
                 }.frame(width: 150, alignment: .leading)
               }
               .buttonStyle(.plain)
@@ -62,7 +58,7 @@ struct HomeView: View {
           }
         } else {
           VStack(alignment: .leading, spacing: 6) {
-            Text("Your mixes").font(.title3.weight(.bold))
+            Text("Your mixes").font(PigType.sectionTitle)
             if let error = model.homeErrors[.mixes] {
               StatusText(error, kind: .error)
             } else {
@@ -168,7 +164,7 @@ struct HomeView: View {
       }
       if songs, let feed, !feed.songs.isEmpty {
         VStack(alignment: .leading, spacing: 4) {
-          Text("Songs").font(.title3.weight(.bold))
+          Text("Songs").font(PigType.sectionTitle)
           let all = feed.songs.compactMap(\.playbackTrack)
           let tracks = Array(all.prefix(10))
           // Packed like an album's songs, without the stack's gap around
@@ -197,7 +193,7 @@ struct HomeView: View {
     let empty = feed.map { $0.artists.isEmpty && $0.albums.isEmpty && $0.songs.isEmpty } ?? true
     if empty || model.homeErrors[section] != nil {
       VStack(alignment: .leading, spacing: 6) {
-        Text(heading).font(.title3.weight(.bold))
+        Text(heading).font(PigType.sectionTitle)
         if model.homeLoading.contains(section) {
           ProgressView("Finding music…")
         } else if let error = model.homeErrors[section] {

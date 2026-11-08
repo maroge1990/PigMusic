@@ -48,7 +48,7 @@ private struct DownloadList: View {
                   } label: {
                     VStack(alignment: .leading, spacing: 2) {
                       Text(record.track.title).lineLimit(1)
-                      Text(record.track.artist).font(PigType.caption).foregroundStyle(.secondary)
+                      Text(record.track.artist).font(PigType.footnote).foregroundStyle(.secondary)
                         .lineLimit(1)
                     }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                   }.buttonStyle(.plain)
@@ -62,7 +62,7 @@ private struct DownloadList: View {
                 ArtworkThumb(model: model, source: group.artwork, title: group.title, size: 44)
                 VStack(alignment: .leading, spacing: 2) {
                   Text(group.title).lineLimit(1)
-                  Text(group.caption).font(PigType.caption).foregroundStyle(.secondary)
+                  Text(group.caption).font(PigType.footnote).foregroundStyle(.secondary)
                     .lineLimit(1)
                 }
                 Spacer(minLength: 0)
@@ -149,7 +149,7 @@ private struct TransferRow: View {
       ArtworkThumb(model: model, source: record.track.artworkSource, title: record.track.title)
       VStack(alignment: .leading, spacing: 2) {
         Text(record.track.title).lineLimit(1)
-        Text(record.track.artist).font(PigType.caption).foregroundStyle(.secondary).lineLimit(1)
+        Text(record.track.artist).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
       }
       Spacer(minLength: 0)
       mark.frame(width: 28, height: 28)

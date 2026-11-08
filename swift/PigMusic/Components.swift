@@ -124,7 +124,7 @@ struct CollectionCard: View {
     VStack(alignment: circle ? .center : .leading, spacing: 6) {
       Artwork(model: model, source: source, title: title, width: 512, circle: circle)
       VStack(alignment: circle ? .center : .leading, spacing: 2) {
-        Text(title).font(.subheadline.weight(.semibold)).lineLimit(2)
+        Text(title).font(PigType.cardTitle).lineLimit(2)
           .multilineTextAlignment(circle ? .center : .leading)
         if let caption, !caption.isEmpty {
           Text(caption).font(PigType.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -160,7 +160,7 @@ struct Shelf<Content: View>: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       VStack(alignment: .leading, spacing: 2) {
-        Text(title).font(.title3.weight(.bold))
+        Text(title).font(PigType.sectionTitle)
         if let caption { Text(caption).font(PigType.footnote).foregroundStyle(.secondary) }
       }.padding(.horizontal)
       ScrollView(.horizontal, showsIndicators: false) {
@@ -391,7 +391,7 @@ struct DetailSettings<Content: View>: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       Divider()
-      Text("Settings").font(.headline)
+      Text("Settings").font(PigType.sectionTitle)
       content
     }.padding(.top, 24)
   }
@@ -548,4 +548,16 @@ struct StatusText: View {
     Text(text).font(PigType.footnote)
       .foregroundStyle(kind == .error ? PigBrand.danger(scheme) : PigBrand.secondary(scheme))
   }
+}
+
+/// Shared type roles and spacing for the app's own views (#160).
+extension PigType {
+  /// The heading above a section of a page.
+  static let sectionTitle: Font = .title3.weight(.bold)
+  /// A card's title (albums, artists, mixes).
+  static let cardTitle: Font = .subheadline.weight(.semibold)
+}
+enum PigSpacing {
+  /// Between the blocks of a scrolling page.
+  static let page: CGFloat = 16
 }

@@ -274,7 +274,7 @@ struct SavedArtistView: View {
   @State private var exploring = false
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 14) {
+      VStack(alignment: .leading, spacing: PigSpacing.page) {
         DetailHeader(
           model: model, source: cover.map { .stored($0) }, eyebrow: "IN YOUR LIBRARY",
           title: artist.name,
@@ -311,7 +311,7 @@ struct SavedArtistView: View {
         }
         if !songs.isEmpty {
           VStack(alignment: .leading, spacing: 0) {
-            Text("Songs").font(.title3.weight(.bold)).padding(.bottom, 6)
+            Text("Songs").font(PigType.sectionTitle).padding(.bottom, 6)
             ForEach(Array(songs.prefix(10).enumerated()), id: \.element.id) { index, track in
               SongRow(model: model, track: track) { model.play(songs, at: index) }
               Divider()
@@ -640,7 +640,7 @@ private struct ServerAlbumView: View {
   // The same page as a library album (#62).
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 14) {
+      VStack(alignment: .leading, spacing: PigSpacing.page) {
         DetailHeader(
           model: model, source: album.artworkSource, eyebrow: "ON THE SERVER",
           title: album.title, artist: album.artist)
@@ -735,7 +735,7 @@ private struct ApplePlaylistView: View {
   }
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 14) {
+      VStack(alignment: .leading, spacing: PigSpacing.page) {
         header
         HStack(spacing: 10) {
           PlayCapsule { model.play(playable, origin: origin) }.disabled(playable.isEmpty)

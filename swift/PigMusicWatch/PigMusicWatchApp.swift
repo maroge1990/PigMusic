@@ -47,14 +47,14 @@ private struct WatchReadiness: View {
         systemImage: complete ? "checkmark.circle.fill" : "hourglass"
       ).font(.headline)
       Text(complete ? "\(total) songs" : "\(ready.count) of \(total) songs on Watch")
-        .font(.footnote)
+        .font(PigType.footnote)
       Text(summary.listening)
-        .font(.footnote).foregroundStyle(.secondary)
+        .font(PigType.footnote).foregroundStyle(.secondary)
       if !complete {
-        Text("Keep iPhone nearby").font(.footnote).foregroundStyle(.secondary)
+        Text("Keep iPhone nearby").font(PigType.footnote).foregroundStyle(.secondary)
       } else if let synced = model.lastSynced {
         Text("Synced \(synced.formatted(.relative(presentation: .named)))")
-          .font(.footnote).foregroundStyle(.secondary)
+          .font(PigType.footnote).foregroundStyle(.secondary)
       }
     }
     .accessibilityElement(children: .combine)
@@ -110,7 +110,7 @@ private struct WatchLibraryView: View {
                   VStack(alignment: .leading) {
                     Text(artist.name).lineLimit(2)
                     Text("\(artist.albums.count) album\(artist.albums.count == 1 ? "" : "s")")
-                      .font(.caption).foregroundStyle(.secondary)
+                      .font(PigType.caption).foregroundStyle(.secondary)
                   }
                 }
               }
@@ -165,15 +165,15 @@ private struct WatchLibraryView: View {
               // so albums are always gapless and there is no Seamless switch.
               Text(
                 "Albums play gapless. Crossfade adds a three-second crossfade between unrelated songs. Changes apply to the next queue."
-              ).font(.footnote)
+              ).font(PigType.footnote)
               if let message = model.message ?? model.link?.error {
-                Text(message).font(.footnote).foregroundStyle(PigBrand.secondary(scheme))
+                Text(message).font(PigType.footnote).foregroundStyle(PigBrand.secondary(scheme))
               }
             }.pigBrandedCanvas().navigationTitle("Storage & sync")
           }
         }
         if model.manifest.context.account == nil {
-          Text("Sign in and open Apple Watch in the phone app to send music.").font(.footnote)
+          Text("Sign in and open Apple Watch in the phone app to send music.").font(PigType.footnote)
         }
       }.pigBrandedCanvas().navigationTitle("PigMusic")
     }.pigBrandedCanvas()
@@ -207,7 +207,7 @@ private struct WatchAlbums: View {
         } label: {
           VStack(alignment: .leading) {
             Text(album.title).lineLimit(2)
-            Text(album.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(album.artist).font(PigType.caption).foregroundStyle(.secondary).lineLimit(1)
           }
         }
       }
@@ -254,7 +254,7 @@ private struct WatchNowPlayingRow: View {
           VStack(alignment: .leading, spacing: 2) {
             Text("Now playing").font(.caption2).foregroundStyle(.secondary)
             Text(track.title).font(.headline).lineLimit(1)
-            Text(track.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(track.artist).font(PigType.caption).foregroundStyle(.secondary).lineLimit(1)
           }.frame(maxWidth: .infinity, alignment: .leading)
         }
         // The accent button, not .plain: plain kept the on-accent icon colour
@@ -299,7 +299,7 @@ private struct WatchSongs: View {
           } label: {
             VStack(alignment: .leading) {
               Text(song.track.title).lineLimit(2)
-              Text(ready ? song.track.artist : "Waiting for transfer").font(.caption)
+              Text(ready ? song.track.artist : "Waiting for transfer").font(PigType.caption)
                 .foregroundStyle(.secondary).lineLimit(1)
             }
           }
@@ -334,7 +334,7 @@ private struct WatchPlaybackDetails: View {
     List {
       if model.queue.indices.contains(model.playback.index) {
         Text(model.queue[model.playback.index].track.title).font(.headline)
-        Text(model.queue[model.playback.index].track.artist).font(.caption)
+        Text(model.queue[model.playback.index].track.artist).font(PigType.caption)
           .foregroundStyle(.secondary)
       }
       HStack {
@@ -355,7 +355,7 @@ private struct WatchPlaybackDetails: View {
           Image(systemName: "forward.fill").frame(minWidth: 40, minHeight: 44)
         }.accessibilityLabel("Next song")
       }.buttonStyle(.plain).padding(8).pigFloatingControls().listRowBackground(Color.clear)
-      Text("\(clock(model.playback.elapsed)) / \(clock(model.playback.duration))").font(.caption)
+      Text("\(clock(model.playback.elapsed)) / \(clock(model.playback.duration))").font(PigType.caption)
         .fontDesign(.rounded).monospacedDigit()
       Slider(
         value: Binding(
@@ -369,7 +369,7 @@ private struct WatchPlaybackDetails: View {
       }
       Slider(value: $model.volume, in: 0...1).accessibilityLabel("PigMusic level")
       if let error = model.playback.error ?? model.message {
-        Text(error).font(.footnote).foregroundStyle(PigBrand.danger(scheme))
+        Text(error).font(PigType.footnote).foregroundStyle(PigBrand.danger(scheme))
         Button("Retry playback") { Task { await model.retry() } }
       }
     }.pigBrandedCanvas().navigationTitle("Controls")

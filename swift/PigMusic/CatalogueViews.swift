@@ -32,7 +32,7 @@ struct CatalogueArtistView: View {
   var body: some View {
     ScrollView {
       ArtistHero(model: model, artistId: artistId, name: name, subtitle: profileLine)
-      VStack(alignment: .leading, spacing: 16) {
+      VStack(alignment: .leading, spacing: PigSpacing.page) {
         if saved != nil {
           Button {
             showingLibrary = true
@@ -49,7 +49,7 @@ struct CatalogueArtistView: View {
         if !popularSongs.isEmpty {
           VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-              Text("Popular songs").font(.title3.weight(.bold))
+              Text("Popular songs").font(PigType.sectionTitle)
               Spacer()
               PlayCapsule { model.play(popularSongs, origin: .catalogue(artistId: artistId)) }
             }.padding(.bottom, 6)
@@ -64,7 +64,7 @@ struct CatalogueArtistView: View {
         }
         if let popular = popularity, !popular.albums.isEmpty {
           // The Library's album grid and tiles, not a row of fixed cards (#62).
-          Text("Popular albums").font(.title3.weight(.bold))
+          Text("Popular albums").font(PigType.sectionTitle)
           LazyVGrid(columns: cardColumns, spacing: 18) {
             ForEach(popular.albums) { release in
               NavigationLink {
@@ -78,7 +78,7 @@ struct CatalogueArtistView: View {
           }
         }
         if let albums, !albums.releases.isEmpty {
-          Text("Albums").font(.title3.weight(.bold))
+          Text("Albums").font(PigType.sectionTitle)
           ReleaseGrid(model: model, releases: albums.releases.sorted { $0.date > $1.date })
         } else if albums == nil {
           if let error {
@@ -372,9 +372,9 @@ struct CatalogueDiscographyView: View {
   }
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 16) {
+      VStack(alignment: .leading, spacing: PigSpacing.page) {
         HStack {
-          Text(kindLabel).font(.title3.weight(.bold))
+          Text(kindLabel).font(PigType.sectionTitle)
           Spacer()
           Menu {
             Picker("Release type", selection: $kind) {
@@ -544,9 +544,12 @@ struct CatalogueEditionsView: View {
               [edition.date, edition.country, edition.formats.joined(separator: ", ")]
                 .filter { !$0.isEmpty }.joined(separator: " · ")
             )
-            .font(PigType.caption).foregroundStyle(.secondary)
-            if !edition.description.isEmpty { Text(edition.description).font(PigType.caption) }
-            Text("\(edition.trackCount) songs · \(edition.status)").font(PigType.caption)
+            .font(PigType.footnote).foregroundStyle(.secondary)
+            if !edition.description.isEmpty {
+              Text(edition.description).font(PigType.footnote).foregroundStyle(.secondary)
+            }
+            Text("\(edition.trackCount) songs · \(edition.status)").font(PigType.footnote)
+              .foregroundStyle(.secondary)
               .foregroundStyle(.secondary)
           }
           }
@@ -608,7 +611,7 @@ struct CatalogueReleaseView: View {
   // song rows with dividers (#62).
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 14) {
+      VStack(alignment: .leading, spacing: PigSpacing.page) {
         if let release {
           DetailHeader(
             model: model, source: .release(releaseId),

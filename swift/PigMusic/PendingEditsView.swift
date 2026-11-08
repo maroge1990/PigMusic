@@ -1,3 +1,4 @@
+import PigBrand
 import PigDomain
 import SwiftUI
 
@@ -8,7 +9,7 @@ struct PendingEditsView: View {
     List {
       Text(
         "Edits are saved on this phone and replayed in order. A changed playlist stops replay until you review or discard that edit."
-      ).font(.footnote)
+      ).font(PigType.footnote)
       Text("Discarding stops retries; it does not undo changes already saved on the server.").font(
         .footnote)
       Button("Sync edits now") {
@@ -25,9 +26,10 @@ struct PendingEditsView: View {
           Text(pending.mutation.action.capitalized)
           if let name = pending.mutation.name { Text(name) }
           if let track = pending.mutation.track {
-            Text("\(track.title) · \(track.artist)").font(.caption)
+            Text("\(track.title) · \(track.artist)").font(PigType.footnote)
+              .foregroundStyle(.secondary)
           }
-          Text(pending.state).font(.caption)
+          Text(pending.state).font(PigType.footnote).foregroundStyle(.secondary)
           if let message = pending.message { StatusText(message, kind: .error) }
           if let id = pending.mutation.playlistId,
             let playlist = model.playlists.first(where: { $0.id == id })

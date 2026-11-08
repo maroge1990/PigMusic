@@ -31,7 +31,7 @@ struct WatchDownloadsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                   Text(record.track.title).lineLimit(1)
                   Text("\(status(record, watch: watch)) · \(record.track.artist)")
-                    .font(PigType.caption).foregroundStyle(.secondary).lineLimit(1)
+                    .font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 0)
                 mark(record, watch: watch).frame(width: 28, height: 28)
@@ -64,7 +64,7 @@ struct WatchDownloadsView: View {
                   ArtworkThumb(model: model, source: group.artwork, title: group.title, size: 44)
                   VStack(alignment: .leading, spacing: 2) {
                     Text(group.title).lineLimit(1)
-                    Text(group.caption).font(PigType.caption).foregroundStyle(.secondary)
+                    Text(group.caption).font(PigType.footnote).foregroundStyle(.secondary)
                       .lineLimit(1)
                   }
                   Spacer(minLength: 0)
