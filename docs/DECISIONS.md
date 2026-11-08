@@ -159,3 +159,5 @@ The rules these decisions produce, as they stand today, are in [PRODUCT.md](PROD
 **D-75 (8 Nov 2026)** — The server keeps its log in a rotating file in its own data folder (#148, about 10 MB, oldest lines dropped), besides the container log, so a restart no longer loses it. Reason: Mark chose option A.
 
 **D-76 (8 Nov 2026)** — The leftover `pig-music-test-app` and `pig-music-test-fake` containers and their test folder are removed (done 8 Nov). Reason: Mark agreed; they were test leftovers.
+
+**D-77 (9 Nov 2026)** — The live download budget stays as saved (it reads as 1 minute a quality level from the stage timings, not the 3-minute default of D-72) for now, though it can cut off a slow transfer. Reason: Mark chose to leave it.

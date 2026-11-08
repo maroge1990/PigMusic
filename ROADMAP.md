@@ -18,7 +18,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   - Not exercised yet (no song acquired since the release): #130, #132, #135, #136, #138; #22 needs listing timed
     during preparation. Only lock holds over 1 s were at startup (1.3 s, 2.2 s in `recover_requests`).
   - The live download budget looks like 1 minute a quality level (the stage timings stop at 60 s), not the 3-minute
-    default; one 9 MB transfer was cut off. A setting for Mark, not a code change.
+    default; one 9 MB transfer was cut off. Mark chose to leave it for now (D-77).
 - **Next:** the morning check of the overnight mix-download run (9 Nov) for the issues not yet exercised; then
   #63's remaining timer loops and #145's artist re-warm.
 - **iPhone/Watch:** 0.2.0 (23) uploaded to TestFlight 8 Nov (#149, #157–#163, waiting on Mark's device check).
