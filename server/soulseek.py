@@ -165,6 +165,8 @@ FORGET_SEARCH = 3600
 # TRANSFER_LIMIT. A peer with more than BUSY_QUEUE uploads waiting ranks
 # after every less busy one, whatever share of the album it has.
 TRANSFER_POLL = 1
+# How long a succeeded transfer's file may take to appear in its folder (#167).
+MOVE_WAIT = 10
 QUEUED_LIMIT = 40
 TRANSFER_LIMIT = 240
 BUSY_QUEUE = 10
@@ -495,7 +497,7 @@ class Soulseek:
                         received = match.get("bytesTransferred", 0) or 0
                         progress(received, candidate["size"])
                         if "succeeded" in state:
-                            self.copy_completed(candidate, destination)
+                            self.copy_completed(candidate, destination, check)
                             check()
                             return
                         if any(
@@ -550,7 +552,7 @@ class Soulseek:
                     except httpx.HTTPError:
                         pass
 
-    def copy_completed(self, candidate, destination):
+    def copy_completed(self, candidate, destination, check=None):
         config = self.config()
         if config.get("ssh_host"):
             import base64
@@ -619,7 +621,19 @@ class Soulseek:
             destination.write_bytes(result.stdout)
             return
         root = Path(config["download_root"]).resolve()
-        source = completed_path(root, candidate)
+        # The engine reports a transfer succeeded about a second before it
+        # moves the file out of its incomplete folder (#167): wait for it.
+        moved_by = time.monotonic() + MOVE_WAIT
+        while True:
+            try:
+                source = completed_path(root, candidate)
+                break
+            except NotYetMoved:
+                if time.monotonic() >= moved_by:
+                    raise
+                if check:
+                    check()
+                time.sleep(0.25)
         owned = engine_owned(root)
         size = candidate["size"]
         # The engine's own folder is on the work disk: a hard link imports
@@ -756,6 +770,11 @@ def engine_owned(folder):
     return bool(work) and folder.resolve().is_relative_to(Path(work).resolve())
 
 
+class NotYetMoved(ValueError):
+    """The completed file is not in its folder yet: no file of that name or
+    of a renamed copy is there at all."""
+
+
 def completed_path(root, candidate):
     """Where the engine saves a completed transfer: its remote folder's name
     then its file name, under the download folder. A second file of that name
@@ -788,6 +807,12 @@ def completed_path(root, candidate):
                 matches.append(path)
         except OSError:
             pass
+    if not matches and not any(
+        entry.name == name or renamed.fullmatch(entry.name) for entry in entries
+    ):
+        raise NotYetMoved(
+            "Completed Soulseek file could not be uniquely located in the configured download folder"
+        )
     if matches != [expected]:
         raise ValueError(
             "Completed Soulseek file could not be uniquely located in the configured download folder"

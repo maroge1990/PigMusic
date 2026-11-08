@@ -804,3 +804,39 @@ def test_the_health_check_keeps_one_engine_client(tmp_path):
     )
     adapter.health()
     assert len(made) == 2
+
+
+def test_a_completed_file_the_engine_has_not_moved_yet_is_waited_for(
+    tmp_path, monkeypatch
+):
+    """#167: the engine reports 'Completed, Succeeded' about a second before
+    it moves the file out of its incomplete folder; 7 of 64 finished
+    transfers were thrown away overnight as 'could not be uniquely located'."""
+    import threading
+
+    import server.soulseek as module
+
+    adapter = Soulseek(configured(tmp_path / "data"))
+    root = tmp_path / "data" / "engine"
+    (root / "Studio").mkdir(parents=True)
+    candidate = candidate_for(song(), {"username": "peer"}, file())
+
+    def move_in():
+        time.sleep(0.4)
+        (root / "Studio" / "01 Song.mp3").write_bytes(b"1" * 10000)
+
+    mover = threading.Thread(target=move_in)
+    mover.start()
+    try:
+        adapter.copy_completed(candidate, tmp_path / "copy.mp3")
+    finally:
+        mover.join()
+    assert (tmp_path / "copy.mp3").read_bytes() == b"1" * 10000
+
+    # A file that never arrives fails once the wait is over, not forever.
+    monkeypatch.setattr(module, "MOVE_WAIT", 0.3)
+    gone = {**candidate, "filename": "Music\\Studio\\02 Other.mp3"}
+    began = time.monotonic()
+    with pytest.raises(ValueError, match="uniquely"):
+        adapter.copy_completed(gone, tmp_path / "other.mp3")
+    assert time.monotonic() - began < 2
