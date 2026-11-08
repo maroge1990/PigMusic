@@ -62,7 +62,7 @@ struct SongActionsView: View {
               Task { await model.download([track]) }
             }
             Button("Send to Apple Watch", systemImage: "applewatch") {
-              Task { message = await model.watch?.enqueue([track]).map(StatusMessage.info) }
+              Task { message = await model.watch?.enqueue([track]) }
             }
             Button("Download smaller AAC copy") {
               Task { await model.download([track], quality: "aac") }

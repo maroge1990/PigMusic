@@ -224,3 +224,15 @@ def test_now_playing_controls_wrap_at_large_text_sizes():
         1
     ]
     assert player.lstrip().startswith("{\n    ViewThatFits(in: .horizontal)")
+
+
+def test_a_refused_or_failed_watch_send_is_an_error():
+    """Codex confirmation on #159: every Send to Apple Watch outcome was a
+    notice, failures included."""
+    watch = sources()["WatchPhoneController.swift"]
+    send = watch.split("func enqueue(", 1)[1].split("  func remove(", 1)[0]
+    assert send.lstrip().startswith(
+        "_ tracks: [Track], origin: DownloadOrigin = .direct) async\n    -> StatusMessage?"
+    )
+    assert send.count("return message.map(StatusMessage.error)") == 5
+    assert "StatusMessage.info)" not in sources()["PersonalActionsViews.swift"]

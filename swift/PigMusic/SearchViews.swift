@@ -334,7 +334,7 @@ struct SavedArtistView: View {
   private func sendToWatch() async {
     var tracks: [Track] = []
     for album in albums { tracks += await model.albumTracks(album) }
-    identityMessage = await model.watch?.enqueue(tracks)
+    identityMessage = await model.watch?.enqueue(tracks)?.text
   }
   private func loadSongs() async {
     var tracks: [Track] = []

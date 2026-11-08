@@ -243,23 +243,26 @@ import SwiftUI
   }
   var supported: Bool { link?.supported == true }
   /// Returns what happened, for the screen where Send to Apple Watch was tapped.
+  /// Its outcome as a status line: a refusal or failure is an error (Codex on #159).
   @discardableResult func enqueue(_ tracks: [Track], origin: DownloadOrigin = .direct) async
-    -> String?
+    -> StatusMessage?
   {
     guard supported else {
       message = "Watch downloads are managed by its paired iPhone."
-      return message
+      return message.map(StatusMessage.error)
     }
     guard verified, let downloads else {
       message = "Connect and refresh your phone library first."
-      return message
+      return message.map(StatusMessage.error)
     }
     if let id = origin.playlistId {
       subscribe(id, name: origin.playlistName)
       exclude([], from: id, sending: Set(tracks.map(\.id)))
       if tracks.isEmpty {
         await publish()
-        return "\(origin.playlistName ?? "This playlist") will follow on your Watch: songs you add are sent automatically."
+        return .info(
+          "\(origin.playlistName ?? "This playlist") will follow on your Watch: songs you add are sent automatically."
+        )
       }
     }
     guard
@@ -268,7 +271,7 @@ import SwiftUI
         <= 1000
     else {
       message = "Choose up to 1,000 songs for your Watch library."
-      return message
+      return message.map(StatusMessage.error)
     }
     let stamp = account.generation
     do {
@@ -279,7 +282,7 @@ import SwiftUI
       guard account.isCurrent(stamp) else { return nil }
       guard !personal.isEmpty else {
         message = "Add these songs to your library before downloading them to Watch."
-        return message
+        return message.map(StatusMessage.error)
       }
       try await downloads.enqueue(personal, quality: "aac", origin: origin)
       var result =
@@ -293,10 +296,10 @@ import SwiftUI
         result += " PigMusic isn't on your Watch yet: install it from the Watch app on this iPhone."
       }
       await publish()
-      return result
+      return .info(result)
     } catch {
       message = error.userMessage
-      return message
+      return message.map(StatusMessage.error)
     }
   }
   func remove(_ id: String) async {

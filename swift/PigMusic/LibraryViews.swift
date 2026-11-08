@@ -365,7 +365,7 @@ struct DownloadMenu: View {
         }
         if model.watch?.supported == true {
           Button("Send to Apple Watch") {
-            Task { watchResult = await model.watch?.enqueue(tracks, origin: origin) }
+            Task { watchResult = await model.watch?.enqueue(tracks, origin: origin)?.text }
           }
         }
       }
