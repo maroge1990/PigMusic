@@ -1,5 +1,6 @@
 """Supervise the web service and its private Soulseek engine in one container."""
 
+import json
 import os
 import signal
 import subprocess
@@ -16,6 +17,37 @@ ENGINE_BACKOFF_START = 5
 ENGINE_BACKOFF_LIMIT = 300
 ENGINE_HEALTHY_SECONDS = 600
 ENGINE_HEAP_MB = 512
+# The server's own log file (#148, D-75): two files of 5 MB, so about 10 MB
+# survives restarts in the data folder; the container log is unchanged.
+LOG_FILE_BYTES = 5 * 1024 * 1024
+LOG_FILE_BACKUPS = 1
+
+
+def log_config(root):
+    """logging.json plus a rotating file in <data>/logs, written beside it;
+    returns the written config's path for uvicorn's --log-config."""
+    config = json.loads(Path(__file__).with_name("logging.json").read_text())
+    logs = Path(root) / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    config["formatters"]["file"] = {
+        "format": "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    }
+    config["handlers"]["file"] = {
+        "class": "logging.handlers.RotatingFileHandler",
+        "formatter": "file",
+        # The same filters as the console: no secrets, no successful health check.
+        "filters": ["health", "credentials"],
+        "filename": str(logs / "pig-music.log"),
+        "maxBytes": LOG_FILE_BYTES,
+        "backupCount": LOG_FILE_BACKUPS,
+        "encoding": "utf-8",
+    }
+    for name in ("uvicorn", "uvicorn.access"):
+        config["loggers"][name]["handlers"].append("file")
+    config["root"]["handlers"].append("file")
+    path = logs / "logging.json"
+    path.write_text(json.dumps(config, indent=2))
+    return path
 
 
 def start_engine(root):
@@ -144,7 +176,7 @@ def main():
                 "--forwarded-allow-ips",
                 proxy_trust(),
                 "--log-config",
-                str(Path(__file__).with_name("logging.json")),
+                str(log_config(root)),
             ],
             env={
                 key: value
