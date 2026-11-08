@@ -422,7 +422,7 @@ struct InlineQualityPicker: View {
   let id: String
   @State private var settings: QualitySettings?
   @State private var selected = "inherit"
-  @State private var message: String?
+  @State private var message: StatusMessage?
   @State private var saving = false
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -452,7 +452,7 @@ struct InlineQualityPicker: View {
       guard
         let value = try? await model.readCatalogue({ try await $0.quality() })
       else {
-        message = "Connect to your server to change quality."
+        message = .info("Connect to your server to change quality.")
         return
       }
       message = nil
@@ -469,8 +469,8 @@ struct InlineQualityPicker: View {
         try await $0.saveQuality(scope: scope, id: id, preferred: value == "inherit" ? nil : value)
       }
       settings = try? await model.readCatalogue { try await $0.quality() }
-      message = "Saved. Shared files keep the highest quality anyone wants."
-    } catch { message = error.userMessage }
+      message = .info("Saved. Shared files keep the highest quality anyone wants.")
+    } catch { message = .error(error.userMessage) }
   }
 }
 
@@ -562,6 +562,9 @@ struct StatusText: View {
     self.text = text
     self.kind = kind
   }
+  init(_ status: StatusMessage) {
+    self.init(status.text, kind: status.kind)
+  }
   var body: some View {
     Text(text).font(PigType.footnote)
       .foregroundStyle(kind == .error ? PigBrand.danger(scheme) : PigBrand.secondary(scheme))
@@ -641,4 +644,13 @@ struct RowThumb<Content: View>: View {
   @ViewBuilder let content: Content
   @ScaledMetric(relativeTo: .body) private var size: CGFloat = 44
   var body: some View { content.frame(width: size, height: size) }
+}
+
+/// A status line's text and whether it reports a failure (Codex round 2 on
+/// #159: one String slot showed successes and failures alike).
+struct StatusMessage: Equatable {
+  let text: String
+  let kind: StatusText.Kind
+  static func info(_ text: String) -> StatusMessage { StatusMessage(text: text, kind: .info) }
+  static func error(_ text: String) -> StatusMessage { StatusMessage(text: text, kind: .error) }
 }

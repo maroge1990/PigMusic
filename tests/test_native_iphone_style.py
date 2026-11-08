@@ -191,3 +191,36 @@ def test_collection_rows_share_one_component_thumb_and_radius():
     editor = app["LibraryViews.swift"].split("struct QueueEditorView", 1)[1]
     assert "UpNextRow(model: model, item: item)" in editor.split("\n}\n", 1)[0]
     assert '"Remove", role: .destructive' not in app["LibraryViews.swift"]
+
+
+def test_a_status_line_knows_whether_it_reports_a_failure():
+    """Codex round 2 on #159: one String slot held successes and failures, so
+    failures showed as notices and a successful cancellation as an error."""
+    for name in (
+        "AccountToolsViews.swift",
+        "ArtistAcquisitionView.swift",
+        "Components.swift",
+        "HomeView.swift",
+        "PersonalActionsViews.swift",
+        "PlaylistViews.swift",
+        "SearchViews.swift",
+    ):
+        text = sources()[name]
+        assert "@State private var message: String?" not in text, name
+        assert "@State private var notice: String?" not in text or name == (
+            "PersonalActionsViews.swift"
+        ), name
+        # A failure is never stored as a notice.
+        assert not re.search(r"catch \{ (message|notice) = \.info", text), name
+        assert not re.search(r"\.info\([^)]*userMessage", text), name
+    requests = sources()["PersonalActionsViews.swift"]
+    assert 'self.error =\n          "Your request was cancelled' not in requests
+
+
+def test_now_playing_controls_wrap_at_large_text_sizes():
+    """Codex round 2 on #162: five scaled round buttons in one row ran off
+    the screen at accessibility sizes."""
+    player = sources()["LibraryViews.swift"].split("private var options: some View", 1)[
+        1
+    ]
+    assert player.lstrip().startswith("{\n    ViewThatFits(in: .horizontal)")

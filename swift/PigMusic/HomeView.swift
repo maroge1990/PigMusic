@@ -227,7 +227,7 @@ struct MixDetailView: View {
   let model: AppModel
   let mix: PersonalMix
   @State private var hidden: Set<String> = []
-  @State private var notice: String?
+  @State private var notice: StatusMessage?
   @State private var saving = false
   private var tracks: [Track] { mix.tracks.filter { !hidden.contains($0.id) } }
   var body: some View {
@@ -248,8 +248,8 @@ struct MixDetailView: View {
             Task {
               do {
                 _ = try await model.performPersonal { try await $0.saveMix(mix.id) }
-                notice = Self.savedNotice
-              } catch { notice = error.userMessage }
+                notice = .info(Self.savedNotice)
+              } catch { notice = .error(error.userMessage) }
               saving = false
             }
           }.disabled(saving)
@@ -266,7 +266,7 @@ struct MixDetailView: View {
                   do {
                     try await model.performPersonal { try await $0.hideMixSong(track.id) }
                     hidden.insert(track.id)
-                  } catch { notice = error.userMessage }
+                  } catch { notice = .error(error.userMessage) }
                 }
               }
             }
@@ -282,7 +282,7 @@ struct MixDetailView: View {
                 do {
                   try await model.hideMixEdition(mix.id)
                   dismiss()
-                } catch { notice = error.userMessage }
+                } catch { notice = .error(error.userMessage) }
                 saving = false
               }
             }.disabled(saving)

@@ -879,7 +879,7 @@ private struct AppleImportSheet: View {
   @State private var confirming = false
   @State private var working = false
   @State private var result: AppleImportResult?
-  @State private var message: String?
+  @State private var message: StatusMessage?
   @Environment(\.dismiss) private var dismiss
   private var capped: Bool { moreThanShown || songs.count > AppleImport.limit }
   var body: some View {
@@ -966,7 +966,7 @@ private struct AppleImportSheet: View {
           playlist, songs: songs, moreThanShown: moreThanShown, downloadMissing: download,
           source: service)
       }
-    } catch is CancellationError {} catch { message = error.userMessage }
+    } catch is CancellationError {} catch { message = .error(error.userMessage) }
   }
 }
 
@@ -1102,7 +1102,7 @@ private struct ShazamFoundView: View {
   let again: () -> Void
   @State private var state: ApplePlaylistSongState?
   @State private var checkFailure: String?
-  @State private var message: String?
+  @State private var message: StatusMessage?
   @State private var adding = false
   @Environment(\.colorScheme) private var scheme
   var body: some View {
@@ -1193,9 +1193,9 @@ private struct ShazamFoundView: View {
       let count = try await model.performPersonal {
         try await $0.addMembership(trackIds: [track.id])
       }
-      message = count > 0 ? "Added to your library." : "Already in your library."
+      message = .info(count > 0 ? "Added to your library." : "Already in your library.")
       await check()
-    } catch is CancellationError {} catch { message = error.userMessage }
+    } catch is CancellationError {} catch { message = .error(error.userMessage) }
   }
 }
 
@@ -1209,7 +1209,7 @@ private struct ShazamInboxView: View {
   @State private var confirming = false
   @State private var requesting = false
   @State private var requested: Set<String> = []
-  @State private var message: String?
+  @State private var message: StatusMessage?
   @Environment(\.colorScheme) private var scheme
   private static let key = "shazam-inbox"
   var body: some View {
@@ -1341,14 +1341,14 @@ private struct ShazamInboxView: View {
       requested.formUnion(songs.map(\.shazamId).filter { !outcome.unmatched.contains($0) })
       let sent = outcome.created + outcome.existing
       let unmatched = outcome.unmatched.count
-      message =
+      message = .info(
         [
           sent > 0 ? "Requested \(sent) song\(sent == 1 ? "" : "s")." : nil,
           unmatched > 0
             ? "\(unmatched) had no exact match in the catalogue: open \(unmatched == 1 ? "it" : "them") to choose a version."
             : nil,
           outcome.downloadsEnabled ? nil : "Server downloads are disabled; requests will wait.",
-        ].compactMap { $0 }.joined(separator: " ")
-    } catch is CancellationError {} catch { message = error.userMessage }
+        ].compactMap { $0 }.joined(separator: " "))
+    } catch is CancellationError {} catch { message = .error(error.userMessage) }
   }
 }

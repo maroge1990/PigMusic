@@ -8,7 +8,7 @@ struct PreferencesView: View {
   let model: AppModel
   @State private var preferences = AccountPreferences()
   @State private var loaded = false
-  @State private var message: String?
+  @State private var message: StatusMessage?
   var body: some View {
     Form {
       // Applies at once and is kept on this phone; it syncs whenever it can,
@@ -31,7 +31,7 @@ struct PreferencesView: View {
   private func save(_ value: AccountPreferences) async {
     // nil: a newer choice replaced this one, and its own save reports.
     guard let confirmed = await model.choosePreferences(value) else { return }
-    message = confirmed ? "Saved." : "Saved on this phone; it will sync when connected."
+    message = .info(confirmed ? "Saved." : "Saved on this phone; it will sync when connected.")
   }
 }
 struct PasswordView: View {
@@ -40,7 +40,7 @@ struct PasswordView: View {
   @State private var password = ""
   @State private var repeatPassword = ""
   @State private var loading = false
-  @State private var message: String?
+  @State private var message: StatusMessage?
   var body: some View {
     Form {
       SecureField("Current password", text: $current).textContentType(.password)
@@ -63,8 +63,8 @@ struct PasswordView: View {
             try await model.performPersonal {
               try await $0.changePassword(current: old, password: new)
             }
-            message = "Password changed."
-          } catch { message = error.userMessage }
+            message = .info("Password changed.")
+          } catch { message = .error(error.userMessage) }
         }
       }.disabled(
         loading || !model.canMutate || current.isEmpty || password.count < 12
@@ -78,7 +78,7 @@ struct SessionsView: View {
   let model: AppModel
   @State private var sessions: [AccountSession] = []
   @State private var loading = false
-  @State private var message: String?
+  @State private var message: StatusMessage?
   @State private var revoking: AccountSession?
   @State private var signingOutOthers = false
   /// Signed-in sessions, this device first.
@@ -132,8 +132,8 @@ struct SessionsView: View {
             loading = true
             do {
               let count = try await model.performPersonal { try await $0.revokeOtherSessions() }
-              message = "Signed out \(count) other device\(count == 1 ? "" : "s")."
-            } catch { message = error.userMessage }
+              message = .info("Signed out \(count) other device\(count == 1 ? "" : "s").")
+            } catch { message = .error(error.userMessage) }
             loading = false
             await load()
           }
@@ -149,7 +149,7 @@ struct SessionsView: View {
               loading = true
               do {
                 try await model.performPersonal { try await $0.revokeSession(id: session.id) }
-              } catch { message = error.userMessage }
+              } catch { message = .error(error.userMessage) }
               revoking = nil
               loading = false
               await load()
@@ -163,7 +163,7 @@ struct SessionsView: View {
     loading = true
     defer { loading = false }
     do { sessions = try await model.readCatalogue { try await $0.sessions() } } catch {
-      message = error.userMessage
+      message = .error(error.userMessage)
     }
   }
 }
@@ -174,7 +174,7 @@ struct QualityView: View {
   @State private var quality: QualitySettings?
   @State private var selected = "inherit"
   @State private var loading = false
-  @State private var message: String?
+  @State private var message: StatusMessage?
   var body: some View {
     Form {
       if let quality {
@@ -195,8 +195,8 @@ struct QualityView: View {
               try await model.performPersonal {
                 try await $0.saveQuality(scope: scope, id: id, preferred: value)
               }
-              message = "Preference saved."
-            } catch { message = error.userMessage }
+              message = .info("Preference saved.")
+            } catch { message = .error(error.userMessage) }
           }
         }.disabled(loading || !model.canMutate)
       } else {
@@ -210,7 +210,7 @@ struct QualityView: View {
         selected =
           value.preferences.first(where: { $0.scope == scope && $0.itemId == id })?.preferred
           ?? "inherit"
-      } catch { message = error.userMessage }
+      } catch { message = .error(error.userMessage) }
     }
   }
 }
@@ -220,7 +220,7 @@ struct RemovalView: View {
   @State private var preview: RemovalPreview?
   @State private var result: RemovalResult?
   @State private var loading = false
-  @State private var message: String?
+  @State private var message: StatusMessage?
   @State private var confirming = false
   var body: some View {
     Form {
@@ -261,7 +261,7 @@ struct RemovalView: View {
     defer { loading = false }
     let ids = tracks.map(\.id)
     do { preview = try await model.readCatalogue { try await $0.removalPreview(ids: ids) } } catch {
-      message = error.userMessage
+      message = .error(error.userMessage)
     }
   }
   private func remove() async {
@@ -276,7 +276,7 @@ struct RemovalView: View {
       }
     } catch {
       self.preview = nil
-      message = error.userMessage + " Preview again before confirming."
+      message = .error(error.userMessage + " Preview again before confirming.")
     }
   }
   private func undo(_ result: RemovalResult) async {
@@ -286,8 +286,8 @@ struct RemovalView: View {
       try await model.performPersonal { try await $0.undoRemoval(id: result.id) }
       self.result = nil
       preview = nil
-      message = "Music restored."
-    } catch { message = error.userMessage }
+      message = .info("Music restored.")
+    } catch { message = .error(error.userMessage) }
   }
 }
 

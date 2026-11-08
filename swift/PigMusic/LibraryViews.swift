@@ -572,23 +572,38 @@ struct NowPlayingView: View {
       }.accessibilityLabel("Next song")
     }.buttonStyle(.plain)
   }
+  /// One row when it fits; at large text sizes the round buttons (which grow
+  /// with the text) wrap onto two rows instead of running off the screen
+  /// (Codex round 2 on #162).
   private var options: some View {
-    HStack(spacing: 12) {
-      Button {
-        player.toggleShuffle()
-      } label: {
-        RoundIconLabel(systemImage: "shuffle").overlay(ring(player.shuffled))
-      }.buttonStyle(.plain).accessibilityLabel("Shuffle")
-        .accessibilityValue(player.shuffled ? "On" : "Off")
-      Button(action: cycleRepeat) {
-        RoundIconLabel(systemImage: player.repeatMode == .one ? "repeat.1" : "repeat")
-          .overlay(ring(player.repeatMode != .off))
-      }.buttonStyle(.plain).accessibilityLabel("Repeat").accessibilityValue(repeatLabel)
-      if let track = current {
-        FavouriteStar(model: model, track: track.actionTrack)
-        RoundIcon(label: "Song actions", systemImage: "ellipsis") { actionTrack = track }
+    ViewThatFits(in: .horizontal) {
+      HStack(spacing: 12) {
+        playbackModes
+        songControls
       }
-      AirPlayButton().frame(width: 40, height: 40)
+      VStack(spacing: 12) {
+        HStack(spacing: 12) { playbackModes }
+        HStack(spacing: 12) { songControls }
+      }
+    }
+  }
+  @ViewBuilder private var playbackModes: some View {
+    Button {
+      player.toggleShuffle()
+    } label: {
+      RoundIconLabel(systemImage: "shuffle").overlay(ring(player.shuffled))
+    }.buttonStyle(.plain).accessibilityLabel("Shuffle")
+      .accessibilityValue(player.shuffled ? "On" : "Off")
+    Button(action: cycleRepeat) {
+      RoundIconLabel(systemImage: player.repeatMode == .one ? "repeat.1" : "repeat")
+        .overlay(ring(player.repeatMode != .off))
+    }.buttonStyle(.plain).accessibilityLabel("Repeat").accessibilityValue(repeatLabel)
+    AirPlayButton().frame(width: 40, height: 40)
+  }
+  @ViewBuilder private var songControls: some View {
+    if let track = current {
+      FavouriteStar(model: model, track: track.actionTrack)
+      RoundIcon(label: "Song actions", systemImage: "ellipsis") { actionTrack = track }
     }
   }
   private func ring(_ on: Bool) -> some View {

@@ -13,7 +13,7 @@ struct PlaylistToolsView: View {
   @State private var importSelection: AppleImportSelection?
   @State private var selectedPlaylists: Set<Int> = []
   @State private var includeOtherTracks = false
-  @State private var message: String?
+  @State private var message: StatusMessage?
   @State private var loading = false
   var body: some View {
     Form {
@@ -76,9 +76,10 @@ struct PlaylistToolsView: View {
           importSelection = selection
           selectedPlaylists = Set(selection.playlists.map(\.id))
           preview = nil
-          message =
+          message = .info(
             "Review the selected export before importing. Existing imported playlists are updated; unrelated playlists are retained."
-        } catch { message = error.userMessage }
+          )
+        } catch { message = .error(error.userMessage) }
       }
   }
   private func create() async {
@@ -88,9 +89,9 @@ struct PlaylistToolsView: View {
     do {
       let confirmed = try await model.saveEdit(OfflineMutation(action: "create", name: value))
       name = ""
-      message =
-        confirmed ? "Playlist created." : "New playlist saved on this phone; waiting to sync."
-    } catch { message = error.userMessage }
+      message = .info(
+        confirmed ? "Playlist created." : "New playlist saved on this phone; waiting to sync.")
+    } catch { message = .error(error.userMessage) }
   }
   private func review(_ data: Data) async {
     loading = true
@@ -101,7 +102,7 @@ struct PlaylistToolsView: View {
           selected: selectedPlaylists, includeOtherTracks: includeOtherTracks) ?? data
       preview = try await model.readCatalogue { try await $0.previewImport(selected) }
       message = nil
-    } catch { message = error.userMessage }
+    } catch { message = .error(error.userMessage) }
   }
   private func submit(_ data: Data) async {
     loading = true
@@ -112,15 +113,15 @@ struct PlaylistToolsView: View {
           selected: selectedPlaylists, includeOtherTracks: includeOtherTracks) ?? data
       let result = try await model.performPersonal { try await $0.importApple(selected) }
       imported = nil
-      message = "Imported \(result.playlists) playlists and \(result.tracks) song records."
-    } catch { message = error.userMessage }
+      message = .info("Imported \(result.playlists) playlists and \(result.tracks) song records.")
+    } catch { message = .error(error.userMessage) }
   }
 }
 
 struct AddToPlaylistView: View {
   let model: AppModel
   let track: Track
-  @State private var message: String?
+  @State private var message: StatusMessage?
   @State private var loading = false
   var body: some View {
     List {
@@ -132,11 +133,11 @@ struct AddToPlaylistView: View {
             do {
               let confirmed = try await model.saveEdit(
                 OfflineMutation(action: "append", playlistId: playlist.id, track: track))
-              message =
+              message = .info(
                 confirmed
-                ? "Added to \(playlist.name). Repeated songs are kept as separate entries."
-                : "Playlist addition saved on this phone; waiting to sync."
-            } catch { message = error.userMessage }
+                  ? "Added to \(playlist.name). Repeated songs are kept as separate entries."
+                  : "Playlist addition saved on this phone; waiting to sync.")
+            } catch { message = .error(error.userMessage) }
           }
         }.disabled(loading || !model.canMutate)
       }
@@ -152,7 +153,7 @@ struct PlaylistView: View {
   @Bindable var model: AppModel
   @State private var playlist: Playlist
   @State private var name: String
-  @State private var message: String?
+  @State private var message: StatusMessage?
   @State private var loading = false
   @State private var deleting = false
   @State private var reloadAfterEdit = false
@@ -264,7 +265,7 @@ struct PlaylistView: View {
         key: "playlist:" + id, conditional: { try await $0.playlist(id: id, etag: $1) })
       name = playlist.name
       message = nil
-    } catch is CancellationError {} catch { message = error.userMessage }
+    } catch is CancellationError {} catch { message = .error(error.userMessage) }
   }
   private func addMissing() async {
     guard !loading else { return }
@@ -282,14 +283,13 @@ struct PlaylistView: View {
         let tracks = Array(requested[batch..<min(batch + 500, requested.count)])
         queued += try await model.performPersonal { try await $0.requestMusic(tracks) }.created
       }
-      message =
-        [
-          added > 0 ? "Added \(added) song\(added == 1 ? "" : "s") to your library." : nil,
-          queued > 0 ? "Requested \(queued) song\(queued == 1 ? "" : "s")." : nil,
-        ].compactMap { $0 }.joined(separator: " ")
-      if message?.isEmpty == true { message = "These songs are already requested." }
+      let done = [
+        added > 0 ? "Added \(added) song\(added == 1 ? "" : "s") to your library." : nil,
+        queued > 0 ? "Requested \(queued) song\(queued == 1 ? "" : "s")." : nil,
+      ].compactMap { $0 }.joined(separator: " ")
+      message = .info(done.isEmpty ? "These songs are already requested." : done)
       reloadAfterEdit = true
-    } catch is CancellationError {} catch { message = error.userMessage }
+    } catch is CancellationError {} catch { message = .error(error.userMessage) }
   }
   private func edit(name: String? = nil, order: [Int]? = nil) async {
     guard !loading else { return }
@@ -304,9 +304,9 @@ struct PlaylistView: View {
           revision: revision, order: order))
       message =
         confirmed
-        ? nil : "Edit saved on this phone. Other playlist edits wait for this one to sync."
+        ? nil : .info("Edit saved on this phone. Other playlist edits wait for this one to sync.")
       if confirmed { reloadAfterEdit = true }
-    } catch { message = error.userMessage + " Refresh before reapplying your edit." }
+    } catch { message = .error(error.userMessage + " Refresh before reapplying your edit.") }
   }
   private func remove(_ index: Int) async {
     guard !loading else { return }
@@ -325,9 +325,9 @@ struct PlaylistView: View {
       }
     do {
       let confirmed = try await model.saveEdit(mutation)
-      message = confirmed ? nil : "Removal saved on this phone; waiting to sync."
+      message = confirmed ? nil : .info("Removal saved on this phone; waiting to sync.")
       if confirmed { reloadAfterEdit = true }
-    } catch { message = error.userMessage + " Refresh before reapplying your edit." }
+    } catch { message = .error(error.userMessage + " Refresh before reapplying your edit.") }
   }
   private func delete() async {
     loading = true
@@ -338,6 +338,6 @@ struct PlaylistView: View {
       _ = try await model.saveEdit(
         OfflineMutation(action: "delete", playlistId: id, revision: revision))
       dismiss()
-    } catch { message = error.userMessage }
+    } catch { message = .error(error.userMessage) }
   }
 }

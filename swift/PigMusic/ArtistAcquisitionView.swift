@@ -12,7 +12,7 @@ struct ArtistAcquisitionView: View {
   @State private var eps = false
   @State private var monitor = false
   @State private var loading = false
-  @State private var message: String?
+  @State private var message: StatusMessage?
   @State private var confirm = false
   var body: some View {
     Form {
@@ -67,7 +67,7 @@ struct ArtistAcquisitionView: View {
     do {
       let value = try await model.readCatalogue({ try await $0.artistAcquisition(id: artistId) })
       apply(value)
-    } catch { message = error.userMessage }
+    } catch { message = .error(error.userMessage) }
   }
   private func save(request: Bool) async {
     guard !loading else { return }
@@ -81,7 +81,7 @@ struct ArtistAcquisitionView: View {
           id: artistId, kinds: kinds, monitor: monitoring, request: request)
       })
       apply(value)
-    } catch { message = error.userMessage }
+    } catch { message = .error(error.userMessage) }
   }
   private func cancel() async {
     guard !loading else { return }
@@ -90,6 +90,6 @@ struct ArtistAcquisitionView: View {
     do {
       let value = try await model.performPersonal({ try await $0.cancelArtist(id: artistId) })
       apply(value)
-    } catch { message = error.userMessage }
+    } catch { message = .error(error.userMessage) }
   }
 }

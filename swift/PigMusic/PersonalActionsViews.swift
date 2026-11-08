@@ -10,7 +10,7 @@ struct SongActionsView: View {
   @State private var addedToLibrary = false
   private var favourite: Bool? { model.favourites[track.id] }
   @State private var loading = false
-  @State private var message: String?
+  @State private var message: StatusMessage?
   var body: some View {
     NavigationStack {
       Form {
@@ -62,7 +62,7 @@ struct SongActionsView: View {
               Task { await model.download([track]) }
             }
             Button("Send to Apple Watch", systemImage: "applewatch") {
-              Task { message = await model.watch?.enqueue([track]) }
+              Task { message = await model.watch?.enqueue([track]).map(StatusMessage.info) }
             }
             Button("Download smaller AAC copy") {
               Task { await model.download([track], quality: "aac") }
@@ -94,11 +94,11 @@ struct SongActionsView: View {
     defer { loading = false }
     do {
       let confirmed = try await model.setFavourite(track, value)
-      message =
+      message = .info(
         confirmed
-        ? (value ? "Added to favourites." : "Removed from favourites.")
-        : "Favourite edit saved on this phone; waiting to sync."
-    } catch is CancellationError {} catch { message = error.userMessage }
+          ? (value ? "Added to favourites." : "Removed from favourites.")
+          : "Favourite edit saved on this phone; waiting to sync.")
+    } catch is CancellationError {} catch { message = .error(error.userMessage) }
   }
   private func add() async {
     guard !loading else { return }
@@ -108,9 +108,9 @@ struct SongActionsView: View {
       let count = try await model.performPersonal {
         try await $0.addMembership(trackIds: [track.id])
       }
-      message = count > 0 ? "Added to your library." : "Already in your library."
+      message = .info(count > 0 ? "Added to your library." : "Already in your library.")
       addedToLibrary = true
-    } catch is CancellationError {} catch { message = error.userMessage }
+    } catch is CancellationError {} catch { message = .error(error.userMessage) }
   }
   private func request() async {
     guard !loading else { return }
@@ -118,12 +118,10 @@ struct SongActionsView: View {
     defer { loading = false }
     do {
       let result = try await model.performPersonal { try await $0.requestMusic([track]) }
-      message =
+      message = .info(
         "Server confirmed: \(result.created) new, \(result.existing) existing, \(result.skipped) skipped."
-      if !result.downloadsEnabled {
-        message! += " Server downloads are disabled; requests will wait."
-      }
-    } catch is CancellationError {} catch { message = error.userMessage }
+          + (result.downloadsEnabled ? "" : " Server downloads are disabled; requests will wait."))
+    } catch is CancellationError {} catch { message = .error(error.userMessage) }
   }
 }
 
@@ -137,6 +135,8 @@ struct RequestsView: View {
   @State private var loaded = false
   @State private var enabled = true
   @State private var error: String?
+  /// A success to report, apart from errors (Codex round 2 on #159).
+  @State private var notice: String?
   var body: some View {
     List {
       if !enabled {
@@ -145,6 +145,7 @@ struct RequestsView: View {
       }
       if loading && !loaded { ProgressView("Loading requests…") }
       if let error { StatusText(error, kind: .error) }
+      if let notice { StatusText(notice) }
       if loaded && groups.isEmpty { StatusText("No music requests") }
       ForEach(groups) { group in
         DisclosureGroup {
@@ -219,10 +220,9 @@ struct RequestsView: View {
     do {
       let result = try await model.performPersonal { try await $0.cancelRequest(id: item.id) }
       await load(reset: true)
-      if result.continuesForOthers {
-        self.error =
-          "Your request was cancelled. The shared download continues for another person."
-      }
+      notice =
+        result.continuesForOthers
+        ? "Your request was cancelled. The shared download continues for another person." : nil
     } catch { self.error = error.userMessage }
   }
   private func load(reset: Bool) async {
