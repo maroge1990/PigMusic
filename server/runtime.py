@@ -26,9 +26,26 @@ LOG_FILE_BACKUPS = 1
 def log_config(root):
     """logging.json plus a rotating file in <data>/logs, written beside it;
     returns the written config's path for uvicorn's --log-config."""
-    config = json.loads(Path(__file__).with_name("logging.json").read_text())
-    logs = Path(root) / "logs"
+    packaged = Path(__file__).with_name("logging.json")
+    try:
+        return _file_log_config(packaged, Path(root) / "logs")
+    except OSError as error:
+        # The file is optional: never let it keep the server from starting.
+        print(
+            f"Server log file unavailable ({error}); logging to the console only",
+            file=sys.stderr,
+            flush=True,
+        )
+        return packaged
+
+
+def _file_log_config(packaged, logs):
+    config = json.loads(packaged.read_text())
     logs.mkdir(parents=True, exist_ok=True)
+    # Opened now, so a file that can't be written falls back here rather
+    # than failing uvicorn's own logging setup.
+    with open(logs / "pig-music.log", "a", encoding="utf-8"):
+        pass
     config["formatters"]["file"] = {
         "format": "%(asctime)s %(levelname)s %(name)s: %(message)s"
     }

@@ -65,3 +65,22 @@ def test_a_restart_keeps_the_earlier_log(tmp_path):
     assert (tmp_path / "logs/pig-music.log").read_text().count(
         "WARNING pig_music: run"
     ) == 2
+
+
+def test_a_log_folder_that_cannot_be_written_falls_back_to_the_console(
+    tmp_path, capsys
+):
+    """Codex on 6212de1: an optional log file must never stop the server."""
+    import server.runtime as runtime
+
+    packaged = Path(runtime.__file__).with_name("logging.json")
+    # "logs" is a file, so the folder can't be made.
+    blocked = tmp_path / "a"
+    blocked.mkdir()
+    (blocked / "logs").write_text("")
+    assert runtime.log_config(blocked) == packaged
+    # The folder exists but the log file can't be opened (it is a folder).
+    unopenable = tmp_path / "b"
+    (unopenable / "logs/pig-music.log").mkdir(parents=True)
+    assert runtime.log_config(unopenable) == packaged
+    assert "log file" in capsys.readouterr().err
