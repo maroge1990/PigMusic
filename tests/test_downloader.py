@@ -1029,10 +1029,27 @@ def test_an_albums_real_publications_never_rebuild_under_the_lifecycle_lock(
     coordinated publication caught the library up synchronously under
     lifecycle_lock: 11 rebuilds for 12 songs despite the debounce."""
     import plistlib
+    import threading
 
     import server.store as store_module
 
     monkeypatch.setattr(store_module, "REBUILD_DEBOUNCE", 0.3, raising=False)
+    # The rebuild thread waits until every song is processed, so the count
+    # does not depend on how fast the machine is (CI, 9 Nov: one song per
+    # 0.3 s window on the slower runner gave 5 rebuilds for 5 songs).
+    processed = threading.Event()
+    real_time = store_module.time
+
+    class HeldClock:
+        def __getattr__(self, name):
+            return getattr(real_time, name)
+
+        def sleep(self, seconds):
+            if threading.current_thread().name == "library-rebuild":
+                processed.wait(30)
+            real_time.sleep(seconds)
+
+    monkeypatch.setattr(store_module, "time", HeldClock())
     store = Store(tmp_path / "data")
     inventory = plistlib.dumps(
         {
@@ -1081,8 +1098,9 @@ def test_an_albums_real_publications_never_rebuild_under_the_lifecycle_lock(
     worker = FixtureDownloader(store, {"freemp3cloud": search})
     while job := store.claim_request():
         worker.process(job)
-    assert getattr(store, "settle_rebuilds", lambda: True)()
+    processed.set()
+    assert store.settle_rebuilds()
     assert {i["status"] for i in store.queue()["items"]} == {"completed"}
     assert not any(builds), "a rebuild ran under lifecycle_lock"
-    assert len(builds) < 5  # Fewer than one per song (timing allowing).
+    assert len(builds) == 1, builds  # One for the album, not one per song.
     assert Store(store.directory).library["stats"]["tracks"] == 5
