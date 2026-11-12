@@ -24,16 +24,17 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   0.2.0 (24), not yet built.
 - **Mark's decisions pending** (report, last section; ask one at a time): SoundCloud with #94, Undo over confirm
   (#183), navigation names, pig in iPhone empty states, Watch artwork, figures scope.
-- **iPhone/Watch:** 0.2.0 (23) on TestFlight since 8 Nov (#149, #157–#163, waiting on Mark's device check). Mark also
-  owes a look at the web (#150–#156).
+- **iPhone/Watch:** 0.2.0 (24) uploaded to TestFlight 13 Nov 10:00 Melbourne (`32c9b28`; the artwork retry, #168), waiting
+  on Mark's device check: open a mix, check covers and the lock screen artwork. Build 23's items (#149, #157–#163)
+  still wait on Mark's device check too; Mark also owes a look at the web (#150–#156).
 - **Ways of working:** area batches (D-50), Codex rounds per D-59 and D-71, Claude pushes; releases under D-52/D-73;
   D-58 closing. Household details live only in the gitignored `.private/` (D-45). The Mac was cleaned on 13 Nov
   (PigTV and PigRider build folders, iPad symbol cache): 15 GB free after the build.
 
 ## Now
 
-1. **Build 0.2.0 (24) for TestFlight** (iPhone artwork retry, #168) and check the artwork release live; then the
-   audit batches in the report's order, starting with the brand re-vendor (#179).
+1. **Mark on build 24 (T5):** covers in a mix and on the lock screen (#168); then the audit batches in the report's
+   order, starting with the brand re-vendor (#179). Live check of the artwork release after tonight's mix run.
 2. **Mark on build 21 (T5)**, then send diagnostics: Shazam (identify, Shazamed, Share from the Shazam app), Add to my
    playlists, a few songs not on the server (#23 timing, #94), Home a few times (#22), searches (#54).
 3. **#123** deferred Watch publish never rescheduled after an account change (native; build 22 with any device findings).
