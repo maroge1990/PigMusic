@@ -51,5 +51,6 @@ These are outside current scope. Each needs an explicit owner decision and a Git
 - **Mac app (MAC):** Designed-for-iPad app on Apple Silicon; Catalyst only if that proves unsuitable. Set aside by the owner.
 - **Shazam (S01/S02):** share a song from Shazam into a private PigMusic song inbox, or recognise a song inside PigMusic with ShazamKit; never an automatic download. Set aside by the owner.
 - **CarPlay and standalone Watch sign-in (P03):** the Watch remains phone-driven; do not change independent-app flags as incidental cleanup. Set aside by the owner.
+- **Watch artwork (D-83):** the Watch shows no covers; songs reach it as audio only. Set aside by the owner on 13 Nov 2026 to save battery and storage.
 - **Later mix tuning (MX0):** compare Last.fm/Apple catalogue access, improve affinity/exposure/skip signals, and consider Forgotten favourites once listening history exists.
 - **Optional network setups (NET):** split DNS for home playback during internet outages; reconsider tunnel suitability if household usage grows.
