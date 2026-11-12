@@ -186,12 +186,35 @@ class Mixes:
         self.wake = asyncio.Event()
         self.radio_lock = threading.Lock()
         self.task = None
+        # The warmer's page-cover queue (app.py); called on the event loop.
+        self.warm_covers = None
+        self.loop = None
 
     def day(self):
         return datetime.now(ZoneInfo(self.cache.settings()["timezone"])).date()
 
     def start(self, client):
+        self.loop = asyncio.get_running_loop()
         self.task = asyncio.create_task(self.run(client))
+
+    def warm(self, tracks):
+        """Hand the catalogue covers these songs show to the warmer, so they
+        exist before a client asks: a mix song is addressed by its release
+        (`track_dto`), and the first ask for an unfetched cover is a 404 the
+        iPhone does not retry. Safe from a worker thread."""
+        items = list(
+            dict.fromkeys(
+                ("release", track["musicbrainz_release_id"])
+                for track in tracks
+                if track.get("musicbrainz_release_id")
+            )
+        )
+        if not items or self.warm_covers is None:
+            return
+        if self.loop is not None and not self.loop.is_closed():
+            self.loop.call_soon_threadsafe(self.warm_covers, items)
+        else:
+            self.warm_covers(items)
 
     async def close(self):
         self.stopping.set()
@@ -654,6 +677,7 @@ class Mixes:
             len(tracks),
             len(payload.get("planned") or tracks),
         )
+        self.warm(tracks)
 
     def activate(self, today):
         with self.store.lifecycle_lock, self.store.connect() as conn:
@@ -1419,6 +1443,7 @@ class Mixes:
         with phase("mix-list-tracks"):
             cached = self.cache.filenames()
             result = []
+            shown = []
             for identity, kind, day, raw in rows:
                 if "edition:" + identity in hidden:
                     continue
@@ -1432,6 +1457,7 @@ class Mixes:
                     and (dto := self.track_dto(identity, index, track, members, cached))
                 ]
                 if tracks:
+                    shown.extend(payload["tracks"])
                     result.append(
                         {
                             "id": identity,
@@ -1442,6 +1468,8 @@ class Mixes:
                             "tracks": tracks,
                         }
                     )
+        # Editions published before the warmer ran, or whose covers it missed.
+        self.warm(shown)
         with phase("mix-list-radio"):
             radio = self.radio_row(user, self.day())
             card = None

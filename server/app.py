@@ -281,6 +281,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     mixes = Mixes(store, home, source_runtime)
     app.include_router(mixes_router(mixes))
     warmer = Warmer(store, home, lambda: app.state.http)
+    mixes.warm_covers = warmer.covers
     app.include_router(home_router(store, music_catalogue, home, warmer))
     from .routes.search import search_router
 

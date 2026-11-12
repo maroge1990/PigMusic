@@ -1748,3 +1748,28 @@ def test_mix_cache_cleanup_reads_each_unchanged_edition_once(tmp_path, monkeypat
         )
     mixes.cache.cleanup()
     assert len(keyed) > first
+
+
+def test_mix_covers_are_warmed_when_published_and_listed(tmp_path, monkeypatch):
+    """Mix songs are addressed by catalogue identity, so their covers are
+    fetched only when a client first asks (43% of those asks on the live
+    server were answered 404 while the fetch ran, and the iPhone shows a
+    placeholder for that view). Publishing an edition, and listing Home,
+    hand the covers to the warmer ahead of the first look."""
+    release = "33333333-3333-4333-8333-333333333333"
+    app, owner = protected(tmp_path, monkeypatch)
+    mixes = app.state.store.mixes
+    assert mixes.warm_covers is not None  # Wired to the warmer by the app.
+    warmed = []
+    mixes.warm_covers = warmed.append
+    songs = [
+        track(musicbrainz_release_id=release),
+        track(2),
+        track(3, musicbrainz_release_id=release),
+    ]
+    for song in songs:
+        cached(mixes, song)
+    ready(mixes, owner, songs)
+    assert warmed == [[("release", release)]]  # Once per release, no untagged songs.
+    assert len(mixes.list(owner)["mixes"][0]["tracks"]) == 3
+    assert warmed == [[("release", release)], [("release", release)]]
