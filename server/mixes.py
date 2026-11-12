@@ -1450,14 +1450,16 @@ class Mixes:
                 payload = json.loads(raw)
                 if not kind.startswith("saved:") and len(payload["tracks"]) < MIN_MIX:
                     continue  # Short editions from before the minimum stay out of Home.
-                tracks = [
-                    dto
-                    for index, track in enumerate(payload["tracks"])
-                    if song_key(track) not in hidden
-                    and (dto := self.track_dto(identity, index, track, members, cached))
-                ]
+                tracks, kept = [], []
+                for index, track in enumerate(payload["tracks"]):
+                    if song_key(track) in hidden:
+                        continue
+                    dto = self.track_dto(identity, index, track, members, cached)
+                    if dto:
+                        tracks.append(dto)
+                        kept.append(track)
                 if tracks:
-                    shown.extend(payload["tracks"])
+                    shown.extend(kept)
                     result.append(
                         {
                             "id": identity,
@@ -1468,7 +1470,8 @@ class Mixes:
                             "tracks": tracks,
                         }
                     )
-        # Editions published before the warmer ran, or whose covers it missed.
+        # Editions published before the warmer ran, or whose covers it missed:
+        # only the songs shown, so a hidden song's cover is never fetched.
         self.warm(shown)
         with phase("mix-list-radio"):
             radio = self.radio_row(user, self.day())

@@ -467,3 +467,35 @@ def test_page_covers_wait_once_within_a_bound_and_only_while_warming():
 
     assert len(asyncio.run(fetched())) == warming.COVER_BACKLOG
     assert not warmer.cover_pending and warmer.covers(page[:1]) == 1
+
+
+def test_a_failed_fanart_fallback_is_not_asked_again_within_backoff(tmp_path):
+    """#185: after a Cover Art Archive miss the Fanart fallback ran on every
+    warm-cover call (Fanart caches 200 and 404 answers, not timeouts or 5xx),
+    and Home mixes hand their covers to the warmer on every list."""
+    from server.media import save_settings
+
+    calls = []
+
+    def transport(request):
+        calls.append(request.url.host)
+        if request.url.host == "musicbrainz.org":
+            return httpx.Response(200, json={"release-group": {"id": GROUP}})
+        if request.url.host == "coverartarchive.org":
+            return httpx.Response(404)
+        if request.url.host == "webservice.fanart.tv":
+            return httpx.Response(503)
+        return httpx.Response(500)
+
+    app = create_app(tmp_path)
+    with TestClient(app) as client:
+        save_settings(app.state.store, True, True, fanart_key="k" * 32)
+        original = app.state.http
+        app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+        warmer = app.state.mixes.warm_covers.__self__
+        assert client.portal.call(warmer.cover, "release", RELEASE) is False
+        assert calls.count("webservice.fanart.tv") == 1
+        assert client.portal.call(warmer.cover, "release", RELEASE) is False
+        # The miss is remembered: no second Fanart request within the backoff.
+        assert calls.count("webservice.fanart.tv") == 1
+        app.state.http = original

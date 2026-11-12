@@ -939,6 +939,12 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         token = config.get("fanart_key")
         if not token or not config.get("portraits"):
             return None
+        # Fanart's own cache keeps its answers, not its failures; the warmer
+        # asks for Home's covers on every list (#185). A failed attempt rests
+        # for five minutes, a release Fanart has no cover for until tomorrow.
+        memory = "missing-artwork:fanart:" + kind + ":" + item_id
+        if await artwork.waiting(memory):
+            return None
         try:
             group_id = item_id
             if kind == "release":
@@ -949,12 +955,14 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             images = await fanart.album(app.state.http, group_id, token)
             cover = best_fanart(images.get("albumcover"))
             if not cover:
+                await artwork.missing(memory, 86400)
                 return None
             content = await fanart_download(app.state.http, cover["url"])
             await asyncio.to_thread(artwork.save, content, target)
             return target
         except Exception:
             # Optional enrichment; the placeholder cover remains.
+            await artwork.missing(memory, 300)
             return None
 
     class Category(BaseModel):

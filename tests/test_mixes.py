@@ -1762,14 +1762,19 @@ def test_mix_covers_are_warmed_when_published_and_listed(tmp_path, monkeypatch):
     assert mixes.warm_covers is not None  # Wired to the warmer by the app.
     warmed = []
     mixes.warm_covers = warmed.append
+    hidden_release = "44444444-4444-4444-8444-444444444444"
     songs = [
         track(musicbrainz_release_id=release),
         track(2),
         track(3, musicbrainz_release_id=release),
+        track(4, musicbrainz_release_id=hidden_release),
     ]
     for song in songs:
         cached(mixes, song)
-    ready(mixes, owner, songs)
-    assert warmed == [[("release", release)]]  # Once per release, no untagged songs.
+    identity = ready(mixes, owner, songs)
+    # Once per release, no untagged songs.
+    assert warmed == [[("release", release), ("release", hidden_release)]]
+    # A song the person hid is not shown, so its cover is not warmed (#185).
+    mixes.hide(owner, f"mix:{identity}:3")
     assert len(mixes.list(owner)["mixes"][0]["tracks"]) == 3
-    assert warmed == [[("release", release)], [("release", release)]]
+    assert warmed[1] == [("release", release)]
