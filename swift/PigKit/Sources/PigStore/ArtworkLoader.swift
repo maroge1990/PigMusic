@@ -50,14 +50,32 @@ import PigDomain
   /// changed while it loaded. With `stopsWhenCancelled` a cancelled task
   /// throws `CancellationError` after the read and after decoding. Errors
   /// from `fetch` are thrown, so the caller can end a revoked session.
+  ///
+  /// `retryAfter`: a cover the server has not fetched yet answers "not
+  /// available" while it fetches it (a catalogue alias on first ask); the
+  /// load asks again after each of these waits before giving up, so the
+  /// screen and the lock screen are not left with a placeholder for a
+  /// cover that arrives a moment later. Other failures are not retried.
   public func load(
-    _ request: ArtworkRequest, stopsWhenCancelled: Bool, isCurrent: () -> Bool,
+    _ request: ArtworkRequest, stopsWhenCancelled: Bool, retryAfter: [Duration] = [],
+    isCurrent: () -> Bool,
     fetch: @escaping @Sendable (ArtworkRequest) async throws -> Data
   ) async throws -> Image? {
     guard let cache else { return nil }
     let key = request.filename as NSString
     if let image = memory.object(forKey: key) { return image }
-    let data = try await cache.data(for: request, fetch: fetch)
+    var waits = retryAfter[...]
+    let data: Data
+    while true {
+      do {
+        data = try await cache.data(for: request, fetch: fetch)
+        break
+      } catch ArtworkFailure.unavailable {
+        guard let wait = waits.popFirst() else { throw ArtworkFailure.unavailable }
+        try await Task.sleep(for: wait)
+        guard isCurrent() else { return nil }
+      }
+    }
     if stopsWhenCancelled { try Task.checkCancellation() }
     let width = request.width
     let decoded = try await Task.detached(priority: .utility) {

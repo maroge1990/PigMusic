@@ -939,23 +939,31 @@ enum PlayOrigin: Hashable {
     case artist(String)
     case appleAlbum(Int)
   }
-  func artwork(_ source: ArtworkSource?, width: Int = 256) async -> UIImage? {
+  /// How long a screen waits for a catalogue cover the server is still
+  /// fetching (its first ask is answered "not available"): the web client's
+  /// 2 s and 6 s looks again. The lock screen waits longer (`playerRetries`),
+  /// since a song plays for minutes and nothing else re-asks for it.
+  static let coverRetries: [Duration] = [.seconds(2), .seconds(6)]
+  static let playerRetries: [Duration] = [.seconds(2), .seconds(6), .seconds(20)]
+  func artwork(
+    _ source: ArtworkSource?, width: Int = 256, retryAfter: [Duration] = coverRetries
+  ) async -> UIImage? {
     switch source {
     case .stored(let sha): return await artwork(sha: sha, width: width)
     case .release(let id):
-      return await catalogueImage("release", id, width) {
+      return await catalogueImage("release", id, width, retryAfter: retryAfter) {
         try await $0.catalogueArtwork(kind: .release, id: id, request: $1)
       }
     case .releaseGroup(let id):
-      return await catalogueImage("release-group", id, width) {
+      return await catalogueImage("release-group", id, width, retryAfter: retryAfter) {
         try await $0.catalogueArtwork(kind: .releaseGroup, id: id, request: $1)
       }
     case .artist(let id):
-      return await catalogueImage("artist", id, width) {
+      return await catalogueImage("artist", id, width, retryAfter: retryAfter) {
         try await $0.artistArtwork(id: id, request: $1)
       }
     case .appleAlbum(let id):
-      return await catalogueImage("apple-album", String(id), width) {
+      return await catalogueImage("apple-album", String(id), width, retryAfter: retryAfter) {
         try await $0.catalogueArtwork(kind: .appleAlbum, id: String(id), request: $1)
       }
     case nil: return nil
@@ -978,7 +986,7 @@ enum PlayOrigin: Hashable {
     return images.memoryImage(request)
   }
   private func catalogueImage(
-    _ kind: String, _ id: String, _ width: Int,
+    _ kind: String, _ id: String, _ width: Int, retryAfter: [Duration] = [],
     fetch: @escaping @Sendable (NativeService, ArtworkRequest) async throws -> Data
   ) async -> UIImage? {
     guard let service, images.cache != nil, UUID(uuidString: id) != nil else { return nil }
@@ -988,7 +996,8 @@ enum PlayOrigin: Hashable {
     else { return nil }
     do {
       return try await images.load(
-        request, stopsWhenCancelled: false, isCurrent: { [account] in account.isCurrent(stamp) }
+        request, stopsWhenCancelled: false, retryAfter: retryAfter,
+        isCurrent: { [account] in account.isCurrent(stamp) }
       ) { try await fetch(service, $0) }
     } catch NativeFailure.authentication {
       revoked(generation: stamp)
@@ -1194,7 +1203,8 @@ enum PlayOrigin: Hashable {
         player.play(
           tracks, startingAt: index,
           artwork: { [weak self] track in
-            await self?.artwork(track.artworkSource, width: 512)
+            await self?.artwork(
+              track.artworkSource, width: 512, retryAfter: AppModel.playerRetries)
           }, resolve: { _ in url }
         )
         return
@@ -1206,7 +1216,7 @@ enum PlayOrigin: Hashable {
     player.play(
       tracks, startingAt: index, autoplay: restored == nil, restored: restored,
       artwork: { [weak self] track in
-        await self?.artwork(track.artworkSource, width: 512)
+        await self?.artwork(track.artworkSource, width: 512, retryAfter: AppModel.playerRetries)
       },
       resolve: { [weak self] track in
         do {

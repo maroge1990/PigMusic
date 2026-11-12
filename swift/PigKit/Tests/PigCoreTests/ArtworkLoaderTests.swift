@@ -102,6 +102,49 @@ private func png(size: Int = 8) throws -> Data {
     #expect(loader.memoryImage(request) == nil)
   }
 
+  /// The server answers "not available" for a catalogue cover it is still
+  /// fetching; the load asks again after each wait, and stops at the end.
+  @Test func aCoverStillBeingFetchedIsAskedForAgain() async throws {
+    let (loader, root) = try makeLoader()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let request = try ArtworkRequest(sha: String(repeating: "a", count: 64))
+    let bytes = try png()
+    let fetches = Fetches()
+    let image = try await loader.load(
+      request, stopsWhenCancelled: false,
+      retryAfter: [.milliseconds(5), .milliseconds(5), .milliseconds(5)], isCurrent: { true }
+    ) { _ in
+      await fetches.add()
+      if await fetches.count < 3 { throw ArtworkFailure.unavailable }
+      return bytes
+    }
+    #expect(image != nil)
+    #expect(await fetches.count == 3)
+    let never = Fetches()
+    await #expect(throws: ArtworkFailure.unavailable) {
+      _ = try await loader.load(
+        try ArtworkRequest(sha: String(repeating: "b", count: 64)), stopsWhenCancelled: false,
+        retryAfter: [.milliseconds(5)], isCurrent: { true }
+      ) { _ in
+        await never.add()
+        throw ArtworkFailure.unavailable
+      }
+    }
+    #expect(await never.count == 2)  // One retry, then the miss stands.
+    // Without retries a miss is final at once: a stored hash never appears later.
+    let once = Fetches()
+    await #expect(throws: ArtworkFailure.unavailable) {
+      _ = try await loader.load(
+        try ArtworkRequest(sha: String(repeating: "c", count: 64)), stopsWhenCancelled: false,
+        isCurrent: { true }
+      ) { _ in
+        await once.add()
+        throw ArtworkFailure.unavailable
+      }
+    }
+    #expect(await once.count == 1)
+  }
+
   @Test func catalogueArtworkIsKeyedByItsAlias() throws {
     let id = "8F1B3C1E-5A6B-4C7D-8E9F-0A1B2C3D4E5F"
     let upper = try #require(
