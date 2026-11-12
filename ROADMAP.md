@@ -22,8 +22,10 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   and Watch simulator builds OK. **Live check next:** after tonight's mix run, the warmer log should show covers
   prepared at publish time and Home mixes should open with covers on the web; the iPhone retry needs TestFlight build
   0.2.0 (24), not yet built.
-- **Mark's decisions pending** (report, last section; ask one at a time): SoundCloud with #94, Undo over confirm
-  (#183), navigation names, pig in iPhone empty states, Watch artwork, figures scope.
+- **Decisions 13 Nov:** D-79 Undo over confirm (#183), D-80 drop SoundCloud and yt-dlp with #94 (Monochrome enabled live but
+  never searched: check its configuration in #94), D-81 navigation names stay, D-82 the pig on iPhone empty and error
+  states (#180), D-83 no Watch artwork (set aside), D-84 rounded tabular figures only where compared (#179, #180). D-78
+  clean-up of the 9 Nov rollback still waits on Mark's hands.
 - **iPhone/Watch:** 0.2.0 (24) uploaded to TestFlight 13 Nov 10:00 Melbourne (`32c9b28`; the artwork retry, #168), waiting
   on Mark's device check: open a mix, check covers and the lock screen artwork. Build 23's items (#149, #157–#163)
   still wait on Mark's device check too; Mark also owes a look at the web (#150–#156).
