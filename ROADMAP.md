@@ -5,37 +5,38 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 9 Nov 2026 (morning, Melbourne).*
+*Overwritten at the end of every session. 13 Nov 2026 (morning, Melbourne).*
 
-- **Live:** release `findings-20261109-v1`, server `4c0550d`, since 9 Nov 09:06 Melbourne (Mark asked; nobody was using
-  it). Healthy. Only this release's rollback is kept on Unraid (D-78): container `PigMusic-before-findings-20261109-v1`
-  and backup `pre-findings-20261109-v1`.
-- **Live checks done (8 Nov night, 9 Nov after the mix-download run), numbers on each issue:**
-  - Closed: #146 logs, #134 timing lines, #133 budgets, #141 library sync, #131 searches (0 engine errors in 445,
-    38% with hits under 5 s), #132 queued peers (none past 40 s), #138 commit lock (0 holds in 57 commits), #135.
-  - Overnight: 155 jobs, 57 acquired (median 43.5 s, max 117 s). With the saved 1-minute budget (D-77) 18 Soulseek
-    transfers were cut off mid-download.
-  - Idle CPU: our server 0.97% of a core (was 1.2%), slskd 2.41% (was 3.1%).
-  - Still open: #136 and the new **#166** (export pass holds lifecycle_lock up to 10 s, about twice the baseline, and
-    the warning can't name the step); **#167** (7 of 64 finished Soulseek transfers not found on disk); #130, #22,
-    #142 not exercised (one requester, nobody on Home or connected); #63.
-- **In that release:** #167 a finished Soulseek file is waited for (the engine moves it about a second after reporting
-  it done); #166 a song's export folder is chosen before the lifecycle lock, and hold warnings name failures and
-  cleanup steps. Recheck both in the next mix run (tonight).
-- **Next:** tonight's mix run for #166/#167; Mark to pick the folder for the song waiting in the export status; then #63's remaining timer loops and #145's artist re-warm.
+- **Live:** release `findings-20261109-v1`, server `4c0550d`, since 9 Nov 09:06 Melbourne. Healthy. Only this release's
+  rollback is kept on Unraid (D-78).
+- **Audit of 13 Nov** (efficiency, duplication, brand 1.8/1.9, UX against the Apple design guide, artwork): report at
+  https://claude.ai/artifact/91KX6g4ciEB7npgbpR4aCH; issues #168–#185. Batch order is in the report: artwork (#168,
+  done) → brand re-vendor (#179) → lock contention and idle work (#171, #172) → web (#174, #175, #181, #182) → iPhone
+  brand rules (#180) → agency and words (#183, waits on Mark) → server dead code (#169, #170, #173) → iPhone dead
+  code and search merge (#176–#178) → review checklist (#184).
+- **Pushed 13 Nov, not yet released:** batch 'artwork' (#168, #185): `312d21f` mix covers warmed when published and
+  listed, `4031df8` iPhone asks again for a cover the server is still fetching (lock screen too), `f4cd866` only shown
+  songs warmed and failed Fanart attempts rest. Two Codex rounds + one confirmation, no findings left. Backend 976
+  passed, PigKit 332 passed, iPhone and Watch simulator builds OK. Needs a release and a TestFlight build (0.2.0 (24))
+  before Mark can see the artwork fix; check the mix covers on Home after the next mix run.
+- **Mark's decisions pending** (report, last section; ask one at a time): SoundCloud with #94, Undo over confirm
+  (#183), navigation names, pig in iPhone empty states, Watch artwork, figures scope.
 - **iPhone/Watch:** 0.2.0 (23) on TestFlight since 8 Nov (#149, #157–#163, waiting on Mark's device check). Mark also
   owes a look at the web (#150–#156).
 - **Ways of working:** area batches (D-50), Codex rounds per D-59 and D-71, Claude pushes; releases under D-52/D-73;
-  D-58 closing. Household details live only in the gitignored `.private/` (D-45).
+  D-58 closing. Household details live only in the gitignored `.private/` (D-45). The Mac was cleaned on 13 Nov
+  (PigTV and PigRider build folders, iPad symbol cache): 15 GB free after the build.
 
 ## Now
 
-1. **Mark on build 21 (T5)**, then send diagnostics: Shazam (identify, Shazamed, Share from the Shazam app), Add to my
+1. **Release the artwork batch** (#168, #185) and build 0.2.0 (24) for TestFlight; then the audit batches in the
+   report's order, starting with the brand re-vendor (#179).
+2. **Mark on build 21 (T5)**, then send diagnostics: Shazam (identify, Shazamed, Share from the Shazam app), Add to my
    playlists, a few songs not on the server (#23 timing, #94), Home a few times (#22), searches (#54).
-2. **#123** deferred Watch publish never rescheduled after an account change (native; build 22 with any device findings).
-3. **Live checks from real use:** #16/#17/#20 freezes and lock holds (nightly mix run + Mark's listening), #22, #54,
+3. **#123** deferred Watch publish never rescheduled after an account change (native; build 22 with any device findings).
+4. **Live checks from real use:** #16/#17/#20 freezes and lock holds (nightly mix run + Mark's listening), #22, #54,
    #94, #23 first-sound p90; #63 quiet-night idle measurement.
-4. **Rig:** a larger generated library for #22 timings; #96 warming fairness; check the engine sweep against the real
+5. **Rig:** a larger generated library for #22 timings; #96 warming fairness; check the engine sweep against the real
    slskd layout.
 
 ## Later (P3)
