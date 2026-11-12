@@ -68,3 +68,36 @@ def test_vendored_radiance_matches_approved_release():
     )
     vendored = (SOURCE / radiance["copiedTo"]).read_bytes()
     assert hashlib.sha256(vendored).hexdigest() == radiance["sha256"]
+
+
+def test_vendored_brand_is_1_9_with_the_glass_stylesheet():
+    """Brand 1.9.0 is vendored, glass and figures CSS included (#179)."""
+    provenance = json.loads((SOURCE / "docs/brand-asset-provenance.json").read_text())
+    native = json.loads((SOURCE / "docs/native-brand-assets.json").read_text())
+    tokens = json.loads((SOURCE / "docs/pig-family-brand-tokens.json").read_text())
+    assert tokens["version"] == provenance["version"] == native["version"] == "1.9.0"
+    glass = next(a for a in provenance["assets"] if a["path"] == "tokens/pig-glass.css")
+    assert glass["copiedTo"] == "client/src/brand/pig-glass.css"
+    css = (SOURCE / glass["copiedTo"]).read_text()
+    for rule in (".pig-glass", ".pig-amount", "prefers-reduced-transparency"):
+        assert rule in css
+    for generated in (
+        "client/src/tokens.css",
+        "swift/PigKit/Sources/PigBrand/Tokens.swift",
+    ):
+        assert "Pig family 1.9.0" in (SOURCE / generated).read_text().splitlines()[0]
+    # The web loads the glass sheet and maps the --pig-* names it uses.
+    assert (
+        '@import "./brand/pig-glass.css";'
+        in (SOURCE / "client/src/Base.css").read_text()
+    )
+    aliases = (SOURCE / "client/src/tokens.css").read_text()
+    for name in (
+        "accent",
+        "on-accent",
+        "text-accent",
+        "surface",
+        "border",
+        "control-border",
+    ):
+        assert f"--pig-{name}: var(--{name});" in aliases

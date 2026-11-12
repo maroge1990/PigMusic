@@ -1,0 +1,43 @@
+/* Pig family 1.9.0 Liquid Glass (web approximation; native apps use the system glass).
+   Floating control layer only: tab bars, toolbars, floating buttons, sheets and menus. Never on cards, lists or content.
+   One rose primary action per screen. Place over the canvas with the corner bloom for a faint pink. */
+.pig-glass {
+  background: rgba(255,255,255,.40);
+  -webkit-backdrop-filter: blur(10px) saturate(190%); backdrop-filter: blur(10px) saturate(190%);
+  border: 1px solid rgba(255,255,255,.75);
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.95), inset 0 -1px 1px rgba(28,22,32,.05), 0 6px 20px rgba(28,22,32,.12);
+}
+[data-theme="dark"] .pig-glass, .pig-glass[data-theme="dark"] {
+  background: rgba(52,42,62,.38);
+  border: 1px solid rgba(255,255,255,.16);
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.22), 0 6px 20px rgba(0,0,0,.40);
+}
+/* The one primary action: full-strength accent so the label keeps AA contrast. */
+.pig-glass--primary, [data-theme="dark"] .pig-glass--primary {
+  background: var(--pig-accent); color: var(--pig-on-accent);
+  border: 1px solid rgba(255,255,255,.45);
+}
+.pig-glass [aria-selected="true"], .pig-glass .is-selected {
+  color: var(--pig-text-accent); background: color-mix(in srgb, var(--pig-accent) 13%, transparent);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .pig-glass, [data-theme="dark"] .pig-glass, .pig-glass[data-theme="dark"] {
+  background: var(--pig-surface); -webkit-backdrop-filter: none; backdrop-filter: none;
+  border: 1px solid var(--pig-border); box-shadow: 0 2px 8px rgba(28,22,32,.08);
+  }
+  .pig-glass--primary, [data-theme="dark"] .pig-glass--primary { background: var(--pig-accent); border: 1px solid rgba(255,255,255,.45); }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .pig-glass, [data-theme="dark"] .pig-glass, .pig-glass[data-theme="dark"] {
+  background: var(--pig-surface); -webkit-backdrop-filter: none; backdrop-filter: none;
+  border: 1px solid var(--pig-border); box-shadow: 0 2px 8px rgba(28,22,32,.08);
+  }
+  .pig-glass--primary, [data-theme="dark"] .pig-glass--primary { background: var(--pig-accent); border: 1px solid rgba(255,255,255,.45); }
+}
+@media (prefers-contrast: more) {
+  .pig-glass, [data-theme="dark"] .pig-glass, .pig-glass[data-theme="dark"] { border-color: var(--pig-control-border); }
+}
+/* Amounts and figures: rounded numerals with tabular digits. */
+.pig-amount { font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+/* Concentric corners: inner radius = container radius minus inset (minimum 6 px). Set --pig-outer-radius and --pig-inset. */
+.pig-concentric { border-radius: max(var(--pig-radius-min, 6px), calc(var(--pig-outer-radius) - var(--pig-inset))); }

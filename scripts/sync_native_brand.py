@@ -1,4 +1,4 @@
-"""Vendor the approved PigMusic 1.7 assets; consumers need no branding checkout."""
+"""Vendor the approved PigMusic brand assets; consumers need no branding checkout."""
 
 import argparse
 import hashlib
@@ -8,11 +8,16 @@ import struct
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+APPROVED_VERSION = "1.9.0"
+# Web stylesheets vendored byte for byte from the kit's tokens/ folder.
+WEB_STYLESHEETS = ("tokens/pig-radiance.css", "tokens/pig-glass.css")
 
 
 def sync(source):
     tokens = json.loads((source / "tokens/brand-tokens.json").read_text())
-    if tokens["version"] != "1.7.0":
+    # Raise this only after reviewing what the new version changes (1.9.0: the
+    # 13 Nov 2026 audit, #179).
+    if tokens["version"] != APPROVED_VERSION:
         raise ValueError("Review a new branding version before adopting it")
     product = source / "assets/products/pig-music"
     imported = {}
@@ -34,13 +39,15 @@ def sync(source):
     receipt_path = ROOT / "docs/brand-asset-provenance.json"
     receipt = json.loads(receipt_path.read_text())
     receipt["version"] = tokens["version"]
+    listed = {entry["path"] for entry in receipt["assets"]}
+    receipt["assets"] += [{"path": p} for p in WEB_STYLESHEETS if p not in listed]
     for entry in receipt["assets"]:
         src = source / entry["path"]
         payload = src.read_bytes()
         if entry["path"] == "tokens/brand-tokens.json":
             destination = ROOT / "docs/pig-family-brand-tokens.json"
-        elif entry["path"] == "tokens/pig-radiance.css":
-            destination = ROOT / "client/src/brand/pig-radiance.css"
+        elif entry["path"] in WEB_STYLESHEETS:
+            destination = ROOT / "client/src/brand" / src.name
         elif "/Apple/" in entry["path"]:
             destination = (
                 ROOT / "swift/PigMusic/Assets.xcassets/AppIcon.appiconset" / src.name

@@ -1,11 +1,11 @@
 {
-  "version": "1.7.0",
+  "version": "1.9.0",
   "source": "https://github.com/maroge1990/PigBrand",
   "assets": [
     {
       "path": "tokens/brand-tokens.json",
-      "bytes": 10996,
-      "sha256": "fc28d72153063243b80f18e45cee3965b7a8643c1d0f11be1fbadce731d628ae",
+      "bytes": 11381,
+      "sha256": "1514c726a3e44a0b52bfdf832e5b396d6f1c70a62c454a096e4c2d478812fac1",
       "status": "production",
       "copiedTo": "docs/pig-family-brand-tokens.json"
     },
@@ -14,7 +14,7 @@
       "status": "production",
       "copiedTo": "client/src/brand/pig-radiance.css",
       "bytes": 3498,
-      "sha256": "9ee418dfe79ee66abb53d49ec1db059364ddf1de4014060682141a88a6f1c7dc"
+      "sha256": "1a74a19168689dd30f58695fd9bc2e0e9b4a685a8f3bfa8d4410f65d818ea16e"
     },
     {
       "path": "assets/products/pig-music/mark.png",
@@ -134,6 +134,12 @@
       "height": 1024,
       "mode": "RGB",
       "copiedTo": "swift/PigMusic/Assets.xcassets/AppIcon.appiconset/dark.png"
+    },
+    {
+      "path": "tokens/pig-glass.css",
+      "copiedTo": "client/src/brand/pig-glass.css",
+      "bytes": 2772,
+      "sha256": "c3662d38d8903706bf603f8abeb2e801079a966a3fd4eb6904dfb5f2056335fa"
     }
   ]
 }

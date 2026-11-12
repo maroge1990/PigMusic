@@ -33,7 +33,7 @@ type MixFeed = {
   radio?: { title: string; ready: number } | null;
 };
 
-/** Each kind has its own pair of Pig-Branding roles (tokens.css). */
+/** Each kind has its own pair of PigBrand roles (tokens.css). */
 const KINDS = new Set([
   "daily",
   "artist",

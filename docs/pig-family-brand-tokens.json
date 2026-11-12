@@ -1,7 +1,7 @@
 {
-  "status": "final-1.7-eight-products-layered-2026-10-10",
-  "version": "1.7.0",
-  "date": "2026-10-10",
+  "status": "final-1.9-eight-products-layered-2026-11-11",
+  "version": "1.9.0",
+  "date": "2026-11-11",
   "logo": {
     "pink": "#F6B7D4",
     "rose": "#EF7AAE",
@@ -181,9 +181,9 @@
       "name": "PigReader",
       "scope": "Ebooks."
     },
-    "pig-domain": {
-      "name": "PigDomain",
-      "scope": "Household chore management."
+    "piggybank": {
+      "name": "Piggybank",
+      "scope": "Personal and household energy: base load, recovery debt, household domains and a weekly odd-job suggestion."
     },
     "pig-board": {
       "name": "PigBoard",
@@ -201,9 +201,9 @@
   "identity": {
     "default": "Distinct fused-pig product icons with established Arial Rounded MT Bold wordmarks.",
     "options": "Earlier badge, frame and crop studies are historical; the refined fused set is the base identity.",
-    "naming": "Pig + a short descriptive noun for new products. PigTV is a retained legacy spelling.",
+    "naming": "Pig + a short descriptive noun for new products. PigTV is a retained legacy spelling. Piggybank is an owner-approved exception (11 November 2026): it starts with Pig and the pig is part of the word; write it as one word with a lower-case b.",
     "font": "ArialRoundedMTBold; distribute outlined wordmarks, not the font.",
-    "approval": "User approved the outlined four-icon original-nose preview as final on 6 October 2026. Use the exact approved raster source; no redraws. Optical lockup and icon placement approved 7 October 2026. PigDomain (bucket pig), PigBoard (wall board), halo icons, splash motion and top-left corner bloom approved as final 7 October 2026. Vector masters for all seven pigs (the original four traced from the approved raster at 99.8% silhouette agreement), layered Icon Composer sources, mono layers, glyphs, PigFinance (classic piggy bank) and Liquid Glass rules approved as final 9 October 2026. PigMenu (chef\u2019s hat pig) approved as final 10 October 2026.",
+    "approval": "User approved the outlined four-icon original-nose preview as final on 6 October 2026. Use the exact approved raster source; no redraws. Optical lockup and icon placement approved 7 October 2026. PigDomain (bucket pig), PigBoard (wall board), halo icons, splash motion and top-left corner bloom approved as final 7 October 2026. Vector masters for all seven pigs (the original four traced from the approved raster at 99.8% silhouette agreement), layered Icon Composer sources, mono layers, glyphs, PigFinance (classic piggy bank) and Liquid Glass rules approved as final 9 October 2026. PigMenu (chef\u2019s hat pig) approved as final 10 October 2026. Piggybank replaces the PigDomain placeholder and keeps the bucket pig, and its name is an approved exception to the Pig + noun rule, 11 November 2026.",
     "nose": "Every pig uses the canonical nose (sources/approved/pig-nose.svg, traced from the approved PigTV artwork), placed by translation (PigVideo\u2019s is turned 6\u00b0 to match its original pose). Never resize, redraw or restyle it in pig artwork. Glyphs use the same path uniformly scaled to the 24-point glyph grid."
   },
   "spacing": [

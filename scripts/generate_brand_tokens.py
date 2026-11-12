@@ -24,7 +24,7 @@ TYPE_ROLES = [
     ("display", 36, "largeTitle"),
 ]
 
-# Content artwork stays appearance-independent. These are Pig-Branding roles,
+# Content artwork stays appearance-independent. These are PigBrand roles,
 # not an additional palette; action/focus colours remain semantic theme roles.
 MIX_ARTWORK = {
     "daily": (("logo", "brown"), ("logo", "pink")),
@@ -93,6 +93,8 @@ def outputs():
             ]
         else:
             css += [line]
+    # The kit's own stylesheets (pig-glass.css) read --pig-* names.
+    css += [f"  --pig-{kebab(key)}: var(--{kebab(key)});" for key in tokens["light"]]
     css += [
         "  --selected-fill: color-mix(in srgb, var(--accent) 14%, var(--surface));",
         "  --success-fill: color-mix(in srgb, var(--success) 14%, var(--surface));",

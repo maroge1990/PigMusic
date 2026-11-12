@@ -1,4 +1,4 @@
-/* Generated from Pig family 1.7.0; do not edit. */
+/* Generated from Pig family 1.9.0; do not edit. */
 :root,
 :root[data-theme="light"] {
   color-scheme: light;
@@ -104,6 +104,20 @@
   );
   --shadow-dropdown: color-mix(in srgb, var(--media-canvas) 20%, transparent);
   --scrim: color-mix(in srgb, var(--media-canvas) 73.333333%, transparent);
+  --pig-canvas: var(--canvas);
+  --pig-surface: var(--surface);
+  --pig-raised: var(--raised);
+  --pig-text: var(--text);
+  --pig-secondary: var(--secondary);
+  --pig-accent: var(--accent);
+  --pig-on-accent: var(--on-accent);
+  --pig-hover: var(--hover);
+  --pig-border: var(--border);
+  --pig-control-border: var(--control-border);
+  --pig-success: var(--success);
+  --pig-warning: var(--warning);
+  --pig-danger: var(--danger);
+  --pig-text-accent: var(--text-accent);
   --selected-fill: color-mix(in srgb, var(--accent) 14%, var(--surface));
   --success-fill: color-mix(in srgb, var(--success) 14%, var(--surface));
   --warning-fill: color-mix(in srgb, var(--warning) 14%, var(--surface));

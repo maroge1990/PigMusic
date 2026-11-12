@@ -1,5 +1,6 @@
 @import "./tokens.css";
 @import "./brand/pig-radiance.css";
+@import "./brand/pig-glass.css";
 
 /* The four shadow recipes (#153), bound to the brand's --shadow-* colours. */
 :root {

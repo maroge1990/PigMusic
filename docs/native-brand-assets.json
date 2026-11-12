@@ -1,7 +1,7 @@
 {
   "assets": {
     "docs/pig-family-brand-tokens.json": {
-      "sha256": "fc28d72153063243b80f18e45cee3965b7a8643c1d0f11be1fbadce731d628ae",
+      "sha256": "1514c726a3e44a0b52bfdf832e5b396d6f1c70a62c454a096e4c2d478812fac1",
       "source": "tokens/brand-tokens.json"
     },
     "swift/PigMusic/AppIcon.icon/Assets/body-mono.svg": {
@@ -289,5 +289,5 @@
       "source": "assets/products/pig-music/Apple/Glyphs.xcassets/pig-music-glyph-outline.imageset/pig-music-glyph-outline@3x.png"
     }
   },
-  "version": "1.7.0"
+  "version": "1.9.0"
 }
