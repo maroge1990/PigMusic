@@ -11,6 +11,7 @@ import secrets
 import shutil
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -67,6 +68,13 @@ TOKEN_SECONDS = 6 * 3600
 # source or the network only briefly (REMOTE1: a miss took 30-35 s each time).
 MISS_SECONDS = 30 * 60
 FAILURE_SECONDS = 2 * 60
+# A JioSaavn match is kept this long, so a song looked up before the tap
+# (#192) still plays at once; its address is checked again (one small range
+# request) once it is older than PROBE_SECONDS, and looked up afresh if the
+# CDN no longer serves it.
+RESOLVED_SECONDS = 6 * 3600
+PROBE_SECONDS = 90
+RESOLVED_ENTRIES = 1000
 # Each relayed source's search gets this long, from when they all start;
 # a slower one counts as no match.
 SEARCH_SECONDS = 8
@@ -96,7 +104,9 @@ class RemoteAudio:
 
     def __init__(self, search=None, directory=None, runtime=None, relay_search=None):
         self.search = search or search_jiosaavn
-        self.cache = {}
+        # {key: (keep until, address, checked at)}, oldest use first.
+        self.cache = OrderedDict()
+        self.clock = time.monotonic
         # JioSaavn lookups and relays wait for their own slots: a lookup
         # never queues behind another song's transfer.
         self.slots = asyncio.Semaphore(3)
@@ -608,8 +618,19 @@ class RemoteAudio:
     async def resolve(self, client, track):
         key = self.key(track)
         cached = self.cache.get(key)
-        if cached and cached[0] > time.monotonic():
-            return cached[1]
+        now = self.clock()
+        if cached and cached[0] > now:
+            self.cache.move_to_end(key)
+            if now - cached[2] < PROBE_SECONDS:
+                return cached[1]
+            try:
+                await self.probe(client, cached[1])
+            except ValueError:
+                # The CDN no longer serves it: look the song up again.
+                self.cache.pop(key, None)
+            else:
+                self.cache[key] = (cached[0], cached[1], self.clock())
+                return cached[1]
         async with self.slots:
             try:
                 results = await asyncio.wait_for(
@@ -690,24 +711,31 @@ class RemoteAudio:
                 or not (parsed.hostname or "").endswith(".saavncdn.com")
             ):
                 raise ValueError("Remote source returned an unsupported audio address.")
-            async with client.stream(
-                "GET",
-                url,
-                headers={"Range": "bytes=0-31", "Accept": "audio/*"},
-                timeout=3,
-                follow_redirects=False,
-            ) as stream:
-                if stream.status_code in {408, 429} or stream.status_code >= 500:
-                    # The CDN is busy or failing, not missing the song.
-                    raise TimeoutError("JioSaavn's audio did not answer.")
-                if stream.status_code not in {200, 206} or not stream.headers.get(
-                    "content-type", ""
-                ).split(";")[0].startswith(("audio/", "application/octet-stream")):
-                    raise ValueError("Remote source did not return an audio stream.")
-            if len(self.cache) > 200:
-                self.cache.clear()
-            self.cache[key] = (time.monotonic() + 90, url)
+            await self.probe(client, url)
+            checked = self.clock()
+            self.cache[key] = (checked + RESOLVED_SECONDS, url, checked)
+            self.cache.move_to_end(key)
+            while len(self.cache) > RESOLVED_ENTRIES:
+                self.cache.popitem(last=False)
             return url
+
+    @staticmethod
+    async def probe(client, url):
+        """The CDN serves audio at this address: a 32-byte range request."""
+        async with client.stream(
+            "GET",
+            url,
+            headers={"Range": "bytes=0-31", "Accept": "audio/*"},
+            timeout=3,
+            follow_redirects=False,
+        ) as stream:
+            if stream.status_code in {408, 429} or stream.status_code >= 500:
+                # The CDN is busy or failing, not missing the song.
+                raise TimeoutError("JioSaavn's audio did not answer.")
+            if stream.status_code not in {200, 206} or not stream.headers.get(
+                "content-type", ""
+            ).split(";")[0].startswith(("audio/", "application/octet-stream")):
+                raise ValueError("Remote source did not return an audio stream.")
 
     @staticmethod
     def rejected(track, results, matched):

@@ -1018,3 +1018,96 @@ def test_relay_downloads_prune_the_cache_on_a_timer_or_after_enough_bytes(
     for n in range(6, 9):
         fetch(n)
     assert len(pruned) == 3
+
+
+def test_a_match_lasts_hours_and_is_rechecked_with_one_range_request():
+    """#192: a song looked up before the tap still plays from its match; an
+    address older than PROBE_SECONDS is checked again, and looked up afresh
+    only when the CDN no longer serves it."""
+    from server import remote
+
+    calls = []
+    target = {"artist": "Artist", "title": "Song", "album": "Album", "duration": 180}
+    candidate = {
+        "channel": "Artist",
+        "title": "Song",
+        "album": "Album",
+        "duration": 180,
+        "source_url": "https://aac.saavncdn.com/music.m4a",
+    }
+    status = {"code": 206}
+
+    async def run():
+        def search(*args):
+            calls.append("search")
+            return [candidate]
+
+        def transport(req):
+            calls.append("probe")
+            return httpx.Response(status["code"], headers={"content-type": "audio/mp4"})
+
+        now = [1000.0]
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(transport)
+        ) as client:
+            resolver = RemoteAudio(search)
+            resolver.clock = lambda: now[0]
+            url = candidate["source_url"]
+            assert await resolver.resolve(client, target) == url
+            now[0] += remote.PROBE_SECONDS - 1
+            assert await resolver.resolve(client, target) == url  # As is.
+            now[0] += 3600
+            assert await resolver.resolve(client, target) == url  # Re-checked.
+            now[0] += 10
+            assert await resolver.resolve(client, target) == url  # As is again.
+            now[0] += 3600
+            status["code"] = 404  # Gone from the CDN: looked up again.
+            with pytest.raises(ValueError):
+                await resolver.resolve(client, target)
+            now[0] += remote.RESOLVED_SECONDS
+            status["code"] = 206
+            assert await resolver.resolve(client, target) == url  # Expired.
+
+    asyncio.run(run())
+    assert calls == [
+        "search",
+        "probe",
+        "probe",
+        "probe",
+        "search",
+        "probe",
+        "search",
+        "probe",
+    ]
+
+
+def test_the_match_cache_drops_the_least_recently_used():
+    from server import remote
+
+    resolver = RemoteAudio(lambda *_: [])
+    for n in range(remote.RESOLVED_ENTRIES + 5):
+        resolver.cache[n] = (float("inf"), str(n), 0)
+        resolver.cache.move_to_end(n)
+    resolver.cache.move_to_end(0)
+
+    async def one_more():
+        candidate = {
+            "channel": "A",
+            "title": "S",
+            "album": "B",
+            "duration": 100,
+            "source_url": "https://aac.saavncdn.com/x.m4a",
+        }
+        resolver.search = lambda *_: [candidate]
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(
+                lambda r: httpx.Response(206, headers={"content-type": "audio/mp4"})
+            )
+        ) as client:
+            await resolver.resolve(
+                client, {"artist": "A", "title": "S", "album": "B", "duration": 100}
+            )
+
+    asyncio.run(one_more())
+    assert len(resolver.cache) == remote.RESOLVED_ENTRIES
+    assert 0 in resolver.cache and 1 not in resolver.cache
