@@ -7,20 +7,26 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 *Overwritten at the end of every session. 13 Nov 2026 (night, Melbourne).*
 
-- **Live:** release `web-20261114-v1`, server `a15d53c`, since 13 Nov about 16:05 Melbourne. It carries batches
-  'brand' (#179), 'idle' (#171, #172) and 'web' (#174, #175, #181, #182) on top of the artwork release. Healthy.
-  Rollback: container `PigMusic-before-web-20261114-v1`, backup `pre-web-20261114-v1` (image `sha-8ee4c29`). D-78
-  clean-up of the older rollbacks (artwork 13 Nov, findings 9 Nov) waits on Mark's hands.
-- **#190 closed:** no regression. The 3.1% was measured 3 to 25 minutes after a restart, during the known catch-up.
-  About 4 hours after it, the server idles at 0.55–0.84% of a core (baseline 0.97%) and the engine at 2.64% (2.41%).
-  Measure idle at least an hour after a restart. #171 still waits for a night's lock holds to compare.
-- **Parity batch 2, 'measure' (#191), pushed `7acda1a`..`e5131ca`:** the server counts taps outside the library
-  (played by source, no match, unavailable), each instant source's answer, downloads (mix and library apart, source
-  and profile), cover answers (a cover never served in the period is a placeholder) and first sound reported by
-  players. Kept a rolling week in `performance.sqlite3`, written in batches only after something happened (idle cost
-  none). Admin, System, bottom: "Speed and coverage, last 7 days"; `scripts/performance_report.py` reads a copied
-  file. The web player reports first sound; the iPhone's report rides in batch 9. Two Codex rounds (three medium
-  findings, fixed and confirmed under D-71). Next: release, then the first numbers on #191 after a few days of use.
+- **Live:** release `web-20261114-v1`, server `a15d53c`, since 13 Nov about 16:05 Melbourne. Healthy. Rollback:
+  container `PigMusic-before-web-20261114-v1`, backup `pre-web-20261114-v1`. D-78 clean-up of the older rollbacks
+  waits on Mark's hands.
+- **Release `measure-20261113-v1` ready, apply step with Mark:** image `sha-9051fac` (digest in
+  `.private/releases/verify-measure-20261113-v1.log`); Unraid verify and preflight passed 13 Nov ~21:20, nothing
+  playing. Carries batch 'measure' (#191). If Mark ran `--apply`, check the live server, then post on #191.
+- **#190 closed:** no regression; the 3.1% was the post-restart catch-up. About 4 hours after a restart the server
+  idles at 0.55–0.84% of a core (baseline 0.97%), the engine at 2.64% (2.41%). Measure idle at least an hour after a
+  restart. #171 still waits for a night's lock holds.
+- **Batch 2 'measure' (#191), pushed `7acda1a`..`9051fac`:** counters for taps outside the library, each instant
+  source's answer, downloads (mix and library apart), cover answers and first sound from players, a rolling week in
+  `performance.sqlite3`; Admin, System: "Speed and coverage, last 7 days"; `scripts/performance_report.py`. The web
+  reports first sound; the iPhone's report rides in batch 9. Two Codex rounds, three mediums fixed and confirmed. The
+  first numbers go on #191 after a few days of use.
+- **Batch 3 'lookahead' (#192), committed, NOT pushed:** `f0bee7d` (JioSaavn match kept 6 h, re-checked by one range
+  request on the tap) and `535dfe6` (look-ahead from release pages, Home and settled searches, two per person; iPhone
+  taps looked up as the catalogue knows the song). On branch `claude/pigmusic-delivery-takeover-e84ed3`, not yet in
+  `~/code/PigMusic` main (kept out until the release apply ran from 9051fac). Codex round 1 was running at handover
+  (`.private/reviews/lookahead-round1.log`); round 2 and confirmations still to do. #201's row for #192 needs its date
+  when this ships.
 - **Parity plan (13 Nov evening):** after comparing Octo and Mornye, Mark chose to improve PigMusic towards their
   instant listening, downloads, artwork and "Made for you" (D-88), with instant sources asked together, JioSaavn first
   (D-89), and every replaced path retired (D-90). Issues #191–#205; order in **Now**.
@@ -55,7 +61,7 @@ Mark's single testing round (D-86).
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | ~~Idle CPU regression~~ (closed 13 Nov: post-restart catch-up, no regression) | #190 | server | — | — | — |
 | 2 | Measure: counters and a report for the targets (pushed 13 Nov) | #191 | server, web admin | 2 | release; baseline posted on #191 | — |
-| 3 | Look up the songs on screen before the tap | #192 | server | 2 | release | — |
+| 3 | Look up the songs on screen before the tap (committed, in Codex) | #192 | server | 2 | release | — |
 | 4 | Sources (audit 8): SoundCloud out, Monochrome diagnosed, YouTube for instant listening as a one-week trial, FreeMp3Cloud and zvu4no out of instant (D-89) | #94, #193 | server | 2 | release, then the trial week | Mark's decision on #193 (revisits D-80) |
 | 5 | Agency and words (audit 6): Undo over confirm | #183 | web (+ native half) | 2 | release; native half in the TestFlight build | — |
 | 6 | Artwork: Deezer first for covers and artist photos (measure first) | #194 | server | 2 | release | — |
