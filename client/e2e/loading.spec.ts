@@ -41,7 +41,15 @@ test("#181: Your devices shows Loading until the sessions answer", async ({
 }) => {
   const sessions = held();
   await mockApi(page, {
-    answers: { "/v1/me/sessions": sessions.answer({ sessions: [] }) },
+    answers: {
+      // Asked for first; unanswered, its 404 hid the Loading line at once
+      // and the test passed only when it looked before that arrived.
+      "/v1/quality": async (route) =>
+        route.fulfill({
+          json: { preferences: [], options: [], household_default: "" },
+        }),
+      "/v1/me/sessions": sessions.answer({ sessions: [] }),
+    },
   });
   await page.goto("/#/account");
   await expect(page.getByText("Loading your devices…")).toBeVisible();
