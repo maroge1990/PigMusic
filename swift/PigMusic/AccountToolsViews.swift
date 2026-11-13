@@ -31,7 +31,7 @@ struct PreferencesView: View {
   private func save(_ value: AccountPreferences) async {
     // nil: a newer choice replaced this one, and its own save reports.
     guard let confirmed = await model.choosePreferences(value) else { return }
-    message = .info(confirmed ? "Saved." : "Saved on this phone; it will sync when connected.")
+    message = .info(confirmed ? "Saved." : "Saved on this iPhone; it will be sent when you're online.")
   }
 }
 struct PasswordView: View {
@@ -203,7 +203,7 @@ struct QualityView: View {
         ProgressView()
       }
       if let message { StatusText(message) }
-    }.pigCanvas().navigationTitle("Server quality").navigationBarTitleDisplayMode(.inline).task {
+    }.pigCanvas().navigationTitle("Your music quality").navigationBarTitleDisplayMode(.inline).task {
       do {
         let value = try await model.readCatalogue { try await $0.quality() }
         quality = value

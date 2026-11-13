@@ -8,11 +8,11 @@ struct PendingEditsView: View {
   var body: some View {
     List {
       Text(
-        "Edits are saved on this phone and replayed in order. A changed playlist stops replay until you review or discard that edit."
+        "Changes are kept on this iPhone and sent in order. If a playlist changed meanwhile, sending stops until you review or discard that change."
       ).font(PigType.footnote)
       Text("Discarding stops retries; it does not undo changes already saved on the server.").font(
         .footnote)
-      Button("Sync edits now") {
+      Button("Send changes now") {
         Task {
           loading = true
           _ = await model.flushEdits()
@@ -20,7 +20,7 @@ struct PendingEditsView: View {
           loading = false
         }
       }.disabled(loading)
-      if model.pendingEdits.isEmpty { Text("All edits synced") }
+      if model.pendingEdits.isEmpty { Text("All changes sent") }
       ForEach(model.pendingEdits) { pending in
         VStack(alignment: .leading) {
           Text(pending.mutation.action.capitalized)
@@ -38,11 +38,11 @@ struct PendingEditsView: View {
               PlaylistView(model: model, playlist: playlist)
             }
           }
-          Button("Discard this pending edit", role: .destructive) {
+          Button("Discard this change", role: .destructive) {
             Task { await model.discardEdit(pending.id) }
           }.disabled(loading)
         }
       }
-    }.pigCanvas().navigationTitle("Pending edits").navigationBarTitleDisplayMode(.inline)
+    }.pigCanvas().navigationTitle("Changes not sent yet").navigationBarTitleDisplayMode(.inline)
   }
 }

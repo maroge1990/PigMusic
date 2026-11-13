@@ -180,7 +180,7 @@ struct WatchDownloadsView: View {
     case "ready": "Waiting for Watch"
     case "failed": "Failed"
     case "downloading": "Downloading to iPhone"
-    default: "Preparing on server"
+    default: "Getting ready"
     }
   }
 }

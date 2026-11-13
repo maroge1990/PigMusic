@@ -68,3 +68,33 @@ def test_no_page_opens_on_a_spinner_alone():
         assert not bare.search(path.read_text()), path.name
     assert source("SearchViews.swift").count("PigLoading(") == 3
     assert "PigLoading(" in source("LibraryViews.swift")
+
+
+def test_plain_words_on_the_iphone():
+    """Brand 1.8 section 14: no technical terms a household member would not
+    use. "server" stays as the name of a place, as on the web ("On the
+    server"); sync jargon and server-centred labels go."""
+    swift_strings = re.compile(r'"((?:[^"\\]|\\.)*)"')
+    shown = []
+    for path in sorted(APP.glob("*.swift")):
+        for line in path.read_text().splitlines():
+            # Comments and diagnostics lines are not shown to anyone.
+            if line.lstrip().startswith("//") or "DiagnosticsLog" in line:
+                continue
+            shown += swift_strings.findall(line)
+    for banned in (
+        "Server request",
+        "Your server",
+        "Server quality",
+        "Songs on the server",
+        "Preparing on server",
+        "Server confirmed",
+        "to sync",
+        "Sync now",
+        "Syncing",
+        "synced",
+        "Pending edits",
+        "pending edit",
+        "on this phone",
+    ):
+        assert not [s for s in shown if banned in s], banned

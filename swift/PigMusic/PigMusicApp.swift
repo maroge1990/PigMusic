@@ -73,11 +73,11 @@ struct SignInView: View {
             .accessibilityHidden(true)
           Text("Your music, wherever you are.").font(PigType.headline)
         }
-        Section("Your server") {
+        Section("PigMusic address") {
           TextField("https://music.example.com", text: $model.server)
             .textContentType(.URL).keyboardType(.URL).textInputAutocapitalization(.never)
             .autocorrectionDisabled()
-          Text("Use the address from your invitation, or ask the person who runs your server.")
+          Text("Use the address from your invitation, or ask the person who set up PigMusic.")
             .font(PigType.footnote)
         }
         Section("Your account") {

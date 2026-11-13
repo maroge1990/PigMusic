@@ -404,15 +404,15 @@ struct AccountView: View {
         NavigationLink("Appearance") { PreferencesView(model: model) }
         NavigationLink("Password") { PasswordView(model: model) }
         NavigationLink("Devices and sessions") { SessionsView(model: model) }
-        NavigationLink("Server quality") { QualityView(model: model) }
-        NavigationLink("Pending edits (\(model.pendingEdits.count))") {
+        NavigationLink("Your music quality") { QualityView(model: model) }
+        NavigationLink("Changes not sent yet (\(model.pendingEdits.count))") {
           PendingEditsView(model: model)
         }
         NavigationLink("Diagnostics") { DiagnosticsView(model: model) }
       }
       Section("Library") {
-        LabeledContent("Songs on the server", value: model.songCount.formatted())
-        Button("Sync now") { Task { await model.refresh() } }.disabled(model.syncing)
+        LabeledContent("Songs in your library", value: model.songCount.formatted())
+        Button("Refresh library") { Task { await model.refresh() } }.disabled(model.syncing)
       }
       Section {
         Toggle(

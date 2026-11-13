@@ -90,7 +90,7 @@ struct PlaylistToolsView: View {
       let confirmed = try await model.saveEdit(OfflineMutation(action: "create", name: value))
       name = ""
       message = .info(
-        confirmed ? "Playlist created." : "New playlist saved on this phone; waiting to sync.")
+        confirmed ? "Playlist created." : "New playlist saved on this iPhone; it will be sent when you're online.")
     } catch { message = .error(error.userMessage) }
   }
   private func review(_ data: Data) async {
@@ -136,7 +136,7 @@ struct AddToPlaylistView: View {
               message = .info(
                 confirmed
                   ? "Added to \(playlist.name). Repeated songs are kept as separate entries."
-                  : "Playlist addition saved on this phone; waiting to sync.")
+                  : "Added on this iPhone; it will be sent when you're online.")
             } catch { message = .error(error.userMessage) }
           }
         }.disabled(loading || !model.canMutate)
@@ -202,7 +202,7 @@ struct PlaylistView: View {
               .font(PigType.footnote.weight(.semibold))
           }
         } else if model.pendingEdits.contains(where: { $0.mutation.playlistId == playlist.id }) {
-          Label("Edits waiting to sync", systemImage: "clock.arrow.circlepath")
+          Label("Changes not sent yet", systemImage: "clock.arrow.circlepath")
             .font(PigType.footnote).foregroundStyle(.secondary)
         }
       }.listRowSeparator(.hidden).listRowBackground(Color.clear)
@@ -304,7 +304,7 @@ struct PlaylistView: View {
           revision: revision, order: order))
       message =
         confirmed
-        ? nil : .info("Edit saved on this phone. Other playlist edits wait for this one to sync.")
+        ? nil : .info("Change saved on this iPhone. Other playlist changes wait until this one is sent.")
       if confirmed { reloadAfterEdit = true }
     } catch { message = .error(error.userMessage + " Refresh before reapplying your edit.") }
   }
@@ -325,7 +325,7 @@ struct PlaylistView: View {
       }
     do {
       let confirmed = try await model.saveEdit(mutation)
-      message = confirmed ? nil : .info("Removal saved on this phone; waiting to sync.")
+      message = confirmed ? nil : .info("Removed on this iPhone; it will be sent when you're online.")
       if confirmed { reloadAfterEdit = true }
     } catch { message = .error(error.userMessage + " Refresh before reapplying your edit.") }
   }

@@ -673,7 +673,7 @@ import SwiftUI
           if let track = try await store.track(id: id) { tracks.append(track) }
         }
         guard account.isCurrent(stamp), verified, command.account == context.account else {
-          return CompanionReply(message: "The phone account changed. Retry after syncing.")
+          return CompanionReply(message: "The iPhone account changed. Try again in a moment.")
         }
         await enqueue(tracks)
         return CompanionReply(

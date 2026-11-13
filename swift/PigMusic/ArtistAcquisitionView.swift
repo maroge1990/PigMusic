@@ -26,7 +26,7 @@ struct ArtistAcquisitionView: View {
         ).font(PigType.footnote)
       }
       if let state {
-        Section("Server request") {
+        Section("Request progress") {
           Text(RequestStatus.label(state.status))
           Text(
             "\(state.done.count) of \(state.total) releases reviewed · \(state.created) requests created"

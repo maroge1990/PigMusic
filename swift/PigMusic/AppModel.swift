@@ -738,7 +738,7 @@ enum PlayOrigin: Hashable {
     _ operation: @Sendable (NativeService) async throws -> T
   ) async throws -> T {
     guard canMutate, let service else {
-      throw NativeFailure.unavailable("Connect to your server and wait for sync to finish.")
+      throw NativeFailure.unavailable("Connect to PigMusic and wait for your library to finish loading.")
     }
     let stamp = account.generation
     mutationActive = true

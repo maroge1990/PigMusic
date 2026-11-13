@@ -97,7 +97,7 @@ struct SongActionsView: View {
       message = .info(
         confirmed
           ? (value ? "Added to favourites." : "Removed from favourites.")
-          : "Favourite edit saved on this phone; waiting to sync.")
+          : "Favourite saved on this iPhone; it will be sent when you're online.")
     } catch is CancellationError {} catch { message = .error(error.userMessage) }
   }
   private func add() async {
@@ -119,8 +119,8 @@ struct SongActionsView: View {
     do {
       let result = try await model.performPersonal { try await $0.requestMusic([track]) }
       message = .info(
-        "Server confirmed: \(result.created) new, \(result.existing) existing, \(result.skipped) skipped."
-          + (result.downloadsEnabled ? "" : " Server downloads are disabled; requests will wait."))
+        "Requested: \(result.created) new, \(result.existing) already asked for, \(result.skipped) left out."
+          + (result.downloadsEnabled ? "" : " Downloads are off on the server, so it will wait."))
     } catch is CancellationError {} catch { message = .error(error.userMessage) }
   }
 }

@@ -932,7 +932,7 @@ private struct AppleImportSheet: View {
                 Button("Add and download \(songsLabel)") { Task { await add(download: true) } }
               } message: {
                 Text(
-                  "Your server finds and downloads the songs that aren't on it yet; they join the playlist once downloaded."
+                  "PigMusic finds and downloads the songs that aren't on the server yet; they join the playlist once downloaded."
                 )
               }
             }
@@ -1243,7 +1243,7 @@ private struct ShazamInboxView: View {
               }
             } message: {
               Text(
-                "Your server finds and downloads the songs that aren't on it yet. A song with no exact match in the catalogue is left out."
+                "PigMusic finds and downloads the songs that aren't on the server yet. A song with no exact match in the catalogue is left out."
               )
             }
           }
