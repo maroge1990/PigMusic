@@ -33,7 +33,7 @@ export const album = {
 };
 const photo = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e8e8e8"/><stop offset="1" stop-color="#888"/></linearGradient></defs><rect width="1024" height="1024" fill="url(#g)"/></svg>`;
 
-export type Mock = { appearance?: string; unknown: string[] };
+type Mock = { appearance?: string; unknown: string[] };
 
 /** Routes every /api call. Unknown calls answer 404 and are listed for the test. */
 export async function mockApi(

@@ -13,7 +13,7 @@ export type CatalogueArtist = {
 export type Local = { tracks: Track[]; household: Track[] };
 type Answer = { time: number; local?: Local; catalogue?: CatalogueArtist[] };
 
-export const ANSWER_LIFETIME_MS = 5 * 60_000;
+const ANSWER_LIFETIME_MS = 5 * 60_000;
 const answers = sessionMap<string, Answer>();
 
 window.addEventListener("music-library-changed", () => {

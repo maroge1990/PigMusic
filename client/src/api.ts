@@ -155,7 +155,7 @@ export function cachedLibrary<T>(): Promise<T> {
   return libraryRead as Promise<T>;
 }
 
-export function rememberLibrary(library: unknown) {
+function rememberLibrary(library: unknown) {
   librarySnapshot = library;
   libraryRead = Promise.resolve(library);
 }

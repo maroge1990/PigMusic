@@ -44,7 +44,7 @@ const adminSections = [
 type AdminSection = (typeof adminSections)[number]["id"];
 
 /** The owner-only `admin` event of /api/v1/events, relayed by the shell. */
-export type AdminState = {
+type AdminState = {
   queue?: Queue;
   scan?: Record<string, unknown>;
   soulseek?: { configured: boolean; connected: boolean } | null;

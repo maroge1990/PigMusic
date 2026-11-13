@@ -49,14 +49,14 @@ const KINDS = new Set([
 ]);
 
 /** "Your 1990s" → "90s"; 2000 onwards keeps the century: "2010s". */
-export function decadeLabel(title = "") {
+function decadeLabel(title = "") {
   const match = /\b(\d{2})(\d)0s\b/.exec(title);
   if (!match) return "";
   return match[1] === "19" ? `${match[2]}0s` : `${match[1]}${match[2]}0s`;
 }
 
 /** Cover family: one geometric motif per kind of mix. */
-export function MixArtwork({ kind, title }: { kind: string; title?: string }) {
+function MixArtwork({ kind, title }: { kind: string; title?: string }) {
   const palette = KINDS.has(kind) ? kind : "daily";
   const background = `var(--mix-${palette}-background)`;
   const ink = `var(--mix-${palette}-foreground)`;

@@ -22,10 +22,10 @@ const clean = (value: string) => value.trim().slice(0, 150);
 
 /** Type-ahead waits this long after the last keystroke (at least 300 ms, so
  * typing adds no catalogue load). */
-export const SEARCH_DEBOUNCE_MS = 350;
+const SEARCH_DEBOUNCE_MS = 350;
 /** Artist pages are prepared only for a query left alone this long, so
  * passing prefixes ask the catalogue for nothing more. */
-export const WARM_AFTER_MS = 1500;
+const WARM_AFTER_MS = 1500;
 const CATALOGUE_MINIMUM = 2;
 
 /** One search: your library first, then the server, then the catalogue. */
