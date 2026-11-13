@@ -357,7 +357,8 @@ struct SongRow: View {
     let copies = copies
     return HStack(spacing: 4) {
       if let watch = copies.watch {
-        Image(systemName: "applewatch").font(.system(size: markSize, weight: .semibold))
+        // A symbol per state as well as a colour (brand 1.8 section 16).
+        Image(systemName: Self.watchSymbol(watch)).font(.system(size: markSize, weight: .semibold))
           .foregroundStyle(
             watch == .ready
               ? PigBrand.accent(scheme)
@@ -367,6 +368,13 @@ struct SongRow: View {
     }
     .frame(minWidth: 22)
     .accessibilityHidden(true)
+  }
+  static func watchSymbol(_ mark: DeviceCopyMark) -> String {
+    switch mark {
+    case .ready: "applewatch"
+    case .pending: "applewatch.radiowaves.left.and.right"
+    case .failed: "exclamationmark.applewatch"
+    }
   }
   @ViewBuilder private func primaryMark(_ phone: DeviceCopyMark?) -> some View {
     switch phone {

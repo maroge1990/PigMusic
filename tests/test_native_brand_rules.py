@@ -126,3 +126,16 @@ def test_compared_figures_use_rounded_tabular_numerals():
     # One way to set figures: no hand-rolled rounded digits left.
     for text in [watch] + [p.read_text() for p in APP.glob("*.swift")]:
         assert ".fontDesign(.rounded).monospacedDigit()" not in text
+
+
+def test_the_watch_mark_on_a_song_row_is_not_colour_alone():
+    """Brand 1.8 section 16: information never by colour alone. The Apple
+    Watch mark on a song row was the same glyph for ready, sending and
+    failed, told apart only by colour."""
+    row = source("Components.swift")
+    symbols = row[row.index("static func watchSymbol") :]
+    symbols = symbols[: symbols.index("\n  }\n")]
+    names = re.findall(r'case \.(\w+): "([\w.]+)"', symbols)
+    assert {state for state, _ in names} == {"ready", "pending", "failed"}
+    assert len({symbol for _, symbol in names}) == 3
+    assert "Image(systemName: Self.watchSymbol(watch))" in row
