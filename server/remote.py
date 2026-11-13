@@ -103,13 +103,15 @@ async def shared_result(task, timeout=None):
 
 
 class Resolving:
-    """A JioSaavn lookup in flight: `started` once it has its slot budget."""
+    """A JioSaavn lookup in flight: a look-ahead's is `speculative`, and
+    `started` once it has its budget."""
 
-    __slots__ = ("task", "started")
+    __slots__ = ("task", "started", "speculative")
 
-    def __init__(self):
+    def __init__(self, speculative):
         self.task = None
         self.started = False
+        self.speculative = speculative
 
 
 class RemoteAudio:
@@ -650,9 +652,13 @@ class RemoteAudio:
         # budget; a look-ahead joins whatever is running.
         key = self.key(track)
         running = self.resolving.get(key)
-        if running is not None and (running.started or speculative):
+        if running is not None and (
+            speculative or not running.speculative or running.started
+        ):
+            # Only a look-ahead still waiting for its turn is overtaken; taps
+            # always share one lookup (Codex, #192 confirmation).
             return await shared_result(running.task)
-        entry = Resolving()
+        entry = Resolving(speculative)
         entry.task = asyncio.ensure_future(
             self._resolve(client, track, entry, speculative)
         )

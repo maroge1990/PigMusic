@@ -443,3 +443,60 @@ def test_a_tap_never_waits_behind_look_ahead_searches(tmp_path):
         asyncio.run(scenario())
     finally:
         release.set()
+
+
+def test_taps_on_one_song_share_one_search_even_when_overtaking():
+    """Codex, #192 confirmation of round 2 (medium): taps scheduled together
+    on one song must share a single search, also when they overtake a
+    look-ahead of it still waiting for its turn."""
+    import threading
+
+    import httpx
+
+    searched = []
+    release = threading.Event()
+
+    def search(query, limit):
+        searched.append(query)
+        release.wait(5)
+        return []
+
+    resolver = RemoteAudio(search)
+    song = {"artist": "Fixture", "title": "one", "album": "Fixture"}
+    other = {"artist": "Fixture", "title": "two", "album": "Fixture"}
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            taps = [
+                asyncio.ensure_future(resolver.resolve(client, song)) for _ in range(3)
+            ]
+            await asyncio.sleep(0.2)
+            assert searched == ["Fixture one"]
+            # A look-ahead waiting for its turn, then three taps at once.
+            from server import remote
+
+            blockers = [
+                asyncio.ensure_future(
+                    resolver.match(client, {**other, "title": f"busy{n}"})
+                )
+                for n in range(remote.LOOKAHEAD_SLOTS)
+            ]
+            await asyncio.sleep(0.1)
+            waiting = asyncio.ensure_future(resolver.match(client, other))
+            await asyncio.sleep(0.1)
+            assert "Fixture two" not in searched
+            taps += [
+                asyncio.ensure_future(resolver.resolve(client, other)) for _ in range(3)
+            ]
+            await asyncio.sleep(0.2)
+            assert searched.count("Fixture two") == 1
+            release.set()
+            for task in taps + blockers + [waiting]:
+                with pytest.raises(ValueError):
+                    await task
+            assert searched.count("Fixture two") == 1  # Never searched again.
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        release.set()
