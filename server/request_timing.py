@@ -238,12 +238,16 @@ class StallWatch:
     """A thread that logs where the event loop is stuck while it is stuck:
     after `stalled_seconds` without a heartbeat from `watch_event_loop`,
     then every `repeat_seconds` while the stall lasts. Stacks show files,
-    lines and code, never values."""
+    lines and code, never values. It sleeps until the heartbeat would be
+    overdue rather than polling, so a healthy loop wakes it no more often than
+    the heartbeat (#172)."""
 
-    def __init__(self, stalled_seconds=0.5, repeat_seconds=5.0, check_every=0.05):
+    # The shortest sleep, so a beat that is already overdue cannot spin.
+    least_wait = 0.02
+
+    def __init__(self, stalled_seconds=0.5, repeat_seconds=5.0):
         self.stalled_seconds = stalled_seconds
         self.repeat_seconds = repeat_seconds
-        self.check_every = check_every
         self.beat = time.monotonic()
         self.loop_thread = None
         self.loop = None
@@ -263,7 +267,15 @@ class StallWatch:
 
     def watch(self):
         reported = None
-        while not self.stopping.wait(self.check_every):
+        while True:
+            # Wake when this beat would become a stall, or, once it has been
+            # reported, when it is due to be reported again.
+            beat = self.beat
+            due = beat + self.stalled_seconds
+            if reported and reported[0] == beat:
+                due = max(due, reported[1] + self.repeat_seconds)
+            if self.stopping.wait(max(due - time.monotonic(), self.least_wait)):
+                return
             beat, now = self.beat, time.monotonic()
             stuck = now - beat
             if stuck < self.stalled_seconds:

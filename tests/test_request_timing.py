@@ -103,7 +103,31 @@ def test_home_mixes_names_database_filter_tracks_and_radio_phases(
 def test_default_stall_watch_captures_subsecond_stalls():
     watch = StallWatch()
     assert watch.stalled_seconds == 0.5
-    assert watch.check_every <= 0.05
+
+
+def test_stall_watch_wakes_only_when_a_stall_could_have_begun():
+    """#172: the watch thread woke every 50 ms (20 a second, always) on top
+    of the loop's heartbeat. It now sleeps until the heartbeat would be
+    overdue, so a healthy loop costs it no more wake-ups than the heartbeat."""
+    wakes = []
+
+    class Counting(threading.Event):
+        def wait(self, timeout=None):
+            wakes.append(timeout)
+            return super().wait(timeout)
+
+    async def scenario():
+        stall = StallWatch()
+        stall.stopping = Counting()
+        stall.start()
+        watcher = asyncio.create_task(watch_event_loop(stall=stall))
+        await asyncio.sleep(2)
+        stall.stop()
+        watcher.cancel()
+
+    asyncio.run(scenario())
+    # The heartbeat beats every 0.25 s: at most 8 in 2 s, plus the first.
+    assert len(wakes) <= 9, len(wakes)
 
 
 def test_descriptor_response_marks_when_its_headers_start(tmp_path):
@@ -214,7 +238,7 @@ def test_stall_watch_logs_where_the_loop_is_stuck(caplog):
             pass
 
     async def scenario():
-        stall = StallWatch(stalled_seconds=0.2, repeat_seconds=10, check_every=0.05)
+        stall = StallWatch(stalled_seconds=0.2, repeat_seconds=10)
         stall.start()
         watcher = asyncio.create_task(watch_event_loop(interval=0.05, stall=stall))
         await asyncio.sleep(0.1)
@@ -248,7 +272,7 @@ def test_stall_watch_lets_a_finished_jobs_memory_go(caplog):
         stalled.wait(2)  # Its frame, holding the payload, is live during the stall.
 
     async def scenario():
-        stall = StallWatch(stalled_seconds=0.2, repeat_seconds=10, check_every=0.05)
+        stall = StallWatch(stalled_seconds=0.2, repeat_seconds=10)
         stall.start()
         watcher = asyncio.create_task(watch_event_loop(interval=0.05, stall=stall))
         await asyncio.sleep(0.1)
