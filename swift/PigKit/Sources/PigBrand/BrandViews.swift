@@ -69,6 +69,10 @@ extension View {
   public func pigBrandedCanvas() -> some View { modifier(BrandCanvas()) }
   public func pigFloatingControls() -> some View { modifier(FloatingControls()) }
   public func pigPrimaryAction() -> some View { modifier(PrimaryAction()) }
+  /// Rounded tabular numerals (brand 1.8 section 14, D-84): for figures that
+  /// sit in a column or are compared (sizes, progress, times). Row durations
+  /// and caption counts keep the system font.
+  public func pigFigures() -> some View { fontDesign(.rounded).monospacedDigit() }
   @ViewBuilder public func pigContentCorners() -> some View {
     if #available(iOS 26, watchOS 26, macOS 26, tvOS 26, *) {
       clipShape(ConcentricRectangle())

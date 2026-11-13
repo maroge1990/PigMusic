@@ -107,3 +107,22 @@ def test_a_failed_download_says_so_in_plain_words():
     downloads = source("DownloadsView.swift")
     assert "Failed: \\(record.error" not in downloads
     assert 'StatusText("Couldn\'t download", kind: .error)' in downloads
+
+
+def test_compared_figures_use_rounded_tabular_numerals():
+    """D-84: rounded tabular numerals where figures are compared (download
+    sizes, playback times, the Watch's figures). The download sizes had
+    neither; the player's times and three Watch figures set their own."""
+    brand = (ROOT / "swift/PigKit/Sources/PigBrand/BrandViews.swift").read_text()
+    assert (
+        "func pigFigures() -> some View { fontDesign(.rounded).monospacedDigit() }"
+        in brand
+    )
+    assert 'downloaded"\n        ).pigFigures()' in source("DownloadsView.swift")
+    assert source("WatchDownloadsView.swift").count(".pigFigures()") == 2
+    assert ".font(.caption).pigFigures()" in source("LibraryViews.swift")
+    watch = (ROOT / "swift/PigMusicWatch/PigMusicWatchApp.swift").read_text()
+    assert watch.count(".pigFigures()") == 4
+    # One way to set figures: no hand-rolled rounded digits left.
+    for text in [watch] + [p.read_text() for p in APP.glob("*.swift")]:
+        assert ".fontDesign(.rounded).monospacedDigit()" not in text

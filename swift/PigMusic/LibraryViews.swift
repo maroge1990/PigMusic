@@ -565,7 +565,7 @@ struct NowPlayingView: View {
         Text(time(position))
         Spacer()
         Text("-" + time(max(0, player.duration - position)))
-      }.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+      }.font(.caption).pigFigures().foregroundStyle(.secondary)
     }
   }
   private var transport: some View {

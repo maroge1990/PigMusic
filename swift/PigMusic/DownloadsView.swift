@@ -72,7 +72,7 @@ private struct DownloadList: View {
       Section("Storage") {
         Text(
           "\(ByteCountFormatter.string(fromByteCount:downloads.records.filter{$0.state == "ready"}.reduce(0){$0+$1.total},countStyle:.file)) downloaded"
-        )
+        ).pigFigures()
         Picker("Download budget", selection: $budget) {
           ForEach([1, 2, 5, 10, 20, 50], id: \.self) { Text("\($0) GB").tag($0) }
         }

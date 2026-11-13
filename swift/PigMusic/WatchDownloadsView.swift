@@ -74,7 +74,7 @@ struct WatchDownloadsView: View {
           if let receipt = watch.receipt {
             Text(
               "\(receipt.ready.count) songs on Watch · \(ByteCountFormatter.string(fromByteCount: receipt.usedBytes, countStyle: .file))"
-            )
+            ).pigFigures()
           }
           Button("Retry Watch transfers") { Task { await watch.retry() } }
           if let error = watch.message ?? watch.link?.error {
@@ -130,7 +130,7 @@ struct WatchDownloadsView: View {
       ).font(.headline)
       Text(
         "\(delivered.count) song\(delivered.count == 1 ? "" : "s") on Watch · \(summary.listening) · \(ByteCountFormatter.string(fromByteCount: summary.bytes, countStyle: .file))"
-      ).font(PigType.subhead)
+      ).font(PigType.subhead).pigFigures()
       if waiting > 0 {
         Text("\(waiting) still on the way. Keep your iPhone near the Watch.")
           .font(PigType.footnote).foregroundStyle(.secondary)

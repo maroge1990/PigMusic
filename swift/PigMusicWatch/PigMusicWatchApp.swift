@@ -142,11 +142,11 @@ private struct WatchLibraryView: View {
           }
           NavigationLink("Storage & sync") {
             List {
-              Text("\(model.receipt?.ready.count ?? 0) songs downloaded").fontDesign(.rounded)
-                .monospacedDigit()
+              Text("\(model.receipt?.ready.count ?? 0) songs downloaded").pigFigures()
               Text(
                 ByteCountFormatter.string(
-                  fromByteCount: model.receipt?.usedBytes ?? 0, countStyle: .file))
+                  fromByteCount: model.receipt?.usedBytes ?? 0, countStyle: .file)
+              ).pigFigures()
               Text(
                 model.link?.reachable == true
                   ? "Phone reachable" : "Phone unavailable · offline music still plays")
@@ -187,7 +187,7 @@ private struct WatchLibraryView: View {
         HStack {
           Text(title)
           Spacer()
-          Text("\(count)").foregroundStyle(.secondary).monospacedDigit()
+          Text("\(count)").foregroundStyle(.secondary).pigFigures()
         }
       } icon: {
         Image(systemName: symbol)
@@ -356,7 +356,7 @@ private struct WatchPlaybackDetails: View {
         }.accessibilityLabel("Next song")
       }.buttonStyle(.plain).padding(8).pigFloatingControls().listRowBackground(Color.clear)
       Text("\(clock(model.playback.elapsed)) / \(clock(model.playback.duration))").font(PigType.caption)
-        .fontDesign(.rounded).monospacedDigit()
+        .pigFigures()
       Slider(
         value: Binding(
           get: { min(model.playback.duration, model.playback.elapsed) }, set: { model.seek($0) }),
