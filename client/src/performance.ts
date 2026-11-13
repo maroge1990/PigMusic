@@ -1,5 +1,6 @@
 /** The parity targets (#191) as rows: each number beside its target. */
 import { formatCount } from "./format";
+import { sourceName } from "./sources";
 
 type Timing = {
   count: number;
@@ -19,6 +20,8 @@ export type PerformanceReport = {
     played: number;
     played_share: number | null;
     server_answer: Timing;
+    by_source?: Record<string, number>;
+    sources?: Record<string, { outcomes: Record<string, number> } & Timing>;
   };
   first_sound: Timing;
   downloads: { mix: Downloads; library: Downloads };
@@ -106,4 +109,24 @@ export function verdict(row: Row) {
   if (row.value === null || row.value === undefined) return "";
   const met = row.lower ? row.value <= row.target : row.value >= row.target;
   return met ? "Meets target" : "Below target";
+}
+
+/** One line per instant source: taps it played and how it answered, so the
+ * YouTube trial (#193) can be judged here. */
+export function sourceLines(report: PerformanceReport): string[] {
+  const sources = report.instant.sources ?? {};
+  const played = report.instant.by_source ?? {};
+  return Object.keys({ ...sources, ...played })
+    .sort()
+    .map((key) => {
+      const entry = sources[key];
+      const parts = [`played ${formatCount(played[key] ?? 0)}`];
+      for (const [outcome, count] of Object.entries(entry?.outcomes ?? {}).sort(
+        ([a], [b]) => a.localeCompare(b),
+      ))
+        parts.push(`${outcome} ${formatCount(count)}`);
+      if (entry?.median_ms != null)
+        parts.push(`found in ${shown(entry.median_ms, true)} (median)`);
+      return `${sourceName(key)}: ${parts.join(" · ")}`;
+    });
 }

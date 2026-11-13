@@ -65,7 +65,20 @@ test("the owner's Admin overview shows the numbers to act on", async ({
               artwork_placeholders: 0.02,
               artists_with_photo: 0.95,
             },
-            instant: { taps: 34, played: 11, played_share: 0.3235 },
+            instant: {
+              taps: 34,
+              played: 11,
+              played_share: 0.3235,
+              by_source: { youtube: 4 },
+              sources: {
+                youtube: {
+                  outcomes: { found: 4, refused: 1 },
+                  count: 4,
+                  median_ms: 2100,
+                  p90_ms: 2900,
+                },
+              },
+            },
             first_sound: { count: 20, median_ms: 1200, p90_ms: 4500 },
             downloads: {
               mix: {
@@ -182,6 +195,10 @@ test("the owner's Admin overview shows the numbers to act on", async ({
     "32.4% · 11 of 34 taps · target at least 90% · Below target",
   );
   await expect(speed).toContainText("1.2 s · 20 starts · target at most 1.5 s");
+  // The YouTube trial is judged from each source's line (#193).
+  await expect(speed).toContainText(
+    "YouTube: played 4 · found 4 · refused 1 · found in 2.1 s (median)",
+  );
   await expect(speed).toContainText(
     "No data yet · 0 of 0 · target at least 95%",
   );

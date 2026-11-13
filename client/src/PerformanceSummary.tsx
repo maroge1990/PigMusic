@@ -3,6 +3,7 @@ import { api } from "./api";
 import {
   performanceRows,
   shown,
+  sourceLines,
   verdict,
   type PerformanceReport,
 } from "./performance";
@@ -49,6 +50,16 @@ export function PerformanceSummary() {
             </Fragment>
           ))}
         </dl>
+      )}
+      {report && sourceLines(report).length > 0 && (
+        <>
+          <h3>Instant sources</h3>
+          <ul className="performance-sources">
+            {sourceLines(report).map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </>
       )}
       <p>
         Counted on this server and kept for a week. Library artists are measured

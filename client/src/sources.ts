@@ -20,7 +20,8 @@ export const sources: Record<string, { name: string; description: string }> = {
 
 export const sourceIds = Object.keys(sources);
 
-// Removed sources keep their name in older download history (D-60, D-80).
+// Removed download sources keep their name in older download history (D-60,
+// D-80); YouTube also names the instant-listen trial (D-91).
 const retired: Record<string, string> = {
   youtube: "YouTube",
   soundcloud: "SoundCloud",

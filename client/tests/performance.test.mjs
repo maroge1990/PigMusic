@@ -13,7 +13,7 @@ registerHooks({
   },
 });
 
-const { performanceRows, shown, verdict } = await import(
+const { performanceRows, shown, sourceLines, verdict } = await import(
   "../src/performance.ts"
 );
 
@@ -53,4 +53,33 @@ test("each parity number is judged against its target (#191)", () => {
   assert.equal(shown(0.3235), "32.4%");
   assert.equal(shown(1200, true), "1.2 s");
   assert.equal(shown(null), "No data yet");
+});
+
+test("each instant source shows the taps it played and how it answered", () => {
+  const lines = sourceLines({
+    ...report,
+    instant: {
+      ...report.instant,
+      by_source: { youtube: 4, jiosaavn: 7 },
+      sources: {
+        youtube: {
+          outcomes: { found: 4, "no match": 2, refused: 1 },
+          count: 4,
+          median_ms: 2100,
+          p90_ms: 3000,
+        },
+        jiosaavn: {
+          outcomes: { found: 7, "no match": 6 },
+          count: 7,
+          median_ms: 1400,
+          p90_ms: 1900,
+        },
+      },
+    },
+  });
+  assert.deepEqual(lines, [
+    "JioSaavn: played 7 · found 7 · no match 6 · found in 1.4 s (median)",
+    "YouTube: played 4 · found 4 · no match 2 · refused 1 · found in 2.1 s (median)",
+  ]);
+  assert.deepEqual(sourceLines(report), []);
 });
