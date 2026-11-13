@@ -89,15 +89,30 @@ def home_router(store, catalogue, home=None, warmer=None):
     home = home or HomeDiscovery(store, catalogue)
     recommended_feeds = RecommendedFeeds(home)
 
-    def prepared(feed):
+    def prepared(feed, request=None):
         # Albums shown on Home open at once: their pages are cached ahead.
         if warmer is not None and isinstance(feed, dict):
             warmer.prepare_albums(feed)
+        # Its songs a tap would stream are looked up now (#192); the two
+        # feeds are one screen.
+        user = getattr(request.state, "user", None) if request else None
+        look_ahead = getattr(request.app.state, "look_ahead", None) if user else None
+        if look_ahead is not None and isinstance(feed, dict):
+            song = request.app.state.look_ahead_song
+            look_ahead.screen(
+                user["id"],
+                [
+                    song(item["release_id"], recording_id=item["id"])
+                    for item in feed.get("songs", [])
+                    if item.get("release_id") and item.get("id")
+                ],
+                name="home",
+            )
         return feed
 
     @router.get("/api/v1/home/popular", response_model=HomeFeedDTO)
     async def popular(request: Request):
-        return prepared(await home.popular(request.app.state.http))
+        return prepared(await home.popular(request.app.state.http), request)
 
     @router.get("/api/v1/home/recent", response_model=RecentAlbums)
     async def recent(request: Request):
@@ -117,7 +132,8 @@ def home_router(store, catalogue, home=None, warmer=None):
         return prepared(
             await recommended_feeds.get(
                 user["id"] if user else None, request.app.state.http, projection
-            )
+            ),
+            request,
         )
 
     return router

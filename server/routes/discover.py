@@ -439,6 +439,18 @@ def discover_router(store, catalogue, popularity=None, warmer=None, http_client=
                     }
                 ).model_dump(mode="json")
             )
+        # The songs here a tap would stream are looked up now (#192).
+        look_ahead = getattr(request.app.state, "look_ahead", None)
+        if look_ahead is not None:
+            song = request.app.state.look_ahead_song
+            look_ahead.screen(
+                user,
+                [
+                    song(result["id"], track["id"])
+                    for track in tracks
+                    if track["server_state"] in {"not_in_library", "requested"}
+                ],
+            )
         return conditional_json(
             request,
             CatalogueReleaseDTO,

@@ -61,6 +61,12 @@ class Resolved(BaseModel):
     album: str | None = None
 
 
+# Songs looked up from a search's answer, once typing has paused this long
+# (type-ahead sends a search at each pause; a newer one replaces it).
+SEARCH_LOOK_AHEAD = 2
+SEARCH_SETTLE_SECONDS = 1.5
+
+
 def search_router(store, home, apple=None):
     router = APIRouter(prefix="/api/v1/search", tags=["personal-library"])
     apple = apple or AppleSearch()
@@ -86,7 +92,43 @@ def search_router(store, home, apple=None):
     async def online(request: Request, q: str = ""):
         region = chart_region(await asyncio.to_thread(settings, store))
         names = await asyncio.to_thread(known)
-        return await apple.search(request.app.state.http, q, region, names)
+        found = await apple.search(request.app.state.http, q, region, names)
+        look_ahead(request, found)
+        return found
+
+    def look_ahead(request, found):
+        """The top songs found are matched and looked up once typing has
+        settled (#192): a tap on one then opens and plays at once."""
+        user = getattr(request.state, "user", None)
+        ahead = getattr(request.app.state, "look_ahead", None)
+        if not user or ahead is None or not isinstance(found, dict):
+            return
+        client = request.app.state.http
+        song = request.app.state.look_ahead_song
+
+        def job(apple_id):
+            async def run():
+                item = await apple.item(client, "song", apple_id)
+                if not item:
+                    return None
+                matched = await search_match.match(
+                    store, home.catalogue, client, "song", item
+                )
+                if not matched or not matched.get("release_id"):
+                    return None
+                return await song(matched["release_id"], recording_id=matched["id"])()
+
+            return run
+
+        ahead.screen(
+            user["id"],
+            [
+                job(item["apple_id"])
+                for item in found.get("songs", [])[:SEARCH_LOOK_AHEAD]
+                if item.get("apple_id")
+            ],
+            delay=SEARCH_SETTLE_SECONDS,
+        )
 
     @router.post("/resolve", response_model=Resolved)
     async def resolve(body: Resolve, request: Request):

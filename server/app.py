@@ -82,6 +82,7 @@ from .media import (
 )
 from .remote import LABELS, RelayTransfer, RemoteAudio
 from .performance import Performance
+from .lookahead import LookAhead
 from .scanner import LibraryScanner
 from .playlists import Playlists
 from .exporter import Exporter
@@ -90,6 +91,9 @@ from .recovery import Recovery
 from .organisation import Organisation
 
 ROOT = Path(__file__).resolve().parent.parent
+# A tap waits at most this long for its release's catalogue data (#192); it
+# is cached whenever the release page was just opened.
+CANONICAL_SECONDS = 2
 # Kept releases whose tracklist one Album editions review reads (#120).
 TIDY_TRACKLISTS = 20
 
@@ -114,6 +118,11 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     # The parity targets' counters (#191): downloads find it on the store.
     performance = store.performance = Performance(store.directory)
     remote_audio.performance = performance
+    look_ahead = LookAhead(
+        remote_audio,
+        lambda: app.state.http,
+        lambda: public_settings(store)["remote_playback"],
+    )
     scanner = LibraryScanner(store)
     playlists = Playlists(store)
     exporter = Exporter(store)
@@ -239,6 +248,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                         pass
                 if scan_task:
                     await scan_task
+                await look_ahead.close()
                 await performance.close()
 
     async def maintain_artwork():
@@ -303,6 +313,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     app.state.mixes = mixes
     install_validation_redaction(app)
     app.state.store = store
+    app.state.look_ahead = look_ahead
     app.state.source_runtime = source_runtime
     app.state.enrichment = enrichment
     app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -1367,25 +1378,40 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             "source": "Saved library",
         }
 
+    async def catalogue_track(release_id, track_id=None, recording_id=None):
+        """The song on a release that a tap plays, with `saved_id` when the
+        household has it: one shape for the tap and the look-ahead (#192), so
+        both share RemoteAudio's answers."""
+        tracks = music_catalogue.presence(
+            release_tracks(await release_data(release_id))
+        )
+        return next(
+            (
+                t
+                for t in tracks
+                if (track_id and t["id"] == track_id)
+                or (not track_id and t.get("musicbrainz_recording_id") == recording_id)
+            ),
+            None,
+        )
+
+    def ahead(release_id, track_id=None, recording_id=None):
+        """A look-ahead job for one song on a release: the track to look up,
+        or None when the household has it."""
+
+        async def job():
+            track = await catalogue_track(release_id, track_id, recording_id)
+            return None if track is None or track.get("saved_id") else track
+
+        return job
+
+    app.state.look_ahead_song = ahead
+
     @app.post("/api/v1/remote-playback/catalogue", tags=["personal-library"])
     async def playback_catalogue(body: PlaybackRequest, request: Request):
         if not body.track_id and not body.recording_id:
             raise HTTPException(422, "Choose a song to play.")
-        tracks = music_catalogue.presence(
-            release_tracks(await release_data(body.release_id))
-        )
-        track = next(
-            (
-                t
-                for t in tracks
-                if (body.track_id and t["id"] == body.track_id)
-                or (
-                    not body.track_id
-                    and t.get("musicbrainz_recording_id") == body.recording_id
-                )
-            ),
-            None,
-        )
+        track = await catalogue_track(body.release_id, body.track_id, body.recording_id)
         if track is None:
             raise HTTPException(404, "Song not found in this release.")
         if track.get("saved_id"):
@@ -1395,9 +1421,37 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
 
     from .routes.personal import TrackInput
 
+    # What a tap's lookup is keyed and matched by, beyond the song's IDs.
+    MATCHED_FIELDS = ("title", "artist", "album", "duration", "isrcs", "recording_kind")
+
+    async def canonical(track):
+        """A song named by its release and recording is looked up as the
+        catalogue knows it, so a tap from any app shares the answer the
+        look-ahead and the web found (#192). The iPhone sends no ISRCs, so
+        its key would otherwise never match theirs. Without the release's
+        data at hand quickly, the song is looked up as sent."""
+        release = track.get("musicbrainz_release_id")
+        recording = track.get("musicbrainz_recording_id")
+        if not release or not recording:
+            return track
+        try:
+            found = await asyncio.wait_for(
+                catalogue_track(release, recording_id=recording), CANONICAL_SECONDS
+            )
+        except (TimeoutError, HTTPException, httpx.HTTPError, ValueError, KeyError):
+            return track
+        if not found:
+            return track
+        return {
+            **track,
+            **{k: found[k] for k in MATCHED_FIELDS if found.get(k) is not None},
+        }
+
     @app.post("/api/v1/remote-playback", tags=["personal-library"])
     async def playback_remote(body: TrackInput, request: Request):
-        return await remote_playback(body.model_dump(exclude_none=True), request)
+        return await remote_playback(
+            body.model_dump(exclude_none=True), request, canonicalise=True
+        )
 
     class RemotePreparation(BaseModel):
         tracks: list[TrackInput] = Field(max_length=3)
@@ -1435,13 +1489,13 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             headers={"Cache-Control": "private, no-store"},
         )
 
-    async def remote_playback(track, request):
+    async def remote_playback(track, request, canonicalise=False):
         """A tap on a song outside the library, counted for the instant-play
         target (#191): played (by source), no match or unavailable, with the
         server's time to answer."""
         began = time.monotonic()
         try:
-            found = await find_remote_playback(track, request)
+            found = await find_remote_playback(track, request, canonicalise)
         except HTTPException as exc:
             outcome = {404: "no match", 503: "unavailable"}.get(exc.status_code)
             if outcome:
@@ -1454,7 +1508,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         )
         return found
 
-    async def find_remote_playback(track, request):
+    async def find_remote_playback(track, request, canonicalise=False):
         user = getattr(request.state, "user", None)
         cached_id = (
             await asyncio.to_thread(mixes.reference, user["id"], track)
@@ -1497,9 +1551,11 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             raise HTTPException(
                 409, "Experimental remote playback is disabled in Settings."
             )
+        # After the prepared-mix check, which knows the song as sent.
+        lookup = await canonical(track) if canonicalise else track
         try:
             found = await remote_audio.stream(
-                app.state.http, track, request.state.user["id"]
+                app.state.http, lookup, request.state.user["id"]
             )
         except (httpx.HTTPError, TimeoutError):
             raise HTTPException(
