@@ -705,8 +705,10 @@ class Mixes:
         today = await asyncio.to_thread(self.day)
         await asyncio.to_thread(self.activate, today)
         await asyncio.to_thread(self.forget_unfound)
-        # Reclaim retired audio before checking capacity for new editions.
-        await asyncio.to_thread(self.cache.cleanup)
+        # Reclaim retired audio before checking capacity for new editions:
+        # once a pass at most, and only when due (#171).
+        if self.cache.cleanup_due():
+            await asyncio.to_thread(self.cache.cleanup)
         for user in await asyncio.to_thread(self.people):
             if self.stopping.is_set():
                 return
@@ -730,7 +732,6 @@ class Mixes:
                 pass
             except Exception:
                 log.exception("Preparing one person's radio failed")
-        await asyncio.to_thread(self.cache.cleanup)
 
     def library_snapshot(self, user):
         """This person's playable, unhidden songs and their keys: the stable

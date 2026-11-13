@@ -14,6 +14,10 @@ from .media import track_file
 from .quality import satisfies
 
 
+# The shortest wait between two cleanups when the cache has room (#171).
+CLEANUP_SECONDS = 600
+
+
 def song_key(track):
     # Release identity matters even when recordings share a title or an MBID.
     identity = [
@@ -35,8 +39,21 @@ class MixCache:
         self.staging = self.directory / "staging"
         self.staging.mkdir(exist_ok=True)
         # Song keys per edition, by its exact stored payload: cleanup runs
-        # twice a minute under the lifecycle lock and editions rarely change (#63).
+        # under the lifecycle lock and editions rarely change (#63).
         self.edition_keys = {}
+        # When cleanup last ran (monotonic), and whether a lack of room has
+        # been seen since: passes ask `cleanup_due` first (#171).
+        self.cleaned_at = None
+        self.short = False
+
+    def cleanup_due(self):
+        """Its thresholds are an hour or more, so a run every ten minutes
+        reclaims as much as one a minute; a full cache asks at once."""
+        return (
+            self.short
+            or self.cleaned_at is None
+            or time.monotonic() - self.cleaned_at >= CLEANUP_SECONDS
+        )
 
     def settings(self):
         return {
@@ -109,11 +126,14 @@ class MixCache:
             used = conn.execute(
                 "SELECT COALESCE(SUM(bytes),0) FROM mix_audio"
             ).fetchone()[0]
-        return (
+        enough = (
             used + size <= settings["budget_bytes"]
             and shutil.disk_usage(self.directory).free - size
             >= settings["reserve_bytes"]
         )
+        if not enough:
+            self.short = True
+        return enough
 
     def filenames(self):
         """Every cached song's file name by key: one read for a whole list
@@ -181,6 +201,9 @@ class MixCache:
         return retained
 
     def cleanup(self, now=None):
+        # Recorded before the run: room found short during it asks again.
+        self.cleaned_at = time.monotonic()
+        self.short = False
         now = time.time() if now is None else now
         with (
             self.store.lifecycle_lock,

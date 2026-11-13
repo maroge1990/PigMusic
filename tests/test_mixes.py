@@ -1778,3 +1778,38 @@ def test_mix_covers_are_warmed_when_published_and_listed(tmp_path, monkeypatch):
     mixes.hide(owner, f"mix:{identity}:3")
     assert len(mixes.list(owner)["mixes"][0]["tracks"]) == 3
     assert warmed[1] == [("release", release)]
+
+
+def test_mix_passes_clean_the_cache_at_most_every_ten_minutes(tmp_path, monkeypatch):
+    """#171: every pass (at least once a minute) ran cleanup twice, each
+    under the lifecycle and mix locks and statting every cached file. Its own
+    thresholds are an hour or more, so one run per pass every ten minutes is
+    enough, plus at once when the cache was found full."""
+    (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": []}))
+    app, owner = protected(tmp_path, monkeypatch)
+    mixes = app.state.store.mixes
+    runs = []
+    real = mixes.cache.cleanup
+    monkeypatch.setattr(mixes.cache, "cleanup", lambda: runs.append(1) or real())
+    clock = [1000.0]
+    monkeypatch.setattr("server.mix_cache.time.monotonic", lambda: clock[0])
+
+    async def passes(count):
+        for _ in range(count):
+            await mixes.prepare_pass(None)
+            clock[0] += 60
+
+    asyncio.run(passes(5))
+    assert len(runs) == 1
+    clock[0] += 600
+    asyncio.run(passes(1))
+    assert len(runs) == 2
+    # A full cache asks for room back before the interval is up.
+    settings = mixes.cache.settings
+    with monkeypatch.context() as full:
+        full.setattr(mixes.cache, "settings", lambda: {**settings(), "budget_bytes": 0})
+        assert not mixes.cache.room()
+    asyncio.run(passes(1))
+    assert len(runs) == 3
+    asyncio.run(passes(1))
+    assert len(runs) == 3
