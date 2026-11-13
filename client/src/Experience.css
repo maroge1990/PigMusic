@@ -458,8 +458,8 @@
   gap: var(--space-4);
 }
 .np-queue .np-queue-tools button {
-  width: 36px;
-  height: 36px;
+  width: 2.75rem;
+  height: 2.75rem;
   padding: 0;
   align-items: center;
   justify-content: center;
@@ -529,6 +529,9 @@
   }
 }
 /* Columns of four songs that page sideways, like Top Songs. */
+.home-songs :focus-visible {
+  outline-offset: -2px;
+}
 .home-songs {
   display: grid;
   grid-auto-flow: column;

@@ -198,7 +198,7 @@
   .tab-list button {
     font-size: var(--type-caption);
     padding: var(--space-8) var(--space-12);
-    min-height: 38px;
+    min-height: 2.75rem;
   }
   .tab-list button > span {
     margin-left: var(--space-4);

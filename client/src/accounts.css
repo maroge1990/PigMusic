@@ -164,6 +164,9 @@
   padding-bottom: var(--space-12);
   scrollbar-width: none;
 }
+.personal-tabs :focus-visible {
+  outline-offset: -2px;
+}
 .personal-tabs::-webkit-scrollbar {
   display: none;
 }

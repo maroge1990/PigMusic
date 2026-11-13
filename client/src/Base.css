@@ -68,6 +68,9 @@ a {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
+/* In a sideways-scrolling shelf (home songs, mixes, account tabs, tab
+ * lists) the ring sits inside the control, where the shelf's clipped edge
+ * cannot cut it off (#181); each shelf's own file sets outline-offset: -2px. */
 button,
 input {
   touch-action: manipulation;

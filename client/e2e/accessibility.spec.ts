@@ -113,3 +113,47 @@ test("the access-denied notice clears on the next page", async ({ page }) => {
   await expect(page.getByText("Pat · 2 songs")).toBeVisible();
   await expect(notice).toHaveCount(0);
 });
+
+// #181: every control named in the audit is at least 44 px tall, and a
+// focus ring inside a sideways shelf is drawn inside the control.
+test("small controls meet the 44 px target; shelf focus rings sit inside", async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.goto("/#/home");
+  await expect(page.locator("main")).toBeVisible();
+  const sizes = await page.evaluate(() => {
+    const host = document.createElement("div");
+    host.innerHTML = `
+      <div class="tab-list"><button id="tab">Albums</button></div>
+      <div class="popular-pager"><button class="icon-button" id="pager">›</button></div>
+      <div class="np-queue"><span class="np-queue-tools"><button id="queue">↑</button></span></div>`;
+    document.querySelector("main")!.append(host);
+    return ["tab", "pager", "queue"].map((id) => {
+      const box = document.getElementById(id)!.getBoundingClientRect();
+      return [id, Math.round(Math.min(box.width, box.height))];
+    });
+  });
+  for (const [id, size] of sizes)
+    expect(size, `${id} is ${size}px`).toBeGreaterThanOrEqual(44);
+
+  const offsets = await page.evaluate(() => {
+    const host = document.createElement("div");
+    host.innerHTML = `
+      <div class="home-songs"><button id="shelf">Song</button></div>
+      <div class="mix-row"><button id="mix">Mix</button></div>`;
+    document.querySelector("main")!.append(host);
+    return ["shelf", "mix"].map((id) => {
+      const button = document.getElementById(id)!;
+      button.focus({ focusVisible: true } as FocusOptions);
+      return [
+        id,
+        button.matches(":focus-visible"),
+        getComputedStyle(button).outlineOffset,
+      ];
+    });
+  });
+  for (const [id, visible, offset] of offsets)
+    if (visible) expect(offset, `${id} ring`).toBe("-2px");
+  expect(offsets.some(([, visible]) => visible)).toBe(true);
+});

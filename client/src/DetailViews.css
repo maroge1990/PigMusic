@@ -122,8 +122,8 @@
   margin-right: var(--space-8);
 }
 .popular-pager .icon-button {
-  width: 36px;
-  height: 36px;
+  width: 2.75rem;
+  height: 2.75rem;
   display: grid;
   place-items: center;
   border-radius: 50%;
@@ -158,10 +158,6 @@
   .popular-pager > span {
     font-size: var(--type-caption);
     margin-right: 2px;
-  }
-  .popular-pager .icon-button {
-    width: 32px;
-    height: 32px;
   }
   .artist-popular .section-title h2 {
     font-size: var(--type-headline);

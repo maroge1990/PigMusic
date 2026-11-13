@@ -9,6 +9,9 @@
   padding: var(--space-12) var(--space-4) var(--space-16);
   margin-inline: calc(-1 * var(--space-4));
 }
+.mix-row :focus-visible {
+  outline-offset: -2px;
+}
 .mix-card {
   flex: 0 0 170px;
   min-width: 0;
