@@ -3,6 +3,8 @@
 import asyncio
 import time
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from server import lookahead as lookahead_module
@@ -371,3 +373,73 @@ def test_earlier_lookups_finishing_never_start_a_search_before_it_settles():
         await ahead.close()
 
     asyncio.run(scenario())
+
+
+def test_a_tap_never_waits_behind_look_ahead_searches(tmp_path):
+    """Codex, #192 round 2 (medium): look-ahead and taps shared JioSaavn's
+    three search slots, so people opening screens could queue a real tap
+    behind speculative searches. Look-ahead has its own budget; a tap starts
+    its search at once, and overtakes a look-ahead of the same song that is
+    still waiting for its turn."""
+    import threading
+
+    import httpx
+
+    searched = []
+    release = threading.Event()
+
+    def search(query, limit):
+        searched.append(query)
+        release.wait(5)
+        return []
+
+    resolver = RemoteAudio(search)
+
+    def song(title):
+        return {"artist": "Fixture", "title": title, "album": "Fixture"}
+
+    def screen(*titles):
+        def job(title):
+            async def run():
+                return song(title)
+
+            return run
+
+        return [job(title) for title in titles]
+
+    async def until(condition):
+        deadline = time.monotonic() + 3
+        while not condition() and time.monotonic() < deadline:
+            await asyncio.sleep(0.02)
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            ahead = LookAhead(resolver, lambda: client, lambda: True)
+            for person, titles in (
+                ("mark", ("a", "b")),
+                ("sam", ("c", "d")),
+                ("jo", ("e", "f")),
+            ):
+                ahead.screen(person, screen(*titles))
+            await asyncio.sleep(0.2)
+            speculative = len(searched)
+            assert speculative < 3  # Look-ahead leaves the tap's slots free.
+            tap = asyncio.ensure_future(resolver.resolve(client, song("tapped")))
+            await until(lambda: "Fixture tapped" in searched)
+            assert "Fixture tapped" in searched  # Started at once.
+            queued = next(
+                t for t in "abcdef" if f"Fixture {t}" not in searched
+            )  # A look-ahead still waiting for its turn.
+            overtaking = asyncio.ensure_future(resolver.resolve(client, song(queued)))
+            await until(lambda: f"Fixture {queued}" in searched)
+            assert f"Fixture {queued}" in searched
+            release.set()
+            for task in (tap, overtaking):
+                with pytest.raises(ValueError):
+                    await task
+            await ahead.close()
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        release.set()

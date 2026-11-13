@@ -1,6 +1,7 @@
 """Optional remote listening; matching never removes version descriptions."""
 
 import asyncio
+import contextlib
 import contextvars
 import hashlib
 import json
@@ -84,6 +85,8 @@ SOURCE_COOLDOWN_SECONDS = 120
 # (#23). The head must do that within this many bytes (cover art included);
 # a listener waits at most this long for bytes that have not arrived yet.
 HEAD_BYTES = 1_000_000
+# JioSaavn searches look-ahead may run at once, across everyone (#192).
+LOOKAHEAD_SLOTS = 2
 WAIT_SECONDS = 20
 CHUNK_BYTES = 65536
 # The transfer a relay download may serve while it arrives (set per task).
@@ -99,6 +102,16 @@ async def shared_result(task, timeout=None):
     return task.result()
 
 
+class Resolving:
+    """A JioSaavn lookup in flight: `started` once it has its slot budget."""
+
+    __slots__ = ("task", "started")
+
+    def __init__(self):
+        self.task = None
+        self.started = False
+
+
 class RemoteAudio:
     """Short-lived source resolution cache; remote listening never queues a download."""
 
@@ -111,8 +124,11 @@ class RemoteAudio:
         # never queues behind another song's transfer.
         self.slots = asyncio.Semaphore(3)
         self.relay_slots = asyncio.Semaphore(3)
-        # Event-loop owned: {key: task} JioSaavn lookups running; a tap joins
-        # the look-ahead's lookup for the same song.
+        # Look-ahead has its own JioSaavn budget, so a tap never waits behind
+        # songs nobody tapped (Codex, #192 round 2); taps keep `slots`.
+        self.speculative_slots = asyncio.Semaphore(LOOKAHEAD_SLOTS)
+        # Event-loop owned: {key: Resolving} JioSaavn lookups running; a tap
+        # joins one that is searching and overtakes one still waiting.
         self.resolving = {}
         # {name: (monotonic expiry, exception type, message)}
         self.misses = {}
@@ -626,26 +642,53 @@ class RemoteAudio:
         missed = self.misses.get(self.miss_key(track))
         if missed and missed[0] > time.monotonic():
             return None
-        return await self.resolve(client, track)
+        return await self.resolve(client, track, speculative=True)
 
-    async def resolve(self, client, track):
-        # One JioSaavn lookup per song at a time: a tap joins a look-ahead's.
+    async def resolve(self, client, track, speculative=False):
+        # One JioSaavn lookup per song at a time. A tap joins a lookup that is
+        # already searching, but overtakes a look-ahead still waiting for its
+        # budget; a look-ahead joins whatever is running.
         key = self.key(track)
-        task = self.resolving.get(key)
-        if task is None:
-            task = asyncio.ensure_future(self._resolve(client, track))
-            self.resolving[key] = task
+        running = self.resolving.get(key)
+        if running is not None and (running.started or speculative):
+            return await shared_result(running.task)
+        entry = Resolving()
+        entry.task = asyncio.ensure_future(
+            self._resolve(client, track, entry, speculative)
+        )
+        self.resolving[key] = entry
 
-            def done(finished, key=key):
-                if self.resolving.get(key) is finished:
-                    del self.resolving[key]
+        def done(_, key=key, entry=entry):
+            if self.resolving.get(key) is entry:
+                del self.resolving[key]
 
-            task.add_done_callback(done)
-            task.add_done_callback(lambda t: t.cancelled() or t.exception())
-        return await shared_result(task)
+        entry.task.add_done_callback(done)
+        entry.task.add_done_callback(lambda t: t.cancelled() or t.exception())
+        return await shared_result(entry.task)
 
-    async def _resolve(self, client, track):
+    async def _resolve(self, client, track, entry=None, speculative=False):
         key = self.key(track)
+        if speculative:
+            async with self.speculative_slots:
+                current = self.resolving.get(key)
+                if current is not entry:
+                    # A tap overtook this look-ahead: its answer is the one,
+                    # and a miss it found is not searched again.
+                    if current is not None:
+                        return await shared_result(current.task)
+                    cached = self.cache.get(key)
+                    if cached and cached[0] > self.clock():
+                        return cached[1]
+                    raise ValueError("Looked up by a tap already.")
+                if entry is not None:
+                    entry.started = True
+                # Its own budget only: never one of the taps' slots.
+                return await self._lookup(client, track, key, contextlib.nullcontext())
+        if entry is not None:
+            entry.started = True
+        return await self._lookup(client, track, key, self.slots)
+
+    async def _lookup(self, client, track, key, slots):
         cached = self.cache.get(key)
         now = self.clock()
         if cached and cached[0] > now:
@@ -660,7 +703,7 @@ class RemoteAudio:
             else:
                 self.cache[key] = (cached[0], cached[1], self.clock())
                 return cached[1]
-        async with self.slots:
+        async with slots:
             try:
                 results = await asyncio.wait_for(
                     asyncio.to_thread(
