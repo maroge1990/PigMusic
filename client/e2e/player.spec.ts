@@ -190,6 +190,27 @@ test("a finished song plays the next one by itself", async ({ page }) => {
   await expect(mini.getByRole("button", { name: "Next song" })).toBeDisabled();
 });
 
+// #191: the player tells the server how long each start took to be heard.
+test("each start reports its time to first sound", async ({ page }) => {
+  const heard: { ms: number; source: string; action: string }[] = [];
+  await albumWithAudio(page, {
+    "/v1/performance/first-sound": async (route) => {
+      heard.push(route.request().postDataJSON());
+      await route.fulfill({ status: 204 });
+    },
+  });
+  await page.goto(`/#/library/album/${album.id}`);
+  await page.getByText("Von dutch").first().click();
+  await expect(page.locator(".mini-player")).toContainText("Club classics");
+  await expect.poll(() => heard.length).toBeGreaterThanOrEqual(3);
+  expect(heard.map((h) => [h.source, h.action])).toEqual([
+    ["library", "play"],
+    ["library", "next"],
+    ["library", "next"],
+  ]);
+  for (const h of heard) expect(h.ms).toBeGreaterThanOrEqual(0);
+});
+
 // #97: a song that can't be played says why, and Next still moves on.
 test("a song that fails to load shows why and Next skips it", async ({
   page,

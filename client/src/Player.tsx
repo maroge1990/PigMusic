@@ -13,6 +13,7 @@ import {
 import { MiniPlayer } from "./MiniPlayer";
 import { fromMixTrack, fromTrack, songBody, type Song } from "./songs";
 import { startFailure } from "./playStart";
+import { StartClock, startSource, type StartAction } from "./firstSound";
 import { resolve, type Playing } from "./playbackSource";
 import { NowPlaying, useNowPlayingFocus } from "./NowPlaying";
 import {
@@ -72,6 +73,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [restoredQueue] = useState(readSavedQueue);
   const audio = useRef<HTMLAudioElement>(null);
   const serial = useRef(0);
+  const startClock = useRef(new StartClock());
   const queue = useRef<Song[]>(restoredQueue?.songs ?? []);
   const cursor = useRef(restoredQueue?.cursor ?? -1);
   const playEvent = useRef<{
@@ -195,9 +197,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     open ? setExpanded(true) : collapse(),
   );
 
-  async function load(s: Song) {
+  async function load(s: Song, action: StartAction = "play") {
     reportPlay();
     const request = ++serial.current;
+    startClock.current.begin(request, action, performance.now());
     audio.current?.pause();
     setSong({ ...s });
     setBusy(true);
@@ -220,6 +223,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       prepareUpcoming();
       if (radioRunningLow(s, queue.current, cursor.current)) void refillRadio();
     } catch (e) {
+      startClock.current.cancel(request);
       if (request === serial.current) setError((e as Error).message);
     } finally {
       if (request === serial.current) setBusy(false);
@@ -324,7 +328,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setQueueVersion((v) => v + 1);
     prepareUpcoming();
   }
-  function step(delta: number) {
+  function step(delta: number, action?: StartAction) {
     const index = stepIndex(
       queue.current.length,
       cursor.current,
@@ -334,13 +338,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const next = queue.current[index];
     if (!next) {
       if (waitsForRadio(queue.current, cursor.current, delta))
-        void refillRadio().then((added) => added && step(delta));
+        void refillRadio().then((added) => added && step(delta, action));
       return;
     }
     resumeAt.current = 0;
     cursor.current = index;
     setQueueVersion((v) => v + 1);
-    void load(next);
+    void load(next, action ?? (delta < 0 ? "previous" : "skip"));
   }
   function previous() {
     const element = audio.current;
@@ -367,6 +371,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const request = serial.current;
     void audio.current?.play().catch((e) => {
       const message = startFailure(e, request !== serial.current);
+      // Waiting for a tap on Play is not the server's time to first sound.
+      if (message) startClock.current.cancel(request);
       if (message) setError(message);
     });
     if ("mediaSession" in navigator) {
@@ -486,6 +492,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           src={song?.url}
           preload="metadata"
           onPlay={() => setPlaying(true)}
+          onPlaying={() => {
+            const heard = startClock.current.heard(
+              serial.current,
+              performance.now(),
+            );
+            if (heard)
+              void apiFetch("/api/v1/performance/first-sound", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  ...heard,
+                  source: startSource(song?.source),
+                }),
+              }).catch(() => undefined);
+          }}
           onPause={() => setPlaying(false)}
           onTimeUpdate={() => {
             const current = audio.current?.currentTime || 0;
@@ -532,8 +553,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             reportPlay();
             setPlaying(false);
             if (afterEnd(repeat) === "again")
-              void load(queue.current[cursor.current]);
-            else step(1);
+              void load(queue.current[cursor.current], "next");
+            else step(1, "next");
           }}
           onError={() => {
             if (song?.url)
