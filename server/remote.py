@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import shutil
+import threading
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -58,6 +59,9 @@ MEDIA_TYPES = {".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".opus": "audio/ogg"}
 # playback link.
 RELAY_SECONDS = 14 * 86400
 RELAY_BYTES = 5_000_000_000
+# A relay download prunes the folder when this long has passed since the last
+# prune, or when a tenth of the budget has arrived since then (#172).
+RELAY_PRUNE_SECONDS = 600
 TOKEN_SECONDS = 6 * 3600
 # A song no source has is not searched for again for a while; a failure of a
 # source or the network only briefly (REMOTE1: a miss took 30-35 s each time).
@@ -105,6 +109,11 @@ class RemoteAudio:
         self.runtime = runtime
         self.relay_search = relay_search
         self.relayed = {}
+        # When the relay folder was last pruned (monotonic) and the bytes
+        # fetched since; downloads run on worker threads.
+        self.pruning = threading.Lock()
+        self.pruned_at = None
+        self.arrived = 0
         self.inflight = {}
         # Event-loop owned: {name: RelayTransfer} still arriving and already
         # playing; another play of the recording joins it.
@@ -513,7 +522,7 @@ class RemoteAudio:
 
         context = self.context(source)
         extension = REGISTRY[source].extension(candidate)
-        self.prune()
+        self.prune_if_due()
         self.directory.mkdir(parents=True, exist_ok=True)
         # Fetched under a private name, then published under the recording's.
         path = self.directory / ("." + secrets.token_hex(16) + extension)
@@ -547,7 +556,24 @@ class RemoteAudio:
         except Exception:
             path.unlink(missing_ok=True)
             raise
+        with self.pruning:
+            self.arrived += final.stat().st_size
         return final
+
+    def prune_if_due(self):
+        """Prune at most every RELAY_PRUNE_SECONDS, unless enough has arrived
+        since the last prune to matter to the budget."""
+        with self.pruning:
+            due = (
+                self.pruned_at is None
+                or time.monotonic() - self.pruned_at >= RELAY_PRUNE_SECONDS
+                or self.arrived >= RELAY_BYTES // 10
+            )
+            if due:
+                self.pruned_at = time.monotonic()
+                self.arrived = 0
+        if due:
+            self.prune()
 
     def prune(self):
         """Drop expired and unfinished copies, then the least recently played

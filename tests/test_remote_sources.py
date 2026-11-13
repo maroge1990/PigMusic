@@ -972,3 +972,49 @@ def test_one_alteration_is_never_another():
     with pytest.raises(ValueError):
         resolved(target, [saavn("Reverb Hits", "r")])
     assert resolved(target, [saavn("Breathless (Reverb)", "r")]).endswith("/r.m4a")
+
+
+def test_relay_downloads_prune_the_cache_on_a_timer_or_after_enough_bytes(
+    tmp_path, monkeypatch
+):
+    """#172: every relay download walked and statted the whole relay folder
+    first. It now prunes when ten minutes have passed since the last prune,
+    or once enough has arrived since then to matter to the budget."""
+    from types import SimpleNamespace
+    from server import remote
+    from server.providers import REGISTRY
+
+    monkeypatch.setitem(
+        REGISTRY,
+        "fixture",
+        SimpleNamespace(adapter=False, download_hosts=(), extension=lambda c: ".mp3"),
+    )
+    monkeypatch.setattr(
+        "server.providers.network.transfer",
+        lambda url, hosts, path, context: path.write_bytes(b"x" * 100),
+    )
+    monkeypatch.setattr("server.audio.probe_file", lambda path: {"duration": 3})
+    monkeypatch.setattr(remote, "add_length_header", lambda path: None)
+    clock = [1000.0]
+    monkeypatch.setattr(remote.time, "monotonic", lambda: clock[0])
+    resolver = RemoteAudio(directory=tmp_path / "relay")
+    pruned = []
+    real = resolver.prune
+    monkeypatch.setattr(resolver, "prune", lambda: pruned.append(1) or real())
+
+    def fetch(n):
+        track = {"artist": "A", "title": f"Song {n}", "album": "B", "duration": 3}
+        resolver.download("fixture", track, {"source_url": "https://x/a.mp3"})
+
+    for n in range(5):
+        fetch(n)
+        clock[0] += 60
+    assert len(pruned) == 1
+    clock[0] += 600
+    fetch(5)
+    assert len(pruned) == 2
+    # Enough bytes since the last prune also prompt one.
+    monkeypatch.setattr(remote, "RELAY_BYTES", 2000)
+    for n in range(6, 9):
+        fetch(n)
+    assert len(pruned) == 3
