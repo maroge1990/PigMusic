@@ -24,9 +24,11 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 - **Batch 3 'lookahead' (#192), committed, NOT pushed:** `f0bee7d` (JioSaavn match kept 6 h, re-checked by one range
   request on the tap) and `535dfe6` (look-ahead from release pages, Home and settled searches, two per person; iPhone
   taps looked up as the catalogue knows the song). On branch `claude/pigmusic-delivery-takeover-e84ed3`, not yet in
-  `~/code/PigMusic` main (kept out until the release apply ran from 9051fac). Codex round 1 was running at handover
-  (`.private/reviews/lookahead-round1.log`); round 2 and confirmations still to do. #201's row for #192 needs its date
-  when this ships.
+  `~/code/PigMusic` main (kept out until the release apply ran from 9051fac). Codex round 1
+  (`.private/reviews/lookahead-round1.log`): **high**, look-ahead runs the full relay path, so speculative whole-file
+  downloads can hold all three relay slots and a real tap waits (fix: look-ahead stops before relay transfers, or
+  taps get reserved slots); **medium**, `pump()` starts a delayed search's jobs before its settle timer when earlier
+  work finishes. Fix both, confirm each (D-71), then round 2. #201's row for #192 needs its date when this ships.
 - **Parity plan (13 Nov evening):** after comparing Octo and Mornye, Mark chose to improve PigMusic towards their
   instant listening, downloads, artwork and "Made for you" (D-88), with instant sources asked together, JioSaavn first
   (D-89), and every replaced path retired (D-90). Issues #191–#205; order in **Now**.
