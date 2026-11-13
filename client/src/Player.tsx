@@ -491,7 +491,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           ref={audio}
           src={song?.url}
           preload="metadata"
-          onPlay={() => setPlaying(true)}
+          onPlay={() => {
+            startClock.current.asked(serial.current);
+            setPlaying(true);
+          }}
           onPlaying={() => {
             const heard = startClock.current.heard(
               serial.current,
@@ -507,7 +510,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 }),
               }).catch(() => undefined);
           }}
-          onPause={() => setPlaying(false)}
+          onPause={() => {
+            startClock.current.paused(serial.current);
+            setPlaying(false);
+          }}
           onTimeUpdate={() => {
             const current = audio.current?.currentTime || 0;
             const event = playEvent.current;

@@ -22,3 +22,16 @@ test("player source labels map to the server's kinds (#191)", () => {
   assert.equal(startSource("Remote · JioSaavn"), "remote");
   assert.equal(startSource(undefined), "other");
 });
+
+test("a pause before the first sound drops that start (#191, Codex round 2)", () => {
+  const clock = new StartClock();
+  clock.begin(1, "play", 0);
+  clock.paused(1); // The previous song's pause, before this one was asked.
+  clock.asked(1);
+  clock.paused(1); // The person paused while it was still loading.
+  clock.asked(1); // ...and played again five minutes later.
+  assert.equal(clock.heard(1, 300_000), null);
+  clock.begin(2, "skip", 1000);
+  clock.asked(2);
+  assert.deepEqual(clock.heard(2, 1800), { ms: 800, action: "skip" });
+});

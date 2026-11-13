@@ -211,6 +211,48 @@ test("each start reports its time to first sound", async ({ page }) => {
   for (const h of heard) expect(h.ms).toBeGreaterThanOrEqual(0);
 });
 
+// #191, Codex round 2: pausing while a song loads is the person's wait,
+// not the time to first sound, so that start is not reported.
+test("a pause before the first sound reports nothing", async ({ page }) => {
+  const heard: unknown[] = [];
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let asked = false;
+  const wav = Buffer.from(silence().split(",")[1], "base64");
+  await page.route("**/held/one.wav", async (route) => {
+    asked = true;
+    await held;
+    await route.fulfill({ body: wav, contentType: "audio/wav" });
+  });
+  await mockApi(page, {
+    answers: {
+      "/v1/playback/t1/url": (route) =>
+        route.fulfill({ json: { url: "/held/one.wav", expires_in: 60 } }),
+      "/v1/performance/first-sound": async (route) => {
+        heard.push(route.request().postDataJSON());
+        await route.fulfill({ status: 204 });
+      },
+    },
+  });
+  await page.goto(`/#/library/album/${album.id}`);
+  await page.getByText("Von dutch").first().click();
+  await expect.poll(() => asked).toBe(true);
+  const mini = page.locator(".mini-player");
+  await mini.getByRole("button", { name: "Pause", exact: true }).click();
+  release();
+  await mini.getByRole("button", { name: "Play", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const audio = document.querySelector("audio")!;
+        return audio.ended || (!audio.paused && audio.currentTime > 0);
+      }),
+    )
+    .toBe(true);
+  await page.waitForTimeout(300);
+  expect(heard).toEqual([]);
+});
+
 // #97: a song that can't be played says why, and Next still moves on.
 test("a song that fails to load shows why and Next skips it", async ({
   page,

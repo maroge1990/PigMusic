@@ -17,10 +17,29 @@ export function startSource(label?: string | null): StartSource {
 /** One start at a time: a newer start replaces an unheard one, and each is
  * reported once. */
 export class StartClock {
-  private pending?: { request: number; action: StartAction; at: number };
+  private pending?: {
+    request: number;
+    action: StartAction;
+    at: number;
+    asked: boolean;
+  };
 
   begin(request: number, action: StartAction, now: number) {
-    this.pending = { request, action, at: now };
+    this.pending = { request, action, at: now, asked: false };
+  }
+
+  /** The player asked the audio element to play this start's song. */
+  asked(request: number) {
+    if (this.pending?.request === request) this.pending.asked = true;
+  }
+
+  /** A pause after the song was asked to play and before it was heard:
+   * the person's wait, not the server's, so the start is not reported.
+   * The pause that ends the previous song comes before the ask and is not
+   * one. */
+  paused(request: number) {
+    if (this.pending?.request === request && this.pending.asked)
+      this.pending = undefined;
   }
 
   /** The start heard now, if `request` is the one waiting; else null. */
