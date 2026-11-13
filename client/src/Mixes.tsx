@@ -18,6 +18,7 @@ import { fromMixTrack, type Song } from "./songs";
 import type { Track } from "./types";
 import "./mixes.css";
 import { SectionHeader } from "./PageHeader";
+import { Loading } from "./EmptyState";
 
 type Mix = {
   id: string;
@@ -473,14 +474,14 @@ export function Mixes() {
             />
           ))}
         </div>
+      ) : !feed && !error ? (
+        <Loading>Loading your mixes…</Loading>
       ) : (
         <p role="status">
           {error ||
-            (feed
-              ? feed.preparing
-                ? "Preparing your mixes. They'll appear once their audio is ready."
-                : "Your mixes appear as your library grows. Discoveries are prepared ahead of playback."
-              : "Preparing your mixes…")}
+            (feed?.preparing
+              ? "Preparing your mixes. They'll appear once their audio is ready."
+              : "Your mixes appear as your library grows. Discoveries are prepared ahead of playback.")}
         </p>
       )}
       {notice && <p role="status">{notice}</p>}

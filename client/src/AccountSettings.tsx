@@ -8,7 +8,7 @@ import { api } from "./api";
 import type { Person } from "./AppShell";
 import { PageHeader } from "./PageHeader";
 import { formatRelative } from "./format";
-import { InlineError } from "./EmptyState";
+import { InlineError, Loading } from "./EmptyState";
 
 type Session = {
   id: string;
@@ -33,7 +33,8 @@ export function AccountSettings({
   const [quality, setQuality] = useState("");
   const [qualityOptions, setQualityOptions] = useState<QualityOption[]>();
   const [household, setHousehold] = useState("");
-  const [sessions, setSessions] = useState<Session[]>([]);
+  // Undefined until the first answer: the list shows Loading, not "none".
+  const [sessions, setSessions] = useState<Session[]>();
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   async function load() {
@@ -159,8 +160,9 @@ export function AccountSettings({
       </section>
       <section className="account-section">
         <h2>Your devices</h2>
+        {!sessions && !error && <Loading>Loading your devices…</Loading>}
         <ul className="session-list">
-          {sessions
+          {(sessions ?? [])
             .filter((s) => !s.revoked_at)
             .sort((a, b) => Number(!!b.current) - Number(!!a.current))
             .map((s) => (
@@ -198,7 +200,7 @@ export function AccountSettings({
               </li>
             ))}
         </ul>
-        {sessions.some((s) => !s.revoked_at && !s.current) && (
+        {sessions?.some((s) => !s.revoked_at && !s.current) && (
           <button
             className="secondary-button"
             onClick={() => {
