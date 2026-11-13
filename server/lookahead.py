@@ -89,6 +89,10 @@ class LookAhead:
         person = self.people.get(user_id)
         if person is None:
             return
+        if person.timer is not None:
+            # A screen still settling (a search typed ahead) starts only when
+            # its timer fires, not when earlier work finishes (Codex, round 1).
+            return
         while person.pending and len(person.running) < PER_PERSON and not self.closed:
             job = person.pending.pop(0)
             task = asyncio.ensure_future(self.run(job))

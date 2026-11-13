@@ -333,3 +333,41 @@ def test_a_look_ahead_never_takes_the_relay_slots_a_tap_needs(tmp_path, monkeypa
         asyncio.run(scenario())
     finally:
         release.set()
+
+
+def test_earlier_lookups_finishing_never_start_a_search_before_it_settles():
+    """Codex, #192 round 1 (medium): an earlier lookup ending during a
+    search's settle delay must not start that search's songs, nor those of a
+    newer query that replaced it."""
+
+    class Gated:
+        def __init__(self):
+            self.started = []
+            self.gates = {}
+
+        async def match(self, client, track):
+            self.started.append(track["title"])
+            gate = self.gates.setdefault(track["title"], asyncio.Event())
+            await gate.wait()
+
+    async def scenario():
+        remote = Gated()
+        ahead = LookAhead(remote, lambda: None, lambda: True)
+        ahead.screen("mark", jobs("page"), name="release")
+        await asyncio.sleep(0.05)
+        assert remote.started == ["page"]
+        ahead.screen("mark", jobs("so"), delay=0.3)
+        remote.gates["page"].set()  # The page's lookup ends while typing.
+        await asyncio.sleep(0.1)
+        assert remote.started == ["page"]
+        ahead.screen("mark", jobs("song"), delay=0.3)  # A newer query.
+        await asyncio.sleep(0.1)
+        assert remote.started == ["page"]
+        await asyncio.sleep(0.3)
+        assert remote.started == ["page", "song"]  # The settled query only.
+        remote.gates["song"].set()
+        await asyncio.sleep(0.05)
+        assert ahead.people == {}
+        await ahead.close()
+
+    asyncio.run(scenario())
