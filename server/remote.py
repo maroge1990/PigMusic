@@ -109,6 +109,9 @@ class RemoteAudio:
         self.runtime = runtime
         self.relay_search = relay_search
         self.relayed = {}
+        # Counts each source's answer for the parity targets (#191); set by
+        # the app.
+        self.performance = None
         # When the relay folder was last pruned (monotonic) and the bytes
         # fetched since; downloads run on worker threads.
         self.pruning = threading.Lock()
@@ -284,6 +287,8 @@ class RemoteAudio:
         def step(name, outcome, since):
             seconds = time.monotonic() - since
             steps.append(f"{name} {outcome} {seconds:.1f} s")
+            if self.performance is not None:
+                self.performance.record("remote-source", name, outcome, seconds * 1000)
             # The same steps in Server-Timing: "zvu4no-found", "jiosaavn-miss".
             outcome = {
                 "no match": "miss",

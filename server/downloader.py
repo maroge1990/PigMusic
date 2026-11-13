@@ -218,6 +218,8 @@ class Timings:
         self.began = time.monotonic()
         self.queued = queued
         self.steps = []
+        # "source/profile" of the copy kept, once one is (#191).
+        self.won = None
         if resolved is not None:
             self.steps.append(
                 {"step": "resolve", "outcome": "ok", "seconds": round(resolved, 2)}
@@ -970,6 +972,7 @@ class Downloader:
                                     pass
                         transferred = True
                         self.complete(job, path, extension, source, profile, provenance)
+                        self.timings().won = source + "/" + profile
                         self.runtime.health.outcome(source, transfer=True)
                         return True
                     except (Cancelled, QualityDeadline, SourceDeadline):
@@ -1138,4 +1141,21 @@ class Downloader:
         finally:
             self.deadlines.pop(job["id"], None)
             timings.line(job, result)
+            self.count(timings, result)
             self.context.timings = None
+
+    def count(self, timings, result):
+        """A finished download for the parity targets (#191): mix songs and
+        library requests apart, with the source and profile that won."""
+        performance = getattr(self.store, "performance", None)
+        if performance is None or result == "interrupted":
+            return
+        if result == "completed from the mix cache":
+            result, timings.won = "completed", "mix cache"
+        performance.record(
+            "download",
+            "library" if type(self) is Downloader else "mix",
+            result,
+            (time.monotonic() - timings.began) * 1000,
+            timings.won if result == "completed" else None,
+        )

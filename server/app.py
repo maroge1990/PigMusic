@@ -81,6 +81,7 @@ from .media import (
     settings as private_media_settings,
 )
 from .remote import LABELS, RelayTransfer, RemoteAudio
+from .performance import Performance
 from .scanner import LibraryScanner
 from .playlists import Playlists
 from .exporter import Exporter
@@ -110,6 +111,9 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     remote_audio = RemoteAudio(
         directory=store.directory / "remote-cache", runtime=source_runtime
     )
+    # The parity targets' counters (#191): downloads find it on the store.
+    performance = store.performance = Performance(store.directory)
+    remote_audio.performance = performance
     scanner = LibraryScanner(store)
     playlists = Playlists(store)
     exporter = Exporter(store)
@@ -174,6 +178,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             },
         ) as client:
             app.state.http = client
+            performance.start()
             enrichment.start()
             await asyncio.to_thread(recovery.recover)
             await asyncio.to_thread(organisation.recover)
@@ -234,6 +239,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                         pass
                 if scan_task:
                     await scan_task
+                await performance.close()
 
     async def maintain_artwork():
         # Wait a week after startup; never prune during startup migration.
@@ -897,7 +903,17 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             lambda: enrich_library(kind, item),
             library=True,
         )
-        return await image_response(target, w)
+        return counted("library-" + kind, item_id, await image_response(target, w))
+
+    def counted(kind, item_id, response):
+        """An artwork answer for the placeholder target (#191)."""
+        performance.record(
+            "artwork",
+            kind,
+            "missing" if response.status_code == 404 else "served",
+            detail=item_id,
+        )
+        return response
 
     @app.get("/api/v1/catalogue/artwork/{kind}/{item_id}", tags=["personal-library"])
     async def catalogue_artwork(kind: str, item_id: str, w: int = 0):
@@ -909,7 +925,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             target = store.cover_dir / (identifier(key) + ".jpg")
             if not target.is_file():
                 enrichment.submit(key, lambda: apple_cover(int(item_id), target))
-            return await image_response(target, w)
+            return counted(kind, item_id, await image_response(target, w))
         if kind not in {"release", "release-group"}:
             raise HTTPException(404, "Artwork not found.")
         item_id = valid_id(item_id)
@@ -917,7 +933,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         target = store.cover_dir / (identifier(key) + ".jpg")
         if not target.is_file():
             enrichment.submit(key, lambda: catalogue_cover(kind, item_id, target))
-        return await image_response(target, w)
+        return counted(kind, item_id, await image_response(target, w))
 
     async def apple_cover(collection_id, target):
         from .apple_search import apple_artwork
@@ -1169,6 +1185,48 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     def warmer_status():
         return warmer.status()
 
+    class FirstSound(BaseModel):
+        # From the tap (or skip) to audible sound, measured by the player.
+        ms: int = Field(ge=0, le=600_000)
+        source: Literal["library", "mix", "remote", "other"]
+        # "next": the queue moved on by itself when a song ended.
+        action: Literal["play", "skip", "previous", "next", "seek"] = "play"
+
+    @app.post("/api/v1/performance/first-sound", status_code=204)
+    async def first_sound(body: FirstSound):
+        """Players report how long a start took to be heard (#191)."""
+        performance.record("first-sound", body.source, "heard", body.ms, body.action)
+        return Response(status_code=204)
+
+    def artist_photos():
+        """(with a portrait, total) over the library's own artists."""
+        artists = [
+            artist
+            for artist in list(store.library.get("artists", []))
+            if not artist.get("compilation_only")
+        ]
+        identities = store.read_documents(
+            "library-artist:" + artist["id"] for artist in artists
+        )
+        with_photo = sum(
+            1
+            for artist in artists
+            if portrait_target(
+                store,
+                artist["name"],
+                identities.get("library-artist:" + artist["id"], {}).get("id"),
+            ).is_file()
+        )
+        return with_photo, len(artists)
+
+    @app.get("/api/v1/admin/performance")
+    async def performance_report(days: int = Query(7, ge=1, le=7)):
+        """The parity targets and this week's numbers against them (#191)."""
+        artists = await asyncio.to_thread(artist_photos)
+        return await asyncio.to_thread(
+            performance.report, time.time() - days * 86400, None, artists
+        )
+
     async def preload_library():
         if os.environ.get("PIG_MUSIC_PRELOAD", "true").lower() == "false":
             return
@@ -1378,6 +1436,25 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         )
 
     async def remote_playback(track, request):
+        """A tap on a song outside the library, counted for the instant-play
+        target (#191): played (by source), no match or unavailable, with the
+        server's time to answer."""
+        began = time.monotonic()
+        try:
+            found = await find_remote_playback(track, request)
+        except HTTPException as exc:
+            outcome = {404: "no match", 503: "unavailable"}.get(exc.status_code)
+            if outcome:
+                performance.record(
+                    "tap", "none", outcome, (time.monotonic() - began) * 1000
+                )
+            raise
+        performance.record(
+            "tap", found["source"], "played", (time.monotonic() - began) * 1000
+        )
+        return found
+
+    async def find_remote_playback(track, request):
         user = getattr(request.state, "user", None)
         cached_id = (
             await asyncio.to_thread(mixes.reference, user["id"], track)
