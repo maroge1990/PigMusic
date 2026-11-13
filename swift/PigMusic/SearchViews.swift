@@ -376,7 +376,7 @@ struct SearchArtistView: View {
     } else if unresolved {
       SavedArtistView(model: model, artist: artist)
     } else {
-      ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).pigCanvas()
+      PigLoading("Opening \(artist.name)…").pigCanvas()
         .navigationTitle(artist.name).navigationBarTitleDisplayMode(.inline)
         .task {
           if let found = await model.storedCatalogue(
@@ -579,7 +579,7 @@ private struct AppleResultView: View {
         PigQuietState(title, line: failure)
           .frame(maxHeight: .infinity).pigCanvas()
       } else {
-        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).pigCanvas()
+        PigLoading("Opening \(title)…").pigCanvas()
       }
     }
     .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
@@ -652,7 +652,7 @@ private struct RecentAlbumView: View {
       switch inLibrary {
       case true?: AlbumView(model: model, album: album)
       case false?: ServerAlbumView(model: model, album: album)
-      case nil: ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).pigCanvas()
+      case nil: PigLoading("Opening \(album.title)…").pigCanvas()
       }
     }
     .task(id: album.id) { inLibrary = await model.store?.holds(albumId: album.id) ?? false }

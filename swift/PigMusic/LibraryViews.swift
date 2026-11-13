@@ -794,7 +794,7 @@ struct ArtistRouteView: View {
         route.names[0], line: "This artist isn't in your library yet. Search to find them."
       ).frame(maxHeight: .infinity).pigCanvas()
     } else {
-      ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).pigCanvas()
+      PigLoading("Opening \(route.names[0])…").pigCanvas()
         .task {
           for name in route.names {
             if let found = await model.savedArtist(name: name) {

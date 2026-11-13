@@ -146,3 +146,14 @@ extension PigQuietState where Action == EmptyView {
     self.init(title, line: line) { EmptyView() }
   }
 }
+
+/// A page that is still opening: one line naming what is coming, with a
+/// spinner, as the web's Loading does. Never a spinner alone on a blank page
+/// (brand 1.8 section 14).
+public struct PigLoading: View {
+  private let text: String
+  public init(_ text: String) { self.text = text }
+  public var body: some View {
+    ProgressView(text).frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+}

@@ -57,3 +57,14 @@ def test_empty_and_error_screens_show_the_pig_with_one_line():
     assert "model.openSearch()" in empty
     model = source("AppModel.swift")
     assert "syncFailed = true" in model and "syncFailed = false" in model
+
+
+def test_no_page_opens_on_a_spinner_alone():
+    """Brand 1.8 section 14: no spinner alone on a blank page. The artist,
+    album and Apple-link pages opened on a bare ProgressView filling the
+    screen; they now say what is opening, as the web's Loading does."""
+    bare = re.compile(r"ProgressView\(\)\s*\.frame\(maxWidth: \.infinity, maxHeight")
+    for path in sorted(APP.glob("*.swift")):
+        assert not bare.search(path.read_text()), path.name
+    assert source("SearchViews.swift").count("PigLoading(") == 3
+    assert "PigLoading(" in source("LibraryViews.swift")
