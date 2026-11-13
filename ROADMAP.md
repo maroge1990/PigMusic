@@ -42,12 +42,15 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 1. **Mark on build 24 (T5):** covers in a mix and on the lock screen (#168); then the audit batches in the report's
    order: brand (#179) is pushed, next is lock contention and idle work (#171, #172). Live check of the artwork release after tonight's mix run.
-2. **Mark on build 21 (T5)**, then send diagnostics: Shazam (identify, Shazamed, Share from the Shazam app), Add to my
+2. **#188** iPhone requests fail for 10–20 s after opening the app although the server answered them (Mark's 13 Nov
+   export): log the connection error and protocol, widen the retry window; decides whether batch 9's TestFlight build
+   or its own carries it.
+3. **Mark on build 21 (T5)**, then send diagnostics: Shazam (identify, Shazamed, Share from the Shazam app), Add to my
    playlists, a few songs not on the server (#23 timing, #94), Home a few times (#22), searches (#54).
-3. **#123** deferred Watch publish never rescheduled after an account change (native; build 22 with any device findings).
-4. **Live checks from real use:** #16/#17/#20 freezes and lock holds (nightly mix run + Mark's listening), #22, #54,
+4. **#123** deferred Watch publish never rescheduled after an account change (native; build 22 with any device findings).
+5. **Live checks from real use:** #16/#17/#20 freezes and lock holds (nightly mix run + Mark's listening), #22, #54,
    #94, #23 first-sound p90; #63 quiet-night idle measurement.
-5. **Rig:** a larger generated library for #22 timings; #96 warming fairness; check the engine sweep against the real
+6. **Rig:** a larger generated library for #22 timings; #96 warming fairness; check the engine sweep against the real
    slskd layout.
 
 ## Later (P3)
