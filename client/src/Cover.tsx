@@ -20,23 +20,31 @@ export function coverUrl(src: string, width: number, revision = 0) {
   return url.pathname + url.search;
 }
 
-/** After a missing image, the server fetches it in the background: look
- * again after these delays, then only when the server says something changed. */
-const LOOKS_MS = [2000, 6000, 30000];
+/** After a missing image, the server fetches it in the background (behind
+ * other covers when a page asks for many): look again after each of these
+ * waits, about twelve minutes in all, then only when the server says
+ * something changed. */
+const LOOKS_MS = [2000, 6000, 30000, 120000, 600000];
+
+type Looks = { key: string; failed: number; count: number };
+const fresh = (key: string): Looks => ({ key, failed: -1, count: 0 });
 
 /** The `r=` an artwork address asks with, and whether the picture at that
  * address failed. The revision moves when the artwork revision changes
- * (`music-artwork-changed`) and, while the picture is missing, for the few
- * early looks above and on each library revision the event stream reports
+ * (`music-artwork-changed`) and, while the picture is missing, for the
+ * bounded looks above and on each library revision the event stream reports
  * (`music-artwork-retry`). Nothing re-asks on a timer after that, so a
  * picture that will never exist is not requested again and again. `key`
- * names the picture; a new one starts the looks again. */
+ * names the picture; every change of key, back to an earlier one too,
+ * starts with no failure and the full set of looks. */
 export function useArtworkRevision(key: string) {
   const [revision, setRevision] = useState(0);
-  const [failed, setFailed] = useState("");
-  const [looks, setLooks] = useState({ key, count: 0 });
-  const missing = failed === `${revision}:${key}`;
-  const count = looks.key === key ? looks.count : 0;
+  const [stored, setLooks] = useState(() => fresh(key));
+  // A new picture forgets the last one's failure before this render shows it.
+  if (stored.key !== key) setLooks(fresh(key));
+  const looks = stored.key === key ? stored : fresh(key);
+  const missing = looks.failed === revision;
+  const count = looks.count;
   useEffect(() => {
     const changed = () => setRevision((r) => r + 1);
     window.addEventListener("music-artwork-changed", changed);
@@ -48,7 +56,9 @@ export function useArtworkRevision(key: string) {
     const soon =
       count < LOOKS_MS.length
         ? setTimeout(() => {
-            setLooks({ key, count: count + 1 });
+            setLooks((old) =>
+              old.key === key ? { ...old, count: old.count + 1 } : old,
+            );
             again();
           }, LOOKS_MS[count])
         : undefined;
@@ -62,7 +72,12 @@ export function useArtworkRevision(key: string) {
     revision,
     missing,
     /** Call from the image's onError. */
-    fail: () => setFailed(`${revision}:${key}`),
+    fail: () =>
+      setLooks((old) =>
+        old.key === key
+          ? { ...old, failed: revision }
+          : { ...fresh(key), failed: revision },
+      ),
   };
 }
 
