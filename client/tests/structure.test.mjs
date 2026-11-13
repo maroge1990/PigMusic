@@ -146,3 +146,16 @@ test("every client call and media address is versioned (/api/v1)", () => {
       assert.match(path, /^\/v1\//, `${file} calls api("${path}")`);
   }
 });
+
+test("#181: settings use plain words, not storage or API terms", () => {
+  const settings = ["MediaSettings.tsx", "MixCacheSettings.tsx"]
+    .map(read)
+    .join("\n");
+  for (const phrase of [
+    "ListenBrainz user token",
+    "Enter your user token",
+    "cache quality",
+    "Cache budget",
+  ])
+    assert.ok(!settings.includes(phrase), `"${phrase}" is still on screen`);
+});

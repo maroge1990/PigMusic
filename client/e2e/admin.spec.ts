@@ -131,7 +131,7 @@ test("the owner's Admin overview shows the numbers to act on", async ({
   await expect(mixes.locator("li[data-status=next]")).toContainText("Up next");
   await mixes.getByRole("button", { name: /Sam/ }).click();
   await expect(mixes).toContainText("No mixes are planned for Sam yet.");
-  const budget = mixes.getByLabel("Cache budget (GB)");
+  const budget = mixes.getByLabel("Space for prepared songs (GB)");
   await budget.fill("55");
   await mixes.getByRole("button", { name: "Refresh mix status" }).click();
   await expect(

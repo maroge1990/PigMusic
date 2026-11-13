@@ -272,7 +272,7 @@ export function MixCacheSettings() {
             }}
           >
             <label>
-              Cache budget (GB)
+              Space for prepared songs (GB)
               <input
                 type="number"
                 min="1"
@@ -304,7 +304,7 @@ export function MixCacheSettings() {
               />
             </label>
             <QualitySelect
-              label="Preferred cache quality"
+              label="Quality of prepared songs"
               value={settings.profile}
               onChange={(profile) => setSettings({ ...settings, profile })}
               options={defaultQualityOptions.filter((o) =>

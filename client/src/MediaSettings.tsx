@@ -134,17 +134,17 @@ export function MediaSettings() {
             browser. Leave this field blank to keep your existing key.
           </p>
           <label className="download-option">
-            ListenBrainz user token
+            ListenBrainz key
             <input
               className="provider-key"
               type="password"
               autoComplete="off"
-              aria-label="ListenBrainz user token"
+              aria-label="ListenBrainz key"
               value={listenToken}
               placeholder={
                 settings.listenbrainz_configured
                   ? "Configured · enter a replacement"
-                  : "Enter your user token"
+                  : "Paste your ListenBrainz key"
               }
               onChange={(e) => setListenToken(e.target.value)}
             />
@@ -155,11 +155,11 @@ export function MediaSettings() {
               target="_blank"
               rel="noreferrer"
             >
-              Get your ListenBrainz token
+              Get your ListenBrainz key
             </a>{" "}
-            to show each artist&rsquo;s popular songs and albums.
-            Recommendations work without it. Leave blank to keep an existing
-            token. Tokens stay on your server.
+            (ListenBrainz calls it your user token) to show each artist&rsquo;s
+            popular songs and albums. Recommendations work without it. Leave
+            blank to keep an existing token. Tokens stay on your server.
           </p>
           <label className="download-option">
             Popular chart region
