@@ -19,9 +19,9 @@ import type { Playing } from "./playbackSource";
 import type { RepeatMode } from "./queue";
 import { goToAlbum, goToPlayingArtist, type Song } from "./songs";
 import { InlineError } from "./EmptyState";
+import { formatDuration } from "./format";
 
-const time = (n: number) =>
-  `${Math.floor((n || 0) / 60)}:${String(Math.floor((n || 0) % 60)).padStart(2, "0")}`;
+const time = (n: number) => formatDuration(n, "0:00");
 
 /** Now Playing is a modal: it keeps keyboard focus inside while open and
  * hands it back to what opened it on close. */

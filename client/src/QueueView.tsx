@@ -3,6 +3,7 @@ import type { Library } from "./types";
 import { Empty, Loading } from "./EmptyState";
 import { SectionHeader } from "./PageHeader";
 import { sourceName } from "./sources";
+import { formatDuration } from "./format";
 type QueueItem = {
   id: string;
   title: string;
@@ -31,11 +32,6 @@ export type QueueAction =
   | "cancel"
   | "source-review/approve"
   | "source-review/reject";
-
-const clock = (seconds?: number) =>
-  seconds
-    ? `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}`
-    : "";
 
 /** Uploads waiting for a decision. The server only accepts one while the
  * request has stopped, so running searches are left alone. */
@@ -70,7 +66,7 @@ function SourceReviews({
               <strong>{item.title}</strong>
               <span>
                 Requested from {item.artist} · uploaded by {review.uploader}
-                {review.duration ? ` · ${clock(review.duration)}` : ""}
+                {review.duration ? ` · ${formatDuration(review.duration)}` : ""}
               </span>
               <span>
                 {sourceName(review.source)}: “{review.title}”

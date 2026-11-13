@@ -27,11 +27,7 @@ import {
   type SongState,
 } from "./songs";
 import { InlineError } from "./EmptyState";
-
-const duration = (n?: number) =>
-  n
-    ? `${Math.floor(n / 60)}:${String(Math.floor(n % 60)).padStart(2, "0")}`
-    : "";
+import { formatDuration } from "./format";
 
 /** One song. Tap anywhere to play; download state and ⋯ sit on the right. */
 export function SongRow({
@@ -101,7 +97,7 @@ export function SongRow({
         )}
         <span className="song-text">
           <strong>{song.title}</strong>
-          <small>{subtitle || duration(song.duration)}</small>
+          <small>{subtitle || formatDuration(song.duration)}</small>
         </span>
       </button>
       <span className="song-state">

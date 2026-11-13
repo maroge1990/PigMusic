@@ -10,7 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { api, updateArtworkRevision } from "./api";
-import { formatCount } from "./format";
+import { formatCount, formatDuration } from "./format";
 import { PageHeader, SectionHeader } from "./PageHeader";
 import { Cover } from "./Cover";
 import { Empty, Loading } from "./EmptyState";
@@ -49,9 +49,6 @@ export type AdminState = {
   scan?: Record<string, unknown>;
   soulseek?: { configured: boolean; connected: boolean } | null;
 };
-
-const formatTime = (seconds: number) =>
-  `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}`;
 
 const plural = (count: number, noun: string) =>
   `${formatCount(count)} ${noun}${count === 1 ? "" : "s"}`;
@@ -579,7 +576,7 @@ export function AdminTools({ route }: { route: Route }) {
                                 )}
                               </div>
                               <span className="track-time">
-                                {formatTime(track.duration)}
+                                {formatDuration(track.duration)}
                               </span>
                               <span
                                 className={`migration-status ${track.status}`}

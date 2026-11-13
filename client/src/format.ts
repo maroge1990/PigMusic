@@ -63,3 +63,14 @@ export function formatRelative(
 
 export const formatCount = (n: number | null | undefined): string =>
   count.format(n ?? 0);
+
+/** "3:07" from seconds. Whole seconds are floored, so 59.6 s reads "0:59",
+ * never "0:60". Missing, zero or invalid durations give `empty`. */
+export function formatDuration(
+  seconds: number | null | undefined,
+  empty: string = "",
+): string {
+  if (!seconds || !Number.isFinite(seconds) || seconds < 0) return empty;
+  const whole = Math.floor(seconds);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+}

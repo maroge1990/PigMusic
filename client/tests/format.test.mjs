@@ -12,8 +12,13 @@ registerHooks({
     }
   },
 });
-const { formatDate, formatCount, formatRelative, formatDateTime } =
-  await import("../src/format.ts");
+const {
+  formatDate,
+  formatCount,
+  formatRelative,
+  formatDateTime,
+  formatDuration,
+} = await import("../src/format.ts");
 
 test("MusicBrainz partial dates keep only what they know", () => {
   assert.equal(formatDate("2010-07-03"), "3 Jul 2010");
@@ -48,4 +53,29 @@ test("relative times read naturally and fall back to a date", () => {
 test("date and time is one medium en-AU format", () => {
   assert.match(formatDateTime("2026-10-09T12:06:00Z"), /^9 Oct\w* 2026, /);
   assert.equal(formatDateTime("nonsense"), "");
+});
+
+test("durations floor whole seconds and never show :60", () => {
+  assert.equal(formatDuration(59.6), "0:59");
+  assert.equal(formatDuration(119.5), "1:59");
+  assert.equal(formatDuration(187), "3:07");
+  assert.equal(formatDuration(3600), "60:00");
+  assert.equal(formatDuration(undefined), "");
+  assert.equal(formatDuration(0), "");
+  assert.equal(formatDuration(0, "0:00"), "0:00");
+  assert.equal(formatDuration(Number.NaN, "0:00"), "0:00");
+});
+
+test("every duration on screen comes from formatDuration", async () => {
+  const { readFile, readdir } = await import("node:fs/promises");
+  const dir = new URL("../src/", import.meta.url);
+  for (const name of await readdir(dir)) {
+    if (!/\.tsx?$/.test(name) || name === "format.ts") continue;
+    const text = await readFile(new URL(name, dir), "utf8");
+    assert.doesNotMatch(
+      text,
+      /% 60\)/,
+      `${name} formats a duration by hand; use formatDuration`,
+    );
+  }
 });
