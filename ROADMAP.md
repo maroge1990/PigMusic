@@ -27,6 +27,13 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   build no longer strips the standard `backdrop-filter`, so Chromium shows the blur again), `40828c0` rounded tabular
   figures on admin glance and queue progress (D-84), `a073184` light default theme colour. One Codex round: no high
   finding; two medium ones filed as #186 and #187. Rides with the next server release (after batch 3).
+- **Pushed, not released:** batch 'idle' (#171, #172): `7bd2b28` mix cache cleanup once a pass at most, every 10
+  minutes or at once when the cache is full (was twice a minute under lifecycle_lock); `b39a45b` + `442d2ad` the stall
+  watch sleeps until a stall could have begun (was 20 wake-ups a second); `30834e2` relay folder pruned every 10
+  minutes or after 500 MB (was before every download). The artist-portrait part of #172 was reverted (`55e5939`):
+  repeat passes already read cached answers. Two Codex rounds: round 1 found two medium issues in the batch, both
+  fixed and confirmed in round 2 (approve). **Live check after release:** lifecycle_lock hold warnings per hour and idle
+  CPU against the 9 Nov baselines (server 0.97%, engine 2.41%).
 - **Decisions 13 Nov:** D-79 Undo over confirm (#183), D-80 drop SoundCloud and yt-dlp with #94 (Monochrome enabled live but
   never searched: check its configuration in #94), D-81 navigation names stay, D-82 the pig on iPhone empty and error
   states (#180), D-83 no Watch artwork (set aside), D-84 rounded tabular figures only where compared (#179, #180), D-85 brand glass where it fits on the web (#179). D-78
@@ -41,7 +48,8 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 ## Now
 
 1. **Mark on build 24 (T5):** covers in a mix and on the lock screen (#168); then the audit batches in the report's
-   order: brand (#179) is pushed, next is lock contention and idle work (#171, #172). Live check of the artwork release after tonight's mix run.
+   order: brand (#179) and idle work (#171, #172) are pushed and go out in the next server release; next is the web
+   batch (#174, #175, #181, #182). Live check of the artwork release after tonight's mix run.
 2. **#188** iPhone requests fail for 10–20 s after opening the app although the server answered them (Mark's 13 Nov
    export): log the connection error and protocol, widen the retry window; decides whether batch 9's TestFlight build
    or its own carries it.
