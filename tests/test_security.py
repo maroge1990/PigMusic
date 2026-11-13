@@ -443,6 +443,12 @@ def test_relayed_remote_audio_uses_a_signed_link_bound_to_its_listener(
     monkeypatch.setattr(RemoteAudio, "find", find)
     monkeypatch.setattr(RemoteAudio, "download", download)
     app, owner = protected(tmp_path, monkeypatch)
+    # The relays are out of instant listening during the YouTube trial
+    # (D-89); their serving code stays until #201 and is tested here.
+    from server.remote import RELAYED
+
+    app.state.look_ahead.remote_audio.relays = RELAYED
+    app.state.look_ahead.remote_audio.youtube = None
     code = app.state.auth.setup_code(owner, "member", "Member")
     app.state.auth.activate(code["code"], PASSWORD, "fixture")
     member = app.state.auth.login(

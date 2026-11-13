@@ -53,3 +53,20 @@ def isolate_startup_enrichment(monkeypatch, tmp_path_factory, request):
     # Legacy functional fixtures are deliberately unauthenticated and isolated.
     # Security tests explicitly revoke this bypass; runtime strips it.
     monkeypatch.setenv("PIG_MUSIC_TEST_LEGACY_API", "1")
+
+
+@pytest.fixture(autouse=True)
+def youtube_stays_offline(monkeypatch):
+    # The app asks YouTube with JioSaavn (#193). No test may reach YouTube:
+    # a test that wants it supplies a fake (tests/test_youtube.py).
+    from server.providers.contracts import ProviderError
+    from server.youtube import YouTube
+
+    async def songs(self, track):
+        raise ProviderError("not_configured")
+
+    def resolve(self, video_id):
+        raise ProviderError("not_configured")
+
+    monkeypatch.setattr(YouTube, "songs", songs)
+    monkeypatch.setattr(YouTube, "resolve", resolve)

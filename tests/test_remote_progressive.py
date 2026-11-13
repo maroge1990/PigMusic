@@ -565,6 +565,10 @@ def test_a_growing_relay_is_served_through_its_signed_link(tmp_path, monkeypatch
     monkeypatch.delenv("PIG_MUSIC_TEST_LEGACY_API", raising=False)
     monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(tmp_path / "nas"))
     app = create_app(tmp_path / "data")
+    # The relays are out of instant listening during the YouTube trial
+    # (D-89); their serving code stays until #201 and is tested here.
+    app.state.look_ahead.remote_audio.relays = remote.RELAYED
+    app.state.look_ahead.remote_audio.youtube = None
     password = "correct horse battery staple 23"
     app.state.auth.create_owner("mark", password)
     token = app.state.auth.login("mark", password, "device", "phone", "ios", "fixture")[

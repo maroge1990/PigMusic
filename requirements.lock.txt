@@ -35,3 +35,4 @@ uvicorn==0.54.0
 websockets==17.2
 yt-dlp-ejs==0.8.0
 yt-dlp==2026.8.19
+ytmusicapi==1.12.3

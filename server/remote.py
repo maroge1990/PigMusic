@@ -26,6 +26,7 @@ from .downloader import matches
 from .matching import album_title, flavour, recording_kind
 from .providers.contracts import ProviderError
 from .vendor.jiosaavn import search_jiosaavn
+from .youtube import YouTubeStream
 
 log = logging.getLogger("pig_music.remote")
 
@@ -54,6 +55,7 @@ LABELS = {
     "jiosaavn": "JioSaavn",
     "zvu4no": "zvu4no",
     "freemp3cloud": "FreeMp3Cloud",
+    "youtube": "YouTube",
 }
 MEDIA_TYPES = {".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".opus": "audio/ogg"}
 # Relayed songs stay for two weeks after they were last played, within 5 GB;
@@ -102,6 +104,41 @@ async def shared_result(task, timeout=None):
     return task.result()
 
 
+def acceptable(track, c):
+    """The shared song rule for an instant source's search result (`matches`:
+    lead artist, title, live/remix/demo words in title and album, length within
+    5 s, agreeing IDs); a song is the same on any edition (PRODUCT), so the
+    album must agree only for an edition chosen explicitly."""
+    return bool(
+        matches(track, c)
+        # The album names the same kind of recording ("The Remixes",
+        # "Demos", "Live at Leeds" are those recordings even when the
+        # song title says nothing) as the request.
+        and flavour(c.get("album")) == recording_kind(track)
+        and altered(c.get("title"), c.get("album"))
+        == altered(track.get("title"), track.get("album"))
+        and (
+            # Only a plain studio song with a known length may come
+            # from another release. A live, demo, remix, session or
+            # altered recording is one performance (another concert
+            # is another recording), so it must be the requested
+            # album or carry one of its ISRCs; so must a song with no
+            # known length or an edition chosen explicitly.
+            (
+                not track.get("explicit_edition")
+                and track.get("duration")
+                and not recording_kind(track)
+                and not altered(track.get("title"), track.get("album"))
+            )
+            or normalise(c.get("album", "")) == normalise(track["album"])
+            or bool(
+                track.get("isrcs") and c.get("isrc") and c["isrc"] in track["isrcs"]
+            )
+        )
+        and (not track.get("isrcs") or not c.get("isrc") or c["isrc"] in track["isrcs"])
+    )
+
+
 class Resolving:
     """A JioSaavn lookup in flight: a look-ahead's is `speculative`, and
     `started` once it has its budget."""
@@ -117,8 +154,28 @@ class Resolving:
 class RemoteAudio:
     """Short-lived source resolution cache; remote listening never queues a download."""
 
-    def __init__(self, search=None, directory=None, runtime=None, relay_search=None):
+    def __init__(
+        self,
+        search=None,
+        directory=None,
+        runtime=None,
+        relay_search=None,
+        youtube=None,
+        relays=RELAYED,
+    ):
         self.search = search or search_jiosaavn
+        # YouTube for instant listening (#193), asked together with JioSaavn,
+        # which wins when both have the song (D-89).
+        self.youtube = youtube
+        # Event-loop owned: {key: (keep until, video ID)}, oldest use first.
+        self.videos = OrderedDict()
+        # Look-ahead's YouTube budget: one song at a time, across everyone.
+        self.youtube_ahead = asyncio.Semaphore(1)
+        # {key: keep until}: songs JioSaavn has no match for.
+        self.unmatched = {}
+        # The relayed sources asked after the instant ones; the app passes
+        # none while YouTube is on trial (D-89).
+        self.relays = tuple(relays)
         # {key: (keep until, address, checked at)}, oldest use first.
         self.cache = OrderedDict()
         self.clock = time.monotonic
@@ -233,11 +290,14 @@ class RemoteAudio:
         if "url" in found:
             return found
         token = secrets.token_urlsafe(24)
-        self.relayed[token] = (
-            time.monotonic() + TOKEN_SECONDS,
-            found.get("transfer") or found["path"],
-            user_id,
-        )
+        if "youtube" in found:
+            # Played through the server: the address is tied to its network.
+            target = YouTubeStream(
+                self.youtube, found["youtube"], found["address"], client
+            )
+        else:
+            target = found.get("transfer") or found["path"]
+        self.relayed[token] = (time.monotonic() + TOKEN_SECONDS, target, user_id)
         return {"relay": token, "source": found["source"]}
 
     def prepare(self, client, tracks):
@@ -328,23 +388,59 @@ class RemoteAudio:
             }.get(outcome, outcome)
             add_phase(f"{name}-{outcome}".lower(), seconds * 1000)
 
+        # JioSaavn and YouTube are asked together; JioSaavn's 320 kbps copy
+        # wins when both have the song (D-89).
+        youtube = None
+        if self.youtube is not None:
+            youtube = asyncio.ensure_future(self.on_youtube(track))
+            youtube.add_done_callback(lambda t: t.cancelled() or t.exception())
         try:
             url = await self.resolve(client, track)
-            step("jiosaavn", "found", began)
-            self.timing(track, "jiosaavn", began, steps)
-            return {"url": url, "source": "jiosaavn"}
         except (ValueError, KeyError, TypeError) as exc:
             failure = exc
         except (httpx.HTTPError, TimeoutError) as exc:
             failure = exc
+        except BaseException:
+            if youtube is not None:
+                youtube.cancel()
+            raise
+        else:
+            if youtube is not None:
+                youtube.cancel()
+            step("jiosaavn", "found", began)
+            self.timing(track, "jiosaavn", began, steps)
+            return {"url": url, "source": "jiosaavn"}
         step("jiosaavn", "no match", began)
-        if self.directory is None:
-            self.timing(track, None, began, steps)
-            raise failure
         # Only a song every source said it does not have is a miss (404,
         # remembered long); a timeout, a provider error or a failed transfer
         # leaves it uncertain (503, remembered briefly).
         uncertain = isinstance(failure, (httpx.HTTPError, TimeoutError, ProviderError))
+        if youtube is not None:
+            try:
+                found = await shared_result(youtube)
+            except ProviderError:  # Refused, down or answering oddly.
+                step("youtube", "failed", began)
+                uncertain = True
+            except ValueError:
+                step("youtube", "no match", began)
+            except (TimeoutError, httpx.HTTPError, OSError):
+                step("youtube", "too slow", began)
+                uncertain = True
+            except Exception:  # A broken source must not stop the next.
+                log.exception("YouTube lookup failed")
+                step("youtube", "failed", began)
+                uncertain = True
+            else:
+                step("youtube", "found", began)
+                self.timing(track, "youtube", began, steps)
+                return found
+        if self.directory is None or not self.relays:
+            self.timing(track, None, began, steps)
+            if youtube is None:
+                raise failure
+            if uncertain:
+                raise TimeoutError("A source did not answer. Try again shortly.")
+            raise ValueError("No source has this recording.")
         # A transfer that plays while it arrives keeps its slot until it ends.
         await self.relay_slots.acquire()
         handed_off = False
@@ -354,11 +450,11 @@ class RemoteAudio:
             searched = time.monotonic()
             searches = [
                 asyncio.ensure_future(self.search_source(source, track))
-                for source in RELAYED
+                for source in self.relays
             ]
             for search in searches:
                 search.add_done_callback(lambda t: t.cancelled() or t.exception())
-            for source, search in zip(RELAYED, searches):
+            for source, search in zip(self.relays, searches):
                 try:
                     candidate = await shared_result(search)
                 except TimeoutError:
@@ -502,6 +598,8 @@ class RemoteAudio:
         if not entry or entry[0] <= time.monotonic() or entry[2] != user_id:
             return None
         path = entry[1]
+        if isinstance(path, YouTubeStream):
+            return path
         if isinstance(path, RelayTransfer):
             if path.error is not None:
                 return None
@@ -644,7 +742,45 @@ class RemoteAudio:
         missed = self.misses.get(self.miss_key(track))
         if missed and missed[0] > time.monotonic():
             return None
-        return await self.resolve(client, track, speculative=True)
+        try:
+            return await self.resolve(client, track, speculative=True)
+        except (ValueError, KeyError, TypeError, httpx.HTTPError, TimeoutError):
+            if self.youtube is None:
+                raise
+        # YouTube's search and lookup, one look-ahead at a time, so taps keep
+        # YouTube's slots (#193).
+        async with self.youtube_ahead:
+            return await self.on_youtube(track)
+
+    async def on_youtube(self, track):
+        """YouTube's copy of the song: the video, kept like JioSaavn's match,
+        and its current address."""
+        key = self.key(track)
+        kept = self.videos.get(key)
+        if kept and kept[0] > time.monotonic():
+            self.videos.move_to_end(key)
+            video = kept[1]
+        else:
+            songs = await self.youtube.songs(track)
+            found = [c for c in songs if acceptable(track, c)]
+            if not found:
+                raise ValueError("YouTube has no match for this song.")
+            wanted = album_title(track.get("album") or "", track.get("artist"))
+            # The same album first, then a fixed order: the same song picks
+            # the same video every time.
+            video = min(
+                found,
+                key=lambda c: (
+                    album_title(c.get("album") or "", c.get("channel")) != wanted,
+                    c["video_id"],
+                ),
+            )["video_id"]
+            self.videos[key] = (time.monotonic() + RESOLVED_SECONDS, video)
+            self.videos.move_to_end(key)
+            while len(self.videos) > RESOLVED_ENTRIES:
+                self.videos.popitem(last=False)
+        address = await self.youtube.address(video)
+        return {"youtube": video, "address": address, "source": "youtube"}
 
     async def resolve(self, client, track, speculative=False):
         # One JioSaavn lookup per song at a time. A tap joins a lookup that is
@@ -708,6 +844,8 @@ class RemoteAudio:
             else:
                 self.cache[key] = (cached[0], cached[1], self.clock())
                 return cached[1]
+        if self.unmatched.get(key, 0) > time.monotonic():
+            raise ValueError("JioSaavn has no match for this song.")
         async with slots:
             try:
                 results = await asyncio.wait_for(
@@ -720,49 +858,18 @@ class RemoteAudio:
                 # The vendored search wraps any failure, a network error
                 # included: JioSaavn is uncertain, the relays still answer.
                 raise TimeoutError("JioSaavn search unavailable.") from exc
-            # The shared song rule (`matches`: lead artist, title, live/remix/
-            # demo words in title and album, length within 5 s, agreeing IDs)
-            # decides; a song is the same on any edition (PRODUCT), so the
-            # album must agree only for an edition chosen explicitly.
-            candidates = [
-                c
-                for c in results
-                if matches(track, c)
-                # The album names the same kind of recording ("The Remixes",
-                # "Demos", "Live at Leeds" are those recordings even when the
-                # song title says nothing) as the request.
-                and flavour(c.get("album")) == recording_kind(track)
-                and altered(c.get("title"), c.get("album"))
-                == altered(track.get("title"), track.get("album"))
-                and (
-                    # Only a plain studio song with a known length may come
-                    # from another release. A live, demo, remix, session or
-                    # altered recording is one performance (another concert
-                    # is another recording), so it must be the requested
-                    # album or carry one of its ISRCs; so must a song with no
-                    # known length or an edition chosen explicitly.
-                    (
-                        not track.get("explicit_edition")
-                        and track.get("duration")
-                        and not recording_kind(track)
-                        and not altered(track.get("title"), track.get("album"))
-                    )
-                    or normalise(c.get("album", "")) == normalise(track["album"])
-                    or bool(
-                        track.get("isrcs")
-                        and c.get("isrc")
-                        and c["isrc"] in track["isrcs"]
-                    )
-                )
-                and (
-                    not track.get("isrcs")
-                    or not c.get("isrc")
-                    or c["isrc"] in track["isrcs"]
-                )
-            ]
+            candidates = [c for c in results if acceptable(track, c)]
             urls = {c.get("source_url"): c for c in candidates if c.get("source_url")}
             if not urls:
                 self.rejected(track, results, 0)
+                # Remembered so a tap on a song look-ahead found on YouTube
+                # does not wait for JioSaavn to miss again.
+                self.unmatched[key] = time.monotonic() + MISS_SECONDS
+                if len(self.unmatched) > RESOLVED_ENTRIES:
+                    now = time.monotonic()
+                    self.unmatched = {
+                        k: v for k, v in self.unmatched.items() if v > now
+                    }
                 raise ValueError(
                     "No remote recording matched this song. Downloading remains available."
                 )

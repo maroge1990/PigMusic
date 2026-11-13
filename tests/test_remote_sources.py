@@ -318,6 +318,8 @@ def test_a_song_no_source_has_is_remembered_as_a_miss(tmp_path, monkeypatch):
     # Once the miss has expired, the sources are asked again.
     for name, (_, kind, message) in list(resolver.misses.items()):
         resolver.misses[name] = (time.monotonic() - 1, kind, message)
+    # JioSaavn's own no-match memory (#193) lasts as long.
+    resolver.unmatched = {k: time.monotonic() - 1 for k in resolver.unmatched}
     with pytest.raises(ValueError):
         asyncio.run(play())
     assert len(asked) == 6

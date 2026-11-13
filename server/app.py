@@ -81,6 +81,7 @@ from .media import (
     settings as private_media_settings,
 )
 from .remote import LABELS, RelayTransfer, RemoteAudio
+from .youtube import YouTube, YouTubeStream
 from .performance import Performance
 from .lookahead import LookAhead
 from .scanner import LibraryScanner
@@ -113,11 +114,18 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     logos = Logos(store, fanart)
     source_runtime = SourceRuntime(store)
     remote_audio = RemoteAudio(
-        directory=store.directory / "remote-cache", runtime=source_runtime
+        directory=store.directory / "remote-cache",
+        runtime=source_runtime,
+        # YouTube for instant listening on trial (#193, D-91); FreeMp3Cloud and
+        # zvu4no leave instant listening meanwhile and stay download sources
+        # (D-89).
+        youtube=YouTube(store.directory / "youtube"),
+        relays=(),
     )
     # The parity targets' counters (#191): downloads find it on the store.
     performance = store.performance = Performance(store.directory)
     remote_audio.performance = performance
+    remote_audio.youtube.performance = performance
     look_ahead = LookAhead(
         remote_audio,
         lambda: app.state.http,
@@ -1471,8 +1479,8 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         )
         if not found:
             raise HTTPException(404, "This stream has expired. Play the song again.")
-        if isinstance(found, RelayTransfer):
-            # Still arriving: served as far as it has arrived (#23).
+        if isinstance(found, (RelayTransfer, YouTubeStream)):
+            # Still arriving (#23), or passed through from YouTube (#193).
             return await found.response(request.method, request.headers.get("range"))
         return FileResponse(
             found[0],

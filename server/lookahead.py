@@ -2,17 +2,18 @@
 
 When the server answers a screen (a release page, Home's feeds, an online
 search), it names the first few songs there that are not in the library.
-Each is matched on JioSaavn in the background, so the tap finds the answer
-waiting: the match is kept for hours and only re-checked on the tap. The
-relayed sources are left to the tap: a look-ahead never searches them or
-starts a transfer, so it cannot hold the relay slots a real tap needs, and its
-JioSaavn miss is not remembered as a miss.
+Each is matched on JioSaavn in the background, and on YouTube after a JioSaavn
+miss (#193), so the tap finds the answer waiting: matches are kept for hours
+and only re-checked on the tap. The relayed sources are left to the tap: a
+look-ahead never searches them or starts a transfer, so it cannot hold the
+relay slots a real tap needs, and its miss is not remembered as a miss.
 
 Per person: at most PER_PERSON lookups run at once, a new screen replaces the
 songs the previous one queued and has not started, and a screen may wait a
 moment first (a search typed ahead settles before it costs anything).
 Lookups run as background metadata work, so a person waiting on a page always
-goes first, and JioSaavn keeps its own slots.
+goes first; JioSaavn and YouTube give look-ahead its own small budget, so taps
+never wait behind it.
 """
 
 import asyncio
@@ -124,9 +125,9 @@ class LookAhead:
             track = await job()
             if track is None:
                 return
-            # JioSaavn's match only (Codex, round 1): relayed sources and
-            # their transfers wait for the tap, so look-ahead never holds a
-            # relay slot a tap needs. A tap joins a match still running.
+            # JioSaavn's match, then YouTube's (Codex, round 1): relayed
+            # sources and their transfers wait for the tap, so look-ahead
+            # never holds a relay slot a tap needs.
             await self.remote_audio.match(self.client(), track)
         except asyncio.CancelledError:
             raise
