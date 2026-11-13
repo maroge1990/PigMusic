@@ -825,33 +825,3 @@ main h1[tabindex="-1"]:focus {
 .apple-import .owner-tools {
   margin-top: var(--space-24);
 }
-/* Uploads held for the owner (SC1): above the queue they block. */
-.source-reviews {
-  margin-bottom: var(--space-24);
-  padding: var(--space-16);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  background: var(--surface);
-}
-.source-reviews h3 {
-  margin: 0 0 var(--space-8);
-  font-size: var(--type-body);
-}
-.source-reviews > p {
-  margin: 0 0 var(--space-12);
-  color: var(--secondary);
-  font-size: var(--type-caption);
-}
-/* On a phone the decision moves under the song instead of squeezing it. */
-.source-reviews .result-row {
-  flex-wrap: wrap;
-}
-.source-reviews .result-row > div:first-of-type {
-  flex: 1 1 14rem;
-  min-width: 0;
-}
-.source-reviews .result-row > .release-actions {
-  flex: 0 0 auto;
-  margin: 0 0 0 auto;
-  flex-wrap: nowrap;
-}

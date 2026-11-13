@@ -10,7 +10,6 @@ from .contracts import ProviderError
 # Failures that prove the source responded, unlike outages or policy blocks.
 ANSWERED = {
     "no_match",
-    "review_required",
     "protected",
     "access_required",
     "invalid_response",

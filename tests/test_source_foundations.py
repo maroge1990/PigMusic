@@ -58,7 +58,6 @@ def test_registry_settings_preserve_defaults_order_and_reject_unknown_sources(tm
         "freemp3cloud",
         "zvu4no",
         "jiosaavn",
-        "soundcloud",
         "monochrome",
     }
     assert supports("jiosaavn", "native_standard")
@@ -105,6 +104,32 @@ def test_settings_saved_with_youtube_keep_working_without_it(tmp_path):
     runtime = Runtime(store)
     assert not cookies.exists()
     assert "youtube" not in {status["id"] for status in runtime.statuses()}
+
+
+def test_settings_saved_with_soundcloud_keep_working_without_it(tmp_path):
+    """SoundCloud was removed as a source (D-80); settings saved naming it
+    (and YouTube before it) load and save without them, and it is neither
+    listed nor searched."""
+    from server.providers.runtime import Runtime
+
+    store = Store(tmp_path)
+    saved = {
+        **store.download_settings(),
+        "enabled": True,
+        "profile": "native_standard",
+        "sources": ["soundcloud", "monochrome", "youtube", "zvu4no"],
+    }
+    with store.connect() as conn:
+        conn.execute(
+            "INSERT INTO documents VALUES ('downloads',?) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",
+            (json.dumps(saved),),
+        )
+    assert store.download_settings()["sources"] == ["monochrome", "zvu4no"]
+    store.save_download_settings({"concurrent_downloads": 2})
+    assert Store(tmp_path).download_settings()["sources"] == ["monochrome", "zvu4no"]
+    runtime = Runtime(store)
+    assert "soundcloud" not in runtime.adapters
+    assert "soundcloud" not in {status["id"] for status in runtime.statuses()}
 
 
 def test_known_identity_conflicts_cannot_pass_equal_names():

@@ -19,15 +19,6 @@ from server.app import create_app
 from server.downloader import Downloader, Cancelled, matches
 from server.providers import REGISTRY
 from server.providers.contracts import Context, ProviderError
-from server.providers.extractor import Extractor, formats, recording
-from server.providers.extractor_worker import (
-    LimitedBody,
-    GuardedRH,
-    Quiet,
-    canonical,
-    candidate,
-    execute,
-)
 from server.providers.health import Health
 from server.providers.monochrome import Monochrome
 from server.providers import network
@@ -43,78 +34,23 @@ TARGET = {
     "duration": 200,
     "isrcs": ["AA1234567890"],
 }
-FORMAT = {
-    "format_id": "audio-1",
-    "ext": "m4a",
-    "acodec": "mp4a.40.2",
-    "vcodec": "none",
-    "abr": 128,
-    "protocol": "https",
-    "url": "https://cdn.googlevideo.com/audio?secret=never-persist",
-}
-INFO = {
-    "id": "abcdefghijk",
-    "artist": "Artist",
-    "track": "Song",
-    "album": "Album",
-    "duration": 200,
-    "formats": [FORMAT],
-}
-
-
-def test_recording_evidence_is_independent_of_request_and_rejects_ambiguous_uploads():
-    assert recording(INFO, "soundcloud")["channel"] == "Artist"
-    assert recording({"title": "Song", "duration": 200}, "soundcloud") is None
-    assert not matches(
-        TARGET, recording({**INFO, "track": "Song (Live)"}, "soundcloud")
-    )
-    assert not matches(TARGET, recording({**INFO, "duration": 233}, "soundcloud"))
-    assert not matches(TARGET, recording({**INFO, "duration": 30}, "soundcloud"))
-    assert recording({**INFO, "has_drm": True}, "soundcloud") is None
-    assert recording({**INFO, "is_live": True}, "soundcloud") is None
-
-
-def test_format_policy_skips_video_storyboards_drm_and_codec_substitution():
-    bad = [
-        {**FORMAT, "acodec": "none"},
-        {**FORMAT, "vcodec": "h264"},
-        {**FORMAT, "has_drm": True},
-        {**FORMAT, "url": "http://cdn.googlevideo.com/audio", "protocol": "http"},
-    ]
-    assert formats({"formats": bad}, "native_standard") == []
-    assert formats(INFO, "mp3_320") == []
-    assert formats(INFO, "aac_256") == []
-    assert formats(INFO, "native_standard")[0]["extension"] == ".m4a"
-    opus = {**FORMAT, "acodec": "opus", "ext": "webm", "abr": 130}
-    assert formats({"formats": [opus]}, "native_standard")[0]["extension"] == ".opus"
-    value = candidate(
-        {**INFO, "webpage_url": "https://soundcloud.com/artist/song"},
-        "soundcloud",
-        "native_standard",
-    )
-    assert "source_url" not in value and "secret" not in json.dumps(value)
-    # YouTube was removed as a source (D-60): its IDs are refused.
-    with pytest.raises(ProviderError):
-        canonical("youtube", "abcdefghijk")
-    with pytest.raises(ProviderError):
-        canonical("soundcloud", "artist/../../evil")
 
 
 @pytest.mark.parametrize(
     "url",
     [
-        "http://soundcloud.com/a",
-        "https://soundcloud.com:444/a",
-        "https://user@soundcloud.com/a",
-        "https://soundcloud.com.evil.example/a",
+        "http://freemp3cloud.com/a",
+        "https://freemp3cloud.com:444/a",
+        "https://user@freemp3cloud.com/a",
+        "https://freemp3cloud.com.evil.example/a",
         "https://127.0.0.1/a",
         "file:///tmp/audio",
-        "https://soundcloud.com./a",
+        "https://freemp3cloud.com./a",
     ],
 )
 def test_url_boundary_rejects_unsafe_urls(url):
     with pytest.raises(ProviderError, match="network policy"):
-        network.validate_url(url, ("soundcloud.com",))
+        network.validate_url(url, ("freemp3cloud.com",))
 
 
 @pytest.mark.parametrize(
@@ -135,7 +71,7 @@ def test_dns_boundary_rejects_private_reserved_and_mapped_addresses(monkeypatch,
         lambda *a, **kw: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 443))],
     )
     with pytest.raises(ProviderError):
-        network.PublicBackend().connect_tcp("soundcloud.com", 443)
+        network.PublicBackend().connect_tcp("freemp3cloud.com", 443)
 
 
 def test_connection_pins_the_validated_ip(monkeypatch):
@@ -152,7 +88,7 @@ def test_connection_pins_the_validated_ip(monkeypatch):
         "connect_tcp",
         lambda self, host, *a: seen.append(host) or object(),
     )
-    network.PublicBackend().connect_tcp("soundcloud.com", 443)
+    network.PublicBackend().connect_tcp("freemp3cloud.com", 443)
     assert seen == ["8.8.8.8"]
 
 
@@ -163,7 +99,7 @@ def test_redirects_checked_before_connect_and_secrets_stripped(monkeypatch):
         seen.append((str(request.url), request.headers.get("cookie")))
         if len(seen) == 1:
             return httpx.Response(
-                302, headers={"location": "https://other.soundcloud.com/file"}
+                302, headers={"location": "https://other.freemp3cloud.com/file"}
             )
         return httpx.Response(302, headers={"location": "https://127.0.0.1/private"})
 
@@ -172,14 +108,14 @@ def test_redirects_checked_before_connect_and_secrets_stripped(monkeypatch):
             network.stream(
                 session,
                 "GET",
-                "https://soundcloud.com/file",
-                ("soundcloud.com",),
+                "https://freemp3cloud.com/file",
+                ("freemp3cloud.com",),
                 Context("native_standard"),
                 headers={"Cookie": "private"},
             )
     assert seen == [
-        ("https://soundcloud.com/file", "private"),
-        ("https://other.soundcloud.com/file", None),
+        ("https://freemp3cloud.com/file", "private"),
+        ("https://other.freemp3cloud.com/file", None),
     ]
 
 
@@ -195,8 +131,8 @@ def test_stream_limits_incomplete_bytes_and_json_retry(monkeypatch, tmp_path):
     )
     with pytest.raises(ProviderError, match="limits"):
         network.transfer(
-            "https://soundcloud.com/audio",
-            ("soundcloud.com",),
+            "https://freemp3cloud.com/audio",
+            ("freemp3cloud.com",),
             tmp_path / "audio",
             Context("native_standard", max_bytes=4),
         )
@@ -214,41 +150,11 @@ def test_stream_limits_incomplete_bytes_and_json_retry(monkeypatch, tmp_path):
         network, "client", lambda: httpx.Client(transport=httpx.MockTransport(gateway))
     )
     assert network.get_json(
-        "https://soundcloud.com/search", ("soundcloud.com",), Context("native_standard")
+        "https://freemp3cloud.com/search",
+        ("freemp3cloud.com",),
+        Context("native_standard"),
     ) == {"tracks": []}
     assert len(count) == 2
-
-
-def test_limited_extractor_reads_none_budgets_and_closes():
-    response = httpx.Response(200, content=b"abcdef")
-    body = LimitedBody(response, Context("native_standard"), [0])
-    assert body.read(2) == b"ab"
-    assert body.read(None) == b"cdef"
-    body.close()
-    assert response.is_closed
-    budget = [10_000_000]
-    with pytest.raises(ProviderError):
-        LimitedBody(
-            httpx.Response(200, content=b"12345"),
-            Context("native_standard", max_bytes=4),
-            budget,
-        ).read()
-
-
-def test_guarded_handler_enforces_policy_on_fragment_requests(monkeypatch):
-    from yt_dlp.networking.common import Request
-    from yt_dlp.networking.exceptions import TransportError
-
-    handler = GuardedRH(
-        source="soundcloud", context=Context("native_standard"), logger=Quiet()
-    )
-    try:
-        with pytest.raises(TransportError):
-            handler.send(Request("https://127.0.0.1/fragment"))
-        with pytest.raises(TransportError):
-            handler.send(Request("https://other.example/manifest"))
-    finally:
-        handler.close()
 
 
 def test_monochrome_isrc_release_duration_and_provider_namespace(monkeypatch):
@@ -292,42 +198,42 @@ def test_circuit_breaker_ignores_candidate_misses_and_allows_one_probe():
     now = [1000]
     health = Health(lambda: now[0])
     for _ in range(6):
-        health.outcome("soundcloud", error=ProviderError("no_match"))
-    with health.operation("soundcloud"):
+        health.outcome("monochrome", error=ProviderError("no_match"))
+    with health.operation("monochrome"):
         pass
     for _ in range(3):
-        health.outcome("soundcloud", error=ProviderError())
-    assert health.snapshot("soundcloud")["next_retry_at"] == 1300
+        health.outcome("monochrome", error=ProviderError())
+    assert health.snapshot("monochrome")["next_retry_at"] == 1300
     with pytest.raises(ProviderError):
-        with health.operation("soundcloud"):
+        with health.operation("monochrome"):
             pass
     now[0] = 1300
-    with health.operation("soundcloud"):
+    with health.operation("monochrome"):
         with pytest.raises(ProviderError):
-            with health.operation("soundcloud"):
+            with health.operation("monochrome"):
                 pass
-        health.outcome("soundcloud", error=ProviderError())
-    assert health.snapshot("soundcloud")["next_retry_at"] == 1900
+        health.outcome("monochrome", error=ProviderError())
+    assert health.snapshot("monochrome")["next_retry_at"] == 1900
     now[0] = 1900
-    with health.operation("soundcloud"):
-        health.outcome("soundcloud")
-    assert health.snapshot("soundcloud")["next_retry_at"] is None
-    assert health.snapshot("soundcloud")["last_transfer"] is None
-    health.outcome("soundcloud", transfer=True)
-    assert health.snapshot("soundcloud")["last_transfer"] == "verified"
+    with health.operation("monochrome"):
+        health.outcome("monochrome")
+    assert health.snapshot("monochrome")["next_retry_at"] is None
+    assert health.snapshot("monochrome")["last_transfer"] is None
+    health.outcome("monochrome", transfer=True)
+    assert health.snapshot("monochrome")["last_transfer"] == "verified"
 
 
 def test_answered_probe_clears_expired_cooldown():
     now = [1000]
     health = Health(lambda: now[0])
     for _ in range(3):
-        health.outcome("soundcloud", error=ProviderError())
+        health.outcome("monochrome", error=ProviderError())
     now[0] = 1300
-    with health.operation("soundcloud"):
+    with health.operation("monochrome"):
         # The probe reached the source; only the candidate was rejected.
-        health.outcome("soundcloud", error=ProviderError("no_match"))
-    assert health.snapshot("soundcloud")["next_retry_at"] is None
-    with health.operation("soundcloud"), health.operation("soundcloud"):
+        health.outcome("monochrome", error=ProviderError("no_match"))
+    assert health.snapshot("monochrome")["next_retry_at"] is None
+    with health.operation("monochrome"), health.operation("monochrome"):
         pass
 
 
@@ -360,7 +266,7 @@ def test_owner_source_routes_and_credentials_never_return_secrets(
     )
     headers = {"Authorization": "Bearer " + owner}
     statuses = client.get(root, headers=headers).json()
-    assert len(statuses) == 6
+    assert len(statuses) == 5
     assert "youtube" not in {s["id"] for s in statuses}
     assert all("session_configured" not in s for s in statuses)
     # The YouTube session upload went with the source (D-60).
@@ -489,119 +395,12 @@ def test_aac_hls_remux_retains_compressed_packets(tmp_path):
         remux_aac(source, output)
 
 
-@pytest.mark.parametrize(
-    "codec,container,protocol",
-    [
-        ("aac", "m4a", "https"),
-        ("opus", "webm", "https"),
-        ("aac", "m4a", "m3u8_native"),
-        ("mp3", "mp3", "m3u8_native"),
-    ],
-)
-def test_actual_worker_downloads_synthetic_progressive_and_hls_through_guarded_handler(
-    tmp_path, monkeypatch, codec, container, protocol
-):
-    """Use yt-dlp's real downloaders against synthetic payloads, with HTTP fixtures.
-
-    This exercises manifest/fragment handling and exposes native-HLS fallback
-    behavior without relying on third-party media or internet access.
-    """
-    from yt_dlp import YoutubeDL
-    from server.providers import extractor_worker as worker
-
-    if not shutil.which("ffmpeg"):
-        pytest.skip("FFmpeg required")
-    root = tmp_path / "payload"
-    root.mkdir()
-    args = {
-        "aac": ["-c:a", "aac", "-b:a", "192k"],
-        "opus": ["-c:a", "libopus", "-b:a", "160k", "-vbr", "off"],
-        "mp3": ["-c:a", "libmp3lame", "-b:a", "128k"],
-    }[codec]
-    if protocol == "m3u8_native":
-        payload = root / "audio.m3u8"
-        suffix = [
-            "-f",
-            "hls",
-            "-hls_time",
-            "1",
-            "-hls_segment_filename",
-            str(root / "fragment-%d.ts"),
-        ]
-    else:
-        payload = root / ("audio." + container)
-        suffix = []
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-v",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "anoisesrc=duration=3:seed=1",
-            *args,
-            *suffix,
-            str(payload),
-        ],
-        check=True,
-    )
-    fmt = {
-        **FORMAT,
-        "acodec": codec,
-        "ext": container,
-        "protocol": protocol,
-        "url": "https://audio.sndcdn.com/" + payload.name,
-        "abr": 192 if codec == "aac" else 160 if codec == "opus" else 128,
-    }
-    info = {
-        **INFO,
-        "id": "123",
-        "title": "Song",
-        "duration": 3,
-        "formats": [fmt],
-        "webpage_url": "https://soundcloud.com/artist/song",
-        "extractor": "soundcloud",
-        "extractor_key": "Soundcloud",
-        "requested_formats": [{"url": "https://evil.example/bypass"}],
-    }
-    monkeypatch.setattr(YoutubeDL, "extract_info", lambda *args, **kwargs: dict(info))
-    urls = []
-
-    def request(req):
-        urls.append(str(req.url))
-        return httpx.Response(
-            200, content=(root / req.url.path.lstrip("/")).read_bytes()
-        )
-
-    monkeypatch.setattr(
-        worker, "client", lambda: httpx.Client(transport=httpx.MockTransport(request))
-    )
-    output = tmp_path / "output"
-    output.mkdir()
-    result = execute(
-        {
-            "source": "soundcloud",
-            "profile": "native_standard",
-            "operation": "transfer",
-            "provider_track_id": "artist/song",
-            "format_id": fmt["format_id"],
-            "directory": str(output),
-        }
-    )
-    assert (output / result["filename"]).is_file()
-    assert urls and all(url.startswith("https://audio.sndcdn.com/") for url in urls)
-    if protocol == "m3u8_native":
-        assert len(urls) > 1
-    assert result["remuxed"] == (container == "webm" or protocol == "m3u8_native")
-
-
 def test_metadata_success_does_not_mask_repeated_transfer_outages():
     health = Health(lambda: 1000)
     for _ in range(3):
-        health.outcome("soundcloud")
-        health.outcome("soundcloud", error=ProviderError(), transfer=True)
-    assert health.snapshot("soundcloud")["next_retry_at"] == 1300
+        health.outcome("monochrome")
+        health.outcome("monochrome", error=ProviderError(), transfer=True)
+    assert health.snapshot("monochrome")["next_retry_at"] == 1300
 
 
 def test_deezer_cannot_invent_identity_or_rescue_conflicting_known_isrc(monkeypatch):
@@ -668,46 +467,18 @@ def test_retained_parser_transport_bounds_and_cookie_form_roundtrip(monkeypatch)
     assert requests[1].content == b"query=Artist+Song"
 
 
-def test_worker_blocks_ffmpeg_network_fallback_and_plugins():
-    from yt_dlp.downloader.external import FFmpegFD
-    from yt_dlp.globals import plugin_dirs
-
-    # A worker execution initializes the guard even when its operation is invalid.
-    with pytest.raises(ProviderError):
-        execute(
-            {
-                "source": "soundcloud",
-                "profile": "native_standard",
-                "operation": "invalid",
-            }
-        )
-    assert plugin_dirs.value == []
-    with pytest.raises(ProviderError, match="network policy"):
-        FFmpegFD.real_download(None, "output", {"url": "https://evil.example/manifest"})
-
-
-@pytest.mark.parametrize(
-    "source,codec",
-    [("soundcloud", "opus"), ("soundcloud", "aac"), ("monochrome", "flac")],
-)
-def test_new_adapters_publish_verified_synthetic_audio_and_survive_restart(
-    tmp_path, monkeypatch, source, codec
+def test_monochrome_publishes_verified_synthetic_audio_and_survives_restart(
+    tmp_path, monkeypatch
 ):
-    from yt_dlp import YoutubeDL
-    from server.providers import extractor_worker as worker
     from server.providers import monochrome
+
+    source, codec = "monochrome", "flac"
 
     if not shutil.which("ffmpeg"):
         pytest.skip("FFmpeg required")
     raw = tmp_path / "raw"
     raw.mkdir()
-    extension = {"opus": "webm", "aac": "m4a", "flac": "flac"}[codec]
-    audio = raw / ("audio." + extension)
-    args = {
-        "opus": ["-c:a", "libopus", "-b:a", "160k", "-vbr", "off"],
-        "aac": ["-c:a", "aac", "-b:a", "192k"],
-        "flac": ["-c:a", "flac"],
-    }[codec]
+    audio = raw / "audio.flac"
     subprocess.run(
         [
             "ffmpeg",
@@ -717,14 +488,15 @@ def test_new_adapters_publish_verified_synthetic_audio_and_survive_restart(
             "lavfi",
             "-i",
             "anoisesrc=duration=3:seed=1",
-            *args,
+            "-c:a",
+            "flac",
             str(audio),
         ],
         check=True,
     )
     store = Store(tmp_path / "state")
     job = queued(store)
-    profile = "lossless" if codec == "flac" else "native_standard"
+    profile = "lossless"
     store.save_download_settings(
         {"enabled": True, "profile": profile, "sources": [source]}
     )
@@ -739,86 +511,37 @@ def test_new_adapters_publish_verified_synthetic_audio_and_survive_restart(
         },
     }
     engine = Downloader(store)
-    if source == "monochrome":
-        monkeypatch.setattr(monochrome, "identify", lambda *a: set())
+    monkeypatch.setattr(monochrome, "identify", lambda *a: set())
 
-        def get(url, hosts, context):
-            return (
-                {
-                    "tracks": [
-                        {
-                            "id": "123",
-                            "recordingId": "987",
-                            "title": job["title"],
-                            "artistNames": [job["artist"]],
-                            "duration": 3000,
-                            "releaseId": "456",
-                            "playable": True,
-                        }
-                    ]
-                }
-                if "/search/" in url
-                else {"title": job["album"]}
-            )
-
-        monkeypatch.setattr(monochrome, "get_json", get)
-        monkeypatch.setattr(
-            network,
-            "client",
-            lambda: httpx.Client(
-                transport=httpx.MockTransport(
-                    lambda r: httpx.Response(200, content=audio.read_bytes())
-                )
-            ),
+    def get(url, hosts, context):
+        return (
+            {
+                "tracks": [
+                    {
+                        "id": "123",
+                        "recordingId": "987",
+                        "title": job["title"],
+                        "artistNames": [job["artist"]],
+                        "duration": 3000,
+                        "releaseId": "456",
+                        "playable": True,
+                    }
+                ]
+            }
+            if "/search/" in url
+            else {"title": job["album"]}
         )
-    else:
-        fmt = {
-            **FORMAT,
-            "acodec": codec,
-            "ext": extension,
-            "url": (
-                "https://audio.sndcdn.com/audio.m4a"
-                if source == "soundcloud"
-                else "https://audio.googlevideo.com/audio.webm"
-            ),
-            "abr": 192 if codec == "aac" else 160,
-        }
-        info = {
-            **INFO,
-            "artist": job["artist"],
-            "track": job["title"],
-            "title": job["title"],
-            "album": job["album"],
-            "duration": 3,
-            "formats": [fmt],
-            "webpage_url": "https://soundcloud.com/artist/song",
-            "extractor": source,
-            "extractor_key": "Soundcloud",
-        }
-        monkeypatch.setattr(YoutubeDL, "extract_info", lambda *a, **kw: dict(info))
 
-        def invoke(request, context):
-            if request["operation"] == "search":
-                return {"candidates": [candidate(info, source, profile)]}
-            return execute(
-                {
-                    **request,
-                    "source": source,
-                    "profile": profile,
-                    "max_bytes": context.max_bytes,
-                }
+    monkeypatch.setattr(monochrome, "get_json", get)
+    monkeypatch.setattr(
+        network,
+        "client",
+        lambda: httpx.Client(
+            transport=httpx.MockTransport(
+                lambda r: httpx.Response(200, content=audio.read_bytes())
             )
-
-        monkeypatch.setattr(engine.runtime.adapters[source], "invoke", invoke)
-        monkeypatch.setattr(
-            worker,
-            "client",
-            lambda: httpx.Client(
-                transport=httpx.MockTransport(
-                    lambda r: httpx.Response(200, content=audio.read_bytes())
-                )
-            ),
-        )
+        ),
+    )
     engine.process(job)
     assert store.queue()["items"][0]["status"] == "completed", store.queue()
     with store.connect() as conn:
@@ -832,7 +555,6 @@ def test_new_adapters_publish_verified_synthetic_audio_and_survive_restart(
     restored = Store(tmp_path / "state")
     assert restored.queue()["items"][0]["status"] == "completed"
     assert len(restored.library["albums"][0]["tracks"]) == 1
-    assert not list(engine.staging.glob(".extractor-*"))
     assert not list(engine.staging.glob("*.part"))
 
 
@@ -844,23 +566,7 @@ def test_dns_wait_is_bounded_without_allowing_late_connections(monkeypatch):
     started = time.monotonic()
     try:
         with pytest.raises(ProviderError):
-            network.PublicBackend().connect_tcp("soundcloud.com", 443, timeout=0.01)
+            network.PublicBackend().connect_tcp("freemp3cloud.com", 443, timeout=0.01)
         assert time.monotonic() - started < 0.5
     finally:
         unblock.set()
-
-
-def test_original_soundcloud_downloads_are_tentative_until_measured_validation():
-    original = {
-        "format_id": "download",
-        "format_note": "Original",
-        "ext": "flac",
-        "vcodec": "none",
-        "protocol": "https",
-    }
-    assert formats({"formats": [original]}, "lossless")[0]["original_codec"] == "flac"
-    assert not formats({"formats": [original]}, "mp3_320")
-    assert not formats({"formats": [{**original, "ext": "wav"}]}, "native_standard")
-    assert not formats({"formats": [{**original, "ext": "webm"}]}, "native_standard")
-    mp3 = {**original, "ext": "mp3"}
-    assert formats({"formats": [mp3]}, "mp3_320")[0]["declared_bitrate"] == 0

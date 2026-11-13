@@ -48,9 +48,6 @@ log = logging.getLogger("pig_music.library")
 # once for every publication (and export) in that time (#136).
 REBUILD_DEBOUNCE = 1.0
 
-# A held upload is decided only while its request has stopped (SC1).
-REVIEWABLE = {"failed", "waiting_for_sources"}
-
 # Statements that change a table's rows, as SQLite's authorizer reports them.
 ROW_WRITES = {sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE}
 
@@ -380,7 +377,6 @@ class Store:
                     "source",
                     "received_bytes",
                     "total_bytes",
-                    "source_review",  # Held again if the upload is still found.
                     "timings",  # The last attempt's; this one starts afresh.
                 ):
                     payload.pop(key, None)
@@ -1127,42 +1123,6 @@ class Store:
             )
             if not result.rowcount:
                 raise ValueError("Only failed or cancelled requests can be retried")
-        return self.queue()
-
-    def review_source(self, request_id, approve):
-        """Approve or reject the upload a request is holding for review (SC1).
-
-        Only a request that has stopped (failed or waiting) can be decided,
-        so a running search never races the owner. Approving requeues a
-        failed request with that upload allowed; rejecting rules it out."""
-        with self.connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT status,payload FROM queue WHERE id=?", (request_id,)
-            ).fetchone()
-            if not row:
-                raise LookupError("Request not found")
-            status, payload = row[0], json.loads(row[1])
-            review = payload.get("source_review")
-            if not review or status not in REVIEWABLE:
-                raise ValueError("This request has no upload waiting for review")
-            if approve:
-                payload["source_review_approved"] = review["provider_track_id"]
-                # Approval is for this uploader; another one found at
-                # transfer goes back to review.
-                payload["source_review_approved_uploader"] = review["uploader"]
-                payload.pop("retry_after", None)
-                status = "waiting_for_sources"
-            else:
-                payload["source_review_rejected"] = [
-                    *payload.get("source_review_rejected", []),
-                    review["provider_track_id"],
-                ]
-            payload["source_review"] = None
-            conn.execute(
-                "UPDATE queue SET status=?,payload=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (status, json.dumps(payload), request_id),
-            )
         return self.queue()
 
     def album_key(self, track):

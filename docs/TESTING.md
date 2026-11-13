@@ -207,7 +207,7 @@ Use this checklist for release acceptance, on the server revision and native bui
 4. Remote playback of a song nobody has (#34).
 5. Headphone and lock-screen controls; playback over poor reception (#32, #35).
 6. A mix and the radio: the radio appends without a glitch (#33).
-7. One SoundCloud and one Monochrome download each play (#34).
+7. One Monochrome download plays (#34).
 
 **E. iPhone: downloads**
 

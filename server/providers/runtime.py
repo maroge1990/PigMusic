@@ -3,7 +3,6 @@
 import time
 
 from .contracts import Context, ProviderError
-from .extractor import Extractor
 from .health import Health
 from .monochrome import Monochrome
 
@@ -14,7 +13,7 @@ class Runtime:
         self.health = Health()
         # YouTube was removed as a source (D-60); its saved session goes too.
         (store.directory / "youtube-cookies.txt").unlink(missing_ok=True)
-        self.adapters = {"soundcloud": Extractor("soundcloud")}
+        self.adapters = {}
         # Invalid operator config should leave unrelated sources usable.
         try:
             self.adapters["monochrome"] = Monochrome()
@@ -22,10 +21,6 @@ class Runtime:
             pass
 
     def configured(self, source):
-        if source == "soundcloud":
-            import importlib.util
-
-            return importlib.util.find_spec("yt_dlp") is not None
         if source == "monochrome":
             return source in self.adapters
         if source == "soulseek":

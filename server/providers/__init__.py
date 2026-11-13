@@ -32,13 +32,6 @@ class ProviderSpec:
 
 
 REGISTRY = {
-    "soundcloud": ProviderSpec(
-        "soundcloud",
-        "SoundCloud",
-        frozenset({"native_standard", "mp3_128", "mp3_320", "aac_256", "lossless"}),
-        frozenset({".mp3", ".m4a", ".opus", ".ogg", ".flac"}),
-        adapter=True,
-    ),
     "monochrome": ProviderSpec(
         "monochrome",
         "Monochrome",

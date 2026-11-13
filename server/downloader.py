@@ -114,7 +114,7 @@ def matches(target, candidate):
     strict = target.get("explicit_edition")
     if (
         strict
-        and candidate.get("source") in {"soundcloud", "monochrome"}
+        and candidate.get("source") == "monochrome"
         and target.get("album")
         and candidate.get("album")
         and folded(target["album"]) != folded(candidate["album"])
@@ -150,12 +150,6 @@ def matches(target, candidate):
     return actual > 0 and (
         not expected or abs(actual - expected) <= ACQUISITION_TOLERANCE
     )
-
-
-def reviewable(job, candidate):
-    """Only an uploader named exactly like the requested artist is worth
-    the owner's review (SC1); case and spacing aside, anything else is not."""
-    return folded(candidate.get("channel")) == folded(job["artist"])
 
 
 def safe_name(value):
@@ -356,29 +350,6 @@ class Downloader:
             status,
             _claim_token=getattr(self.context, "claim_token", None),
             **details,
-        )
-
-    def hold(self, job, source, candidate):
-        """Keep an upload credited only by its uploader's name for the owner
-        to approve; the search carries on with the other sources (SC1)."""
-        self.state(
-            job["id"],
-            "searching",
-            source_review={
-                "source": source,
-                "provider_track_id": candidate["provider_track_id"],
-                "title": candidate["title"],
-                "uploader": candidate["channel"],
-                "duration": candidate.get("duration"),
-                "quality": candidate.get("quality"),
-                # The public page, never a (short-lived) stream URL.
-                "url": (
-                    "https://soundcloud.com/" + candidate["provider_track_id"]
-                    if source == "soundcloud"
-                    else None
-                ),
-                "held_at": time.time(),
-            },
         )
 
     async def run(self):
@@ -896,46 +867,13 @@ class Downloader:
                                     f"{job['artist']} {job['title']}", 20
                                 )
                             self.runtime.health.outcome(source)
-                    rejected = set(job.get("source_review_rejected") or [])
-                    candidates = [
-                        c
-                        for c in candidates
-                        if matches(job, c)
-                        and c.get("provider_track_id") not in rejected
-                    ]
+                    candidates = [c for c in candidates if matches(job, c)]
                     searched["candidates"] = len(candidates)
-                # Uploader-name credits wait for the owner unless approved,
-                # and only an exact name match is worth asking about. They are
-                # kept aside and offered only if everything stronger fails.
-                approved = job.get("source_review_approved")
-                held = [
-                    c
-                    for c in candidates
-                    if c.get("identity_evidence") == "uploader_name"
-                    and c.get("provider_track_id") != approved
-                ]
-                # The approval names the uploader the owner saw (an approval
-                # from before that was recorded trusts this search's credit).
-                approved_uploader = job.get("source_review_approved_uploader")
-                candidates = [
-                    (
-                        {
-                            **c,
-                            "uploader_approved": approved_uploader or c.get("channel"),
-                        }
-                        if approved and c.get("provider_track_id") == approved
-                        else c
-                    )
-                    for c in candidates
-                    if c not in held
-                ]
-                held = [c for c in held if reviewable(job, c)]
                 if job.get("exact_quality") and profile == "mp3_128":
                     exact = lambda c: not re.search(
                         r"(?<!\d)(?:192|256|320)(?!\d)", str(c.get("quality", ""))
                     )
                     candidates = [c for c in candidates if exact(c)]
-                    held = [c for c in held if exact(c)]
                 candidates.sort(key=lambda c: c.get("quality") != "320kbps")
                 for candidate in candidates[:3]:
                     self.check(job["id"])
@@ -981,23 +919,6 @@ class Downloader:
                     except (Cancelled, QualityDeadline, SourceDeadline):
                         raise
                     except Exception as exc:
-                        # Re-extraction found only an uploader's credit. Judge
-                        # (and show) what it found, never the search's credit:
-                        # the uploader may be someone else entirely.
-                        fresh = (
-                            exc.review
-                            if isinstance(exc, ProviderError)
-                            and exc.code == "review_required"
-                            else None
-                        )
-                        if fresh:
-                            again = {
-                                **candidate,
-                                **fresh,
-                                "identity_evidence": "uploader_name",
-                            }
-                            if matches(job, again) and reviewable(job, again):
-                                held.append(again)
                         if transferred:
                             self.runtime.health.outcome(
                                 source, error=ProviderError("no_match"), transfer=True
@@ -1024,13 +945,7 @@ class Downloader:
                         errors.append(f"{source}: {message}")
                     finally:
                         path.unlink(missing_ok=True)
-                if held:
-                    self.hold(job, source, held[0])
-                    errors.append(
-                        f"{source}: only an upload credited by its uploader's name; "
-                        "waiting for review"
-                    )
-                elif not candidates:
+                if not candidates:
                     errors.append(
                         f"{source}: no candidate passed recording/version matching"
                     )
