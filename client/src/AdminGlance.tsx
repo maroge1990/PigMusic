@@ -93,7 +93,7 @@ export function AdminGlance({
             href={tile.href}
             className={tile.warn && tile.value ? "needs-attention" : ""}
           >
-            <strong>
+            <strong className="pig-amount">
               {typeof tile.value === "number"
                 ? formatCount(tile.value)
                 : (tile.value ?? "–")}

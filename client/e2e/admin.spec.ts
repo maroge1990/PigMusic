@@ -1029,3 +1029,37 @@ test("a song whose Trash deletion stopped part-way shows it needs review", async
   await expect(panel).toContainText("Needs review");
   await expect(panel.getByRole("button", { name: "Restore" })).toHaveCount(0);
 });
+
+test("compared figures use the brand's rounded tabular numerals (D-84)", async ({
+  page,
+}) => {
+  const downloading = {
+    ...queue,
+    items: [
+      {
+        ...queue.items[0],
+        received_bytes: 2048 * 1024,
+        total_bytes: 8192 * 1024,
+      },
+    ],
+  };
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/admin/queue": (route) => route.fulfill({ json: downloading }),
+    },
+  });
+  await page.goto("/#/admin");
+  const figure = page
+    .getByRole("list", { name: "At a glance" })
+    .locator("strong")
+    .first();
+  await expect(figure).toHaveClass(/\bpig-amount\b/);
+  expect(
+    await figure.evaluate((el) => getComputedStyle(el).fontVariantNumeric),
+  ).toBe("tabular-nums");
+  await page.goto("/#/admin/downloads");
+  await expect(page.getByText("2048 KB / 8192 KB")).toHaveClass(
+    /\bpig-amount\b/,
+  );
+});

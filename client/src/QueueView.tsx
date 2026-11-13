@@ -200,7 +200,7 @@ export function QueueView({
                 {item.source && ` · ${sourceName(item.source)}`}
               </span>
               {item.status === "downloading" && (
-                <span>
+                <span className="pig-amount">
                   {Math.round((item.received_bytes || 0) / 1024)} KB
                   {item.total_bytes
                     ? ` / ${Math.round(item.total_bytes / 1024)} KB`
