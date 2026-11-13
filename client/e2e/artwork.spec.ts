@@ -1,5 +1,5 @@
 import { expect, test, type Route } from "@playwright/test";
-import { album, mockApi } from "./mock";
+import { album, artist, mockApi } from "./mock";
 
 const photo = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512"><rect width="512" height="512" fill="#888"/></svg>`;
 
@@ -86,4 +86,42 @@ test("#175: the sign-in screen runs no artwork timer", async ({ page }) => {
     () => (window as unknown as { intervals: number[] }).intervals,
   );
   expect(intervals).not.toContain(60000);
+});
+
+test("#175: an idle artist download panel follows request events, not a minute timer", async ({
+  page,
+}) => {
+  await page.clock.install();
+  // A connected, quiet event stream: no fallback poll stands in for it.
+  await page.addInitScript(() => {
+    class Quiet extends EventTarget {
+      static CLOSED = 2;
+      readyState = 1;
+      onerror: ((event: Event) => void) | null = null;
+      onopen: ((event: Event) => void) | null = null;
+      close() {}
+    }
+    (window as unknown as { EventSource: unknown }).EventSource = Quiet;
+  });
+  let asked = 0;
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      [`/v1/admin/catalogue/artists/${artist.id}/acquisition`]: (route) => {
+        asked += 1;
+        return route.fulfill({
+          json: { status: "idle", monitor: false, kinds: ["album"] },
+        });
+      },
+    },
+  });
+  await page.goto(`/#/search/artist/${artist.id}?name=Charli%20xcx`);
+  await expect.poll(() => asked).toBeGreaterThan(0);
+  const first = asked;
+  await page.clock.runFor(5 * 60_000);
+  expect(asked).toBe(first);
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("music-requests-changed")),
+  );
+  await expect.poll(() => asked).toBe(first + 1);
 });

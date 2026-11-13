@@ -41,15 +41,19 @@ export function ArtistAcquisition({
         })
         .catch(() => {});
     void update();
-    const timer = setInterval(
-      () => {
-        if (!document.hidden) void update();
-      },
-      ["queued", "running"].includes(state.status) ? 5000 : 60000,
-    );
+    // A job that starts by itself (a monitored artist's new release) queues
+    // requests, which the event stream reports; poll only while one runs.
+    const changed = () => void update();
+    window.addEventListener("music-requests-changed", changed);
+    const timer = ["queued", "running"].includes(state.status)
+      ? setInterval(() => {
+          if (!document.hidden) void update();
+        }, 5000)
+      : undefined;
     return () => {
       active = false;
       clearInterval(timer);
+      window.removeEventListener("music-requests-changed", changed);
     };
   }, [id, state.status]);
   async function save(request = false) {
