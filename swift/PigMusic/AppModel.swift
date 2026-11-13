@@ -82,6 +82,10 @@ enum PlayOrigin: Hashable {
   /// A refresh failure still repeating, for a diagnostics export taken now.
   var refreshFailurePending: String? { refreshFailures.pending }
   @ObservationIgnored private var restoring = false
+  /// True once launch has shown what this phone already holds: the saved
+  /// library of a restored account, or the sign-in form. The splash ends here,
+  /// not after the first refresh and not after a fixed time (brand 1.8 §8).
+  private(set) var launched = false
   /// Whether the scene is active and the foreground work runs (#97).
   @ObservationIgnored private var foreground = ForegroundGate()
   @ObservationIgnored private let defaults: UserDefaults
@@ -98,6 +102,7 @@ enum PlayOrigin: Hashable {
     defer {
       restoring = false
       busy = false
+      launched = true
     }
     #if DEBUG
       if ProcessInfo.processInfo.arguments.contains("--demo") {
@@ -119,6 +124,8 @@ enum PlayOrigin: Hashable {
       let service = try NativeService(
         server: connection.server, vault: vault, parked: Self.parkedSessions)
       try await attach(connection.person, service: service)
+      // The saved library is on screen; the refresh fills it in behind.
+      launched = true
       await refresh()
       startLiveUpdates()
     } catch { message = error.userMessage }

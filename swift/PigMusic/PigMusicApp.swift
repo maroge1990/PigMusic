@@ -18,15 +18,10 @@ import UIKit
           await model.restore()
           finishStarting()
         }
-        .onChange(of: model.person?.id) { _, person in
-          // A restored account is attached before its first refresh. Keep the
-          // splash over the half-filled library until that refresh ends, at most
-          // briefly, so no intermediate screen flashes.
-          guard person != nil, starting else { return }
-          Task {
-            try? await Task.sleep(for: .seconds(1.5))
-            finishStarting()
-          }
+        // The splash shows only while loading (brand 1.8 §8): it ends once a
+        // restored account's saved library is attached, with no minimum time.
+        .onChange(of: model.launched) { _, launched in
+          if launched { finishStarting() }
         }
         .onChange(of: phase, initial: true) { _, value in
           if value == .active { DiagnosticsLog.shared.foreground() }
