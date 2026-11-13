@@ -289,7 +289,11 @@ export function AppShell() {
           >
             {initials(user.display_name || user.username)}
           </a>
-          <nav ref={nav} className="app-nav" aria-label="Main navigation">
+          <nav
+            ref={nav}
+            className="app-nav pig-glass"
+            aria-label="Main navigation"
+          >
             {sections
               .filter((s) => s.id !== "admin" || owner)
               .map(({ id, label, icon: Icon }) => {

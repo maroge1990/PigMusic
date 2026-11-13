@@ -238,7 +238,7 @@ function SongMenu({
       <div
         ref={popup}
         popover="auto"
-        className="song-menu"
+        className="song-menu pig-glass"
         role="menu"
         aria-label={song.title}
         style={position}

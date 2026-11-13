@@ -8,7 +8,6 @@
   --radius-dock: 1.5rem;
   /* Height of each dock row: the tabs and, while playing, the player. */
   --dock-row: 3.25rem;
-  --dock-surface: var(--surface);
 }
 
 /* ---------- Song rows ---------- */
@@ -138,12 +137,8 @@
   max-height: min(32rem, calc(100dvh - 2rem));
   overflow-y: auto;
   padding: var(--space-4);
-  border: 1px solid var(--border);
+  /* Surface, border and shadow come from .pig-glass (D-85). */
   border-radius: var(--radius-card);
-  background: color-mix(in srgb, var(--surface) 94%, transparent);
-  backdrop-filter: blur(24px) saturate(1.6);
-  -webkit-backdrop-filter: blur(24px) saturate(1.6);
-  box-shadow: var(--elevation-floating);
   color: var(--text);
 }
 .song-menu-group + .song-menu-group {
@@ -208,8 +203,9 @@
   border-radius: var(--radius-capsule);
   border: 1px solid var(--media-border);
   background: color-mix(in srgb, var(--media-solid-panel) 88%, transparent);
-  backdrop-filter: blur(24px) saturate(1.6);
+  /* Prefixed first: the minifier drops the standard property otherwise. */
   -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  backdrop-filter: blur(24px) saturate(1.6);
   box-shadow: var(--elevation-floating);
   color: var(--media-text);
   overflow: hidden;
@@ -544,8 +540,8 @@
   border-radius: 50%;
   color: var(--media-text);
   background: color-mix(in srgb, var(--media-canvas) 35%, transparent);
-  backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
 }
 .has-background .hero-back span {
   position: absolute;
@@ -622,16 +618,11 @@
     margin: 0;
     display: grid;
     gap: 0;
-    border-top: 1px solid var(--border);
     left: var(--space-12);
     right: var(--space-12);
     bottom: var(--dock-gap);
-    border: 1px solid var(--border);
+    /* Surface, border and shadow come from .pig-glass (D-85). */
     border-radius: var(--radius-dock);
-    background: var(--dock-surface);
-    backdrop-filter: blur(24px) saturate(1.6);
-    -webkit-backdrop-filter: blur(24px) saturate(1.6);
-    box-shadow: var(--elevation-soft);
     grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
     padding: 2px var(--space-4);
   }
@@ -655,7 +646,6 @@
   }
   /* The player row: the dock surface extends upward behind it. */
   html:has(.mini-player) .personal-header .app-nav {
-    border-top-color: var(--border);
     border-radius: 0 0 var(--radius-dock) var(--radius-dock);
   }
   html:has(.mini-player) .personal-header .app-nav::before {
@@ -665,12 +655,12 @@
     right: -1px;
     bottom: 100%;
     height: var(--player-height, 0px);
-    border: 1px solid var(--border);
+    border: inherit;
     border-bottom: 0;
     border-radius: var(--radius-dock) var(--radius-dock) 0 0;
     background: inherit;
-    backdrop-filter: inherit;
     -webkit-backdrop-filter: inherit;
+    backdrop-filter: inherit;
     pointer-events: none;
   }
   .mini-player {
@@ -687,8 +677,8 @@
     border: 0;
     border-radius: var(--radius-dock) var(--radius-dock) 0 0;
     background: none;
-    backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    backdrop-filter: none;
     box-shadow: none;
     color: var(--text);
   }
@@ -757,4 +747,50 @@
 }
 .song-state .song-cloud-faded {
   opacity: 0.45;
+}
+
+/* ---------- Glass (D-85) ---------- */
+/* The header nav is glass only as the floating phone dock. */
+@media (min-width: 601px) {
+  .personal-header .app-nav.pig-glass {
+    border: 0;
+    background: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+}
+/* The dark media surfaces keep their own translucency; like .pig-glass they
+ * turn solid when the system asks for less transparency. */
+@media (prefers-reduced-transparency: reduce) {
+  .has-background .hero-back {
+    background: var(--media-solid-panel);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .modal-backdrop,
+  .migration-footer {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .migration-footer {
+    background: var(--raised);
+  }
+}
+@media (prefers-reduced-transparency: reduce) and (min-width: 601px) {
+  .mini-player {
+    background: var(--media-solid-panel);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+@media (prefers-contrast: more) {
+  .has-background .hero-back {
+    border: 1px solid var(--media-control-border);
+  }
+}
+@media (prefers-contrast: more) and (min-width: 601px) {
+  .mini-player {
+    border-color: var(--media-control-border);
+  }
 }

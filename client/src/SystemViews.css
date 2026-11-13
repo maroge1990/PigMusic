@@ -65,6 +65,7 @@
   position: fixed;
   inset: 0;
   background: var(--scrim);
+  -webkit-backdrop-filter: blur(7px);
   backdrop-filter: blur(7px);
   z-index: 100;
   display: flex;

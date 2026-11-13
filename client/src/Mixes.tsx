@@ -334,7 +334,7 @@ function MixCard({
       <div
         ref={popup}
         popover="manual"
-        className="song-menu"
+        className="song-menu pig-glass"
         role="menu"
         aria-label={mix.title}
         style={position}
