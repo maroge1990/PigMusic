@@ -5,7 +5,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 13 Nov 2026 (afternoon, Melbourne).*
+*Overwritten at the end of every session. 13 Nov 2026 (evening, Melbourne).*
 
 - **Live:** release `artwork-20261113-v1`, server `8ee4c29`, since 13 Nov 09:37 Melbourne (D-52: nobody playing; Mark
   ran the apply step himself because the permission system blocks Claude from changing the live container). Healthy;
@@ -34,6 +34,21 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   repeat passes already read cached answers. Two Codex rounds: round 1 found two medium issues in the batch, both
   fixed and confirmed in round 2 (approve). **Live check after release:** lifecycle_lock hold warnings per hour and idle
   CPU against the 9 Nov baselines (server 0.97%, engine 2.41%).
+- **Pushed, not released:** batch 'web' (#174, #175, #181, #182): one floored `formatDuration` (59.6 s no longer
+  reads 0:60) and eight unused exports dropped; a missing cover looks again at 2 s, 6 s, 30 s, 2 min and 10 min, then
+  only on a library change (was every minute for ever; the 60 s timer ran even on the sign-in screen), one
+  `useArtworkRevision` hook for covers and the artist hero; the idle artist download panel follows request events;
+  library search 150 ms after typing, catalogue (MusicBrainz) still after a 350 ms pause; Now Playing leaves with an
+  exit animation; pressed states on buttons and links; em letter-spacing; the home song shelf fades its scrollable
+  edge (only where scroll timelines exist); Loading on Home mixes and Your devices; plain words for the ListenBrainz
+  key and mix preparation; 44 px tabs, pager and Up next tools, shelf focus rings inside the control. Two Codex
+  rounds (D-59, by size): round 1 found two medium artwork issues, round 2 one medium shelf-fade issue; all three
+  fixed and confirmed (D-71), no findings left. Unit 87, e2e 198, backend 982.
+- **Next release (D-52, earliest 14 Nov; 13 Nov's slot went to the artwork release):** batches 'brand', 'idle' and
+  'web' together. Then the batch 3 live check (lifecycle_lock hold warnings per hour, idle CPU against 0.97% server /
+  2.41% engine) and the web brand check (#179).
+- **CI:** the container check for `d44516d` failed once with every test worker dying in the 1 GB container; a re-run
+  passed (#189).
 - **Decisions 13 Nov:** D-79 Undo over confirm (#183), D-80 drop SoundCloud and yt-dlp with #94 (Monochrome enabled live but
   never searched: check its configuration in #94), D-81 navigation names stay, D-82 the pig on iPhone empty and error
   states (#180), D-83 no Watch artwork (set aside), D-84 rounded tabular figures only where compared (#179, #180), D-85 brand glass where it fits on the web (#179). D-78
@@ -48,8 +63,9 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 ## Now
 
 1. **Mark on build 24 (T5):** covers in a mix and on the lock screen (#168); then the audit batches in the report's
-   order: brand (#179) and idle work (#171, #172) are pushed and go out in the next server release; next is the web
-   batch (#174, #175, #181, #182). Live check of the artwork release after tonight's mix run.
+   order: brand (#179), idle work (#171, #172) and web (#174, #175, #181, #182) are pushed and go out in the next
+   server release (14 Nov at the earliest); next is the iPhone brand batch (#180, TestFlight 0.2.0 (25)). Live check of
+   the artwork release after tonight's mix run.
 2. **#188** iPhone requests fail for 10–20 s after opening the app although the server answered them (Mark's 13 Nov
    export): log the connection error and protocol, widen the retry window; decides whether batch 9's TestFlight build
    or its own carries it.
