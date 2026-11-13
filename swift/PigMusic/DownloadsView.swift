@@ -147,6 +147,8 @@ private struct TransferRow: View {
       VStack(alignment: .leading, spacing: 2) {
         Text(record.track.title).lineLimit(1)
         Text(record.track.artist).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
+        // Said in words as well as by the red mark; the mark retries.
+        if record.state == "failed", !record.isPaused { StatusText("Couldn't download", kind: .error) }
       }
       Spacer(minLength: 0)
       mark.frame(width: 28, height: 28)
@@ -213,7 +215,7 @@ private struct TransferRow: View {
     return switch record.state {
     case "ready": "Downloaded"
     case "downloading": "Downloading"
-    case "failed": "Failed: \(record.error ?? "try again")"
+    case "failed": "Couldn't download"
     default: "Waiting"
     }
   }

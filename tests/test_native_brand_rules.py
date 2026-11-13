@@ -98,3 +98,12 @@ def test_plain_words_on_the_iphone():
         "on this phone",
     ):
         assert not [s for s in shown if banned in s], banned
+
+
+def test_a_failed_download_says_so_in_plain_words():
+    """Brand 1.8 section 14: an error says what happened in plain words,
+    never a raw error. A failed download showed only a red mark, and
+    VoiceOver read "Failed: " followed by the system's error text."""
+    downloads = source("DownloadsView.swift")
+    assert "Failed: \\(record.error" not in downloads
+    assert 'StatusText("Couldn\'t download", kind: .error)' in downloads
