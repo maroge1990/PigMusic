@@ -129,16 +129,22 @@ def test_downloads_are_counted_apart_for_mixes_and_library(tmp_path):
     downloader.count(Timings(), "interrupted")
     downloader.count(Timings(), "completed from the mix cache")
 
-    class Mix(Downloader):
-        pass
+    from server.mix_cache import MixDownloader
 
-    mix = Mix.__new__(Mix)
+    class Fixture(Downloader):
+        pass  # A subclass of the library worker is still the library.
+
+    library = Fixture.__new__(Fixture)
+    library.store = Store()
+    library.count(Timings(), "failed")
+    mix = MixDownloader.__new__(MixDownloader)
     mix.store = Store()
     mix.count(Timings(), "cancelled")
     assert [(r[0], r[1], r[2], r[4]) for r in recorded] == [
         ("download", "library", "completed", "soulseek/lossless"),
         ("download", "library", "failed", None),
         ("download", "library", "completed", "mix cache"),
+        ("download", "library", "failed", None),
         ("download", "mix", "cancelled", None),
     ]
 
@@ -220,3 +226,39 @@ def test_report_script_prints_the_targets_from_a_copy(tmp_path, capsys):
     assert "19 of 20 (95.0%, target 95.0%)  meets target" in text
     main([str(counters.path), "--json"])
     assert '"played_share": 0.5' in capsys.readouterr().out
+
+
+def test_an_unexpected_download_error_counts_as_a_failure(tmp_path):
+    """Codex round 1 (#191): a request marked failed by an unexpected error
+    was left out of the completion count."""
+    import plistlib
+
+    from server.store import Store
+
+    store = Store(tmp_path / "data")
+    store.save_download_settings(
+        {"enabled": True, "profile": "mp3_320", "sources": ["freemp3cloud"]}
+    )
+    source = store.import_apple(
+        plistlib.dumps(
+            {"Tracks": {"1": {"Name": "Song", "Artist": "Artist", "Album": "Album"}}}
+        )
+    )
+    store.update_selection([source["albums"][0]["tracks"][0]["id"]], True)
+    store.submit_migration()
+    job = store.claim_request()
+    recorded = []
+
+    class Counters:
+        record = staticmethod(lambda *args: recorded.append(args))
+
+    store.performance = Counters()
+
+    class Broken(Downloader):
+        def attempt(self, *_):
+            raise OSError("The library share went away")
+
+    Broken(store, {}).process(job)
+    assert [(r[0], r[1], r[2]) for r in recorded] == [("download", "library", "failed")]
+    with store.connect() as conn:
+        assert conn.execute("SELECT status FROM queue").fetchone()[0] == "failed"

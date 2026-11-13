@@ -269,6 +269,8 @@ class MixCache:
 class MixDownloader(Downloader):
     """Use acquisition's search, transfer and validation without its NAS side effects."""
 
+    counted_as = "mix"
+
     def __init__(self, cache, runtime, stopping, providers=None):
         self.cache = cache
         self.stop_check = stopping

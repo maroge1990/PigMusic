@@ -277,6 +277,9 @@ class Timings:
 
 
 class Downloader:
+    # How the parity counts file this worker's downloads (#191).
+    counted_as = "library"
+
     def __init__(self, store, providers=None, runtime=None, resolver=None):
         self.store = store
         # Files songs requested without an explicit edition under the
@@ -1132,6 +1135,8 @@ class Downloader:
         except Cancelled:
             result = "cancelled"
         except Exception:
+            # A failure like any other for the completion count (#191).
+            result = "failed"
             self.state(
                 job["id"],
                 "failed",
@@ -1154,7 +1159,7 @@ class Downloader:
             result, timings.won = "completed", "mix cache"
         performance.record(
             "download",
-            "library" if type(self) is Downloader else "mix",
+            self.counted_as,
             result,
             (time.monotonic() - timings.began) * 1000,
             timings.won if result == "completed" else None,
