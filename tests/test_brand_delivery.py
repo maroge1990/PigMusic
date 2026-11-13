@@ -101,3 +101,14 @@ def test_vendored_brand_is_1_9_with_the_glass_stylesheet():
         "control-border",
     ):
         assert f"--pig-{name}: var(--{name});" in aliases
+
+
+def test_web_default_theme_colour_matches_the_manifest():
+    """Before theme.js runs, the page is light, as is the kit's manifest (#179)."""
+    html = (SOURCE / "client/index.html").read_text()
+    manifest = json.loads((SOURCE / "client/public/manifest.webmanifest").read_text())
+    tokens = json.loads((SOURCE / "docs/pig-family-brand-tokens.json").read_text())
+    canvas = tokens["light"]["canvas"].upper()
+    assert manifest["theme_color"].upper() == manifest["background_color"].upper()
+    assert manifest["theme_color"].upper() == canvas
+    assert f'<meta name="theme-color" content="{canvas}" />' in html
