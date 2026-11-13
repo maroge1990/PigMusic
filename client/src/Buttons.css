@@ -3,6 +3,29 @@
  * takes the surrounding text. Full size (primary, secondary, a plain form
  * button) and small are capsules, small with less padding; a round action
  * is a 2.75rem circle. */
+
+/* Pressed (#182): every button and link answers on pointer-down. `scale`
+ * composes with any transform a control already has; :where keeps this
+ * below every family's own rules. A full-width song row is lit instead of
+ * shrunk, and Reduce Motion dims rather than scales. */
+:where(button:not(:disabled), a[href], [role="button"]) {
+  transition: scale 0.1s ease-out;
+}
+:where(button:not(:disabled), a[href], [role="button"]):active {
+  scale: 0.97;
+}
+:where(.song-main):active {
+  scale: none;
+}
+.song-row:has(> .song-main:active) {
+  background: var(--raised);
+}
+@media (prefers-reduced-motion: reduce) {
+  :where(button:not(:disabled), a[href], [role="button"]):active {
+    scale: none;
+    opacity: 0.7;
+  }
+}
 .primary-button,
 .secondary-button,
 .small-button,

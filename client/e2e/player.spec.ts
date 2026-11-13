@@ -346,3 +346,42 @@ test("#182: closing Now Playing by hand plays its exit; Reduce Motion closes at 
   await page.getByRole("button", { name: "Close now playing" }).click();
   await expect(dialog).toBeHidden({ timeout: 100 });
 });
+
+test("#182: buttons answer on pointer-down; a song row lights instead of shrinking", async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.goto(`/#/library/album/${album.id}`);
+  const row = page.locator(".song-row").first();
+  await expect(row).toBeVisible();
+  const menu = row.locator("button[aria-haspopup='menu']");
+  const song = row.locator(".song-main");
+  const style = (el: Element) => {
+    const s = getComputedStyle(el);
+    return `${s.scale} ${s.opacity}`;
+  };
+  const hold = async (target: typeof menu, check: () => Promise<void>) => {
+    const box = (await target.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await check();
+    await page.mouse.up();
+  };
+  const resting = await row.evaluate(
+    (el) => getComputedStyle(el).backgroundColor,
+  );
+  await hold(menu, () =>
+    expect.poll(() => menu.evaluate(style)).toBe("0.97 1"),
+  );
+  await hold(song, async () => {
+    await expect
+      .poll(() => row.evaluate((el) => getComputedStyle(el).backgroundColor))
+      .not.toBe(resting);
+    expect(await song.evaluate(style)).toBe("none 1");
+  });
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await hold(menu, () =>
+    expect.poll(() => menu.evaluate(style)).toBe("none 0.7"),
+  );
+});
