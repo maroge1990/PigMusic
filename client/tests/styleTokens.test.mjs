@@ -56,3 +56,10 @@ test("shadows use the four recipes", () => {
   );
   assert.deepEqual(shadows, []);
 });
+
+test("#182: letter-spacing scales with the type (em, not px)", () => {
+  const fixed = declarations(/^letter-spacing$/).filter(([, , value]) =>
+    /px\b/.test(value),
+  );
+  assert.deepEqual(fixed, []);
+});

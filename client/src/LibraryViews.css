@@ -136,7 +136,7 @@
   font-size: clamp(1.25rem, 2.7vw, 2.375rem);
   color: var(--text-accent);
   font-weight: 600;
-  letter-spacing: -1px;
+  letter-spacing: -0.03em;
 }
 .card-name {
   font-size: var(--type-caption);

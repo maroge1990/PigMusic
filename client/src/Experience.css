@@ -643,7 +643,7 @@
     padding: 0;
     gap: 1px;
     border-radius: var(--radius-capsule);
-    letter-spacing: -0.2px;
+    letter-spacing: -0.015em;
     font-size: var(--type-caption);
   }
   .personal-header .app-nav a svg {

@@ -93,7 +93,7 @@
 }
 .modal-heading h2 {
   font-size: var(--type-title);
-  letter-spacing: -1px;
+  letter-spacing: -0.035em;
 }
 .modal-heading .eyebrow {
   margin-bottom: var(--space-12);

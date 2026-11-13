@@ -33,7 +33,10 @@ async function header(page: Page) {
     return {
       inPageHeader: !!block?.classList.contains("page-header"),
       size: s.fontSize,
-      tracking: s.letterSpacing,
+      // Tracking is in em (#182): compare it relative to the size.
+      tracking: (parseFloat(s.letterSpacing) / parseFloat(s.fontSize)).toFixed(
+        3,
+      ),
       after: block ? getComputedStyle(block).marginBottom : null,
       subtitle: sub ? getComputedStyle(sub).fontSize : null,
     };
