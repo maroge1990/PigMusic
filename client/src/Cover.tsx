@@ -20,6 +20,52 @@ export function coverUrl(src: string, width: number, revision = 0) {
   return url.pathname + url.search;
 }
 
+/** After a missing image, the server fetches it in the background: look
+ * again after these delays, then only when the server says something changed. */
+const LOOKS_MS = [2000, 6000, 30000];
+
+/** The `r=` an artwork address asks with, and whether the picture at that
+ * address failed. The revision moves when the artwork revision changes
+ * (`music-artwork-changed`) and, while the picture is missing, for the few
+ * early looks above and on each library revision the event stream reports
+ * (`music-artwork-retry`). Nothing re-asks on a timer after that, so a
+ * picture that will never exist is not requested again and again. `key`
+ * names the picture; a new one starts the looks again. */
+export function useArtworkRevision(key: string) {
+  const [revision, setRevision] = useState(0);
+  const [failed, setFailed] = useState("");
+  const [looks, setLooks] = useState({ key, count: 0 });
+  const missing = failed === `${revision}:${key}`;
+  const count = looks.key === key ? looks.count : 0;
+  useEffect(() => {
+    const changed = () => setRevision((r) => r + 1);
+    window.addEventListener("music-artwork-changed", changed);
+    return () => window.removeEventListener("music-artwork-changed", changed);
+  }, []);
+  useEffect(() => {
+    if (!missing) return;
+    const again = () => setRevision((r) => r + 1);
+    const soon =
+      count < LOOKS_MS.length
+        ? setTimeout(() => {
+            setLooks({ key, count: count + 1 });
+            again();
+          }, LOOKS_MS[count])
+        : undefined;
+    window.addEventListener("music-artwork-retry", again);
+    return () => {
+      clearTimeout(soon);
+      window.removeEventListener("music-artwork-retry", again);
+    };
+  }, [missing, count, key]);
+  return {
+    revision,
+    missing,
+    /** Call from the image's onError. */
+    fail: () => setFailed(`${revision}:${key}`),
+  };
+}
+
 export function Cover({
   title,
   src,
@@ -33,43 +79,9 @@ export function Cover({
   className?: string;
   sizes?: string;
 }) {
-  const [broken, setBroken] = useState(false);
-  const [revision, setRevision] = useState(0);
-  useEffect(() => {
-    const changed = () => {
-      setBroken(false);
-      setRevision((r) => r + 1);
-    };
-    window.addEventListener("music-artwork-changed", changed);
-    return () => window.removeEventListener("music-artwork-changed", changed);
-  }, []);
-  // The server fetches missing artwork in the background: look again soon,
-  // then fall back to the shared slow retry clock.
-  const [attempts, setAttempts] = useState(0);
-  useEffect(() => {
-    if (!broken) return;
-    const retry = () => {
-      setBroken(false);
-      setRevision((r) => r + 1);
-    };
-    const soon =
-      attempts < 2
-        ? setTimeout(() => {
-            setAttempts((n) => n + 1);
-            retry();
-          }, [2000, 6000][attempts])
-        : undefined;
-    window.addEventListener("music-artwork-retry", retry);
-    return () => {
-      clearTimeout(soon);
-      window.removeEventListener("music-artwork-retry", retry);
-    };
-  }, [broken]);
-  const image = (width: number) => coverUrl(src || "", width, revision);
-  useEffect(() => {
-    setBroken(false);
-    setAttempts(0);
-  }, [src]);
+  const artwork = useArtworkRevision(src || "");
+  const broken = artwork.missing;
+  const image = (width: number) => coverUrl(src || "", width, artwork.revision);
   return (
     <div className={`cover ${artist ? "artist-cover" : ""} ${className}`}>
       {src && !broken ? (
@@ -85,7 +97,7 @@ export function Cover({
           loading="lazy"
           decoding="async"
           referrerPolicy="no-referrer"
-          onError={() => setBroken(true)}
+          onError={artwork.fail}
         />
       ) : (
         <>

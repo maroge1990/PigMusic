@@ -2,7 +2,7 @@ import { cachedLibrary, peekLibrary } from "./api";
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft } from "lucide-react";
 import { StateBadge } from "./StateBadge";
-import { Cover } from "./Cover";
+import { Cover, useArtworkRevision } from "./Cover";
 import type { Artist, Library } from "./types";
 export function ArtistHero({
   artist,
@@ -14,8 +14,10 @@ export function ArtistHero({
   /** Where the back control returns to; it floats over the photograph. */
   back?: { label: string; go: () => void };
 }) {
-  const [revision, setRevision] = useState(0);
   const base = `/api/v1/${discovered ? "catalogue/" : ""}artists/${artist.id}`;
+  // The photograph decides when to look again; the logo follows its revision.
+  const photo = useArtworkRevision(base);
+  const revision = photo.revision;
   const background = `${base}/background?r=${revision}`;
   const logoSrc = `${base}/logo?r=${revision}`;
   // The address that last loaded; a cached image can load before effects run.
@@ -28,9 +30,8 @@ export function ArtistHero({
       ? Boolean(library.media?.fanart_configured && library.media?.portraits)
       : null;
   });
-  const [failedBackground, setFailedBackground] = useState("");
   // Reserve the final layout while cached artwork is decoded; fallback only on failure.
-  const immersive = enabled !== false && failedBackground !== background;
+  const immersive = enabled !== false && !photo.missing;
   const [loaded, setLoaded] = useState(false);
   // The photograph runs edge to edge from the top of the screen.
   useEffect(() => {
@@ -57,20 +58,6 @@ export function ArtistHero({
       active = false;
     };
   }, [artist.id]);
-  useEffect(() => {
-    const changed = () => setRevision((r) => r + 1);
-    // Look again only while the photograph is missing; a new address for a
-    // loaded image would download it again and bypass the cache.
-    const retry = () => {
-      if (!loaded) changed();
-    };
-    window.addEventListener("music-artwork-changed", changed);
-    window.addEventListener("music-artwork-retry", retry);
-    return () => {
-      window.removeEventListener("music-artwork-changed", changed);
-      window.removeEventListener("music-artwork-retry", retry);
-    };
-  }, [loaded]);
   useEffect(() => {
     const node = scene.current;
     if (!node || !loaded) return;
@@ -141,7 +128,7 @@ export function ArtistHero({
             onLoad={() => setLoaded(true)}
             onError={() => {
               setLoaded(false);
-              setFailedBackground(background);
+              photo.fail();
             }}
           />
           <img

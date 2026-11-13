@@ -200,11 +200,6 @@ export function updateArtworkRevision(revision: number | undefined) {
   window.dispatchEvent(new Event("music-artwork-changed"));
 }
 
-// One retry clock for missing images; successful immutable images stay cached.
-setInterval(() => {
-  if (!document.hidden) window.dispatchEvent(new Event("music-artwork-retry"));
-}, 60000);
-
 export function clearSessionReads() {
   // Cached artwork and pages belong to the person who just left.
   globalThis.navigator?.serviceWorker?.controller?.postMessage({

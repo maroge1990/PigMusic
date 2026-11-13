@@ -394,9 +394,13 @@ const RECONNECT_MAX = 300000;
 function useServerEvents(active: boolean, admin: boolean) {
   useEffect(() => {
     if (!active) return;
-    const changed = () => {
+    const libraryChanged = () =>
       window.dispatchEvent(new Event("music-library-changed"));
-      // New artwork also refreshes the library; let missing covers look again.
+    const changed = () => {
+      libraryChanged();
+      // New artwork also moves the library revision; let missing covers look
+      // again. Only a reported revision does: the fallback poll below fires
+      // whether or not anything changed.
       window.dispatchEvent(new Event("music-artwork-retry"));
     };
     const requests = () =>
@@ -404,7 +408,7 @@ function useServerEvents(active: boolean, admin: boolean) {
     let fallback: ReturnType<typeof setInterval> | undefined;
     const poll = () => {
       if (document.hidden) return;
-      changed();
+      libraryChanged();
       requests();
       window.dispatchEvent(new Event("music-admin-poll"));
     };
