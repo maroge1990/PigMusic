@@ -21,7 +21,7 @@ class Remote:
         self.started = []
         self.gate = asyncio.Event()
 
-    async def shared(self, client, track):
+    async def match(self, client, track):
         self.started.append(track["title"])
         await self.gate.wait()
 
@@ -187,7 +187,7 @@ def test_home_and_a_settled_search_look_up_their_songs(tmp_path, monkeypatch):
     track = release_tracks(fixture_release())[0]
     looked_up = []
 
-    async def shared(self, client, wanted):
+    async def match_ahead(self, client, wanted):
         looked_up.append(
             (wanted["musicbrainz_release_id"], wanted["musicbrainz_recording_id"])
         )
@@ -231,7 +231,7 @@ def test_home_and_a_settled_search_look_up_their_songs(tmp_path, monkeypatch):
         return {"id": OTHER, "release_id": RELEASE}
 
     monkeypatch.setattr(Catalogue, "get", provider)
-    monkeypatch.setattr(RemoteAudio, "shared", shared)
+    monkeypatch.setattr(RemoteAudio, "match", match_ahead)
     monkeypatch.setattr(HomeDiscovery, "popular", popular)
     monkeypatch.setattr(AppleSearch, "search", apple_search)
     monkeypatch.setattr(AppleSearch, "item", apple_item)
@@ -263,3 +263,73 @@ def test_home_and_a_settled_search_look_up_their_songs(tmp_path, monkeypatch):
         settle(3)
         time.sleep(0.2)
         assert looked_up == [(RELEASE, OTHER)] * 3
+
+
+def test_a_look_ahead_never_takes_the_relay_slots_a_tap_needs(tmp_path, monkeypatch):
+    """Codex, #192 round 1 (high): a look-ahead stops at JioSaavn's match. It
+    never searches the relays or starts a transfer, so songs nobody tapped
+    cannot hold every relay slot while a real tap waits, and its JioSaavn miss
+    is not remembered as a miss for the tap, which still asks the relays."""
+    import threading
+
+    import httpx
+
+    resolver = RemoteAudio(lambda *_: [], directory=tmp_path / "relay")
+    audio = tmp_path / "disposable.mp3"
+    audio.write_bytes(b"mock transfer")
+    found, fetched = [], []
+    release = threading.Event()
+
+    def find(source, track):
+        found.append((source, track["title"]))
+        return {"fixture": True}
+
+    def download(source, track, candidate):
+        fetched.append(track["title"])
+        release.wait(5)
+        return audio
+
+    monkeypatch.setattr(resolver, "find", find)
+    monkeypatch.setattr(resolver, "download", download)
+
+    def song(title):
+        return {"artist": "Fixture", "title": title, "album": "Fixture"}
+
+    def screen(*titles):
+        def job(title):
+            async def run():
+                return song(title)
+
+            return run
+
+        return [job(title) for title in titles]
+
+    async def until(condition):
+        deadline = time.monotonic() + 3
+        while not condition() and time.monotonic() < deadline:
+            await asyncio.sleep(0.02)
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            ahead = LookAhead(resolver, lambda: client, lambda: True)
+            ahead.screen("mark", screen("a", "b"))
+            ahead.screen("sam", screen("c", "d"))
+            await until(lambda: not ahead.people)
+            await asyncio.sleep(0.2)
+            assert found == [] and fetched == []  # No relay was asked.
+            assert not ahead.people  # Every look-ahead has ended.
+            assert resolver.relay_slots._value == 3
+            assert resolver.misses == {}
+            tap = asyncio.ensure_future(resolver.shared(client, song("tapped")))
+            await until(lambda: fetched)
+            assert fetched == ["tapped"]  # The tap's transfer started at once.
+            release.set()
+            assert (await tap)["source"] == "zvu4no"
+            # A tap on a song looked up ahead still reaches the relays.
+            assert (await resolver.shared(client, song("a")))["source"] == "zvu4no"
+            await ahead.close()
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        release.set()

@@ -111,6 +111,9 @@ class RemoteAudio:
         # never queues behind another song's transfer.
         self.slots = asyncio.Semaphore(3)
         self.relay_slots = asyncio.Semaphore(3)
+        # Event-loop owned: {key: task} JioSaavn lookups running; a tap joins
+        # the look-ahead's lookup for the same song.
+        self.resolving = {}
         # {name: (monotonic expiry, exception type, message)}
         self.misses = {}
         # Other sources are fetched by the server into a short-lived cache and
@@ -615,7 +618,33 @@ class RemoteAudio:
         live = time.monotonic()
         self.relayed = {k: v for k, v in self.relayed.items() if v[0] > live}
 
+    async def match(self, client, track):
+        """Look-ahead (#192): JioSaavn's match only, kept for the tap. It
+        never asks the relays or starts a transfer, so songs nobody tapped
+        hold no relay slot, and a miss here is not remembered: the tap still
+        asks every source."""
+        missed = self.misses.get(self.miss_key(track))
+        if missed and missed[0] > time.monotonic():
+            return None
+        return await self.resolve(client, track)
+
     async def resolve(self, client, track):
+        # One JioSaavn lookup per song at a time: a tap joins a look-ahead's.
+        key = self.key(track)
+        task = self.resolving.get(key)
+        if task is None:
+            task = asyncio.ensure_future(self._resolve(client, track))
+            self.resolving[key] = task
+
+            def done(finished, key=key):
+                if self.resolving.get(key) is finished:
+                    del self.resolving[key]
+
+            task.add_done_callback(done)
+            task.add_done_callback(lambda t: t.cancelled() or t.exception())
+        return await shared_result(task)
+
+    async def _resolve(self, client, track):
         key = self.key(track)
         cached = self.cache.get(key)
         now = self.clock()

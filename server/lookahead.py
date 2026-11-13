@@ -2,15 +2,17 @@
 
 When the server answers a screen (a release page, Home's feeds, an online
 search), it names the first few songs there that are not in the library.
-Each is looked up in the background through RemoteAudio, the same work a tap
-does, so the tap finds the answer waiting: JioSaavn's match is kept for hours
-and only re-checked on the tap, and a relayed copy stays in the relay folder.
+Each is matched on JioSaavn in the background, so the tap finds the answer
+waiting: the match is kept for hours and only re-checked on the tap. The
+relayed sources are left to the tap: a look-ahead never searches them or
+starts a transfer, so it cannot hold the relay slots a real tap needs, and its
+JioSaavn miss is not remembered as a miss.
 
 Per person: at most PER_PERSON lookups run at once, a new screen replaces the
 songs the previous one queued and has not started, and a screen may wait a
 moment first (a search typed ahead settles before it costs anything).
 Lookups run as background metadata work, so a person waiting on a page always
-goes first, and every source keeps its own slots, cooldowns and miss memory.
+goes first, and JioSaavn keeps its own slots.
 """
 
 import asyncio
@@ -118,9 +120,10 @@ class LookAhead:
             track = await job()
             if track is None:
                 return
-            # Joins any lookup already running for this song; its answer (or
-            # miss) is what the tap will find.
-            await self.remote_audio.shared(self.client(), track)
+            # JioSaavn's match only (Codex, round 1): relayed sources and
+            # their transfers wait for the tap, so look-ahead never holds a
+            # relay slot a tap needs. A tap joins a match still running.
+            await self.remote_audio.match(self.client(), track)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
