@@ -40,6 +40,9 @@ import {
   type SavedQueue,
 } from "./queue";
 
+/** The Now Playing sheet's exit (sheet-out in Experience.css). */
+const SHEET_OUT_MS = 200;
+
 type Controls = {
   /** Play `queue[index]`, then carry on through the queue. */
   play: (queue: Song[], index?: number) => void;
@@ -164,8 +167,33 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const { panel, openedFrom } = useNowPlayingFocus(expanded, setExpanded);
-  const collapse = () => setExpanded(false);
+  // Closing by hand plays the sheet's exit before it goes; a stop or a
+  // sign-out closes at once.
+  const [leaving, setLeaving] = useState(false);
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  const collapse = () => {
+    if (leaveTimer.current) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+      return setExpanded(false);
+    setLeaving(true);
+    leaveTimer.current = setTimeout(() => {
+      leaveTimer.current = undefined;
+      setLeaving(false);
+      setExpanded(false);
+    }, SHEET_OUT_MS);
+  };
+  useEffect(() => {
+    if (expanded) return;
+    clearTimeout(leaveTimer.current);
+    leaveTimer.current = undefined;
+    setLeaving(false);
+  }, [expanded]);
+  useEffect(() => () => clearTimeout(leaveTimer.current), []);
+  const { panel, openedFrom } = useNowPlayingFocus(expanded, (open) =>
+    open ? setExpanded(true) : collapse(),
+  );
 
   async function load(s: Song) {
     reportPlay();
@@ -537,6 +565,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             song={song}
             panel={panel}
             collapse={collapse}
+            leaving={leaving}
             position={position}
             duration={duration}
             seek={seek}

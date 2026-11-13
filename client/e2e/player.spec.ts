@@ -322,3 +322,27 @@ test("signing out clears the player and its saved queue", async ({ page }) => {
   await expect(page.getByLabel("Username")).toBeVisible();
   await expect(mini).toHaveCount(0);
 });
+
+test("#182: closing Now Playing by hand plays its exit; Reduce Motion closes at once", async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.goto(`/#/library/album/${album.id}`);
+  await page.getByText("Von dutch").first().click();
+  const open = page.locator(".mini-player").getByRole("button").first();
+  const dialog = page.getByRole("dialog", { name: "Now playing" });
+  await open.click();
+  await expect(dialog).toBeVisible();
+  await page.getByRole("button", { name: "Close now playing" }).click();
+  await expect(dialog).toHaveClass(/is-leaving/);
+  expect(
+    await dialog.evaluate((el) => getComputedStyle(el).animationName),
+  ).toBe("sheet-out");
+  await expect(dialog).toBeHidden();
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await open.click();
+  await expect(dialog).toBeVisible();
+  await page.getByRole("button", { name: "Close now playing" }).click();
+  await expect(dialog).toBeHidden({ timeout: 100 });
+});

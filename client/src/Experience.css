@@ -311,6 +311,17 @@
     opacity: 0;
   }
 }
+/* Closing by hand: the way it came, a little quicker (SHEET_OUT_MS). */
+.now-playing.is-leaving {
+  animation: sheet-out 0.2s ease-in forwards;
+  pointer-events: none;
+}
+@keyframes sheet-out {
+  to {
+    transform: translateY(6%);
+    opacity: 0;
+  }
+}
 .now-playing > * {
   flex-shrink: 0;
   width: min(100%, 26rem);
@@ -736,7 +747,8 @@
   .mini-player {
     transition: none;
   }
-  .now-playing {
+  .now-playing,
+  .now-playing.is-leaving {
     animation: none;
   }
 }

@@ -87,6 +87,7 @@ export function NowPlaying({
   muted,
   toggleMute,
   close,
+  leaving = false,
   error,
   songs,
   index,
@@ -111,6 +112,8 @@ export function NowPlaying({
   muted: boolean;
   toggleMute: () => void;
   close: () => void;
+  /** Playing its exit; it unmounts once that ends. */
+  leaving?: boolean;
   error: string;
   songs: Song[];
   index: number;
@@ -121,7 +124,7 @@ export function NowPlaying({
   return (
     <section
       ref={panel}
-      className="now-playing"
+      className={`now-playing${leaving ? " is-leaving" : ""}`}
       role="dialog"
       aria-modal="true"
       aria-label="Now playing"
