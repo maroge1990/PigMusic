@@ -53,6 +53,42 @@ test("the owner's Admin overview shows the numbers to act on", async ({
             ],
           },
         }),
+      "/v1/admin/performance": (route) =>
+        route.fulfill({
+          json: {
+            targets: {
+              taps_played: 0.9,
+              first_sound_median_ms: 1500,
+              first_sound_p90_ms: 3000,
+              mix_downloads_completed: 0.8,
+              library_downloads_completed: 0.95,
+              artwork_placeholders: 0.02,
+              artists_with_photo: 0.95,
+            },
+            instant: { taps: 34, played: 11, played_share: 0.3235 },
+            first_sound: { count: 20, median_ms: 1200, p90_ms: 4500 },
+            downloads: {
+              mix: {
+                completed: 263,
+                failed: 290,
+                cancelled: 0,
+                completion: 0.4756,
+              },
+              library: {
+                completed: 0,
+                failed: 0,
+                cancelled: 0,
+                completion: null,
+              },
+            },
+            artwork: {
+              distinct: 100,
+              placeholders: 1,
+              placeholder_share: 0.01,
+            },
+            artists: { with_photo: 80, total: 83, share: 0.9639 },
+          },
+        }),
       "/v1/admin/mixes/people/u1": (route) =>
         route.fulfill({
           json: {
@@ -138,6 +174,20 @@ test("the owner's Admin overview shows the numbers to act on", async ({
     mixes.getByRole("button", { name: "Refresh mix status" }),
   ).toBeEnabled();
   await expect(budget).toHaveValue("55");
+  // The parity targets sit at the bottom of System (#191).
+  const speed = page.locator(".system-panel").filter({
+    has: page.getByRole("heading", { name: "Speed and coverage, last 7 days" }),
+  });
+  await expect(speed).toContainText(
+    "32.4% · 11 of 34 taps · target at least 90% · Below target",
+  );
+  await expect(speed).toContainText("1.2 s · 20 starts · target at most 1.5 s");
+  await expect(speed).toContainText(
+    "No data yet · 0 of 0 · target at least 95%",
+  );
+  await expect(speed).toContainText(
+    "96.4% · 80 of 83 · target at least 95% · Meets target",
+  );
 });
 
 test("members have no Admin section, even by address", async ({ page }) => {

@@ -16,6 +16,7 @@ import { sourceIds, sourceName, sources } from "./sources";
 import { LibraryScan } from "./LibraryScan";
 import { ToolBoundary } from "./ToolBoundary";
 import { MixCacheSettings } from "./MixCacheSettings";
+import { PerformanceSummary } from "./PerformanceSummary";
 import { Loading } from "./EmptyState";
 const Organisation = lazy(() =>
   import("./Organisation").then((m) => ({ default: m.Organisation })),
@@ -116,6 +117,7 @@ export function SystemStatus({
         </section>
       </div>
       <MixCacheSettings />
+      <PerformanceSummary />
     </>
   );
 }
