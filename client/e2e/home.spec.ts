@@ -335,6 +335,42 @@ test("Popular songs show ten, then all on request", async ({ page }) => {
   await expect(list.locator(".song-row")).toHaveCount(12);
 });
 
+// #182: the shelf's edges fade only while there is more to scroll that way.
+test("the song shelf fades the edge it can still scroll towards", async ({
+  page,
+}) => {
+  const songs = Array.from({ length: 10 }, (_, i) => ({
+    ...item("s" + i, "Song " + i),
+    title: "Song " + i,
+    album: "Album one",
+    duration: 200,
+  }));
+  await mockApi(page, {
+    answers: {
+      "/v1/home/recommended": (route) => route.fulfill({ json: feed("") }),
+      "/v1/home/popular": (route) =>
+        route.fulfill({ json: { ...feed("Popular in Australia"), songs } }),
+    },
+  });
+  await page.goto("/#/home");
+  const list = page.locator(".home-songs");
+  await expect(list.locator(".song-row")).toHaveCount(10);
+  const edges = () =>
+    list.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return [
+        s.getPropertyValue("--shelf-fade-start"),
+        s.getPropertyValue("--shelf-fade-end"),
+      ].join(" ");
+    });
+  expect(await list.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(
+    true,
+  );
+  await expect.poll(edges).toBe("0px 32px");
+  await list.evaluate((el) => (el.scrollLeft = el.scrollWidth));
+  await expect.poll(edges).toBe("32px 0px");
+});
+
 // #105: a first-ever chart build can take several minutes; Home keeps
 // checking while it is preparing and shows the chart when it arrives.
 test("a chart that takes over two minutes still appears on an open Home", async ({

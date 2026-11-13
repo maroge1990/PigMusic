@@ -503,6 +503,31 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
 }
+@property --shelf-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --shelf-fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes shelf-edges {
+  0% {
+    --shelf-fade-start: 0px;
+    --shelf-fade-end: var(--space-32);
+  }
+  8%,
+  92% {
+    --shelf-fade-start: var(--space-32);
+    --shelf-fade-end: var(--space-32);
+  }
+  100% {
+    --shelf-fade-start: var(--space-32);
+    --shelf-fade-end: 0px;
+  }
+}
 /* Columns of four songs that page sideways, like Top Songs. */
 .home-songs {
   display: grid;
@@ -513,6 +538,18 @@
   overflow-x: auto;
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
+  /* Scroll-edge fades (#182): an edge fades only while there is more to
+     scroll that way; a shelf that fits, or a browser without scroll
+     timelines, shows no fade. */
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--shelf-fade-start),
+    #000 calc(100% - var(--shelf-fade-end)),
+    transparent
+  );
+  animation: shelf-edges linear both;
+  animation-timeline: scroll(x self);
   margin-right: calc(-1 * var(--space-16));
   padding-right: var(--space-16);
 }
