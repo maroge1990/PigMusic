@@ -5,25 +5,28 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 13 Nov 2026 (late afternoon, Melbourne).*
+*Overwritten at the end of every session. 13 Nov 2026 (night, Melbourne).*
 
-- **Live:** release `web-20261114-v1`, server `a15d53c`, since 13 Nov about 16:05 Melbourne (D-87: releases at any
-  time; Mark ran the apply step). It carries batches 'brand' (#179), 'idle' (#171, #172) and 'web' (#174, #175, #181,
-  #182) on top of the artwork release. Healthy. Rollback: container `PigMusic-before-web-20261114-v1`, backup
-  `pre-web-20261114-v1` (image `sha-8ee4c29`). D-78 clean-up of the older rollbacks (artwork 13 Nov, findings 9 Nov)
-  waits on Mark's hands.
-- **Live checks after this release:** the web changes are in the served bundle; #174, #175, #179, #181 and #182 are
-  closed (D-58). The stall watcher thread now uses 0.02% of a core (#172). But idle CPU rose: the server used 3.10% of
-  a core over 10 quiet minutes against the 0.97% baseline, spent in the asyncio worker threads with SQLite-like file
-  work and nothing logged: **#190**, not yet explained (this batch, batch 4 or the morning's artwork release). Lock
-  holds: only the start-up one in the first half hour; #171 waits for tonight's export and mix run to compare.
+- **Live:** release `web-20261114-v1`, server `a15d53c`, since 13 Nov about 16:05 Melbourne. It carries batches
+  'brand' (#179), 'idle' (#171, #172) and 'web' (#174, #175, #181, #182) on top of the artwork release. Healthy.
+  Rollback: container `PigMusic-before-web-20261114-v1`, backup `pre-web-20261114-v1` (image `sha-8ee4c29`). D-78
+  clean-up of the older rollbacks (artwork 13 Nov, findings 9 Nov) waits on Mark's hands.
+- **#190 closed:** no regression. The 3.1% was measured 3 to 25 minutes after a restart, during the known catch-up.
+  About 4 hours after it, the server idles at 0.55–0.84% of a core (baseline 0.97%) and the engine at 2.64% (2.41%).
+  Measure idle at least an hour after a restart. #171 still waits for a night's lock holds to compare.
+- **Parity batch 2, 'measure' (#191), pushed `7acda1a`..`e5131ca`:** the server counts taps outside the library
+  (played by source, no match, unavailable), each instant source's answer, downloads (mix and library apart, source
+  and profile), cover answers (a cover never served in the period is a placeholder) and first sound reported by
+  players. Kept a rolling week in `performance.sqlite3`, written in batches only after something happened (idle cost
+  none). Admin, System, bottom: "Speed and coverage, last 7 days"; `scripts/performance_report.py` reads a copied
+  file. The web player reports first sound; the iPhone's report rides in batch 9. Two Codex rounds (three medium
+  findings, fixed and confirmed under D-71). Next: release, then the first numbers on #191 after a few days of use.
 - **Parity plan (13 Nov evening):** after comparing Octo and Mornye, Mark chose to improve PigMusic towards their
   instant listening, downloads, artwork and "Made for you" (D-88), with instant sources asked together, JioSaavn first
   (D-89), and every replaced path retired (D-90). Issues #191–#205; order in **Now**.
 - **Audit of 13 Nov:** report https://claude.ai/artifact/91KX6g4ciEB7npgbpR4aCH, handover
-  https://claude.ai/artifact/C5NUCuD6V6v8EaYR2n5b7G, issues #168–#190. Batches 1 to 5 done. Next: #190, then batch 6
-  agency and words (#183), 7 server dead code (#169, #170, #173), 8 YouTube and SoundCloud removal (#94), 9 iPhone dead
-  code and search merge (#176–#178), 10 the review checklist (#184).
+  https://claude.ai/artifact/C5NUCuD6V6v8EaYR2n5b7G, issues #168–#190. Batches 1 to 5 done; the rest are folded
+  into **Now**.
 - **Pushed, not on a device yet:** batch 'iphone-brand' (#180), `0addcab`..`50c9099`: the splash ends when the saved
   library is shown; the pig with one line on empty and error screens (D-82) and a Library error state; pages say what
   is opening; plain words for sync and settings; "Couldn't download"; rounded figures where compared (D-84); a symbol
@@ -50,8 +53,8 @@ Mark's single testing round (D-86).
 
 | # | Batch | Issues | Platform | Codex | Ships in | Waits on |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Idle CPU regression | #190 | server | per fix | release | — |
-| 2 | Measure: counters and a report for the targets | #191 | server, web admin | 1 | release; baseline posted on #191 | — |
+| 1 | ~~Idle CPU regression~~ (closed 13 Nov: post-restart catch-up, no regression) | #190 | server | — | — | — |
+| 2 | Measure: counters and a report for the targets (pushed 13 Nov) | #191 | server, web admin | 2 | release; baseline posted on #191 | — |
 | 3 | Look up the songs on screen before the tap | #192 | server | 2 | release | — |
 | 4 | Sources (audit 8): SoundCloud out, Monochrome diagnosed, YouTube for instant listening as a one-week trial, FreeMp3Cloud and zvu4no out of instant (D-89) | #94, #193 | server | 2 | release, then the trial week | Mark's decision on #193 (revisits D-80) |
 | 5 | Agency and words (audit 6): Undo over confirm | #183 | web (+ native half) | 2 | release; native half in the TestFlight build | — |
