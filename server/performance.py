@@ -139,7 +139,9 @@ class Performance:
         except Exception:
             with self.lock:  # Kept for the next attempt, within the limit.
                 room = max(0, PENDING_LIMIT - len(self.pending))
-                self.pending[:0] = events[len(events) - room :] if room else []
+                kept = events[max(0, len(events) - room) :] if room else []
+                self.dropped += len(events) - len(kept)
+                self.pending[:0] = kept
             raise
         if prune:
             self.pruned_at = now

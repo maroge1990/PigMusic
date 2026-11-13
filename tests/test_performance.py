@@ -262,3 +262,21 @@ def test_an_unexpected_download_error_counts_as_a_failure(tmp_path):
     assert [(r[0], r[1], r[2]) for r in recorded] == [("download", "library", "failed")]
     with store.connect() as conn:
         assert conn.execute("SELECT status FROM queue").fetchone()[0] == "failed"
+
+
+def test_a_failed_write_keeps_every_event_that_fits(tmp_path):
+    """Codex round 2 (#191): a failed batch smaller than the room left lost
+    its oldest events."""
+    for size, room_left in ((3000, 5000), (5000, 5000), (6000, 5000)):
+        counters = Performance(tmp_path / "missing-folder")
+        counters.pending = [
+            (i, "tap", "none", "unavailable", None, None) for i in range(size)
+        ]
+        try:
+            counters.flush()
+        except sqlite3.OperationalError:
+            pass
+        kept = min(size, room_left)
+        assert len(counters.pending) == kept
+        assert counters.pending[0][0] == size - kept  # The newest are kept.
+        assert counters.dropped == size - kept
