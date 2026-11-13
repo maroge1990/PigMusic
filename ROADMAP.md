@@ -5,49 +5,33 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 13 Nov 2026 (night, Melbourne).*
+*Overwritten at the end of every session. 14 Nov 2026 (morning, Melbourne).*
 
-- **Live:** release `web-20261114-v1`, server `a15d53c`, since 13 Nov about 16:05 Melbourne. Healthy. Rollback:
-  container `PigMusic-before-web-20261114-v1`, backup `pre-web-20261114-v1`. D-78 clean-up of the older rollbacks
-  waits on Mark's hands.
-- **Release `measure-20261113-v1` ready, apply step with Mark:** image `sha-9051fac` (digest in
-  `.private/releases/verify-measure-20261113-v1.log`); Unraid verify and preflight passed 13 Nov ~21:20, nothing
-  playing. Carries batch 'measure' (#191). If Mark ran `--apply`, check the live server, then post on #191.
-- **#190 closed:** no regression; the 3.1% was the post-restart catch-up. About 4 hours after a restart the server
-  idles at 0.55–0.84% of a core (baseline 0.97%), the engine at 2.64% (2.41%). Measure idle at least an hour after a
-  restart. #171 still waits for a night's lock holds.
-- **Batch 2 'measure' (#191), pushed `7acda1a`..`9051fac`:** counters for taps outside the library, each instant
-  source's answer, downloads (mix and library apart), cover answers and first sound from players, a rolling week in
-  `performance.sqlite3`; Admin, System: "Speed and coverage, last 7 days"; `scripts/performance_report.py`. The web
-  reports first sound; the iPhone's report rides in batch 9. Two Codex rounds, three mediums fixed and confirmed. The
-  first numbers go on #191 after a few days of use.
-- **Batch 3 'lookahead' (#192), committed, NOT pushed:** `f0bee7d` (JioSaavn match kept 6 h, re-checked by one range
-  request on the tap) and `535dfe6` (look-ahead from release pages, Home and settled searches, two per person; iPhone
-  taps looked up as the catalogue knows the song). On branch `claude/pigmusic-delivery-takeover-e84ed3`, not yet in
-  `~/code/PigMusic` main (kept out until the release apply ran from 9051fac). Codex round 1
-  (`.private/reviews/lookahead-round1.log`): **high**, look-ahead runs the full relay path, so speculative whole-file
-  downloads can hold all three relay slots and a real tap waits (fix: look-ahead stops before relay transfers, or
-  taps get reserved slots); **medium**, `pump()` starts a delayed search's jobs before its settle timer when earlier
-  work finishes. Fix both, confirm each (D-71), then round 2. #201's row for #192 needs its date when this ships.
-- **Parity plan (13 Nov evening):** after comparing Octo and Mornye, Mark chose to improve PigMusic towards their
-  instant listening, downloads, artwork and "Made for you" (D-88), with instant sources asked together, JioSaavn first
-  (D-89), and every replaced path retired (D-90). Issues #191–#205; order in **Now**.
-- **Audit of 13 Nov:** report https://claude.ai/artifact/91KX6g4ciEB7npgbpR4aCH, handover
-  https://claude.ai/artifact/C5NUCuD6V6v8EaYR2n5b7G, issues #168–#190. Batches 1 to 5 done; the rest are folded
-  into **Now**.
-- **Pushed, not on a device yet:** batch 'iphone-brand' (#180), `0addcab`..`50c9099`: the splash ends when the saved
-  library is shown; the pig with one line on empty and error screens (D-82) and a Library error state; pages say what
-  is opening; plain words for sync and settings; "Couldn't download"; rounded figures where compared (D-84); a symbol
-  per Watch state on song rows. Two Codex rounds, both approve with no findings. Icons are left for batch 10.
-- **D-86:** Mark tests once, when all audit batches are done. The native batches (5, the native half of 6, 9, and the
-  #188 app fix) go to TestFlight together as 0.2.0 (25) at the end; no build bump until then.
-- **#188 (P1):** iPhone requests fail for 10–20 s after opening the app although the server answered. Cloudflare
-  HTTP/3 switched off 13 Nov about 12:10 Melbourne as a test; compare Mark's next diagnostics export with the 13 Nov
-  baseline (54 failed of 166 logged requests).
-- **CI:** flakes in #189. The container check on `55ddf4c` failed on a racy web test (Your devices Loading), fixed in
-  `e1b7623` (the test now answers the quality request).
-- **iPhone/Watch:** latest TestFlight 0.2.0 (24); its items (#168) and build 23's (#149, #157–#163) wait for Mark's
-  testing round (D-86).
+- **Live:** release `measure-20261113-v1`, server `9051fac`, applied by Mark 14 Nov 06:52 Melbourne. Healthy; carries
+  batch 'measure' (#191). Rollback: container `PigMusic-before-measure-20261113-v1`, backup `pre-measure-20261113-v1`.
+  D-78 clean-up of the older rollbacks (web, artwork, findings) waits on Mark's hands. The counters started from zero
+  at this release: the first numbers go on #191 after a few days of use.
+- **Mark away (D-94):** Claude keeps pushing reviewed server and web batches and prepares each release (CI, verify,
+  preflight); Mark applies the newest prepared release when back. Decisions taken before he left: YouTube trial
+  (D-91), convert down from verified lossless if the numbers help (D-92), keep and document `server.admin` (D-93),
+  yt-dlp updates itself for the trial (D-95), #199's tint stays out of TestFlight until he approves screenshots.
+- **Batch 3 'lookahead' (#192), pushed `f0bee7d`..`47ef935`:** JioSaavn matches kept 6 h and re-checked on the tap;
+  release pages, Home and settled searches look up their first songs on JioSaavn ahead of the tap. Look-ahead never
+  asks the relays or starts a transfer, has its own JioSaavn budget (two at once, across everyone), and a tap
+  overtakes a look-ahead still waiting. Two Codex rounds; one high and four mediums fixed, each confirmed (D-71).
+- **Batch 4 'sources' (#94, #193), in progress:** SoundCloud out with its uploader review (`f6caa58`, not reviewed
+  yet). Monochrome is never searched because the saved profile is MP3 320 and it offers only lossless (#94); it
+  becomes useful with convert-down (#196). YouTube for instant listening: search, isolated lookup worker, byte proxy
+  and checked self-update written and tested against YouTube (search ~0.9 s, address ~2 s), not yet wired into taps.
+- **#190 closed:** no regression. Measure idle at least an hour after a restart (server 0.55–0.84% of a core, engine
+  2.64%, about 4 h after a restart). #171 still waits for a night's lock holds (the 14 Nov release restarted it).
+- **Parity plan:** D-88 to D-90; issues #191–#205; order in **Now**. Audit of 13 Nov: report
+  https://claude.ai/artifact/91KX6g4ciEB7npgbpR4aCH, handover https://claude.ai/artifact/C5NUCuD6V6v8EaYR2n5b7G.
+- **Pushed, not on a device yet:** batch 'iphone-brand' (#180), `0addcab`..`50c9099`. Under D-86 the native batches
+  go to TestFlight together as 0.2.0 (25) at the end; no build bump until then.
+- **#188 (P1):** iPhone requests fail for 10–20 s after opening the app. Cloudflare HTTP/3 off since 13 Nov ~12:10
+  Melbourne as a test; compare Mark's next diagnostics export with the baseline (54 failed of 166 logged requests).
+- **CI:** flakes in #189. **iPhone/Watch:** TestFlight 0.2.0 (24); #168 and build 23's items wait for Mark (D-86).
 - **Ways of working:** area batches (D-50), Codex rounds per D-59 and D-71, Claude pushes; releases at any time under
   D-87; D-58 closing. Household details live only in the gitignored `.private/` (D-45).
 
@@ -63,8 +47,8 @@ Mark's single testing round (D-86).
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | ~~Idle CPU regression~~ (closed 13 Nov: post-restart catch-up, no regression) | #190 | server | — | — | — |
 | 2 | Measure: counters and a report for the targets (pushed 13 Nov) | #191 | server, web admin | 2 | release; baseline posted on #191 | — |
-| 3 | Look up the songs on screen before the tap (committed, in Codex) | #192 | server | 2 | release | — |
-| 4 | Sources (audit 8): SoundCloud out, Monochrome diagnosed, YouTube for instant listening as a one-week trial, FreeMp3Cloud and zvu4no out of instant (D-89) | #94, #193 | server | 2 | release, then the trial week | Mark's decision on #193 (revisits D-80) |
+| 3 | Look up the songs on screen before the tap (pushed 14 Nov) | #192 | server | 2 | release | — |
+| 4 | Sources (audit 8): SoundCloud out, Monochrome diagnosed, YouTube for instant listening as a one-week trial (D-91, D-95), FreeMp3Cloud and zvu4no out of instant (D-89) | #94, #193 | server | 2 | release, then the trial week | — |
 | 5 | Agency and words (audit 6): Undo over confirm | #183 | web (+ native half) | 2 | release; native half in the TestFlight build | — |
 | 6 | Artwork: Deezer first for covers and artist photos (measure first) | #194 | server | 2 | release | — |
 | 7 | Server dead code and duplicates (audit 7), with any retirement whose pass mark is met | #169, #170, #173 parts 1 and 3, #201 | server | 1 | release | Mark: keep or delete `server.admin` |
