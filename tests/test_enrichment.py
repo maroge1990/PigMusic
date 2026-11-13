@@ -773,3 +773,57 @@ def test_an_expired_partial_answer_is_served_while_its_completion_runs(
             await asyncio.gather(*list(provider.completing.values()))
 
     asyncio.run(run())
+
+
+def test_library_warming_remembers_an_artist_without_any_image(tmp_path, monkeypatch):
+    """#172: the warmer's 30-minute library pass looked up every artist with
+    no portrait and no cover again (a MusicBrainz artist read and a release
+    search each), found nothing again, and did it next pass too. A miss is now
+    remembered for a day; a page view still asks at once."""
+    from server.routes.catalogue import catalogue_router
+
+    store = Store(tmp_path)
+    save_settings(store, True, False)
+    reads = []
+
+    class Catalogue:
+        async def get(self, client, path, **params):
+            reads.append(path)
+            return {"name": "Nobody"} if path.startswith("artist/") else {}
+
+    class NoPortraits:
+        async def get(self, client, name, artist_id=None):
+            return None
+
+    class NoPopularity:
+        async def get(self, client, artist_id, include_albums=True):
+            return {"songs": []}
+
+    clock = [1_000_000.0]
+    monkeypatch.setattr("server.routes.catalogue.time.time", lambda: clock[0])
+    router, *_ = catalogue_router(
+        store,
+        Catalogue(),
+        None,
+        NoPopularity(),
+        None,
+        NoPortraits(),
+        None,
+        None,
+        None,
+        lambda: "fixture",
+        lambda: None,
+    )
+
+    async def run():
+        await router.warm_artist(ARTIST)
+        first = len(reads)
+        assert first == 2  # The artist, then its releases for a cover.
+        clock[0] += 1800  # The next library pass.
+        await router.warm_artist(ARTIST)
+        assert len(reads) == first
+        clock[0] += 86400  # A day later it looks again.
+        await router.warm_artist(ARTIST)
+        assert len(reads) == 2 * first
+
+    asyncio.run(run())

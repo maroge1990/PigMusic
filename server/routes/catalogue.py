@@ -16,6 +16,10 @@ from ..portraits import portrait_target
 from ..artist_backgrounds import background_target
 from ..artist_logos import logo_target
 
+# How long the library warmer trusts "this artist has no image at all" before
+# looking again; a page view still asks at once (#172).
+ARTIST_IMAGE_MISS_SECONDS = 86400
+
 
 def catalogue_router(
     store,
@@ -222,6 +226,10 @@ def catalogue_router(
                     store.write_document, cache_key, {"file": target.name}
                 )
                 return target
+        # Nothing anywhere: the library warmer rests on this for a day (#172).
+        await asyncio.to_thread(
+            store.write_document, cache_key, {"file": "", "missed_at": time.time()}
+        )
         return None
 
     @router.get(
@@ -315,8 +323,15 @@ def catalogue_router(
             pass
         if public_settings(store)["portraits"]:
             cache_key = "catalogue-artist-image:" + artist_id + ":" + image_config()
-            cached = await cached_artist_image(cache_key)
-            if not cached or not (store.cover_dir / Path(cached).name).is_file():
+            known = await asyncio.to_thread(store.read_document, cache_key)
+            cached = known.get("file", "")
+            resting = (
+                not cached
+                and time.time() - known.get("missed_at", 0) < ARTIST_IMAGE_MISS_SECONDS
+            )
+            if not resting and (
+                not cached or not (store.cover_dir / Path(cached).name).is_file()
+            ):
                 try:
                     await enrich_catalogue_artist(artist_id, cache_key)
                 except Exception:
