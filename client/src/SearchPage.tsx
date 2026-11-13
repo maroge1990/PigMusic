@@ -20,9 +20,12 @@ import { EmptyLine, InlineError, Loading } from "./EmptyState";
 const fold = (value: string) => value.toLocaleLowerCase().normalize("NFKD");
 const clean = (value: string) => value.trim().slice(0, 150);
 
-/** Type-ahead waits this long after the last keystroke (at least 300 ms, so
- * typing adds no catalogue load). */
-const SEARCH_DEBOUNCE_MS = 350;
+/** Type-ahead searches the library this long after the last keystroke; a
+ * newer query aborts the older one's request. */
+const SEARCH_DEBOUNCE_MS = 150;
+/** The catalogue (MusicBrainz, rate-limited upstream) is asked only once
+ * typing has paused this long, so passing prefixes add no catalogue load. */
+const CATALOGUE_PAUSE_MS = 350;
 /** Artist pages are prepared only for a query left alone this long, so
  * passing prefixes ask the catalogue for nothing more. */
 const WARM_AFTER_MS = 1500;
@@ -42,6 +45,11 @@ export function SearchPage({
   // The query being searched: the address's, then what is typed, once
   // typing pauses.
   const [active, setActive] = useState(clean(query));
+  // The query the catalogue is asked for: the same, after a longer pause. A
+  // new object per pause, so returning to a query asks again if need be.
+  const [settled, setSettled] = useState({ query: clean(query) });
+  const shown = useRef(active);
+  shown.current = active;
   const typed = useRef(false);
   useEffect(() => {
     // Arriving from elsewhere (a link, back): the address wins.
@@ -49,6 +57,7 @@ export function SearchPage({
     typed.current = false;
     setText(query);
     setActive(clean(query));
+    setSettled({ query: clean(query) });
   }, [query]);
   useEffect(() => {
     if (!typed.current) return;
@@ -62,7 +71,14 @@ export function SearchPage({
         next ? "#/search?q=" + encodeURIComponent(next) : "#/search",
       );
     }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
+    const pause = setTimeout(
+      () => setSettled({ query: next }),
+      CATALOGUE_PAUSE_MS,
+    );
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(pause);
+    };
   }, [text]);
   const [local, setLocal] = useState<Local | null>(null);
   const [catalogue, setCatalogue] = useState<CatalogueArtist[] | null>(null);
@@ -94,7 +110,6 @@ export function SearchPage({
     const signal = controller.signal;
     const asked = currentSession();
     const current = () => !signal.aborted && asked === currentSession();
-    let warming: ReturnType<typeof setTimeout> | undefined;
     // Local results arrive first; the catalogue can be slower or unavailable.
     if (!saved?.local)
       void api<{ tracks: Track[]; household_tracks: Track[] }>(
@@ -112,39 +127,52 @@ export function SearchPage({
         .catch((e) => {
           if (current()) setError(e.message);
         });
-    if (active.length >= CATALOGUE_MINIMUM && !saved?.catalogue)
-      void api<{ artists: CatalogueArtist[] }>(
-        "/v1/catalogue/artists?q=" + encodeURIComponent(active),
-        { signal },
-      )
-        .then((found) => {
-          remember(key, asked, (entry) => (entry.catalogue = found.artists));
-          if (!current()) return;
-          setCatalogue(found.artists);
-          // The likely next tap, once the query has settled: essentials for
-          // two, everything for the first. A new query cancels it.
-          warming = setTimeout(
-            () =>
-              whenIdle(() => {
-                if (!current()) return;
-                found.artists
-                  .slice(0, 2)
-                  .forEach((a, i) => warmArtist(a.id, i < 1, a.name));
-              }),
-            WARM_AFTER_MS,
-          );
-        })
-        .catch(() => {
-          if (current()) {
-            setCatalogue([]);
-            setCatalogueFailed(true);
-          }
-        });
+    return () => controller.abort();
+  }, [active, session]);
+  useEffect(() => {
+    const wanted = settled.query;
+    if (wanted.length < CATALOGUE_MINIMUM) return;
+    const key = fold(wanted);
+    if (answer(key)?.catalogue) return;
+    const controller = new AbortController();
+    const signal = controller.signal;
+    const asked = currentSession();
+    const current = () => !signal.aborted && asked === currentSession();
+    // Shown only while it is still the query on screen.
+    const showing = () => current() && fold(shown.current) === key;
+    let warming: ReturnType<typeof setTimeout> | undefined;
+    void api<{ artists: CatalogueArtist[] }>(
+      "/v1/catalogue/artists?q=" + encodeURIComponent(wanted),
+      { signal },
+    )
+      .then((found) => {
+        remember(key, asked, (entry) => (entry.catalogue = found.artists));
+        if (!showing()) return;
+        setCatalogue(found.artists);
+        // The likely next tap, once the query has settled: essentials for
+        // two, everything for the first. A new query cancels it.
+        warming = setTimeout(
+          () =>
+            whenIdle(() => {
+              if (!showing()) return;
+              found.artists
+                .slice(0, 2)
+                .forEach((a, i) => warmArtist(a.id, i < 1, a.name));
+            }),
+          WARM_AFTER_MS,
+        );
+      })
+      .catch(() => {
+        if (showing()) {
+          setCatalogue([]);
+          setCatalogueFailed(true);
+        }
+      });
     return () => {
       controller.abort();
       clearTimeout(warming);
     };
-  }, [active, session]);
+  }, [settled, session]);
 
   const needle = fold(active);
   const artists = active

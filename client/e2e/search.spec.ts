@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Route } from "@playwright/test";
 import { artist, mockApi } from "./mock";
 
 test("search types ahead without a request per keystroke", async ({ page }) => {
@@ -144,4 +144,47 @@ test("signing in as someone else never shows the previous person's search", asyn
   await expect(page.getByText("sam's saved song")).toBeVisible();
   await expect(page.getByText("pat's saved song")).toHaveCount(0);
   expect(asked).toEqual(["pat", "sam"]);
+});
+
+test("#182: the library answers 150 ms after typing; the catalogue waits for a longer pause", async ({
+  page,
+}) => {
+  await page.clock.install();
+  const asked: string[] = [];
+  const record = (kind: string) => (route: Route) => {
+    asked.push(
+      kind + ":" + new URL(route.request().url()).searchParams.get("q"),
+    );
+    return route.fulfill({
+      json:
+        kind === "library"
+          ? { tracks: [], household_tracks: [] }
+          : { artists: [], offset: 0, total: 0, next_offset: null },
+    });
+  };
+  await mockApi(page, {
+    answers: {
+      "/v1/search": record("library"),
+      "/v1/catalogue/artists": record("catalogue"),
+    },
+  });
+  await page.goto("/#/search");
+  const box = page.getByRole("searchbox", {
+    name: "Search artists, albums or songs",
+  });
+  await expect(box).toBeVisible();
+  // Time moves only when the test says so.
+  await page.clock.pauseAt(Date.now() + 60_000);
+  await box.pressSequentially("Cha");
+  await page.clock.runFor(160);
+  await expect.poll(() => asked).toEqual(["library:Cha"]);
+  // A 250 ms pause between words is not long enough to ask the catalogue.
+  await page.clock.runFor(90);
+  await box.pressSequentially("r");
+  await page.clock.runFor(160);
+  await expect.poll(() => asked).toEqual(["library:Cha", "library:Char"]);
+  await page.clock.runFor(250);
+  await expect
+    .poll(() => asked)
+    .toEqual(["library:Cha", "library:Char", "catalogue:Char"]);
 });
