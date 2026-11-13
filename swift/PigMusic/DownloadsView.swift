@@ -10,7 +10,8 @@ struct DownloadsView: View {
       if let downloads = model.downloads {
         DownloadList(model: model, downloads: downloads)
       } else {
-        ContentUnavailableView("Connect your library", systemImage: "arrow.down.circle")
+        // Only between sign-in and the library opening, a moment at most.
+        ProgressView("Opening your downloads…").frame(maxWidth: .infinity, maxHeight: .infinity)
       }
     }.pigCanvas().navigationTitle("On this device").navigationBarTitleDisplayMode(.inline)
   }
@@ -26,9 +27,10 @@ private struct DownloadList: View {
     let groups = DeviceGroup.build(downloads.records.filter { $0.state == "ready" })
     List {
       if downloads.records.isEmpty {
-        ContentUnavailableView(
-          "No downloads yet", systemImage: "arrow.down.circle",
-          description: Text("Choose songs, albums or playlists to download."))
+        PigQuietState(
+          "No downloads yet",
+          line: "Songs, albums and playlists you download to this iPhone appear here."
+        ).listRowBackground(Color.clear)
       }
       if !transfers.isEmpty {
         Section("Transfers") {

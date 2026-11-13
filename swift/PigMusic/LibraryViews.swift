@@ -31,6 +31,23 @@ struct LibraryView: View {
   @Bindable var model: AppModel
   @State private var tab: LibraryTab = .artists
   @Environment(\.colorScheme) private var scheme
+  /// An empty library is loading, unreachable or truly empty, and says which.
+  @ViewBuilder private var emptyLibrary: some View {
+    if model.syncing {
+      ProgressView("Loading your music…").frame(maxWidth: .infinity).padding(.vertical, 32)
+    } else if model.syncFailed {
+      PigQuietState(
+        "Can't reach your library",
+        line: "Music on this iPhone still plays. Check your connection and try again."
+      ) {
+        Button("Try again") { Task { await model.refresh() } }.pigPrimaryAction()
+      }
+    } else {
+      PigQuietState("Your library is empty", line: "Find songs and albums to add.") {
+        Button("Find music") { model.openSearch() }.pigPrimaryAction()
+      }
+    }
+  }
   var body: some View {
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 16, pinnedViews: []) {
@@ -65,14 +82,7 @@ struct LibraryView: View {
           }
         }
         content
-        if model.songCount == 0 {
-          ContentUnavailableView(
-            "Your library", systemImage: "music.note",
-            description: Text(
-              model.syncing
-                ? "Syncing your music…"
-                : "Search for songs and albums to add, or pull to refresh."))
-        }
+        if model.songCount == 0 { emptyLibrary }
       }
       .padding(.horizontal).padding(.bottom, 24)
     }
@@ -780,9 +790,9 @@ struct ArtistRouteView: View {
         SearchArtistView(model: model, artist: artist)
       }
     } else if searched {
-      ContentUnavailableView(
-        route.names[0], systemImage: "music.mic",
-        description: Text("This artist isn't in your library yet. Search to find them."))
+      PigQuietState(
+        route.names[0], line: "This artist isn't in your library yet. Search to find them."
+      ).frame(maxHeight: .infinity).pigCanvas()
     } else {
       ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).pigCanvas()
         .task {

@@ -82,9 +82,9 @@ private struct SearchResultsView: View {
       if session.query.isEmpty {
         ShazamSection(model: model)
         if model.recentSearches.picks.isEmpty {
-          ContentUnavailableView(
-            "Find music", systemImage: "magnifyingglass",
-            description: Text("Songs, albums, artists and playlists, wherever they are."))
+          PigQuietState(
+            "Find music", line: "Songs, albums, artists and playlists, wherever they are."
+          ).listRowBackground(Color.clear)
         } else {
           recent
         }
@@ -576,9 +576,8 @@ private struct AppleResultView: View {
           model: model, releaseId: release, title: resolved.album ?? resolved.name, groupId: nil,
           editionCount: 0)
       } else if let failure {
-        ContentUnavailableView(
-          title, systemImage: "questionmark.circle", description: Text(failure)
-        ).pigCanvas()
+        PigQuietState(title, line: failure)
+          .frame(maxHeight: .infinity).pigCanvas()
       } else {
         ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).pigCanvas()
       }
@@ -1018,13 +1017,9 @@ private struct ShazamListenView: View {
         if let found {
           ShazamFoundView(model: model, song: found, close: close) { attempt += 1 }
         } else if let failure {
-          ContentUnavailableView {
-            Label("No song found", systemImage: "shazam.logo")
-          } description: {
-            Text(failure.message)
-          } actions: {
+          PigQuietState("No song found", line: failure.message) {
             Button("Try again") { attempt += 1 }.pigPrimaryAction()
-          }
+          }.frame(maxHeight: .infinity)
         } else {
           VStack(spacing: 16) {
             ProgressView().controlSize(.large)
@@ -1225,11 +1220,11 @@ private struct ShazamInboxView: View {
       ? .catalogue(artistId: nil) : .library
     List {
       if songs.isEmpty {
-        ContentUnavailableView(
-          "Nothing Shazamed yet", systemImage: "shazam.logo",
-          description: Text(
+        PigQuietState(
+          "Nothing Shazamed yet",
+          line:
             "Songs you identify with What's playing? in Search, or share to PigMusic from the Shazam app, appear here."
-          ))
+        ).listRowBackground(Color.clear)
       } else {
         Section {
           if requesting {

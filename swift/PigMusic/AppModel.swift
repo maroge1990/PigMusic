@@ -86,6 +86,12 @@ enum PlayOrigin: Hashable {
   /// library of a restored account, or the sign-in form. The splash ends here,
   /// not after the first refresh and not after a fixed time (brand 1.8 §8).
   private(set) var launched = false
+  /// The last library refresh could not reach PigMusic. The saved library
+  /// carries on; an empty one says so instead of looking empty (#180).
+  private(set) var syncFailed = false
+  /// Asks the tab bar to open Search: an empty library's one action.
+  private(set) var searchRequests = 0
+  func openSearch() { searchRequests += 1 }
   /// Whether the scene is active and the foreground work runs (#97).
   @ObservationIgnored private var foreground = ForegroundGate()
   @ObservationIgnored private let defaults: UserDefaults
@@ -541,6 +547,7 @@ enum PlayOrigin: Hashable {
             ? "" : "; \(changed.count) changed songs" + (invalid ? ", playback stopped" : "")))
       message =
         invalid ? "Playback stopped because the server changed or removed cached music." : nil
+      syncFailed = false
     } catch NativeFailure.authentication {
       guard account.isCurrent(stamp) else { return }
       revoked(generation: stamp)
@@ -552,6 +559,7 @@ enum PlayOrigin: Hashable {
         DiagnosticsLog.shared.record("sync", line)
       }
       message = nil
+      syncFailed = true
     }
     // A category chosen during this sync, changed or failed, loads now;
     // `syncing` stays set until this finishes, so a later choice joins it.
@@ -1302,6 +1310,7 @@ enum PlayOrigin: Hashable {
     artists = []
     playlists = []
     songCount = 0
+    syncFailed = false
     albumCount = 0
     artistCount = 0
     albumCategory = "album"

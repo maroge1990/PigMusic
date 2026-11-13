@@ -80,9 +80,10 @@ def test_one_paging_label():
     assert labels and all(label.startswith("Show more") for label in labels), labels
 
 
-def test_whole_screen_empties_use_content_unavailable_view():
+def test_whole_screen_empties_use_one_quiet_state():
+    """#159, then D-82: one kind of empty screen, now the pig's quiet state."""
     assert (
-        'ContentUnavailableView(\n          "No downloads yet"'
+        'PigQuietState(\n          "No downloads yet"'
         in sources()["DownloadsView.swift"]
     )
 

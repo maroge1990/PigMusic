@@ -208,6 +208,7 @@ struct LibraryShell: View {
     .onChange(of: selection) { _, chosen in
       if chosen == .search { searchFocus += 1 }
     }
+    .onChange(of: model.searchRequests) { selection = .search }
     if #available(iOS 26.1, *) {
       view.tabBarMinimizeBehavior(.onScrollDown)
         .tabViewBottomAccessory(isEnabled: playing) {

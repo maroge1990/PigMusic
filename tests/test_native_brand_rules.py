@@ -35,3 +35,25 @@ def test_the_splash_ends_when_the_saved_library_is_shown():
     assert attached < restore.index("launched = true", attached)
     assert restore.index("launched = true", attached) < restore.index("await refresh()")
     assert re.search(r"defer \{[^}]*launched = true", restore)
+
+
+def test_empty_and_error_screens_show_the_pig_with_one_line():
+    """D-82: the iPhone's quiet moments show the pig with one short line, as
+    the web's Empty does. They were system ContentUnavailableViews; Library
+    had no error state and Downloads offered "Connect your library" with no
+    way to act on it."""
+    for name in ("SearchViews.swift", "LibraryViews.swift", "DownloadsView.swift"):
+        assert "ContentUnavailableView" not in source(name), name
+    assert "Connect your library" not in source("DownloadsView.swift")
+    brand = (ROOT / "swift/PigKit/Sources/PigBrand/BrandViews.swift").read_text()
+    quiet = brand[brand.index("public struct PigQuietState") :]
+    assert 'Image("PigMark")' in quiet and ".accessibilityHidden(true)" in quiet
+    library = source("LibraryViews.swift")
+    empty = library[library.index("private var emptyLibrary") :]
+    empty = empty[: empty.index("\n  }\n")]
+    # Loading, error with a way to recover, and empty with the one action.
+    assert "model.syncing" in empty
+    assert "model.syncFailed" in empty and "model.refresh()" in empty
+    assert "model.openSearch()" in empty
+    model = source("AppModel.swift")
+    assert "syncFailed = true" in model and "syncFailed = false" in model
