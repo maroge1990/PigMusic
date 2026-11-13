@@ -269,12 +269,15 @@ class StallWatch:
         reported = None
         while True:
             # Wake when this beat would become a stall, or, once it has been
-            # reported, when it is due to be reported again.
+            # reported, when it is due to be reported again; but never sleep
+            # longer than a stall takes, so a loop that recovers and stalls
+            # again inside the repeat interval is still caught.
             beat = self.beat
             due = beat + self.stalled_seconds
             if reported and reported[0] == beat:
                 due = max(due, reported[1] + self.repeat_seconds)
-            if self.stopping.wait(max(due - time.monotonic(), self.least_wait)):
+            wait = min(due - time.monotonic(), self.stalled_seconds)
+            if self.stopping.wait(max(wait, self.least_wait)):
                 return
             beat, now = self.beat, time.monotonic()
             stuck = now - beat

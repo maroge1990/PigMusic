@@ -257,6 +257,29 @@ def test_stall_watch_logs_where_the_loop_is_stuck(caplog):
     assert "in hold_the_loop" in stuck[0] and "asyncio 1/" in stuck[0]
 
 
+def test_stall_watch_reports_a_second_stall_soon_after_a_recovery(caplog):
+    """Codex (#172 round 1): after reporting a stall the watch slept for the
+    whole repeat interval, so a stall that began after the loop recovered,
+    within that interval, went unreported."""
+    caplog.set_level(logging.INFO, "pig_music.timing")
+
+    async def scenario():
+        stall = StallWatch(stalled_seconds=0.2, repeat_seconds=10)
+        stall.start()
+        watcher = asyncio.create_task(watch_event_loop(interval=0.05, stall=stall))
+        await asyncio.sleep(0.1)
+        time.sleep(0.5)  # First stall.
+        await asyncio.sleep(0.2)  # Recovered.
+        time.sleep(0.5)  # Second stall, well inside repeat_seconds.
+        await asyncio.sleep(0.2)
+        stall.stop()
+        watcher.cancel()
+
+    asyncio.run(scenario())
+    stuck = [r for r in caplog.records if "stuck for" in r.getMessage()]
+    assert len(stuck) == 2, [r.getMessage()[:40] for r in stuck]
+
+
 def test_stall_watch_lets_a_finished_jobs_memory_go(caplog):
     caplog.set_level(logging.INFO, "pig_music.timing")
 
