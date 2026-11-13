@@ -500,3 +500,63 @@ def test_taps_on_one_song_share_one_search_even_when_overtaking():
         asyncio.run(scenario())
     finally:
         release.set()
+
+
+def test_overtaken_look_aheads_never_hold_the_budget_waiting():
+    """Codex, #192 confirmation 3 (medium): an overtaken look-ahead waited
+    for the lookup that replaced it while holding a look-ahead slot. Two of
+    them, whose replacements were newer look-aheads, held both slots that
+    those replacements needed, for ever."""
+    import threading
+
+    import httpx
+
+    from server import remote
+
+    release = threading.Event()
+    searched = []
+
+    def search(query, limit):
+        searched.append(query)
+        if "busy" in query:
+            release.wait(5)
+        return []
+
+    resolver = RemoteAudio(search)
+
+    def song(title):
+        return {"artist": "Fixture", "title": title, "album": "Fixture"}
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            busy = [
+                asyncio.ensure_future(resolver.match(client, song(f"busy{n}")))
+                for n in range(remote.LOOKAHEAD_SLOTS)
+            ]
+            await asyncio.sleep(0.1)
+            old = [
+                asyncio.ensure_future(resolver.match(client, song(t)))
+                for t in ("a", "b")
+            ]
+            await asyncio.sleep(0.05)
+            # Taps overtake both and miss at once.
+            for title in ("a", "b"):
+                with pytest.raises(ValueError):
+                    await resolver.resolve(client, song(title))
+            # Another person's look-ahead queues the same songs again.
+            new = [
+                asyncio.ensure_future(resolver.match(client, song(t)))
+                for t in ("a", "b")
+            ]
+            await asyncio.sleep(0.05)
+            release.set()
+            results = await asyncio.wait_for(
+                asyncio.gather(*busy, *old, *new, return_exceptions=True), 3
+            )
+            assert all(isinstance(r, ValueError) for r in results)
+            assert resolver.speculative_slots._value == remote.LOOKAHEAD_SLOTS
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        release.set()

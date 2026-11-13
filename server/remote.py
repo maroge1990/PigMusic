@@ -676,20 +676,19 @@ class RemoteAudio:
         key = self.key(track)
         if speculative:
             async with self.speculative_slots:
-                current = self.resolving.get(key)
-                if current is not entry:
-                    # A tap overtook this look-ahead: its answer is the one,
-                    # and a miss it found is not searched again.
-                    if current is not None:
-                        return await shared_result(current.task)
-                    cached = self.cache.get(key)
-                    if cached and cached[0] > self.clock():
-                        return cached[1]
-                    raise ValueError("Looked up by a tap already.")
-                if entry is not None:
+                if self.resolving.get(key) is entry:
                     entry.started = True
-                # Its own budget only: never one of the taps' slots.
-                return await self._lookup(client, track, key, contextlib.nullcontext())
+                    # Its own budget only: never one of the taps' slots.
+                    return await self._lookup(
+                        client, track, key, contextlib.nullcontext()
+                    )
+            # A tap overtook this look-ahead. Only other look-aheads wait on
+            # it, so it never waits in turn (waiting while holding the budget
+            # could deadlock, Codex confirmation 3): a cached answer, or done.
+            cached = self.cache.get(key)
+            if cached and cached[0] > self.clock():
+                return cached[1]
+            raise ValueError("Looked up by a tap already.")
         if entry is not None:
             entry.started = True
         return await self._lookup(client, track, key, self.slots)
