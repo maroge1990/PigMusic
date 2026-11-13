@@ -5,7 +5,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 13 Nov 2026 (morning, Melbourne).*
+*Overwritten at the end of every session. 13 Nov 2026 (afternoon, Melbourne).*
 
 - **Live:** release `artwork-20261113-v1`, server `8ee4c29`, since 13 Nov 09:37 Melbourne (D-52: nobody playing; Mark
   ran the apply step himself because the permission system blocks Claude from changing the live container). Healthy;
@@ -22,9 +22,14 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   and Watch simulator builds OK. **Live check next:** after tonight's mix run, the warmer log should show covers
   prepared at publish time and Home mixes should open with covers on the web; the iPhone retry needs TestFlight build
   0.2.0 (24), not yet built.
+- **Pushed, not released:** batch 'brand' (#179): `7f70104` Pig family 1.9.0 vendored with its glass stylesheet (no
+  asset byte changed), `d5b770f` brand glass on the song menu and phone dock, solid under Reduce Transparency (and the
+  build no longer strips the standard `backdrop-filter`, so Chromium shows the blur again), `40828c0` rounded tabular
+  figures on admin glance and queue progress (D-84), `a073184` light default theme colour. One Codex round: no high
+  finding; two medium ones filed as #186 and #187. Rides with the next server release (after batch 3).
 - **Decisions 13 Nov:** D-79 Undo over confirm (#183), D-80 drop SoundCloud and yt-dlp with #94 (Monochrome enabled live but
   never searched: check its configuration in #94), D-81 navigation names stay, D-82 the pig on iPhone empty and error
-  states (#180), D-83 no Watch artwork (set aside), D-84 rounded tabular figures only where compared (#179, #180). D-78
+  states (#180), D-83 no Watch artwork (set aside), D-84 rounded tabular figures only where compared (#179, #180), D-85 brand glass where it fits on the web (#179). D-78
   clean-up of the 9 Nov rollback still waits on Mark's hands.
 - **iPhone/Watch:** 0.2.0 (24) uploaded to TestFlight 13 Nov 10:00 Melbourne (`32c9b28`; the artwork retry, #168), waiting
   on Mark's device check: open a mix, check covers and the lock screen artwork. Build 23's items (#149, #157–#163)
@@ -36,7 +41,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 ## Now
 
 1. **Mark on build 24 (T5):** covers in a mix and on the lock screen (#168); then the audit batches in the report's
-   order, starting with the brand re-vendor (#179). Live check of the artwork release after tonight's mix run.
+   order: brand (#179) is pushed, next is lock contention and idle work (#171, #172). Live check of the artwork release after tonight's mix run.
 2. **Mark on build 21 (T5)**, then send diagnostics: Shazam (identify, Shazamed, Share from the Shazam app), Add to my
    playlists, a few songs not on the server (#23 timing, #94), Home a few times (#22), searches (#54).
 3. **#123** deferred Watch publish never rescheduled after an account change (native; build 22 with any device findings).
