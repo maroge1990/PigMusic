@@ -371,6 +371,35 @@ test("the song shelf fades the edge it can still scroll towards", async ({
   await expect.poll(edges).toBe("32px 0px");
 });
 
+test("#182 (Codex round 2): a shelf that fits shows no fade", async ({
+  page,
+}) => {
+  const songs = Array.from({ length: 3 }, (_, i) => ({
+    ...item("s" + i, "Song " + i),
+    title: "Song " + i,
+    album: "Album one",
+    duration: 200,
+  }));
+  await mockApi(page, {
+    answers: {
+      "/v1/home/recommended": (route) => route.fulfill({ json: feed("") }),
+      "/v1/home/popular": (route) =>
+        route.fulfill({ json: { ...feed("Popular in Australia"), songs } }),
+    },
+  });
+  await page.goto("/#/home");
+  const list = page.locator(".home-songs");
+  await expect(list.locator(".song-row")).toHaveCount(3);
+  expect(await list.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(
+    false,
+  );
+  const edges = await list.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return `${s.getPropertyValue("--shelf-fade-start")} ${s.getPropertyValue("--shelf-fade-end")}`;
+  });
+  expect(edges).toBe("0px 0px");
+});
+
 // #105: a first-ever chart build can take several minutes; Home keeps
 // checking while it is preparing and shows the chart when it arrives.
 test("a chart that takes over two minutes still appears on an open Home", async ({

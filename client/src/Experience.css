@@ -541,20 +541,24 @@
   overflow-x: auto;
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
-  /* Scroll-edge fades (#182): an edge fades only while there is more to
-     scroll that way; a shelf that fits, or a browser without scroll
-     timelines, shows no fade. */
-  mask-image: linear-gradient(
-    to right,
-    transparent,
-    #000 var(--shelf-fade-start),
-    #000 calc(100% - var(--shelf-fade-end)),
-    transparent
-  );
-  animation: shelf-edges linear both;
-  animation-timeline: scroll(x self);
   margin-right: calc(-1 * var(--space-16));
   padding-right: var(--space-16);
+}
+@supports (animation-timeline: scroll(x self)) {
+  .home-songs {
+    /* Scroll-edge fades (#182): an edge fades only while there is more to
+       scroll that way; a shelf that fits, or a browser without scroll
+       timelines (no @supports match), shows no fade. */
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      #000 var(--shelf-fade-start),
+      #000 calc(100% - var(--shelf-fade-end)),
+      transparent
+    );
+    animation: shelf-edges linear both;
+    animation-timeline: scroll(x self);
+  }
 }
 .home-songs::-webkit-scrollbar {
   display: none;

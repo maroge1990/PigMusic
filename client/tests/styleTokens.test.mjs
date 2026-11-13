@@ -63,3 +63,16 @@ test("#182: letter-spacing scales with the type (em, not px)", () => {
   );
   assert.deepEqual(fixed, []);
 });
+
+test("#182 (Codex round 2): the shelf fade applies only where scroll timelines exist", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("Experience.css", SRC), "utf8");
+  const guarded =
+    /@supports \(animation-timeline: scroll\(x self\)\) \{\s*\.home-songs \{[^}]*\}\s*\}/.exec(
+      css,
+    );
+  assert.ok(guarded, "the fade sits in an @supports block");
+  const rest = css.replace(guarded[0], "");
+  for (const rule of rest.matchAll(/\.home-songs \{([^}]*)\}/g))
+    assert.doesNotMatch(rule[1], /mask-image|animation/);
+});
