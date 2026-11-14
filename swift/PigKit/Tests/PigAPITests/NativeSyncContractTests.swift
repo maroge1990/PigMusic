@@ -193,6 +193,7 @@ final class NativeSyncContractTests: XCTestCase {
       eventId: UUID().uuidString, trackId: tracks[0].id,
       playedAt: Int(Date().timeIntervalSince1970), seconds: 30)
     try await service.recordListens([qualified])
+    try await service.reportFirstSound(FirstSound(ms: 1240, source: "remote", action: "skip"))
     try await service.recordListens([qualified])  // Replay is idempotent on the server.
     let export: [String: Any] = [
       "Tracks": [

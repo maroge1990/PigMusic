@@ -134,6 +134,21 @@ extension NativeService {
     }
   }
 
+  /// How long a start took to be heard (#191). Counted by the server only;
+  /// a failed report is not retried.
+  public func reportFirstSound(_ report: FirstSound) async throws {
+    guard
+      let source = Components.Schemas.FirstSound.sourcePayload(rawValue: report.source),
+      let action = Components.Schemas.FirstSound.actionPayload(rawValue: report.action)
+    else { return }
+    switch try await client.first_sound_api_v1_performance_first_sound_post(
+      .init(body: .json(.init(action: action, ms: min(report.ms, 600_000), source: source))))
+    {
+    case .noContent: return
+    case .unauthorized: throw NativeFailure.authentication
+    default: throw NativeFailure.unavailable("The start time was not recorded.")
+    }
+  }
   public func recordListens(_ events: [ListeningEvent]) async throws {
     guard !events.isEmpty else { return }
     let payload = events.map {

@@ -256,6 +256,8 @@ import PigSync
   }
   func clearAccount() {
     onListen = nil
+    onFirstSound = nil
+    startTimer.cancel()
     onCheckpoint = nil
     stop()
     let old = repository
@@ -393,14 +395,15 @@ import PigSync
     watchSlowStart()
   }
   /// What the person asked for and when, until the first sound of it.
-  @ObservationIgnored private var startRequest: (what: String, at: ContinuousClock.Instant)?
-  private func timeStart(_ what: String) { startRequest = (what, .now) }
+  @ObservationIgnored private var startTimer = StartClock()
+  /// Each start's wait, for the server's parity counters (#191).
+  @ObservationIgnored var onFirstSound: (@MainActor (FirstSound) -> Void)?
+  private func timeStart(_ what: String) { startTimer.begin(what) }
   private func reportStart(_ mode: String) {
-    guard let request = startRequest else { return }
-    startRequest = nil
+    guard let heard = startTimer.heard(queue.current?.track) else { return }
     DiagnosticsLog.shared.record(
-      "playback",
-      "\(request.what): sound after \(Self.milliseconds(since: request.at)) ms (\(mode))")
+      "playback", "\(heard.action): sound after \(heard.ms) ms (\(mode))")
+    onFirstSound?(heard)
   }
   nonisolated private static func milliseconds(since start: ContinuousClock.Instant) -> Int {
     Int(((ContinuousClock.now - start) / .milliseconds(1)).rounded())
@@ -408,6 +411,8 @@ import PigSync
   private func accept(_ snapshot: QueuePlaybackSnapshot) {
     guard usingEngine else { return }
     if snapshot.state == .playing { reportStart("seamless") }
+    // A start that failed is never reported (#191), as on the web.
+    if snapshot.state == .failed { startTimer.cancel() }
     if snapshot.state != loggedState || snapshot.index != loggedIndex {
       loggedState = snapshot.state
       loggedIndex = snapshot.index
@@ -616,6 +621,7 @@ import PigSync
     if playing { reportStart("stream") }
     preparing = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
     if let failed = player.currentItem?.error {
+      startTimer.cancel()
       recovery.cancel()
       error = failed.userMessage
       preparing = false
@@ -824,6 +830,8 @@ import PigSync
   }
   func pause() {
     measureListen()
+    // A pause before the sound is the person's wait, not the start's (#191).
+    startTimer.cancel()
     recovery.cancel()
     intent.pause()
     suspend()

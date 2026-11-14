@@ -395,6 +395,11 @@ enum PlayOrigin: Hashable {
         await self.flushHistory()
       }
     }
+    player.onFirstSound = { [weak self] report in
+      guard let self, self.account.isCurrent(listeningGeneration), let service = self.service
+      else { return }
+      Task { try? await service.reportFirstSound(report) }
+    }
     player.onUpcoming = { [weak self] tracks in
       guard let self, let service = self.service else { return }
       let archive = self.downloads?.archive
