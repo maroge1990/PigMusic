@@ -9,7 +9,7 @@ type Offer = {
   undo: () => Promise<unknown> | unknown;
   /** Said once Undo has worked. */
   undone: string;
-  /** A deferred action's send: its Undo leaves the moment it is sent. */
+  /** A deferred action's start: its Undo leaves as sending begins. */
   sent?: Promise<unknown>;
 };
 type Note = { id: number; text: string };
@@ -57,7 +57,7 @@ export function UndoBar() {
         setOffers((all) => all.filter((o) => o.id !== offer.id));
       setOffers((all) => [...all, offer]);
       later(drop, UNDO_SHOWN_MS);
-      // Sent (or failed to send): it can no longer be undone.
+      // Being sent: it can no longer be undone.
       offer.sent?.then(drop, drop);
     };
     window.addEventListener(EVENT, offered);

@@ -357,7 +357,11 @@ test("two playlists deleted in a row each keep their own Undo", async ({
   await page.clock.install();
   const deleted: string[] = [];
   const playlist = (id: string, name: string) => (route: Route) => {
-    if (route.request().method() === "DELETE") deleted.push(id);
+    if (route.request().method() === "DELETE") {
+      deleted.push(id);
+      // The server is slow to answer: the Undo must leave all the same.
+      return new Promise<void>(() => {});
+    }
     return route.fulfill({ json: { id, name, revision: 1, entries: [] } });
   };
   await mockApi(page, {
@@ -381,6 +385,6 @@ test("two playlists deleted in a row each keep their own Undo", async ({
   await expect(bar).toContainText("Road trip is back.");
   await page.clock.runFor(11_000);
   await expect.poll(() => deleted).toEqual(["p2"]);
-  // Once sent, its Undo is gone: it can no longer be taken back.
+  // Once sending starts, its Undo is gone, before any answer arrives.
   await expect(bar.getByRole("button", { name: "Undo" })).toHaveCount(0);
 });

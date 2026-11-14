@@ -68,3 +68,32 @@ test("a failed send is reported, and a repeated key sends the earlier first", as
   assert.equal(await later.done, true);
   assert.deepEqual(sent, ["earlier", "later"]);
 });
+
+test("it says when sending starts, before the send has finished", async () => {
+  // Codex, #183 confirmation: an Undo must leave as soon as sending starts,
+  // not when a slow answer arrives.
+  let finish;
+  const action = defer(
+    "g",
+    () => new Promise((resolve) => (finish = resolve)),
+    10,
+  );
+  let started = false;
+  action.started.then(() => (started = true));
+  await wait(30);
+  assert.equal(started, true);
+  assert.equal(action.undo(), false);
+  let done = false;
+  action.done.then(() => (done = true));
+  await wait(5);
+  assert.equal(done, false); // The answer has not arrived yet.
+  finish();
+  assert.equal(await action.done, true);
+  // A page going away starts it at once too.
+  const flushed = defer("h", () => new Promise(() => {}));
+  let flushStarted = false;
+  flushed.started.then(() => (flushStarted = true));
+  flushPending();
+  await wait(1);
+  assert.equal(flushStarted, true);
+});

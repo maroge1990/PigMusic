@@ -12,6 +12,7 @@ type Send = (keepalive: boolean) => Promise<unknown>;
 type Entry = {
   send: Send;
   timer: ReturnType<typeof setTimeout>;
+  start: () => void;
   resolve: (sent: boolean) => void;
   reject: (error: unknown) => void;
 };
@@ -23,6 +24,8 @@ function fire(key: string, keepalive: boolean) {
   if (!entry) return;
   pending.delete(key);
   clearTimeout(entry.timer);
+  // From here it can no longer be undone.
+  entry.start();
   entry.send(keepalive).then(
     () => entry.resolve(true),
     (error: unknown) => entry.reject(error),
@@ -30,24 +33,27 @@ function fire(key: string, keepalive: boolean) {
 }
 
 /**
- * Schedules `send` under `key`. `done` resolves true once it was sent, false
- * if it was undone, and rejects with the send's error. Scheduling a key that
- * is already pending sends the earlier one at once first.
+ * Schedules `send` under `key`. `started` resolves the moment sending
+ * begins, after which it can no longer be undone; `done` resolves true once
+ * it was sent, false if it was undone, and rejects with the send's error.
+ * Scheduling a key that is already pending sends the earlier one at once.
  */
 export function defer(
   key: string,
   send: Send,
   delay = UNDO_DELAY_MS,
-): { undo: () => boolean; done: Promise<boolean> } {
+): { undo: () => boolean; done: Promise<boolean>; started: Promise<void> } {
   fire(key, false);
   let resolve!: (sent: boolean) => void;
   let reject!: (error: unknown) => void;
+  let start!: () => void;
   const done = new Promise<boolean>((yes, no) => {
     resolve = yes;
     reject = no;
   });
+  const started = new Promise<void>((yes) => (start = yes));
   const timer = setTimeout(() => fire(key, false), delay);
-  const entry = { send, timer, resolve, reject };
+  const entry = { send, timer, start, resolve, reject };
   pending.set(key, entry);
   return {
     /** True when it was still pending and is now cancelled. */
@@ -59,6 +65,7 @@ export function defer(
       return true;
     },
     done,
+    started,
   };
 }
 
