@@ -342,3 +342,16 @@ def test_a_failed_deezer_photo_download_still_asks_the_other_sources(tmp_path):
     found = run(get())
     assert found is not None and found.is_file()
     assert asked[-1] == "assets.artistgrid.cx"
+
+
+def test_an_exact_name_on_a_truncated_page_is_not_unique():
+    """Codex round 1 (#194): a namesake may sit on a later page."""
+    unlinked = {"artist/" + ARTIST: {"name": "New Order", "relations": []}}
+    partial = {
+        "search/artist": lambda r: {
+            "data": [{"name": "New Order", "picture_xl": PHOTO}],
+            "total": 21,
+            "next": "https://api.deezer.com/search/artist?q=New+Order&index=10",
+        }
+    }
+    assert photo_of(unlinked, partial)[0] is None

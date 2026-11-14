@@ -174,10 +174,13 @@ class DeezerArt:
         wanted = normalise(name)
         if not wanted:
             return None
-        data = await self.api(client, "search/artist", q=name, limit=10)
+        data = await self.api(client, "search/artist", q=name, limit=100)
+        found = data.get("data") or []
+        if data.get("next") or int(data.get("total") or 0) > len(found):
+            return None  # A namesake may be on a later page.
         named = [
             artist
-            for artist in data.get("data") or []
+            for artist in found
             if isinstance(artist, dict) and normalise(artist.get("name", "")) == wanted
         ]
         # Namesakes are common (three "New Order"s): only a sole match counts.
