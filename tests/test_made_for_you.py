@@ -352,3 +352,32 @@ def test_the_migration_keeps_details_of_earlier_mix_listens(tmp_path, monkeypatc
             "SELECT event_id,title,artist,mix_title FROM listen_details"
         ).fetchall()
     assert rows == [("earlier", "Song 1", "Earlier", "Earlier blend")]
+
+
+def test_rewind_never_offers_a_mix_song_playback_would_refuse(tmp_path, monkeypatch):
+    # Codex round 2: an edition retired over six hours ago, its lease over,
+    # keeps its cached audio (another edition may hold the same song), but
+    # playback refuses it; Rewind must not offer it to Play your top songs.
+    app, owner = protected(tmp_path, monkeypatch)
+    store = app.state.store
+    mixes = store.mixes
+    user, token = member(app, owner)
+    station(app, monkeypatch, [], [])
+    songs = [track(n, duration=180) for n in range(2)]
+    for song in songs:
+        cached(mixes, song, now=time.time())
+    daily = mixes.stage(user, "daily", mixes.day(), "Old blend", "Reason", songs)
+    mixes.publish(daily, songs, mixes.day())
+    now = int(time.time())
+    with client(app, token) as http:
+        report(http, f"mix:{daily}:0", now - 600, "old")
+        live = http.get("/api/v1/rewind", params={"period": "year"}).json()
+        assert live["top_songs"][0]["track"]["available"] is True
+        with store.connect() as conn:
+            conn.execute(
+                "UPDATE mix_editions SET active=0,retired_at=?,lease_until=0 WHERE id=?",
+                (now - 7 * 3600, daily),
+            )
+        assert http.post(f"/api/v1/playback/mix:{daily}:0/url").status_code == 404
+        year = http.get("/api/v1/rewind", params={"period": "year"}).json()
+    assert year["top_songs"][0]["track"]["available"] is False

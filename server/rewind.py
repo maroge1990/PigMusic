@@ -149,12 +149,12 @@ def rewind(store, mixes, user, period):
             return {**track_dto(track), "server_state": "in_library"}
         if track_id.startswith("mix:"):
             _, identity, index = track_id.split(":")
-            entry = known.get(track_id)
-            if entry is None and track_id not in known:
-                try:
-                    entry = mixes.entry(user, track_id)
-                except LookupError:
-                    entry = None
+            # Playable only as playback allows it: a retired edition past its
+            # lease is refused even while its audio is cached (Codex round 2).
+            try:
+                entry = mixes.entry(user, track_id, playback=True)
+            except LookupError:
+                entry = None
             if entry:
                 dto = mixes.track_dto(identity, int(index), entry, members)
                 if dto:
