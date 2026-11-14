@@ -13,6 +13,11 @@ from .catalogue import settled
 FANART_SLOTS = 4
 
 
+def key_tag(token):
+    """A short, stable tag of a secret key for cache names; never the key."""
+    return hashlib.sha256((token or "").encode()).hexdigest()[:12]
+
+
 class Fanart:
     def __init__(self, store):
         self.store = store
@@ -33,12 +38,7 @@ class Fanart:
         return albums.get(group_id, {}) if isinstance(albums, dict) else {}
 
     async def read(self, client, path, token):
-        key = (
-            "fanart-metadata:"
-            + path.removeprefix("music/")
-            + ":"
-            + hashlib.sha256(token.encode()).hexdigest()[:12]
-        )
+        key = "fanart-metadata:" + path.removeprefix("music/") + ":" + key_tag(token)
         async with self.locks.hold(key):
             cached = await asyncio.to_thread(self.store.read_document, key)
             if cached.get("expires", 0) > time.time():

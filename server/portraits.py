@@ -2,7 +2,6 @@
 
 import asyncio
 from contextlib import nullcontext
-import hashlib
 import csv
 import io
 import re
@@ -18,7 +17,7 @@ from .catalogue import settled
 from .deezer_art import deezer_image
 from .library import identifier, normalise
 from .media import settings
-from .fanart import Fanart
+from .fanart import Fanart, key_tag
 
 
 class Portraits:
@@ -167,6 +166,6 @@ class Portraits:
 
 def portrait_target(store, name, artist_id=None):
     config = settings(store)
-    provider = hashlib.sha256(config.get("fanart_key", "").encode()).hexdigest()[:12]
+    provider = key_tag(config.get("fanart_key", ""))
     key = identifier("portrait-v2", (artist_id or normalise(name)) + provider)
     return store.cover_dir / (key + ".jpg")

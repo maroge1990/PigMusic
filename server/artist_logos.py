@@ -1,12 +1,12 @@
 """Display-only Fanart artist wordmarks, kept as transparent PNGs."""
 
-import asyncio, hashlib, time
+import asyncio, time
 from .keyed_locks import KeyedLocks
 from .images import save_image
 from .library import identifier
 from .catalogue import mbid, settled
 from .media import settings
-from .fanart import Fanart, best
+from .fanart import Fanart, best, key_tag
 
 
 class Logos:
@@ -73,6 +73,6 @@ def logo_target(store, artist_id):
     key = identifier(
         "artist-logo",
         mbid(artist_id),
-        hashlib.sha256(token.encode()).hexdigest()[:12],
+        key_tag(token),
     )
     return store.cover_dir / "logos" / (key + ".png")

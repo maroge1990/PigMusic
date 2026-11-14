@@ -136,3 +136,28 @@ def test_every_fanart_request_shares_one_budget(tmp_path):
 
     asyncio.run(scenario())
     assert state["most"] == FANART_SLOTS
+
+
+def test_fanart_file_names_are_unchanged_by_the_shared_key_tag(tmp_path):
+    """#170 refactor: cached logos, backgrounds and portraits keep their names."""
+    import hashlib
+    import json
+
+    from server.artist_backgrounds import background_target
+    from server.artist_logos import logo_target
+    from server.library import identifier
+    from server.portraits import portrait_target
+
+    (tmp_path / "media-settings.json").write_text(
+        json.dumps({"portraits": True, "fanart_key": "secret"}), encoding="utf-8"
+    )
+    store = Store(tmp_path)
+    tag = hashlib.sha256(b"secret").hexdigest()[:12]
+    artist = "11111111-1111-4111-8111-111111111111"
+    assert logo_target(store, artist).stem == identifier("artist-logo", artist, tag)
+    assert background_target(store, artist).stem == identifier(
+        "artist-background", artist, tag
+    )
+    assert portrait_target(store, "Name", artist).stem == identifier(
+        "portrait-v2", artist + tag
+    )
