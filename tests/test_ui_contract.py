@@ -179,6 +179,23 @@ def test_a_stale_native_edit_answers_conflict_not_bad_request(tmp_path, monkeypa
         assert invalid.status_code == 400, invalid.text
 
 
+def test_a_member_reports_first_sound_like_the_owner(tmp_path, monkeypatch):
+    # #191: the counters take every player's starts; a member's web player
+    # and phone were refused with owner_only.
+    app = household(tmp_path, monkeypatch)
+    with TestClient(app, base_url="https://private.ts.net") as client:
+        for username in ("member", "mark"):
+            sign_in(client, username)
+            heard = client.post(
+                "/api/v1/performance/first-sound",
+                headers=WRITE,
+                json={"ms": 900, "source": "library", "action": "play"},
+            )
+            assert heard.status_code == 204, (username, heard.text)
+        sign_in(client, "member")
+        assert client.get("/api/v1/admin/performance").status_code == 403
+
+
 def test_admin_access_reports_public_origin_to_owner_only(tmp_path, monkeypatch):
     monkeypatch.setenv("PIG_MUSIC_PUBLIC_ORIGIN", "https://music.example.test")
     app = household(tmp_path, monkeypatch)

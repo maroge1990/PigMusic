@@ -1239,7 +1239,10 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         # "next": the queue moved on by itself when a song ended.
         action: Literal["play", "skip", "previous", "next", "seek"] = "play"
 
-    @app.post("/api/v1/performance/first-sound", status_code=204)
+    # Every player reports, members too: the route is personal (#191).
+    @app.post(
+        "/api/v1/performance/first-sound", status_code=204, tags=["personal-library"]
+    )
     async def first_sound(body: FirstSound):
         """Players report how long a start took to be heard (#191)."""
         performance.record("first-sound", body.source, "heard", body.ms, body.action)

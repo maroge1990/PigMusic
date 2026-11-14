@@ -20168,7 +20168,10 @@
             "deviceBearer": []
           }
         ],
-        "summary": "First Sound"
+        "summary": "First Sound",
+        "tags": [
+          "personal-library"
+        ]
       }
     },
     "/api/v1/play-events": {
