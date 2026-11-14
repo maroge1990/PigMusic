@@ -7,8 +7,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 *Overwritten at the end of every session. 15 Nov 2026 (Melbourne), later.*
 
-- **Live:** release `native-20261114-v2`, server `6ab9f7e` (D-99), healthy. Rollback: container
-  `PigMusic-before-native-20261114-v2`, backup `pre-native-20261114-v2`. No server change since.
+- **Live:** release `madeforyou-20261115-v1`, server `d9c0df8` (D-99), applied 15 Nov, healthy (see batch 11).
 - **TestFlight 0.2.0 (25):** uploaded 14 Nov 20:55 (the first run failed silently at signing; the script now runs
   with its output saved to `~/pigmusic-archives/upload.log` on the Mac).
 - **Batch 10 (#184), Mark's device round on build 25, in progress:** area 1 (iPhone Undo, haptics, hairlines) passed
@@ -28,7 +27,9 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   in Up next; iPhone fetches ahead and plays on) and Rewind (server `/rewind`, web `#/home/rewind`, iPhone Home ›
   Your Rewind). Migration 14 `listen_details` keeps what each listen was, so a year survives mix clean-up; a listen
   counts as the song's length (the apps report once at 30 s). Codex round 1 (a high and two mediums), round 2 (a
-  medium) and the confirmation approved. Server and web: release next; iPhone: TestFlight (27) with batch 10b.
+  medium) and the confirmation approved. **Live** as `madeforyou-20261115-v1` (server `d9c0df8`, migration 14;
+  rollback: container `PigMusic-before-madeforyou-20261115-v1`, backup `pre-madeforyou-20261115-v1`; an older image
+  needs that backup). iPhone half in TestFlight 0.2.0 (27) with batch 10b.
 - **#188:** build 25's export: no transport failures while online (baseline 54 of 166), all HTTP/2; replies still
   take 1.5 s median (p90 3.1 s) on the path, not the server. Next: ask Mark whether HTTP/3 stays off, then suggest
   "Always use HTTPS".
