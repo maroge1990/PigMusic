@@ -443,23 +443,8 @@ public actor NativeService: LibrarySource {
     }
   }
 
-  public func searchServer(query: String, offset: Int = 0, revision: String? = nil) async throws
-    -> ServerSearchPage
-  {
-    switch try await client.search_api_v1_search_get(
-      .init(
-        query: .init(q: SearchText.clean(query), offset: offset, limit: 100, revision: revision)))
-    {
-    case .ok(let response): return try LibraryCodec.convert(response.body.json)
-    case .unauthorized: throw NativeFailure.authentication
-    case .conflict: throw NativeFailure.changed
-    default:
-      throw NativeFailure.unavailable(
-        "Server search is unavailable. Your cached results are still accessible.")
-    }
-  }
   /// The ranked search (D-61). An older server without it answers 404:
-  /// `SearchUnsupported`, and the app keeps its earlier search.
+  /// `SearchUnsupported`, and the app searches this phone's library.
   public func foundResults(query: String) async throws -> FoundResults {
     switch try await client.find_api_v1_search_results_get(
       .init(query: .init(q: SearchText.clean(query), limit: 50)))

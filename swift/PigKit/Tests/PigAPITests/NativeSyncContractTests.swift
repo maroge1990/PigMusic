@@ -92,10 +92,11 @@ final class NativeSyncContractTests: XCTestCase {
     XCTAssertEqual(imageResponse.mimeType, "image/webp")
     let image = try ArtworkCache.thumbnail(imageData, width: 256)
     XCTAssertEqual(image.width, 256)
-    let results = try await service.searchServer(query: "Song")
-    XCTAssertEqual(results.tracks.count, 2)
-    XCTAssertEqual(results.householdTracks.count, 1)
-    let shared = try XCTUnwrap(results.householdTracks.first)
+    let results = try await service.foundResults(query: "Song")
+    let household = results.songs.filter { $0.serverState == "household_available" }
+    XCTAssertEqual(results.songs.count - household.count, 2)
+    XCTAssertEqual(household.count, 1)
+    let shared = try XCTUnwrap(household.first)
     XCTAssertEqual(shared.serverState, "household_available")
     // Household songs stream without being added; playing never adds them.
     let householdURL = try await service.resolve(shared)
@@ -121,8 +122,8 @@ final class NativeSyncContractTests: XCTestCase {
     try await coordinator.refresh()
     let afterAdd = try await store.count(.tracks)
     XCTAssertEqual(afterAdd, 3)
-    let refreshed = try await service.searchServer(query: "Song")
-    XCTAssertEqual(refreshed.householdTracks.count, 0)
+    let refreshed = try await service.foundResults(query: "Song")
+    XCTAssertFalse(refreshed.songs.contains { $0.serverState == "household_available" })
     let requested = try await service.requestMusic([
       Track(
         id: "missing", title: "Missing fixture song", artist: "Fixture Artist", album: "Other album"

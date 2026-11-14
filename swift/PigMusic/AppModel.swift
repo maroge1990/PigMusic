@@ -38,9 +38,8 @@ enum PlayOrigin: Hashable {
   var homeContent: [HomeSection: HomeContent] = [:]
   var homeErrors: [HomeSection: String] = [:]
   var homeLoading: Set<HomeSection> = []
-  var searchSession: SearchSession?
-  /// The ranked search (D-61); nil offline-only (demo). Falls back to
-  /// `searchSession` when the server predates it.
+  /// The ranked search (D-61); this phone's library when the server can't
+  /// answer, and the only one in the demo (#177).
   var foundSearch: FoundSearch?
   var actionTrack: Track?
   /// Favourite state by song, shared by the player's star and Song actions.
@@ -441,11 +440,8 @@ enum PlayOrigin: Hashable {
         restored: restoredQueue)
     }
     foundSearch = FoundSearch(
-      source: service, applePlaylists: AppleMusicCatalogue.playlistSearch
+      source: service, library: database, applePlaylists: AppleMusicCatalogue.playlistSearch
     ) { [weak self] in
-      self?.revoked(generation: stamp)
-    }
-    searchSession = SearchSession(cached: database, online: service) { [weak self] in
       self?.revoked(generation: stamp)
     }
     sync = SyncCoordinator(source: service, store: database)
@@ -1300,8 +1296,6 @@ enum PlayOrigin: Hashable {
     libraryEvent = nil
     if let downloads { Task { await downloads.clear() } }
     downloads = nil
-    searchSession?.clear()
-    searchSession = nil
     foundSearch?.clear()
     foundSearch = nil
     actionTrack = nil
@@ -1382,7 +1376,7 @@ enum PlayOrigin: Hashable {
         images.cache = try ArtworkCache(directory: demoDirectory)
         artworkNamespace = "synthetic-demo"
         store = database
-        searchSession = SearchSession(cached: database)
+        foundSearch = FoundSearch(source: nil, library: database)
         person = try LibraryCodec.decoder().decode(
           Person.self,
           from: Data(

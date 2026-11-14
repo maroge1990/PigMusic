@@ -15,15 +15,14 @@ struct SearchView: View {
   @State private var handledFocus = 0
   var body: some View {
     Group {
-      // The ranked search when the server has it and something is typed;
-      // the earlier search before typing (recent picks), offline and on an
-      // older server.
-      if let found = model.foundSearch, !found.unsupported,
-        !SearchText.clean(query).isEmpty, found.error == nil || found.results != nil
-      {
-        FoundResultsView(model: model, search: found)
-      } else if let session = model.searchSession {
-        SearchResultsView(model: model, session: session)
+      // Recent picks before typing; then the ranked search, which searches
+      // this phone's library when the server can't answer (#177).
+      if let found = model.foundSearch {
+        if SearchText.clean(query).isEmpty {
+          SearchStartView(model: model)
+        } else {
+          FoundResultsView(model: model, search: found)
+        }
       } else {
         ProgressView("Opening library…")
       }
@@ -41,7 +40,6 @@ struct SearchView: View {
     .task(id: "\(model.artworkNamespace)|\(SearchText.clean(query))") {
       // Debounce typing; the previous results stay until new ones arrive.
       if SearchText.clean(query).isEmpty {
-        model.searchSession?.clear()
         model.foundSearch?.clear()
         return
       }
@@ -57,14 +55,8 @@ struct SearchView: View {
       }.disabled(SearchText.clean(query).isEmpty)
     }
   }
-  /// The ranked search first; the earlier one when it can't answer (an older
-  /// server, or offline), which also searches this phone's library.
   private func search(force: Bool) async {
-    if let found = model.foundSearch, !found.unsupported {
-      await found.search(query, force: force)
-      if !found.unsupported && found.error == nil { return }
-    }
-    await model.searchSession?.search(query, force: force)
+    await model.foundSearch?.search(query, force: force)
   }
   private func focusIfAsked() {
     guard focusRequest != handledFocus else { return }
@@ -74,97 +66,18 @@ struct SearchView: View {
   }
 }
 
-private struct SearchResultsView: View {
+/// Before anything is typed: Shazam, then recent picks.
+private struct SearchStartView: View {
   let model: AppModel
-  @Bindable var session: SearchSession
   var body: some View {
     List {
-      if session.query.isEmpty {
-        ShazamSection(model: model)
-        if model.recentSearches.picks.isEmpty {
-          PigQuietState(
-            "Find music", line: "Songs, albums, artists and playlists, wherever they are."
-          ).listRowBackground(Color.clear)
-        } else {
-          recent
-        }
+      ShazamSection(model: model)
+      if model.recentSearches.picks.isEmpty {
+        PigQuietState(
+          "Find music", line: "Songs, albums, artists and playlists, wherever they are."
+        ).listRowBackground(Color.clear)
       } else {
-        Section("Your library") {
-          status(
-            loading: session.localLoading, error: session.localError,
-            empty: session.tracks.isEmpty && session.albums.isEmpty && session.artists.isEmpty)
-          ForEach(session.artists) { artist in
-            NavigationLink {
-              SearchArtistView(model: model, artist: artist)
-                .onAppear { model.rememberSearch(.artist(artist)) }
-            } label: {
-              CollectionRow(artist.name) { SavedArtistThumb(model: model, artist: artist) }
-            }
-          }
-          ForEach(session.albums) { album in
-            NavigationLink {
-              AlbumView(model: model, album: album)
-                .onAppear { model.rememberSearch(.album(album)) }
-            } label: {
-              CollectionRow(album.title, subtitle: album.artist) {
-                ArtworkThumb(model: model, source: album.artworkSource, title: album.title)
-              }
-            }
-          }
-          ForEach(session.tracks) { song in
-            SongRow(model: model, track: song) {
-              model.rememberSearch(.song(song))
-              model.play([song])
-            }
-          }
-          if session.localNext != nil {
-            Button("Show more library results") { Task { await session.moreLocal() } }
-              .buttonStyle(.pigSecondary).disabled(session.localLoading)
-          }
-        }
-        if session.onlineEnabled {
-          Section("Household songs") {
-            status(
-              loading: session.householdLoading, error: session.householdError,
-              empty: session.household.isEmpty)
-            ForEach(session.household) { song in
-              SongRow(model: model, track: song) {
-                model.rememberSearch(.song(song))
-                model.play([song], origin: .catalogue(artistId: nil))
-              }
-            }
-            if session.householdNext != nil {
-              Button("Show more household results") { Task { await session.moreHousehold() } }
-                .buttonStyle(.pigSecondary).disabled(session.householdLoading)
-            }
-          }
-          Section("Catalogue artists") {
-            if session.query.count < 2 {
-              Text("Enter at least two characters.").foregroundStyle(.secondary)
-            } else {
-              status(
-                loading: session.catalogueLoading, error: session.catalogueError,
-                empty: session.catalogue.isEmpty)
-              ForEach(session.catalogue) { artist in
-                NavigationLink {
-                  CatalogueArtistView(model: model, artistId: artist.id, name: artist.name)
-                    .onAppear {
-                      model.rememberSearch(.catalogueArtist(id: artist.id, name: artist.name))
-                    }
-                } label: {
-                  CollectionRow(artist.name, subtitle: artist.description) {
-                    ArtworkThumb(
-                      model: model, source: .artist(artist.id), title: artist.name, circle: true)
-                  }
-                }
-              }
-              if session.catalogueNext != nil {
-                Button("More catalogue artists") { Task { await session.moreCatalogue() } }
-                  .disabled(session.catalogueLoading)
-              }
-            }
-          }
-        }
+        recent
       }
     }
   }
@@ -213,11 +126,6 @@ private struct SearchResultsView: View {
         Button("Clear") { model.clearRecentSearches() }.textCase(nil)
       }
     }
-  }
-  @ViewBuilder private func status(loading: Bool, error: String?, empty: Bool) -> some View {
-    if loading { ProgressView("Searching…") }
-    if let error { StatusText(error, kind: .error) }
-    if !loading && error == nil && empty { StatusText("No matches") }
   }
 }
 
@@ -415,9 +323,15 @@ private struct FoundResultsView: View {
         if items.isEmpty {
           if search.loading {
             ProgressView("Searching…")
+          } else if let error = search.error {
+            StatusText(error, kind: .error)
           } else {
             StatusText("No matches")
           }
+        }
+        if search.fromThisPhone {
+          Text("The server can't be reached, so this is music on this phone.")
+            .font(PigType.footnote).foregroundStyle(.secondary)
         }
         if kind == .top || kind == .songs || kind == .albums, let state = search.online?.state,
           state != "ready"

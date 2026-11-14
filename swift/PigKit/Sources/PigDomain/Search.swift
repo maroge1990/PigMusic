@@ -33,16 +33,6 @@ public struct LibrarySearchPage: Sendable {
     self.revision = revision
   }
 }
-public struct ServerSearchPage: Codable, Sendable {
-  public let tracks: [Track]
-  public let householdTracks: [Track]
-  public let artists: [Artist]
-  public let albums: [Album]
-  public let offset: Int
-  public let nextOffset: Int?
-  public let totalHouseholdTracks: Int
-  public let revision: String
-}
 public struct CatalogueArtist: Codable, Sendable, Identifiable {
   public let id: String
   public let name: String

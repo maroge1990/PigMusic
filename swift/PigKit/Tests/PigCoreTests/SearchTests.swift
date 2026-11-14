@@ -40,66 +40,6 @@ import Testing
   #expect(!page.tracks.contains { $0.id == "000" })
 }
 
-private actor DelayedSearch: CachedSearchSource {
-  var waiting: CheckedContinuation<LibrarySearchPage, any Error>?
-  var revision = "one"
-  func searchPage(query: String, offset: Int, limit: Int) async throws -> LibrarySearchPage {
-    if query == "old" { return try await withCheckedThrowingContinuation { waiting = $0 } }
-    return LibrarySearchPage(
-      tracks: [Track(id: "\(query)-\(offset)", title: query, artist: "Artist")], offset: offset,
-      nextOffset: offset == 0 ? 100 : nil, revision: revision)
-  }
-  func ready() -> Bool { waiting != nil }
-  func release() {
-    waiting?.resume(
-      returning: LibrarySearchPage(tracks: [Track(id: "old", title: "old", artist: "Artist")]))
-    waiting = nil
-  }
-  func change() { revision = "two" }
-}
-private struct FailedCatalogue: OnlineSearchSource {
-  func searchServer(query: String, offset: Int, revision: String?) async throws -> ServerSearchPage
-  {
-    try LibraryCodec.decoder().decode(
-      ServerSearchPage.self,
-      from: Data(
-        #"{"tracks":[],"albums":[],"artists":[],"household_tracks":[{"id":"shared","title":"Song","artist":"Artist"}],"offset":0,"next_offset":null,"total_household_tracks":1,"revision":"server"}"#
-          .utf8))
-  }
-  func catalogueArtists(query: String, offset: Int) async throws -> CatalogueArtistPage {
-    throw NativeFailure.unavailable("Provider unavailable")
-  }
-}
-
-@MainActor @Test func replacedSearchAndAccountClearDiscardLateResults() async throws {
-  let source = DelayedSearch()
-  let session = SearchSession(cached: source)
-  let old = Task { await session.search("old") }
-  while !(await source.ready()) { await Task.yield() }
-  await session.search("new")
-  await source.release()
-  await old.value
-  #expect(session.tracks.map(\.id) == ["new-0"])
-  let pending = Task { await session.search("old") }
-  while !(await source.ready()) { await Task.yield() }
-  session.clear()
-  await source.release()
-  await pending.value
-  #expect(session.query.isEmpty && session.tracks.isEmpty && !session.localLoading)
-}
-@MainActor @Test func providerFailurePreservesLocalAndHouseholdAndRevisionChangeRejectsAppend()
-  async throws
-{
-  let source = DelayedSearch()
-  let session = SearchSession(cached: source, online: FailedCatalogue())
-  await session.search("Song")
-  #expect(session.tracks.count == 1 && session.household.map(\.id) == ["shared"])
-  #expect(session.catalogueError == "Provider unavailable")
-  await source.change()
-  await session.moreLocal()
-  #expect(session.tracks.count == 1 && session.localError != nil)
-}
-
 @Test func upgradedCacheBuildsEntityIndexesAndRenamedRowsReplaceOldTerms() async throws {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -133,65 +73,6 @@ private struct FailedCatalogue: OnlineSearchSource {
   #expect(old.albums.isEmpty && old.artists.isEmpty)
   let renamed = try await upgraded.searchPage(query: "Newname")
   #expect(renamed.albums.count == 1 && renamed.artists.count == 1)
-}
-
-private struct ExpiredSearch: OnlineSearchSource {
-  func searchServer(query: String, offset: Int, revision: String?) async throws -> ServerSearchPage
-  { throw NativeFailure.authentication }
-  func catalogueArtists(query: String, offset: Int) async throws -> CatalogueArtistPage {
-    throw NativeFailure.unavailable("Provider failed")
-  }
-}
-@MainActor @Test func expiredSearchClearsAllResultsAndNotifiesAccountOnce() async {
-  var callbacks = 0
-  let session = SearchSession(
-    cached: DelayedSearch(), online: ExpiredSearch(), onAuthentication: { callbacks += 1 })
-  await session.search("Song")
-  #expect(callbacks == 1)
-  #expect(
-    session.tracks.isEmpty && session.household.isEmpty && session.catalogue.isEmpty
-      && session.query.isEmpty)
-}
-
-private actor CountingOnline: OnlineSearchSource {
-  var server = 0
-  var catalogue = 0
-  func searchServer(query: String, offset: Int, revision: String?) async throws -> ServerSearchPage
-  {
-    server += 1
-    return try LibraryCodec.decoder().decode(
-      ServerSearchPage.self,
-      from: Data(
-        #"{"tracks":[],"albums":[],"artists":[],"household_tracks":[],"offset":0,"next_offset":null,"total_household_tracks":0,"revision":"server"}"#
-          .utf8))
-  }
-  func catalogueArtists(query: String, offset: Int) async throws -> CatalogueArtistPage {
-    catalogue += 1
-    return try LibraryCodec.decoder().decode(
-      CatalogueArtistPage.self,
-      from: Data(
-        #"{"artists":[{"id":"\#(query)","name":"\#(query)","description":""}],"total":1,"offset":0,"next_offset":null}"#
-          .utf8))
-  }
-  func counts() -> [Int] { [server, catalogue] }
-}
-@MainActor @Test func typeAheadReusesAnswersAndSkipsShortCatalogueQueries() async {
-  #expect(SearchText.debounce >= .milliseconds(300))
-  let online = CountingOnline()
-  let session = SearchSession(cached: DelayedSearch(), online: online)
-  let start = Date()
-  await session.search("R")
-  #expect(await online.counts() == [1, 0])
-  await session.search("Ra")
-  await session.search("Rad")
-  // Backspacing to an earlier query, in any case, reuses its answers.
-  await session.search("ra", now: start.addingTimeInterval(10))
-  #expect(await online.counts() == [3, 2])
-  #expect(session.catalogue.map(\.id) == ["Ra"])
-  // Refresh, and answers older than five minutes, ask again.
-  await session.search("Ra", force: true)
-  await session.search("Rad", now: start.addingTimeInterval(400))
-  #expect(await online.counts() == [5, 4])
 }
 
 @Test func cacheSyncedBeforeArtistPortraitsResyncsOnce() async throws {
