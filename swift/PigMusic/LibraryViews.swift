@@ -89,17 +89,25 @@ struct LibraryView: View {
     .navigationTitle("Your library")
     .refreshable { await model.refresh() }
     #if DEBUG
-      // Headless UI review: --open-album shows the first album page.
+      // Headless UI review: --open-album shows the first album page and
+      // --open-artist the first artist's.
       .navigationDestination(item: $debugAlbum) { AlbumView(model: model, album: $0) }
+      .navigationDestination(item: $debugArtist) { SavedArtistView(model: model, artist: $0) }
       .task {
-        guard ProcessInfo.processInfo.arguments.contains("--open-album") else { return }
-        while model.albums.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
-        debugAlbum = model.albums.first
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("--open-album") {
+          while model.albums.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
+          debugAlbum = model.albums.first
+        } else if arguments.contains("--open-artist") {
+          while model.artists.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
+          debugArtist = model.artists.first
+        }
       }
     #endif
   }
   #if DEBUG
     @State private var debugAlbum: Album?
+    @State private var debugArtist: Artist?
   #endif
   @ViewBuilder private var content: some View {
     switch tab {
