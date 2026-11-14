@@ -37,6 +37,7 @@ from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
 from mutagen.flac import FLAC, Picture
 from mutagen.oggopus import OggOpus
 from mutagen.oggvorbis import OggVorbis
+from .lossless_check import lossy_cutoff
 from .soulseek import Soulseek
 
 from .audio import probe_file, validate_streams
@@ -591,6 +592,16 @@ class Downloader:
             and abs(probe["duration"] - target["duration"]) > ACQUISITION_TOLERANCE
         ):
             raise ValueError("Downloaded recording has the wrong duration")
+        if probe["codec"] == "flac":
+            # A FLAC made from an MP3 or AAC keeps the encoder's cutoff (#195).
+            cutoff = lossy_cutoff(
+                path, probe.get("sample_rate_hz") or 0, probe["duration"], check
+            )
+            if cutoff:
+                raise ValueError(
+                    "Lossless download looks like lossy audio "
+                    f"(nothing above about {cutoff / 1000:.1f} kHz)"
+                )
         if decode:
             self.decode(path, check)
         return probe
