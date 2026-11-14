@@ -96,11 +96,40 @@ def zipapp(version):
     return body.getvalue()
 
 
+@pytest.fixture(scope="module")
+def releases():
+    """yt-dlp zipapps built from the installed package: `working(version)`
+    imports and runs; `broken(version)` fails on import."""
+    import functools
+    from pathlib import Path
+
+    import yt_dlp
+
+    package = Path(yt_dlp.__file__).parent
+
+    @functools.cache
+    def build(version, broken=False):
+        body = io.BytesIO()
+        with zipfile.ZipFile(body, "w", zipfile.ZIP_STORED) as archive:
+            for path in package.rglob("*.py"):
+                name = "yt_dlp/" + path.relative_to(package).as_posix()
+                text = path.read_bytes()
+                if name == "yt_dlp/version.py":
+                    text = f"__version__ = '{version}'\nRELEASE_GIT_HEAD = ''\nVARIANT = None\nUPDATE_HINT = None\nCHANNEL = 'stable'\nORIGIN = 'yt-dlp/yt-dlp'\n_pkg_version = '{version}'\n".encode()
+                if broken and name == "yt_dlp/__init__.py":
+                    text = b"raise ImportError('incompatible release')\n"
+                archive.writestr(name, text)
+            archive.writestr("__main__.py", "")
+        return body.getvalue()
+
+    return build
+
+
 def test_an_update_installs_only_a_newer_release_matching_its_checksum(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, releases
 ):
     youtube = YouTube(tmp_path)
-    newer = zipapp("2099.01.02")
+    newer = releases("2099.01.02")
     published = {"sum": hashlib.sha256(newer).hexdigest(), "body": newer}
     fetched = []
 
@@ -112,7 +141,7 @@ def test_an_update_installs_only_a_newer_release_matching_its_checksum(
 
     monkeypatch.setattr(youtube_module, "download", download)
     # A body that does not match the published checksum is refused.
-    published["body"] = zipapp("2099.01.03")
+    published["body"] = releases("2099.01.03")
     assert youtube.update() is None
     assert youtube.update_path() is None
     # At most every 6 hours.
@@ -123,14 +152,119 @@ def test_an_update_installs_only_a_newer_release_matching_its_checksum(
     installed = youtube.update_path()
     assert installed.name == "yt-dlp-2099.01.02.zip"
     assert installed.read_bytes() == newer
+    # The worker runs it.
+    assert youtube.ask({"operation": "version"}, installed) == {"version": "2099.01.02"}
     # A changed file on disk is not used.
     installed.write_bytes(b"tampered")
     assert youtube.update_path() is None
     # An older release than the pinned one is never installed.
     (tmp_path / "update" / "checked").unlink()
-    older = zipapp("2001.01.01")
+    older = releases("2001.01.01")
     published.update(sum=hashlib.sha256(older).hexdigest(), body=older)
     assert youtube.update() is None
+
+
+def test_a_release_that_does_not_run_in_the_worker_is_never_activated(
+    tmp_path, monkeypatch, releases
+):
+    """Codex, sources round 1 (high): a checksum-valid release that breaks on
+    import must never replace the pinned version."""
+    youtube = YouTube(tmp_path)
+    broken = releases("2099.02.03", broken=True)
+
+    def download(session, url, limit):
+        if url.endswith("SHA2-256SUMS"):
+            return f"{hashlib.sha256(broken).hexdigest()}  yt-dlp\n".encode()
+        return broken
+
+    monkeypatch.setattr(youtube_module, "download", download)
+    assert youtube.update() is None
+    assert youtube.update_path() is None
+    assert youtube.quarantined() == {"2099.02.03"}
+    assert not list((tmp_path / "update").glob("*.zip"))
+    assert not list((tmp_path / "update").glob(".yt-dlp-*"))
+
+
+def test_an_installed_update_that_breaks_is_set_aside_for_the_pinned_one(
+    tmp_path, releases
+):
+    """Codex, sources round 1 (high): an update that fails where the pinned
+    version works is quarantined for good, also for a new YouTube instance."""
+    folder = tmp_path / "update"
+    folder.mkdir()
+    broken = releases("2099.03.04", broken=True)
+    (folder / "yt-dlp-2099.03.04.zip").write_bytes(broken)
+    (folder / "verified.json").write_text(
+        json.dumps(
+            {
+                "version": "2099.03.04",
+                "sha256": hashlib.sha256(broken).hexdigest(),
+                "file": "yt-dlp-2099.03.04.zip",
+            }
+        )
+    )
+    youtube = YouTube(tmp_path)
+    assert youtube.update_path() is not None
+    asked = []
+
+    def ask(request, update):
+        asked.append(update)
+        if update is not None:  # The real worker with the broken release.
+            return YouTube.ask(youtube, {"operation": "version"}, update)
+        return address()
+
+    youtube.ask = ask
+    assert youtube.resolve(VIDEO)["url"].startswith("https://")
+    assert asked[0] is not None and asked[1] is None
+    assert YouTube(tmp_path).update_path() is None  # Persisted.
+
+
+def test_a_cancelled_search_keeps_its_slot_until_its_thread_ends(tmp_path):
+    """Codex, sources round 1 (medium): a search whose caller stopped waiting
+    (JioSaavn won) still holds its slot, and look-ahead searches with its own
+    client and slot, so taps stay bounded and never queue behind it."""
+    import threading
+
+    youtube = YouTube(tmp_path)
+    release = threading.Event()
+    running = []
+
+    class Searcher:
+        def songs(self, query):
+            running.append(query)
+            release.wait(5)
+            return []
+
+    youtube_module_searcher = youtube_module.GuardedSearch
+    youtube_module.GuardedSearch = Searcher
+    try:
+
+        async def scenario():
+            taps = [
+                asyncio.ensure_future(youtube.songs({"artist": "A", "title": str(n)}))
+                for n in range(2)
+            ]
+            ahead = asyncio.ensure_future(
+                youtube.songs({"artist": "A", "title": "ahead"}, speculative=True)
+            )
+            await asyncio.sleep(0.1)
+            for task in taps:
+                task.cancel()  # JioSaavn won.
+            await asyncio.sleep(0.05)
+            late = asyncio.ensure_future(
+                youtube.songs({"artist": "A", "title": "late"})
+            )
+            await asyncio.sleep(0.1)
+            assert sorted(running) == ["A 0", "A 1", "A ahead"]  # Still bounded.
+            release.set()
+            assert await late == []
+            assert await ahead == []
+            assert "A late" in running
+
+        asyncio.run(scenario())
+    finally:
+        release.set()
+        youtube_module.GuardedSearch = youtube_module_searcher
 
 
 def test_release_version_reads_the_zipapp():
@@ -226,7 +360,7 @@ class FakeYouTube:
         self.searched = []
         self.looked_up = []
 
-    async def songs(self, track):
+    async def songs(self, track, speculative=False):
         self.searched.append(track["title"])
         await asyncio.sleep(self.delay)
         return self.songs_found
@@ -341,7 +475,7 @@ def test_look_ahead_warms_youtube_so_the_tap_waits_for_neither_source(tmp_path):
 
 def test_a_youtube_refusal_leaves_the_tap_uncertain_not_a_miss(tmp_path):
     class Refusing(FakeYouTube):
-        async def songs(self, track):
+        async def songs(self, track, speculative=False):
             raise ProviderError("access_required")
 
     resolver = resolver_with(Refusing([]), lambda *_: [], tmp_path)

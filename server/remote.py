@@ -750,9 +750,9 @@ class RemoteAudio:
         # YouTube's search and lookup, one look-ahead at a time, so taps keep
         # YouTube's slots (#193).
         async with self.youtube_ahead:
-            return await self.on_youtube(track)
+            return await self.on_youtube(track, speculative=True)
 
-    async def on_youtube(self, track):
+    async def on_youtube(self, track, speculative=False):
         """YouTube's copy of the song: the video, kept like JioSaavn's match,
         and its current address."""
         key = self.key(track)
@@ -761,7 +761,7 @@ class RemoteAudio:
             self.videos.move_to_end(key)
             video = kept[1]
         else:
-            songs = await self.youtube.songs(track)
+            songs = await self.youtube.songs(track, speculative)
             found = [c for c in songs if acceptable(track, c)]
             if not found:
                 raise ValueError("YouTube has no match for this song.")

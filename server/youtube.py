@@ -36,6 +36,15 @@ from .providers.contracts import Context, ProviderError
 from .providers.network import client as guarded_client, stream as guarded_stream
 from .providers.process import run_checked
 
+
+async def shared_result(task, timeout=None):
+    """Wait for shared work without cancelling it when the waiter leaves."""
+    done, _ = await asyncio.wait({task}, timeout=timeout)
+    if not done:
+        raise TimeoutError
+    return task.result()
+
+
 log = logging.getLogger("pig_music.youtube")
 
 SEARCH_HOSTS = ("music.youtube.com", "youtube.com")
@@ -85,6 +94,9 @@ class GuardedSearch:
         from ytmusicapi import YTMusic
 
         session = guarded_client()
+        searcher = self
+        # One deadline for a whole search, however many requests it makes.
+        self.deadline = time.monotonic() + SEARCH_SECONDS
 
         class Guarded(YTMusic):
             def _send_request(self, endpoint, body, additionalParams=""):
@@ -98,6 +110,7 @@ class GuardedSearch:
                         YTM_BASE_API + endpoint + self.params + additionalParams,
                         dict(self.headers),
                         json.dumps(body).encode(),
+                        searcher.deadline,
                     )
                 )
 
@@ -112,6 +125,7 @@ class GuardedSearch:
                     url + ("?" + str(query) if params else ""),
                     dict(headers),
                     None,
+                    searcher.deadline,
                 )
 
                 class Reply:
@@ -123,12 +137,12 @@ class GuardedSearch:
 
         self.session = session
         self.music = Guarded()
-        self.lock = threading.Lock()
 
     def songs(self, query, limit=10):
-        # ytmusicapi keeps state (visitor ID, headers) per instance.
-        with self.lock:
-            results = self.music.search(query, filter="songs", limit=limit)
+        # ytmusicapi keeps state (visitor ID, headers) per instance: one
+        # search at a time per searcher, which YouTube.songs guarantees.
+        self.deadline = time.monotonic() + SEARCH_SECONDS
+        results = self.music.search(query, filter="songs", limit=limit)
         songs = []
         for item in results[:limit]:
             video_id = item.get("videoId")
@@ -156,8 +170,8 @@ class GuardedSearch:
         return songs
 
 
-def fetch(session, method, url, headers, content):
-    context = Context("native_standard", deadline=time.monotonic() + SEARCH_SECONDS)
+def fetch(session, method, url, headers, content, deadline):
+    context = Context("native_standard", deadline=deadline)
     reply = guarded_stream(
         session,
         method,
@@ -190,12 +204,16 @@ class YouTube:
         # {directory}/cache: yt-dlp's player cache; {directory}/update: a
         # verified newer yt-dlp (D-95).
         self.directory = Path(directory)
-        self.search_slots = asyncio.Semaphore(2)
+        # Taps and look-ahead search with their own clients and slots, so a
+        # look-ahead search never holds up a tap (Codex, sources round 1).
+        # A slot is held until the search's thread ends, even if its caller
+        # stopped waiting.
+        self.search_slots = {False: asyncio.Semaphore(2), True: asyncio.Semaphore(1)}
+        self.searchers = {False: [], True: []}
         self.resolve_slots = asyncio.Semaphore(2)
         # Event-loop owned: {video_id: (usable until (wall clock), address)}.
         self.addresses = OrderedDict()
         self.resolving = {}
-        self.searcher = None
         self.refusals = []
         self.purged_at = float("-inf")
         self.refusal_lock = threading.Lock()
@@ -207,23 +225,38 @@ class YouTube:
 
     # Search -----------------------------------------------------------------
 
-    async def songs(self, track):
-        async with self.search_slots:
-            if self.searcher is None:
-                self.searcher = await asyncio.to_thread(GuardedSearch)
-            query = f"{track['artist']} {track['title']}"
+    async def songs(self, track, speculative=False):
+        slots = self.search_slots[speculative]
+        await slots.acquire()
+        idle = self.searchers[speculative]
+        query = f"{track['artist']} {track['title']}"
+
+        def search():
+            searcher = idle.pop() if idle else GuardedSearch()
             try:
-                return await asyncio.wait_for(
-                    asyncio.to_thread(self.searcher.songs, query), SEARCH_SECONDS + 1
-                )
-            except ProviderError:
-                raise
-            except (TimeoutError, httpx.HTTPError, OSError) as exc:
-                raise TimeoutError("YouTube search unavailable.") from exc
-            except Exception as exc:
-                # ytmusicapi parses YouTube's own layout; a change there is a
-                # provider problem, never a server failure.
-                raise ProviderError("invalid_response") from exc
+                return searcher.songs(query)
+            finally:
+                idle.append(searcher)
+
+        try:
+            job = asyncio.ensure_future(asyncio.to_thread(search))
+        except BaseException:
+            slots.release()
+            raise
+        # The slot is given back when the thread ends, not when the caller
+        # stops waiting: a cancelled search still occupies it.
+        job.add_done_callback(lambda _: slots.release())
+        job.add_done_callback(lambda t: t.cancelled() or t.exception())
+        try:
+            return await shared_result(job, SEARCH_SECONDS + 1)
+        except ProviderError:
+            raise
+        except (TimeoutError, httpx.HTTPError, OSError) as exc:
+            raise TimeoutError("YouTube search unavailable.") from exc
+        except Exception as exc:
+            # ytmusicapi parses YouTube's own layout; a change there is a
+            # provider problem, never a server failure.
+            raise ProviderError("invalid_response") from exc
 
     # Addresses ----------------------------------------------------------------
 
@@ -285,7 +318,8 @@ class YouTube:
             saved = json.loads(record.read_text())
             path = self.directory / "update" / saved["file"]
             if (
-                version_key(saved["version"]) > version_key(pinned_version())
+                saved["version"] not in self.quarantined()
+                and version_key(saved["version"]) > version_key(pinned_version())
                 and hashlib.sha256(path.read_bytes()).hexdigest() == saved["sha256"]
             ):
                 return path
@@ -293,19 +327,56 @@ class YouTube:
             pass
         return None
 
+    def quarantined(self):
+        """Updates that failed where the pinned yt-dlp worked (D-95)."""
+        try:
+            value = json.loads(
+                (self.directory / "update" / "quarantined.json").read_text()
+            )
+            return set(value) if isinstance(value, list) else set()
+        except (OSError, ValueError):
+            return set()
+
+    def quarantine(self, version):
+        folder = self.directory / "update"
+        folder.mkdir(parents=True, exist_ok=True)
+        versions = sorted(self.quarantined() | {version})
+        handle, temporary = tempfile.mkstemp(dir=folder, prefix=".quarantined-")
+        with os.fdopen(handle, "w") as out:
+            json.dump(versions, out)
+        os.replace(temporary, folder / "quarantined.json")
+
+    def ask(self, request, update):
+        """Run the worker once; its answer, or invalid_response if it broke."""
+        with tempfile.TemporaryDirectory(prefix="pig-youtube-") as folder:
+            path = Path(folder) / "request.json"
+            path.write_text(json.dumps(request))
+            try:
+                result = self.run_worker(path, update)
+                return json.loads(result.stdout.decode().strip().splitlines()[-1])
+            except (ValueError, IndexError, TimeoutError, OSError):
+                return {"error": "invalid_response"}
+
     def resolve(self, video_id):
         """Worker thread: the isolated lookup (server/providers/youtube_worker.py)."""
         cache = self.directory / "cache"
         cache.mkdir(parents=True, exist_ok=True)
+        request = {"video_id": video_id, "cache": str(cache)}
         update = self.update_path()
-        with tempfile.TemporaryDirectory(prefix="pig-youtube-") as folder:
-            request = Path(folder) / "request.json"
-            request.write_text(json.dumps({"video_id": video_id, "cache": str(cache)}))
-            result = self.run_worker(request, update)
-        try:
-            value = json.loads(result.stdout.decode().strip().splitlines()[-1])
-        except (ValueError, IndexError) as exc:
-            raise ProviderError("invalid_response") from exc
+        value = self.ask(request, update)
+        if update is not None and value.get("error") == "invalid_response":
+            # An update that breaks where the pinned version works is set
+            # aside for good, so YouTube keeps working (Codex, sources round 1).
+            pinned = self.ask(request, None)
+            if pinned.get("error") != "invalid_response":
+                version = json.loads(
+                    (self.directory / "update" / "verified.json").read_text()
+                )["version"]
+                self.quarantine(version)
+                log.warning("yt-dlp %s set aside: the pinned version works", version)
+            value = pinned
+        if not isinstance(value, dict):
+            raise ProviderError("invalid_response")
         if "error" in value:
             if value["error"] == "access_required":
                 self.refused_now()
@@ -399,12 +470,22 @@ class YouTube:
             if current
             else pinned_version()
         )
-        if version_key(version) <= version_key(running):
+        if version_key(version) <= version_key(running) or version in (
+            self.quarantined()
+        ):
             return None
         name = f"yt-dlp-{version}.zip"
         handle, temporary = tempfile.mkstemp(dir=folder, prefix=".yt-dlp-")
         with os.fdopen(handle, "wb") as out:
             out.write(body)
+        # It must import and run in the worker before it is used (Codex,
+        # sources round 1): a release that breaks here is never activated.
+        smoke = self.ask({"operation": "version"}, Path(temporary))
+        if smoke.get("version") != version:
+            os.unlink(temporary)
+            self.quarantine(version)
+            log.warning("yt-dlp %s refused: it does not run in the worker", version)
+            return None
         os.replace(temporary, folder / name)
         record = {"version": version, "sha256": wanted, "file": name}
         handle, temporary = tempfile.mkstemp(dir=folder, prefix=".verified-")

@@ -188,7 +188,11 @@ def resolve(video_id, cache):
 def main():
     try:
         request = json.loads(Path(sys.argv[1]).read_text())
-        value = resolve(request.get("video_id"), request.get("cache"))
+        if request.get("operation") == "version":
+            # The parent's smoke test of an update (D-95): it imports and runs.
+            value = {"version": __version__}
+        else:
+            value = resolve(request.get("video_id"), request.get("cache"))
     except ProviderError as exc:
         value = {"error": exc.code}
     except DownloadError as exc:

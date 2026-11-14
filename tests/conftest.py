@@ -58,15 +58,21 @@ def isolate_startup_enrichment(monkeypatch, tmp_path_factory, request):
 @pytest.fixture(autouse=True)
 def youtube_stays_offline(monkeypatch):
     # The app asks YouTube with JioSaavn (#193). No test may reach YouTube:
-    # a test that wants it supplies a fake (tests/test_youtube.py).
+    # its search requests and any worker lookup of a video are refused here;
+    # a test that wants YouTube supplies a fake (tests/test_youtube.py).
+    from server import youtube
     from server.providers.contracts import ProviderError
-    from server.youtube import YouTube
 
-    async def songs(self, track):
+    def fetch(*args, **kwargs):
         raise ProviderError("not_configured")
 
-    def resolve(self, video_id):
-        raise ProviderError("not_configured")
+    ask = getattr(youtube.YouTube, "ask", None)
 
-    monkeypatch.setattr(YouTube, "songs", songs)
-    monkeypatch.setattr(YouTube, "resolve", resolve)
+    def offline_ask(self, request, update):
+        if "video_id" in request:
+            return {"error": "not_configured"}
+        return ask(self, request, update)
+
+    monkeypatch.setattr(youtube, "fetch", fetch)
+    if ask is not None:
+        monkeypatch.setattr(youtube.YouTube, "ask", offline_ask)
