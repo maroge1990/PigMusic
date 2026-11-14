@@ -18,7 +18,7 @@ from .quality import satisfies
 CLEANUP_SECONDS = 600
 
 
-def song_key(track):
+def mix_key(track):
     # Release identity matters even when recordings share a title or an MBID.
     identity = [
         track.get("musicbrainz_release_id"),
@@ -163,7 +163,7 @@ class MixCache:
                 return track_file(self.store, match["id"])
             except (FileNotFoundError, ValueError, OSError):
                 pass
-        return self.file(song_key(track))
+        return self.file(mix_key(track))
 
     @contextmanager
     def lease(self, key, seconds=6 * 3600):
@@ -187,13 +187,13 @@ class MixCache:
             # Keyed by the exact stored text: any change is read again.
             keys = self.edition_keys.get((identity, payload))
             if keys is None:
-                keys = frozenset(song_key(t) for t in json.loads(payload)["tracks"])
+                keys = frozenset(mix_key(t) for t in json.loads(payload)["tracks"])
             seen[(identity, payload)] = keys
             retained.update(keys)
         self.edition_keys = seen
         # Explicit library intent protects audio even while paused or retrying.
         retained.update(
-            song_key(json.loads(payload))
+            mix_key(json.loads(payload))
             for (payload,) in conn.execute(
                 "SELECT payload FROM queue WHERE status NOT IN ('completed','cancelled')"
             )
@@ -240,7 +240,7 @@ class MixCache:
 
     def promote(self, downloader, job, profile):
         """Copy, never move, a suitable cache file into normal guarded publication."""
-        key = song_key(job)
+        key = mix_key(job)
         with self.lease(key), self.store.connect() as conn:
             row = conn.execute(
                 "SELECT probe FROM mix_audio WHERE key=?", (key,)
@@ -307,7 +307,7 @@ class MixDownloader(Downloader):
     def complete(self, job, path, extension, source, profile, provenance=None):
         self.check(job["id"])
         probe = self.validate(path, job, profile, check=lambda: self.check(job["id"]))
-        key = song_key(job)
+        key = mix_key(job)
         filename = key + extension
         with self.store.lifecycle_lock:
             self.check(job["id"])
@@ -353,7 +353,7 @@ class MixDownloader(Downloader):
             "disc_number": 1,
             "track_number": 1,
             **track,
-            "id": song_key(track),
+            "id": mix_key(track),
             "quality_policy": {
                 "preferred": profile,
                 "fallback": "mp3_320",

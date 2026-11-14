@@ -17,7 +17,7 @@ from server.downloader import Downloader, matches
 from server.providers.contracts import Context, ProviderError
 from server.routes.personal import TrackInput
 from server.store import Store
-from server.mix_cache import MixCache, MixDownloader, song_key
+from server.mix_cache import MixCache, MixDownloader, mix_key
 
 
 def verify(source, target, output, metadata_only=False, mix_cache=False, profile=None):
@@ -65,11 +65,11 @@ def verify(source, target, output, metadata_only=False, mix_cache=False, profile
             # Fresh objects must recover the validated file without a library row.
             restarted = Store(store.directory)
             persisted = MixCache(restarted)
-            path = persisted.file(song_key(target))
+            path = persisted.file(mix_key(target))
             with restarted.connect() as conn:
                 probe = json.loads(
                     conn.execute(
-                        "SELECT probe FROM mix_audio WHERE key=?", (song_key(target),)
+                        "SELECT probe FROM mix_audio WHERE key=?", (mix_key(target),)
                     ).fetchone()[0]
                 )
                 for table in ("queue", "acquired", "library_members"):

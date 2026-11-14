@@ -19,7 +19,7 @@ from .catalogue import background_metadata, credit
 from .home import release_choice
 from .matching import compatible, recording_kind
 from .media import chart_region, present, settings, track_file
-from .mix_cache import MixCache, MixDownloader, song_key
+from .mix_cache import MixCache, MixDownloader, mix_key
 from .playlists import Playlists
 from .request_timing import phase
 from .api_models import TrackDTO
@@ -100,7 +100,7 @@ def unfound_name(track):
     a particular edition, length, kind of recording or ISRCs rejects
     candidates another accepts."""
     rules = [
-        song_key(track),
+        mix_key(track),
         bool(track.get("explicit_edition")),
         track.get("isrcs") or track.get("isrc"),
         track.get("duration"),
@@ -110,7 +110,7 @@ def unfound_name(track):
 
 
 class TrackKeys:
-    """`song_key` once per track for one planning pass. The pass works on a
+    """`mix_key` once per track for one planning pass. The pass works on a
     stable snapshot, so a track object keeps its key; the object itself is
     kept with its key, so a reused `id()` can never return a stale one."""
 
@@ -120,7 +120,7 @@ class TrackKeys:
     def __call__(self, track):
         entry = self.known.get(id(track))
         if entry is None or entry[0] is not track:
-            entry = self.known[id(track)] = (track, song_key(track))
+            entry = self.known[id(track)] = (track, mix_key(track))
         return entry[1]
 
 
@@ -132,7 +132,7 @@ def choose(
     weights=None,
     previous=None,
     per_artist=2,
-    key=song_key,
+    key=mix_key,
 ):
     """Daily weighted shuffle with diversity; identity is never guessed from title."""
     history = history or {}
@@ -249,7 +249,7 @@ class Mixes:
         with self.store.connect() as conn:
             return [r[0] for r in conn.execute("SELECT id FROM users WHERE disabled=0")]
 
-    def history(self, user_id, tracks, key=song_key):
+    def history(self, user_id, tracks, key=mix_key):
         with self.store.connect() as conn:
             recent = dict(
                 conn.execute(
@@ -310,7 +310,7 @@ class Mixes:
                 "SELECT payload FROM mix_editions WHERE user_id=? AND kind='daily' AND day<? ORDER BY day DESC LIMIT 1",
                 (user, str(day)),
             ).fetchone()
-        return {song_key(t) for t in json.loads(row[0])["tracks"]} if row else set()
+        return {mix_key(t) for t in json.loads(row[0])["tracks"]} if row else set()
 
     def favourite_weights(self, user):
         with self.store.connect() as conn:
@@ -319,9 +319,7 @@ class Mixes:
                 ("pig-favourites:" + user, user),
             ).fetchone()
         return (
-            {song_key(t): 3 for t in json.loads(row[0]).get("tracks", [])}
-            if row
-            else {}
+            {mix_key(t): 3 for t in json.loads(row[0]).get("tracks", [])} if row else {}
         )
 
     async def candidates(self, client, projection):
@@ -475,7 +473,7 @@ class Mixes:
         # recommendation and in today's chart. Retain the richer recording data.
         unique = {}
         for track in candidates:
-            key = track.get("musicbrainz_recording_id") or song_key(track)
+            key = track.get("musicbrainz_recording_id") or mix_key(track)
             if key not in unique:
                 unique[key] = track
             elif track["bucket"] == "popular":
@@ -588,11 +586,11 @@ class Mixes:
         Backfill is owned music that fits the mix, used in order when planned
         songs fail to prepare.
         """
-        seen = {song_key(t) for t in tracks}
+        seen = {mix_key(t) for t in tracks}
         planned, extra = len(seen), []
         for track in backfill:
-            if song_key(track) not in seen:
-                seen.add(song_key(track))
+            if mix_key(track) not in seen:
+                seen.add(mix_key(track))
                 extra.append(track)
         if planned + len(extra) < MIN_MIX:
             log.info(
@@ -609,7 +607,7 @@ class Mixes:
         )
 
     @staticmethod
-    def neighbourhood_fill(owned, artist, neighbourhood, salt, history, key=song_key):
+    def neighbourhood_fill(owned, artist, neighbourhood, salt, history, key=mix_key):
         """The artist's other songs, then owned songs by their neighbours, then
         owned songs in the artist's main genre."""
         own = sorted(
@@ -652,7 +650,7 @@ class Mixes:
                 (identity,),
             ).fetchone()
             payload = {**json.loads(row[3]), "tracks": tracks, "state": "ready"}
-            available_keys = {song_key(t) for t in tracks}
+            available_keys = {mix_key(t) for t in tracks}
             payload["failures"] = {
                 key: error
                 for key, error in payload.get("failures", {}).items()
@@ -813,7 +811,7 @@ class Mixes:
                         )
                         reason = "Regional chart music. Add music to your library for personalised mixes."
                     tracks = choose(
-                        [t for t in pool if song_key(t) not in hidden],
+                        [t for t in pool if mix_key(t) not in hidden],
                         30,
                         f"{user}:{day}",
                         previous=await asyncio.to_thread(self.exposure, user, day),
@@ -1107,7 +1105,7 @@ class Mixes:
                 else set()
             )
             payload["tracks"] = [
-                t for t in payload["tracks"] if song_key(t) not in hidden
+                t for t in payload["tracks"] if mix_key(t) not in hidden
             ]
             await asyncio.to_thread(self.update, identity, payload)
             deferred = False
@@ -1123,7 +1121,7 @@ class Mixes:
                 except FileNotFoundError:
                     known = await asyncio.to_thread(self.unfound, track)
                     if known:
-                        payload.setdefault("failures", {})[song_key(track)] = known
+                        payload.setdefault("failures", {})[mix_key(track)] = known
                         payload["cursor"] = position + 1
                         await asyncio.to_thread(self.update, identity, payload)
                         continue
@@ -1141,7 +1139,7 @@ class Mixes:
                     if not await asyncio.to_thread(downloader.fetch, track):
                         deferred |= downloader.result != "failed"
                         if downloader.result == "failed":
-                            payload.setdefault("failures", {})[song_key(track)] = (
+                            payload.setdefault("failures", {})[mix_key(track)] = (
                                 downloader.error or "No matching recording available"
                             )
                             log.info(
@@ -1149,12 +1147,12 @@ class Mixes:
                                 track.get("title"),
                                 track.get("artist"),
                                 payload["title"],
-                                payload["failures"][song_key(track)],
+                                payload["failures"][mix_key(track)],
                             )
                             await asyncio.to_thread(
                                 self.record_unfound,
                                 track,
-                                payload["failures"][song_key(track)],
+                                payload["failures"][mix_key(track)],
                             )
                         else:
                             payload["blocked"] = (
@@ -1167,7 +1165,7 @@ class Mixes:
                         payload["cursor"] = position + 1
                         await asyncio.to_thread(self.update, identity, payload)
                         continue
-                payload.get("failures", {}).pop(song_key(track), None)
+                payload.get("failures", {}).pop(mix_key(track), None)
                 payload["cursor"] = position + 1
                 await asyncio.to_thread(self.update, identity, payload)
             # Successful audio is durable; rebuild readiness after a resumed pass.
@@ -1207,12 +1205,12 @@ class Mixes:
 
     def fill(self, payload, prepared, hidden, need):
         """Owned backfill songs with audio, in order, up to `need` in all."""
-        have = {song_key(t) for t in prepared}
+        have = {mix_key(t) for t in prepared}
         added = []
         for track in payload.get("backfill", []):
             if len(prepared) + len(added) >= need:
                 break
-            key = song_key(track)
+            key = mix_key(track)
             if key in have or key in hidden:
                 continue
             try:
@@ -1360,7 +1358,7 @@ class Mixes:
                         for item in json.loads(raw)["tracks"]:
                             conn.execute(
                                 "UPDATE mix_audio SET lease_until=MAX(lease_until,?) WHERE key=?",
-                                (until, song_key(item)),
+                                (until, mix_key(item)),
                             )
             # The leases are committed first: checking the file can wait on the
             # NAS, and must not hold the database's write lock meanwhile (#67).
@@ -1407,7 +1405,7 @@ class Mixes:
 
     def reference(self, user, track):
         """A saved playlist can reuse audio from this person's rotating edition."""
-        key = song_key(track)
+        key = mix_key(track)
         with self.store.connect() as conn:
             rows = conn.execute(
                 "SELECT id,payload FROM mix_editions WHERE user_id=? AND (active=1 OR lease_until>?)",
@@ -1415,7 +1413,7 @@ class Mixes:
             ).fetchall()
         for identity, raw in rows:
             for index, item in enumerate(json.loads(raw)["tracks"]):
-                if song_key(item) == key:
+                if mix_key(item) == key:
                     return f"mix:{identity}:{index}"
         return None
 
@@ -1453,7 +1451,7 @@ class Mixes:
                     continue  # Short editions from before the minimum stay out of Home.
                 tracks, kept = [], []
                 for index, track in enumerate(payload["tracks"]):
-                    if song_key(track) in hidden:
+                    if mix_key(track) in hidden:
                         continue
                     dto = self.track_dto(identity, index, track, members, cached)
                     if dto:
@@ -1504,7 +1502,7 @@ class Mixes:
                 pass
         if not library_id:
             try:
-                self.cache.file(song_key(track), cached)
+                self.cache.file(mix_key(track), cached)
             except FileNotFoundError:
                 return None
         return TrackDTO(
@@ -1590,7 +1588,7 @@ class Mixes:
                 factor[key] = factor.get(key, 1) * 2
         favourites = self.favourite_weights(user)
         return {
-            song_key(t): favourites.get(song_key(t), 1)
+            mix_key(t): favourites.get(mix_key(t), 1)
             * factor.get(t["artist"].casefold(), 1)
             for t in tracks
         }
@@ -1607,30 +1605,30 @@ class Mixes:
             payload = json.loads(raw)
             for track in payload.get("planned") or payload["tracks"]:
                 if track.get("bucket") in DISCOVERY | {"release"}:
-                    pool.setdefault(song_key(track), track)
+                    pool.setdefault(mix_key(track), track)
         return list(pool.values())
 
     def radio_batch(self, user, day, payload):
         projection = self.store.user_libraries.projection(user)
         hidden = self.hidden(user)
-        used = {song_key(t) for t in payload["tracks"] + payload.get("queue", [])}
+        used = {mix_key(t) for t in payload["tracks"] + payload.get("queue", [])}
         owned = [
             t
             for t in projection["tracks"]
             if t.get("available", True)
-            and song_key(t) not in hidden
-            and song_key(t) not in used
+            and mix_key(t) not in hidden
+            and mix_key(t) not in used
         ]
         owned_keys = {
-            t.get("musicbrainz_recording_id") or song_key(t)
+            t.get("musicbrainz_recording_id") or mix_key(t)
             for t in projection["tracks"]
         }
         discoveries = [
             t
             for t in self.radio_pool(user, day)
-            if song_key(t) not in hidden
-            and song_key(t) not in used
-            and (t.get("musicbrainz_recording_id") or song_key(t)) not in owned_keys
+            if mix_key(t) not in hidden
+            and mix_key(t) not in used
+            and (t.get("musicbrainz_recording_id") or mix_key(t)) not in owned_keys
         ]
         history = self.history(user, owned)
         weights = self.radio_weights(user, owned + discoveries)
@@ -1689,12 +1687,12 @@ class Mixes:
                     await asyncio.to_thread(self.record_unfound, track, error)
 
             def advance(p, track=track, ready=ready):
-                p["queue"] = [t for t in p["queue"] if song_key(t) != song_key(track)]
+                p["queue"] = [t for t in p["queue"] if mix_key(t) != mix_key(track)]
                 p.pop("blocked", None)
                 if ready:
                     p["tracks"].append(track)
                 else:
-                    p.setdefault("failures", {})[song_key(track)] = error
+                    p.setdefault("failures", {})[mix_key(track)] = error
 
             await asyncio.to_thread(self.radio_update, identity, advance)
             added += ready
@@ -1733,7 +1731,7 @@ class Mixes:
                 break
             track = payload["tracks"][index]
             last = index
-            if song_key(track) in hidden:
+            if mix_key(track) in hidden:
                 continue
             dto = self.track_dto(identity, index, track, members)
             if dto:
@@ -1754,7 +1752,7 @@ class Mixes:
         with self.store.connect() as conn:
             conn.execute(
                 "INSERT INTO radio_feedback VALUES (?,?,?,?,?)",
-                (user, song_key(track), track["artist"], action, int(time.time())),
+                (user, mix_key(track), track["artist"], action, int(time.time())),
             )
 
     def inspect(self, user):
@@ -1775,7 +1773,7 @@ class Mixes:
         editions = []
         for identity, kind, day, active, raw in rows:
             payload = json.loads(raw)
-            published = {song_key(t) for t in payload["tracks"]}
+            published = {mix_key(t) for t in payload["tracks"]}
             failures = payload.get("failures", {})
             preparing = payload["state"] != "ready"
             cursor = payload.get("cursor", 0)
@@ -1783,7 +1781,7 @@ class Mixes:
             for position, track in enumerate(
                 payload.get("planned") or payload["tracks"]
             ):
-                key = song_key(track)
+                key = mix_key(track)
                 status, detail = "waiting", None
                 match = self.store.index.match(track).track
                 try:
@@ -1856,7 +1854,7 @@ class Mixes:
         The canonical song must still belong to this person's saved edition;
         arbitrary catalogue requests never gain a cache-download entitlement.
         """
-        wanted = song_key(requested)
+        wanted = mix_key(requested)
         with self.store.connect() as conn:
             rows = conn.execute(
                 "SELECT payload FROM playlists WHERE owner_id=? AND json_extract(payload,'$.source')='mix'",
@@ -1867,7 +1865,7 @@ class Mixes:
                 t
                 for (raw,) in rows
                 for t in json.loads(raw)["tracks"]
-                if song_key(t) == wanted
+                if mix_key(t) == wanted
             ),
             None,
         )
@@ -1936,7 +1934,7 @@ class Mixes:
             return
         payload = json.loads(row[0])
         if result == "failed":
-            payload.setdefault("failures", {})[song_key(song)] = (
+            payload.setdefault("failures", {})[mix_key(song)] = (
                 error or "No matching full recording available"
             )
             payload["attempts"] = payload.get("attempts", 0) + 1
@@ -1953,7 +1951,7 @@ class Mixes:
         with self.store.connect() as conn:
             conn.execute(
                 "INSERT OR IGNORE INTO mix_feedback VALUES (?,?)",
-                (user, song_key(track)),
+                (user, mix_key(track)),
             )
 
     def save(self, user, identity):
@@ -1979,7 +1977,7 @@ class Mixes:
                     if k not in {"id", "reason", "bucket", "relative_path"}
                 }
                 for t in payload["tracks"]
-                if song_key(t) not in hidden
+                if mix_key(t) not in hidden
             ]
             conn.execute(
                 "INSERT OR IGNORE INTO playlists(id,payload,owner_id) VALUES (?,?,?)",

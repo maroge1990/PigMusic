@@ -1484,13 +1484,13 @@ class UserLibrary:
                     ),
                 ).rowcount
                 if event["track_id"] in mix_tracks:
-                    from .mix_cache import song_key
+                    from .mix_cache import mix_key
 
                     conn.execute(
                         "INSERT OR IGNORE INTO mix_listens VALUES (?,?,?,?)",
                         (
                             user_id,
-                            song_key(mix_tracks[event["track_id"]]),
+                            mix_key(mix_tracks[event["track_id"]]),
                             event["played_at"],
                             event["event_id"],
                         ),

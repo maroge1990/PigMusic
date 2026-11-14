@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.home import HomeDiscovery
-from server.mix_cache import song_key, MixDownloader
+from server.mix_cache import mix_key, MixDownloader
 from server import mixes as mix_module
 from server.mixes import choose
 from test_security import PASSWORD, protected
@@ -36,7 +36,7 @@ def track(n=1, **extra):
 
 
 def cached(mixes, song, now=None):
-    key = song_key(song)
+    key = mix_key(song)
     filename = key + ".mp3"
     path = mixes.cache.directory / filename
     path.write_bytes(b"fixture audio")
@@ -82,13 +82,13 @@ def test_daily_selection_changes_without_losing_identity_or_artist_diversity():
     left = choose(songs, 30, "today")
     assert left == choose(list(reversed(songs)), 30, "today")
     right = choose(songs, 30, "tomorrow")
-    assert len({song_key(t) for t in left} - {song_key(t) for t in right}) >= 15
+    assert len({mix_key(t) for t in left} - {mix_key(t) for t in right}) >= 15
     assert all(a["artist"] != b["artist"] for a, b in zip(left, left[1:]))
-    recent = {song_key(t): int(time.time()) for t in left}
-    assert not {song_key(t) for t in choose(songs, 30, "today", recent)} & set(recent)
+    recent = {mix_key(t): int(time.time()) for t in left}
+    assert not {mix_key(t) for t in choose(songs, 30, "today", recent)} & set(recent)
     a = track(musicbrainz_release_id="release", musicbrainz_recording_id="recording")
-    assert song_key(a) == song_key({**a, "title": "Spelling difference"})
-    assert song_key(a) != song_key({**a, "musicbrainz_release_id": "live-edition"})
+    assert mix_key(a) == mix_key({**a, "title": "Spelling difference"})
+    assert mix_key(a) != mix_key({**a, "musicbrainz_release_id": "live-edition"})
     assert len(choose([a, {**a, "musicbrainz_release_id": "other"}], 5, "day")) == 1
 
 
@@ -137,7 +137,7 @@ def test_private_editions_signed_cache_playback_history_and_save(
         }
         assert client.post("/api/v1/play-events", json=events).status_code == 200
         assert client.post("/api/v1/play-events", json=events).status_code == 200
-        assert mixes.history(user, [])[song_key(track())] > 0
+        assert mixes.history(user, [])[mix_key(track())] > 0
         with app.state.store.connect() as conn:
             assert conn.execute("SELECT COUNT(*) FROM mix_listens").fetchone()[0] == 1
         saved = client.post(f"/api/v1/mixes/{identity}/save")
@@ -223,7 +223,7 @@ def test_mix_playback_does_not_wait_for_library_work(tmp_path, monkeypatch):
     # The playback lease still protects the file from cleanup.
     with mixes.store.connect() as conn:
         lease = conn.execute(
-            "SELECT lease_until FROM mix_audio WHERE key=?", (song_key(track()),)
+            "SELECT lease_until FROM mix_audio WHERE key=?", (mix_key(track()),)
         ).fetchone()[0]
     assert lease > time.time() + 5 * 3600
 
@@ -330,7 +330,7 @@ def test_a_song_no_source_has_is_not_searched_again_by_any_mix_or_person(
     calls = []
 
     def fail(downloader, song):
-        calls.append(song_key(song))
+        calls.append(mix_key(song))
         downloader.result, downloader.error = "failed", error
         return False
 
@@ -340,9 +340,9 @@ def test_a_song_no_source_has_is_not_searched_again_by_any_mix_or_person(
     for _ in range(3):  # attempts 0, 1, 2: every retry round the edition gets
         rounds(mixes, owner, mine)
     payload = rounds(mixes, user, theirs)
-    assert calls == [song_key(missing)] * searches
+    assert calls == [mix_key(missing)] * searches
     # The other person's mix still says why the song was left out.
-    assert payload["failures"] == {song_key(missing): error}
+    assert payload["failures"] == {mix_key(missing): error}
     # A day later the song may have appeared somewhere: search again.
     with mixes.store.connect() as conn:
         conn.execute(
@@ -399,8 +399,8 @@ def test_a_deferred_round_does_not_search_failed_songs_again(tmp_path, monkeypat
     calls = []
 
     def fetch(downloader, song):
-        calls.append(song_key(song))
-        if song_key(song) == song_key(busy):
+        calls.append(mix_key(song))
+        if mix_key(song) == mix_key(busy):
             downloader.result = "deferred"
             downloader.error = "Another mix download is in progress"
         else:
@@ -414,7 +414,7 @@ def test_a_deferred_round_does_not_search_failed_songs_again(tmp_path, monkeypat
     identity = mixes.stage(owner, "daily", mixes.day(), "Daily", "Reason", [gone, busy])
     for _ in range(4):
         rounds(mixes, owner, identity)
-    assert calls.count(song_key(gone)) == 1 and calls.count(song_key(busy)) == 4
+    assert calls.count(mix_key(gone)) == 1 and calls.count(mix_key(busy)) == 4
 
 
 def test_owned_mix_rows_keep_library_actions_separate_from_private_playback(
@@ -641,8 +641,8 @@ def test_a_rotated_mix_song_stands_in_from_any_edition_or_todays_radio(
     with mixes.store.connect() as conn:
         leases = dict(conn.execute("SELECT key,lease_until FROM mix_audio"))
         assert conn.execute("SELECT COUNT(*) FROM mix_listens").fetchone()[0] == 1
-    assert leases[song_key(reissue)] > time.time() + 5 * 3600
-    assert leases[song_key(on_radio)] > time.time() + 5 * 3600
+    assert leases[mix_key(reissue)] > time.time() + 5 * 3600
+    assert leases[mix_key(on_radio)] > time.time() + 5 * 3600
 
 
 def test_a_rotated_song_stands_in_from_an_edition_retired_minutes_ago(
@@ -774,7 +774,7 @@ def test_cache_download_uses_validation_without_nas_or_membership(
     )
     assert downloader.fetch(song)
     assert len(requests) == 1 and requests[0].url.host == "meln.top"
-    assert store.mix_cache.file(song_key(song)).is_file()
+    assert store.mix_cache.file(mix_key(song)).is_file()
     assert store.queue()["items"] == []
     assert not (tmp_path / "nas").exists()
     with store.connect() as conn:
@@ -1118,7 +1118,7 @@ def test_daily_exposure_changes_at_least_half_the_mix_across_a_week(
         asyncio.run(mixes.prepare_person(None, owner, today))
         row = mixes.edition(owner, "daily", today)
         songs = json.loads(row[1])["tracks"]
-        current = {song_key(t) for t in songs}
+        current = {mix_key(t) for t in songs}
         assert len(current) == len(songs) >= 25
         assert all(a["artist"] != b["artist"] for a, b in zip(songs, songs[1:]))
         if previous:
@@ -1463,7 +1463,7 @@ def test_new_families_follow_their_selection_rules(tmp_path, monkeypatch):
     assert sum(t.get("bucket") in {"related", "decade"} for t in daily) == 15
     fresh = songs("fresh")
     assert len(fresh) >= 10 and all(t.get("bucket") for t in fresh)
-    assert not {song_key(t) for t in fresh} & {song_key(t) for t in daily}
+    assert not {mix_key(t) for t in fresh} & {mix_key(t) for t in daily}
     assert {t["title"] for t in songs("releases")} <= {
         f"Song {n}" for n in range(172, 176)
     }
@@ -1641,7 +1641,7 @@ def test_radio_appends_stable_entries_pages_and_learns_from_skips(
     # random, and could itself be owned[59]).
     other = next(s for s in owned if s["artist"] != skipped["artist"])
     weights = mixes.radio_weights(user, [skipped, other])
-    assert weights[song_key(skipped)] < weights[song_key(other)]
+    assert weights[mix_key(skipped)] < weights[mix_key(other)]
     # Another person cannot play or steer this station.
     assert mixes.radio_next(owner)["id"] != edition
     with pytest.raises(LookupError):
@@ -1727,9 +1727,9 @@ def test_mix_cache_cleanup_reads_each_unchanged_edition_once(tmp_path, monkeypat
         cached(mixes, song)
     ready(mixes, owner, songs)
     keyed = []
-    real = __import__("server.mix_cache", fromlist=["song_key"]).song_key
+    real = __import__("server.mix_cache", fromlist=["mix_key"]).mix_key
     monkeypatch.setattr(
-        "server.mix_cache.song_key", lambda t: keyed.append(1) or real(t)
+        "server.mix_cache.mix_key", lambda t: keyed.append(1) or real(t)
     )
     mixes.cache.cleanup()
     first = len(keyed)

@@ -69,7 +69,9 @@ def apple_kinds(title, album=""):
     return split(title)[1] | (album_kinds(album) if album else frozenset())
 
 
-def group_kinds(group):
+def group_version_kinds(group):
+    """Kinds from a group's title and secondary types (catalogue.group_kinds
+    reads the types only)."""
     types = {t.lower() for t in group.get("secondary-types") or []}
     return album_kinds(group.get("title", "")) | {TYPES[t] for t in types if t in TYPES}
 
@@ -131,7 +133,7 @@ async def find(catalogue, client, kind, item, artist):
             limit=25,
         )
         candidates = data.get("release-groups", [])
-        same = group_kinds
+        same = group_version_kinds
     for found in candidates:
         credits = found.get("artist-credit", [])
         artist_id, artist_name = first_credit_artist(credits)
