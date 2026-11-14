@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, X } from "lucide-react";
 import { api } from "./api";
 
@@ -7,31 +7,46 @@ type Log = { id: string; status: string; lines: Line[] };
 
 /** One download told step by step (#197): what was searched, the copies
  * found, each one tried and why it was refused, the checks, any conversion
- * and where the file went. Loaded the first time it is opened. */
-export function DownloadLog({ path, title }: { path: string; title: string }) {
+ * and where the file went. Asked for each time it opens, and again while
+ * open whenever the request changes (`version`: its status and update
+ * time), so a retry or a finished download never shows an old answer. */
+export function DownloadLog({
+  path,
+  title,
+  version,
+}: {
+  path: string;
+  title: string;
+  version?: string;
+}) {
+  const [open, setOpen] = useState(false);
   const [log, setLog] = useState<Log | null>(null);
   const [failed, setFailed] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const serial = useRef(0);
 
-  async function open(event: React.SyntheticEvent<HTMLDetailsElement>) {
-    if (!event.currentTarget.open || log || loading) return;
-    setLoading(true);
+  useEffect(() => {
+    if (!open) return;
+    const asked = ++serial.current;
     setFailed(false);
-    try {
-      setLog(await api<Log>(path));
-    } catch {
-      setFailed(true);
-    } finally {
-      setLoading(false);
-    }
-  }
+    api<Log>(path).then(
+      (answer) => {
+        if (asked === serial.current) setLog(answer);
+      },
+      () => {
+        if (asked === serial.current) setFailed(true);
+      },
+    );
+  }, [open, path, version]);
 
   return (
-    <details className="download-log" onToggle={(e) => void open(e)}>
+    <details
+      className="download-log"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary aria-label={`Details of the download of ${title}`}>
         Details
       </summary>
-      {loading && <p className="muted">Loading the details…</p>}
+      {open && !log && !failed && <p className="muted">Loading the details…</p>}
       {failed && (
         <p className="inline-error">Couldn’t load the details. Try again.</p>
       )}

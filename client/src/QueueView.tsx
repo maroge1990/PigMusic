@@ -12,6 +12,7 @@ type QueueItem = {
   status: string;
   source?: string;
   error?: string;
+  updated_at?: string;
   received_bytes?: number;
   total_bytes?: number;
   /** Names this very entry for Cancel all (#183). */
@@ -119,6 +120,7 @@ export function QueueView({
               <DownloadLog
                 path={`/v1/admin/queue/${encodeURIComponent(item.id)}/log`}
                 title={item.title}
+                version={`${item.status}|${item.updated_at ?? ""}`}
               />
             </div>
             {["failed", "cancelled"].includes(item.status) ? (

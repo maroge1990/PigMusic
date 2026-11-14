@@ -115,7 +115,7 @@ test("Downloads shows one card per request, with detail inside", async ({
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
-test("#197: a download opens to its story, loaded once, failures marked", async ({
+test("#197: a download opens to its story, fresh on every opening, failures marked", async ({
   page,
 }) => {
   let asked = 0;
@@ -166,8 +166,54 @@ test("#197: a download opens to its story, loaded once, failures marked", async 
   // A refused step says so in words, not by colour alone.
   await expect(story.locator("li.download-log-failed")).toHaveCount(2);
   await expect(story.locator("li").nth(2)).toContainText("Problem:");
-  // Closing and opening again does not ask again.
+  // Closing and opening again asks again (Codex round 2): a retry or a
+  // finished download is never shown from an old answer.
   await page.getByLabel("Details of the download of Meteora song 2").click();
   await page.getByLabel("Details of the download of Meteora song 2").click();
-  expect(asked).toBe(1);
+  await expect.poll(() => asked).toBe(2);
+});
+
+test("#197: open details follow the request as it changes", async ({
+  page,
+}) => {
+  let status = "waiting_for_sources";
+  const page1 = () => ({
+    ...groups,
+    groups: [
+      {
+        ...groups.groups[1],
+        state: status === "failed" ? "failed" : "waiting",
+        items: [{ ...groups.groups[1].items[0], status, updated_at: status }],
+      },
+    ],
+  });
+  await mockApi(page, {
+    answers: {
+      "/v1/requests/groups": (route) => route.fulfill({ json: page1() }),
+      "/v1/requests/n1/log": (route) =>
+        route.fulfill({
+          json: {
+            id: "n1",
+            status,
+            lines:
+              status === "failed"
+                ? [{ text: "No source had a copy", ok: false }]
+                : [{ text: "Waited in the queue", ok: true, seconds: 1 }],
+          },
+        }),
+      "/v1/requests": (route) =>
+        route.fulfill({ json: { items: [], next_offset: null, active: 0 } }),
+    },
+  });
+  await page.goto("/#/downloads");
+  await page.locator(".request-group > summary").first().click();
+  await page.getByLabel("Details of the download of Numb").click();
+  const story = page.locator(".download-log");
+  await expect(story).toContainText("Waited in the queue");
+  status = "failed";
+  // The list refreshes (as after a live update); the open details follow.
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("music-requests-changed")),
+  );
+  await expect(story).toContainText("No source had a copy");
 });

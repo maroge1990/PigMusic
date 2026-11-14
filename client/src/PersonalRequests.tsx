@@ -270,6 +270,7 @@ export function PersonalRequests() {
                               "/log"
                             }
                             title={item.title}
+                            version={`${item.status}|${item.updated_at ?? ""}`}
                           />
                         </div>
                         <StateBadge
