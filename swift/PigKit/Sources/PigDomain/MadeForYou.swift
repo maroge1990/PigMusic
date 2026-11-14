@@ -10,6 +10,12 @@ public enum QueueContinuation {
   public static func continues(keepPlaying: Bool, repeating: Bool, radio: Bool) -> Bool {
     keepPlaying && !repeating && !radio
   }
+  /// Whether similar songs that just arrived start playing at once: only
+  /// when the queue already ended on its last song while they were fetched
+  /// (Codex round 1); otherwise they wait in Up next.
+  public static func playsAtOnce(ended: Bool, atLastSong: Bool, playing: Bool) -> Bool {
+    ended && atLastSong && !playing
+  }
   /// The last few songs up to and including the current one (most recent
   /// last) as seeds, and every song in the queue to leave out.
   public static func request(queue ids: [String], current index: Int) -> (

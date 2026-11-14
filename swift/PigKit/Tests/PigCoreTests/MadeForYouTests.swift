@@ -11,6 +11,16 @@ struct MadeForYouTests {
     #expect(!QueueContinuation.continues(keepPlaying: true, repeating: false, radio: true))
   }
 
+  @Test func songsArrivingAfterTheQueueEndedPlayAtOnce() {
+    // Codex round 1: the last song ended or was skipped while they loaded.
+    #expect(QueueContinuation.playsAtOnce(ended: true, atLastSong: true, playing: false))
+    // Still playing the last song: they wait in Up next.
+    #expect(!QueueContinuation.playsAtOnce(ended: false, atLastSong: true, playing: true))
+    #expect(!QueueContinuation.playsAtOnce(ended: true, atLastSong: true, playing: true))
+    // The person went back in the queue meanwhile.
+    #expect(!QueueContinuation.playsAtOnce(ended: true, atLastSong: false, playing: false))
+  }
+
   @Test func theLastFiveSongsAreSeedsAndTheWholeQueueIsLeftOut() {
     let ids = (0..<8).map { "s\($0)" } + ["s1"]
     let (seeds, exclude) = QueueContinuation.request(queue: ids, current: 6)

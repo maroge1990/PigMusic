@@ -1372,22 +1372,34 @@ enum PlayOrigin: Hashable {
   /// Songs added to the queue as similar songs when it ran out (#202).
   var similarIDs: Set<String> = []
   @ObservationIgnored private var continuationLoading = false
+  /// The queue ended while its similar songs were still being fetched: they
+  /// play as soon as they arrive (Codex round 1).
+  @ObservationIgnored private var continuationEnded = false
   /// Adds similar songs after the last song of a queue that isn't the radio,
   /// unless the person turned it off or repeat is on (#202). At the very end
   /// they play as a fresh queue, as the radio does.
   func continueQueue(continuing: Bool = false) {
     let queue = player.queue
-    guard !continuationLoading, let current = queue.current,
+    guard let current = queue.current,
       QueueContinuation.continues(
         keepPlaying: preferences.keepPlaying, repeating: player.repeatMode != .off,
         radio: radioIDs.contains(current.track.id))
     else { return }
+    guard !continuationLoading else {
+      // Fetched ahead and not back yet: play them when they come.
+      if continuing { continuationEnded = true }
+      return
+    }
     let (seeds, exclude) = QueueContinuation.request(
       queue: queue.items.map(\.track.id), current: queue.index)
     continuationLoading = true
+    continuationEnded = continuing
     let stamp = account.generation
     Task {
-      defer { continuationLoading = false }
+      defer {
+        continuationLoading = false
+        continuationEnded = false
+      }
       guard
         let batch = try? await readCatalogue({
           try await $0.radioContinuation(seeds: seeds, exclude: exclude)
@@ -1399,7 +1411,11 @@ enum PlayOrigin: Hashable {
       let added = batch.tracks.filter { !known.contains($0.id) }
       guard !added.isEmpty else { return }
       similarIDs.formUnion(added.map(\.id))
-      if continuing && player.queue.index == player.queue.items.count - 1 && !player.playing {
+      if QueueContinuation.playsAtOnce(
+        ended: continuationEnded,
+        atLastSong: player.queue.index == player.queue.items.count - 1,
+        playing: player.playing)
+      {
         play(added)
       } else {
         player.enqueue(added)
