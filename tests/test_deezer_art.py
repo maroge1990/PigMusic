@@ -355,3 +355,39 @@ def test_an_exact_name_on_a_truncated_page_is_not_unique():
         }
     }
     assert photo_of(unlinked, partial)[0] is None
+
+
+def test_a_deezer_outage_with_no_archive_cover_is_asked_again_soon(tmp_path):
+    """Codex round 2 (#194): Deezer down + archive 404 must not rest a day."""
+    import time
+
+    from server.store import Store
+
+    store = Store(tmp_path)
+    entity = {**RELEASE_ENTITY, "release-group": {"id": GROUP}}
+    artwork = Artwork(store, Catalogue({"release/" + RELEASE: entity}))
+    up = {"deezer": False}
+
+    def handle(request):
+        if request.url.host == "api.deezer.com":
+            if not up["deezer"]:
+                raise httpx.ConnectError("down")
+            return httpx.Response(200, json={"data": [album()]})
+        if request.url.host == "cdn-images.dzcdn.net":
+            return httpx.Response(200, content=image_bytes())
+        return httpx.Response(404)  # The archive has no cover.
+
+    async def ask():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+            return await artwork.catalogue_cover(client, "release", RELEASE)
+
+    assert run(ask()) is None
+    key = "catalogue-artwork:release:" + RELEASE
+    assert store.read_document(key)["retry_after"] < time.time() + 600
+    # A plain "Deezer has nothing" with an archive 404 still rests a day.
+    up["deezer"] = True
+    artwork.deezer.cover = lambda *a: asyncio.sleep(0)
+    with store.connect() as conn:
+        conn.execute("DELETE FROM documents WHERE name = ?", (key,))
+    assert run(ask()) is None
+    assert store.read_document(key)["retry_after"] > time.time() + 3600

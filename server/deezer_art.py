@@ -36,6 +36,10 @@ ANSWER_LIMIT = 1_000_000
 SPACING = 0.15
 
 
+class DeezerRefused(ValueError):
+    """Deezer answered with an error other than "no data" (quota, outage)."""
+
+
 def deezer_image(value):
     """A trusted Deezer CDN address for a real image (never the blank one)."""
     url = urlsplit(value)
@@ -107,7 +111,7 @@ class DeezerArt:
             # Code 800 is "no data"; anything else (quota, outage) is a failure.
             if (data.get("error") or {}).get("code") == 800:
                 return {}
-            raise ValueError("Deezer refused the request")
+            raise DeezerRefused("Deezer refused the request")
         return data
 
     async def cover(self, client, kind, item_id):

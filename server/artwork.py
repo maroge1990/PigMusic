@@ -12,7 +12,7 @@ import httpx
 from PIL import Image, ImageOps
 
 from .catalogue import credit, mbid, settled
-from .deezer_art import DeezerArt, deezer_image
+from .deezer_art import DeezerArt, DeezerRefused, deezer_image
 from .library import normalise, identifier
 from .matching import album_title, lead_artist, strip_edition, title_key
 
@@ -250,6 +250,7 @@ class Artwork:
 
     async def front(self, client, kind, item_id):
         """Deezer's cover first (#194), else the Cover Art Archive's."""
+        unsure = False
         try:
             url = await self.deezer.cover(client, kind, item_id)
             if url:
@@ -258,8 +259,9 @@ class Artwork:
                 await asyncio.to_thread(self.check, content)
                 self.counted("cover", "deezer")
                 return content
+        except (httpx.HTTPError, DeezerRefused):
+            unsure = True  # Deezer (or MusicBrainz) may answer later.
         except (
-            httpx.HTTPError,
             ValueError,
             KeyError,
             TypeError,
@@ -267,7 +269,13 @@ class Artwork:
             Image.DecompressionBombError,
         ):
             pass  # Optional first source: the archive is asked next.
-        content = await self.archive_front(client, kind, item_id)
+        try:
+            content = await self.archive_front(client, kind, item_id)
+        except httpx.HTTPStatusError as exc:
+            if unsure and exc.response.status_code == 404:
+                # Not "no cover anywhere": callers rest five minutes, not a day.
+                raise ValueError("Deezer unavailable; no archive cover") from exc
+            raise
         self.counted("cover", "cover-art-archive")
         return content
 
