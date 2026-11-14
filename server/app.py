@@ -446,17 +446,18 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         album = store.albums_by_id.get(album_id)
         if not album:
             raise HTTPException(404, "Album not found.")
-        count = 0
+        # The Trash entries made, for Undo (D-79, #183).
+        restorable = []
         for track in list(album["tracks"]):
             try:
-                await asyncio.to_thread(recovery.remove, track["id"])
-                count += 1
+                record = await asyncio.to_thread(recovery.remove, track["id"])
+                restorable.append(record["id"])
             except (ValueError, OSError):
                 raise HTTPException(
                     409,
-                    f"Removed {count} songs; remaining files need review. All removed songs are recoverable.",
+                    f"Removed {len(restorable)} songs; remaining files need review. All removed songs are recoverable.",
                 )
-        return {"removed": count}
+        return {"removed": len(restorable), "restorable": restorable}
 
     @app.post("/api/v1/admin/artists/{artist_id}/remove")
     async def remove_artist(artist_id: str):
@@ -466,20 +467,20 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         identity = await library_artist_catalogue(artist_id)
         # The artist lock can wait behind a submission on lifecycle_lock.
         await asyncio.to_thread(artist_jobs.cancel, identity["id"])
-        count = 0
+        restorable = []
         for album in [
             a for a in store.library["albums"] if a["artist_id"] == artist_id
         ]:
             for track in list(album["tracks"]):
                 try:
-                    await asyncio.to_thread(recovery.remove, track["id"])
-                    count += 1
+                    record = await asyncio.to_thread(recovery.remove, track["id"])
+                    restorable.append(record["id"])
                 except (ValueError, OSError):
                     raise HTTPException(
                         409,
-                        f"Removed {count} songs; remaining files need review. All removed songs are recoverable.",
+                        f"Removed {len(restorable)} songs; remaining files need review. All removed songs are recoverable.",
                     )
-        return {"removed": count, "monitor": False}
+        return {"removed": len(restorable), "monitor": False, "restorable": restorable}
 
     class OrganiseRequest(BaseModel):
         track_ids: list[str] = Field(max_length=5000)
@@ -608,7 +609,11 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     async def remove_song(track_id: str):
         try:
             record = await asyncio.to_thread(recovery.remove, track_id)
-            return {"id": record["id"], "status": record["status"]}
+            return {
+                "id": record["id"],
+                "status": record["status"],
+                "restorable": [record["id"]],
+            }
         except (ValueError, OSError, FileNotFoundError):
             raise HTTPException(
                 409,
@@ -718,6 +723,15 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         except ValueError as error:
             raise HTTPException(409, str(error))
         return {"id": record["id"], "status": record["status"]}
+
+    class TrashRestore(BaseModel):
+        identities: list[str] = Field(min_length=1, max_length=5000)
+
+    @app.post("/api/v1/admin/library/trash/restore")
+    async def restore_songs(body: TrashRestore):
+        """Undo for a removal (D-79, #183): every song it put in Trash comes
+        back; one that cannot is reported, and the others still come back."""
+        return await asyncio.to_thread(recovery.restore_many, body.identities)
 
     @app.post("/api/v1/admin/library/trash/{identity}/restore")
     async def restore_song(identity: str):

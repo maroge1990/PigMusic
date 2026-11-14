@@ -474,3 +474,48 @@ def test_a_trash_folder_moved_while_the_purge_hashes_is_never_recorded_purged(
     assert recovery.purge(30, plan["fingerprint"]) == {"purged": 0, "kept": 1}
     record = store.read_document("removed:" + old["id"])
     assert record.get("quarantine") and not record.get("purged_at")
+
+
+def test_undo_restores_every_song_a_removal_put_in_trash(tmp_path, monkeypatch):
+    """D-79, #183: an album, artist or duplicate removal answers with its Trash
+    entries, and one request restores them all; one that cannot be restored
+    is reported, never hidden, and the others still come back."""
+    from fastapi.testclient import TestClient
+
+    from server.app import create_app
+
+    store, root, path, track = setup(tmp_path, monkeypatch)
+    second = root / "Artist" / "Album" / "Other.mp3"
+    second.write_bytes(b"second song")
+    other = {
+        **track,
+        "id": "other",
+        "title": "Other",
+        "relative_path": "Artist/Album/Other.mp3",
+        "track_number": 2,
+    }
+    (tmp_path / "data" / "library-snapshot.json").write_text(
+        json.dumps({"tracks": [track, other]})
+    )
+    app = create_app(tmp_path / "data")
+    with TestClient(app) as client:
+        (album,) = app.state.store.library["albums"]
+        removed = client.post(f"/api/v1/admin/albums/{album['id']}/remove").json()
+        assert removed["removed"] == 2 and len(removed["restorable"]) == 2
+        assert not path.exists() and not second.exists()
+        restored = client.post(
+            "/api/v1/admin/library/trash/restore",
+            json={"identities": removed["restorable"] + ["unknown"]},
+        )
+        assert restored.status_code == 200, restored.text
+        body = restored.json()
+        assert sorted(body["restored"]) == sorted(removed["restorable"])
+        assert body["failed"] == ["unknown"]
+        assert path.read_bytes() == b"original music"
+        assert second.read_bytes() == b"second song"
+        # Restoring again finds nothing to restore, and says so.
+        again = client.post(
+            "/api/v1/admin/library/trash/restore",
+            json={"identities": removed["restorable"]},
+        ).json()
+        assert again["restored"] == [] and len(again["failed"]) == 2

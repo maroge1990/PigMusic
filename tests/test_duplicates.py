@@ -69,10 +69,12 @@ def test_removal_moves_listeners_to_the_kept_copy_and_can_be_restored(
 ):
     store, member, nas = setup(tmp_path, monkeypatch)
     recovery = Recovery(store)
-    assert remove(store, recovery, ["hits", "nas", "other"]) == {
-        "removed": 1,
-        "skipped": 2,
-    }
+    result = remove(store, recovery, ["hits", "nas", "other"])
+    assert result["removed"] == 1 and result["skipped"] == 2
+    # Its Trash entries come back with it, for Undo (D-79, #183).
+    assert result["restorable"] == [
+        r["id"] for r in recovery.list() if r["track_id"] == "hits"
+    ]
     titles = {a["title"] for a in store.library["albums"]}
     assert "Greatest Hits" not in titles and "Rumours" in titles
     assert (nas / "Fleetwood Mac" / "Rumours" / "Dreams.mp3").exists()

@@ -81,6 +81,8 @@ def remove(store, recovery, track_ids):
 
     keepers = {d["track"]["id"]: d["keeper"]["id"] for d in find(store)}
     removed = skipped = 0
+    # The Trash entries made, for Undo (D-79, #183).
+    restorable = []
     for track_id in dict.fromkeys(track_ids):
         keeper = keepers.get(track_id)
         if not keeper:
@@ -97,8 +99,8 @@ def remove(store, recovery, track_ids):
                 ).rowcount:
                     bump(conn, user_id)
         try:
-            recovery.remove(track_id, exclude=False)
+            restorable.append(recovery.remove(track_id, exclude=False)["id"])
             removed += 1
         except (ValueError, OSError, FileNotFoundError):
             skipped += 1
-    return {"removed": removed, "skipped": skipped}
+    return {"removed": removed, "skipped": skipped, "restorable": restorable}

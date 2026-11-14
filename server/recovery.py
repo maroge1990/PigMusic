@@ -162,6 +162,18 @@ class Recovery:
         self.save("removed:" + record["id"], record)
 
     @coordinated
+    def restore_many(self, identities):
+        """Restore each; those that cannot be restored are listed, never
+        hidden, and do not stop the rest."""
+        restored, failed = [], []
+        for identity in dict.fromkeys(identities):
+            try:
+                self.restore(identity)
+                restored.append(identity)
+            except (ValueError, OSError, KeyError, TypeError):
+                failed.append(identity)
+        return {"restored": restored, "failed": failed}
+
     def restore(self, identity):
         with self.lock:
             record = self.store.read_document("removed:" + identity)
