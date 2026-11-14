@@ -247,6 +247,8 @@ def test_the_release_verifier_accepts_migration_13_on_a_queue(tmp_path, monkeypa
         conn.execute("DROP TRIGGER queue_revived")
         conn.execute("ALTER TABLE queue DROP COLUMN incarnation")
         conn.execute("DELETE FROM schema_migrations WHERE version=13")
+        conn.execute("DROP TABLE listen_details")
+        conn.execute("DELETE FROM schema_migrations WHERE version=14")
     expected = tmp_path / "expected.json"
     expected.write_text(json.dumps({"tracks": 0, "album_ids": []}))
     monkeypatch.setattr(

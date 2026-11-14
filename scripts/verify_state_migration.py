@@ -188,6 +188,7 @@ def main():
         11,
         12,
         13,
+        14,
     ], "Unexpected migration versions"
     assert all(
         isinstance(r[1], str) and r[1] for r in ledger
@@ -228,6 +229,13 @@ def main():
             row[2] is None for row in after["playlists"]
         ), "Unexpected playlist ownership"
         after["playlists"] = [row[:2] for row in after["playlists"]]
+    # Migration 14 keeps what each earlier mix listen was (#203): every row
+    # belongs to a listen already there, and nothing else changes.
+    if "listen_details" not in before:
+        listens = {(r[1], r[6]) for r in after.get("play_events", [])}
+        assert all(
+            (row[0], row[1]) in listens for row in after.pop("listen_details", [])
+        ), "Listen details without their listen"
     # Migration 13 gives each queue entry a random incarnation (#183): the
     # only change to an entry, a fresh 32-hex token in a new last column.
     if (
