@@ -68,3 +68,8 @@ import Testing
     #expect(publisher.runs == [false, true, false])
   }
 }
+
+@Test func theBridgeHeartbeatIsASafetyNetNotAPoll() {
+  // #178: events publish; the foreground check ran every 2 s while paired.
+  #expect(WatchPublishLoop.heartbeat >= .seconds(30))
+}

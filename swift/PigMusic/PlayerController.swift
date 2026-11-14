@@ -169,57 +169,25 @@ import PigSync
           self.finishedStreaming()
         }
       })
-    observations.append(
-      NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification).receive(
-        on: DispatchQueue.main
-      ).sink {
-        [weak self] notification in
-        let began =
-          (notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt)
-          == AVAudioSession.InterruptionType.began.rawValue
-        let options = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
-        let shouldResume = AVAudioSession.InterruptionOptions(rawValue: options).contains(
-          .shouldResume)
-        let disconnected =
-          (notification.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt)
-          == AVAudioSession.InterruptionReason.routeDisconnected.rawValue
-        Task { @MainActor in
-          self?.interruption(began: began, shouldResume: shouldResume, disconnected: disconnected)
-        }
-      })
-    observations.append(
-      NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification).receive(
-        on: DispatchQueue.main
-      ).sink {
-        [weak self] notification in
-        let reason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
-        Task { @MainActor in
-          guard let self else { return }
-          if reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue {
-            self.pause()
-          }
-          if self.usingEngine { self.recoverRoute() }
-        }
-      })
-    observations.append(
-      NotificationCenter.default.publisher(for: AVAudioSession.mediaServicesWereResetNotification)
-        .receive(on: DispatchQueue.main).sink { [weak self] _ in
-          DiagnosticsLog.shared.record("audio", "media services reset")
-          Task { @MainActor in self?.releaseSession() }
-        })
-    observations.append(
-      NotificationCenter.default.publisher(for: .AVAudioEngineConfigurationChange).receive(
-        on: DispatchQueue.main
-      ).sink {
-        [weak self] notification in
-        let identity = notification.object.map { ObjectIdentifier($0 as AnyObject) }
-        Task { @MainActor in
-          guard let self, identity == self.engineOutput?.engineIdentity,
-            self.engineOutput?.requiresRecovery == true
-          else { return }
-          self.recoverRoute()
-        }
-      })
+    observations += AudioSessionEvent.observe { [weak self] event in
+      guard let self else { return }
+      switch event {
+      case .interruptionBegan(let disconnected):
+        interruption(began: true, shouldResume: false, disconnected: disconnected)
+      case .interruptionEnded(let shouldResume):
+        interruption(began: false, shouldResume: shouldResume)
+      case .routeChanged(let removed):
+        if removed { pause() }
+        if usingEngine { recoverRoute() }
+      case .mediaServicesReset:
+        DiagnosticsLog.shared.record("audio", "media services reset")
+        releaseSession()
+      case .engineConfigurationChanged(let engine):
+        guard engine == engineOutput?.engineIdentity, engineOutput?.requiresRecovery == true
+        else { return }
+        recoverRoute()
+      }
+    }
     let commands = MPRemoteCommandCenter.shared()
     // @Sendable keeps each handler off the main actor: the system may call it
     // from another queue, and an isolated handler would assert before its Task.

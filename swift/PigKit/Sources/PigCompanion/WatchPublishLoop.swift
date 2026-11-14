@@ -21,3 +21,11 @@ import PigDomain
     }
   }
 }
+
+extension WatchPublishLoop {
+  /// How often the phone's bridge checks the Watch link and archive on its
+  /// own while in the foreground (#178). Downloads, receipts, the link's state
+  /// changes, the 45 s batch deferral and every library sync already publish,
+  /// so this is only a safety net, paired or not.
+  public nonisolated static let heartbeat: Duration = .seconds(30)
+}

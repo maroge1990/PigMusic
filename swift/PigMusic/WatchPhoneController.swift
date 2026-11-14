@@ -184,8 +184,8 @@ import SwiftUI
     }
     startPolling()
   }
-  /// Foreground only. Without an installed Watch app there is nothing to
-  /// deliver, so the bridge checks back slowly instead of every two seconds.
+  /// Foreground only, every 30 s, paired or not: downloads, receipts, the
+  /// link's state changes and every library sync publish on their own (#178).
   private func startPolling() {
     account.cancel("poll")
     guard namespace != nil else { return }
@@ -199,7 +199,7 @@ import SwiftUI
           await downloads?.reload()
           await publish()
         }
-        do { try await Task.sleep(for: .seconds(paired ? 2 : 30)) } catch { return }
+        do { try await Task.sleep(for: WatchPublishLoop.heartbeat) } catch { return }
       }
     })
   }
