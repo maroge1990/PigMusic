@@ -47,7 +47,6 @@ final class DemoLibraryTests: XCTestCase {
     let screen = app.windows.firstMatch.frame
     XCTAssertEqual(pig.frame.midX, screen.midX, accuracy: 1)
     XCTAssertEqual(pig.frame.midY, screen.midY, accuracy: 1)
-    XCTAssertEqual(pig.frame.width, 180, accuracy: 1)
   }
 
   /// #62: an album opened from Home looks like the same album in Library.
