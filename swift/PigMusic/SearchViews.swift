@@ -251,7 +251,8 @@ struct SavedArtistView: View {
         DetailHeader(
           model: model, source: cover.map { .stored($0) }, eyebrow: "IN YOUR LIBRARY",
           title: artist.name,
-          subtitle: artist.albumCount.map { "\($0) album\($0 == 1 ? "" : "s")" }, circle: true
+          subtitle: artist.albumCount.map { "\($0) album\($0 == 1 ? "" : "s")" }, circle: true,
+          tinted: true
         ).preparesPlayback(songs, model: model)
         HStack(spacing: 10) {
           PlayCapsule { model.play(songs) }.disabled(songs.isEmpty)
@@ -611,7 +612,7 @@ private struct ServerAlbumView: View {
       VStack(alignment: .leading, spacing: PigSpacing.page) {
         DetailHeader(
           model: model, source: album.artworkSource, eyebrow: "ON THE SERVER",
-          title: album.title, artist: album.artist)
+          title: album.title, artist: album.artist, tinted: true)
         HStack(spacing: 10) {
           PlayCapsule { model.play(tracks, origin: .catalogue(artistId: nil)) }
             .disabled(tracks.isEmpty)

@@ -69,6 +69,8 @@ enum PlayOrigin: Hashable {
   /// Decoded covers in memory, in front of the account's artwork cache.
   @ObservationIgnored private let images = ArtworkLoader<UIImage> { UIImage(cgImage: $0) }
   @ObservationIgnored private var artistCovers: [String: String?] = [:]
+  /// Each cover's colour (#199), computed once per cover and account.
+  @ObservationIgnored private var coverSwatches: [String: CoverRGB?] = [:]
   @ObservationIgnored private var catalogueMemory = CatalogueMemory()
   @ObservationIgnored private(set) var service: NativeService?
   @ObservationIgnored private(set) var store: LibraryStore?
@@ -590,6 +592,7 @@ enum PlayOrigin: Hashable {
     self.artistCount = artistCount
     if artworkChanged {
       artistCovers = [:]
+    coverSwatches = [:]
       artworkRefresh += 1
     }
     libraryRevision += 1
@@ -1041,6 +1044,22 @@ enum PlayOrigin: Hashable {
     artistCovers[artist.id] = sha
     return sha
   }
+  /// The colour a cover lends its page (#199), or nil without a cover. The
+  /// image comes from the same loader (and the same width) the page draws, so
+  /// it is usually in memory; sampling runs off the main actor and the answer
+  /// is kept per cover.
+  func coverSwatch(_ source: ArtworkSource?, width: Int) async -> CoverRGB? {
+    guard let source else { return nil }
+    let key = "\(artworkNamespace)|\(source)"
+    if let known = coverSwatches[key] { return known }
+    guard let image = await artwork(source, width: width), let cgImage = image.cgImage,
+      !Task.isCancelled
+    else { return nil }
+    let swatch = await CoverSampler.swatch(cgImage)
+    if coverSwatches.count > 256 { coverSwatches = [:] }
+    coverSwatches[key] = swatch
+    return swatch
+  }
   func sortLibrary(_ collection: LibraryCollection, by sort: LibrarySort) async {
     guard !loadingMore, !syncing else { return }
     switch collection {
@@ -1300,6 +1319,7 @@ enum PlayOrigin: Hashable {
     images.detach()
     artworkNamespace = ""
     artistCovers = [:]
+    coverSwatches = [:]
     catalogueMemory.clear()
     homeContent = [:]
     homeLoadedAt = [:]

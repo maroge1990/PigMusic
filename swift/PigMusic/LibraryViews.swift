@@ -262,7 +262,8 @@ struct AlbumView: View {
         DetailHeader(
           model: model, source: album.artworkSource ?? tracks.first?.artworkSource,
           eyebrow: "IN YOUR LIBRARY", title: album.title, subtitle: albumSubtitle,
-          artist: album.artist, openArtist: artist == nil ? nil : { showingArtist = true }
+          artist: album.artist, openArtist: artist == nil ? nil : { showingArtist = true },
+          tinted: true
         ).preparesPlayback(tracks, model: model)
         HStack(spacing: 10) {
           PlayCapsule { model.play(tracks) }.disabled(tracks.isEmpty)
@@ -499,6 +500,8 @@ struct NowPlayingView: View {
   /// Song actions open from this sheet: the app's own action sheet can't
   /// show while the player covers it (#100).
   @State private var actionTrack: Track?
+  /// The playing cover's colour behind the player (#199).
+  @State private var swatch: CoverRGB?
   // Sections are separate properties so each type-checks quickly.
   var body: some View {
     NavigationStack {
@@ -512,6 +515,17 @@ struct NowPlayingView: View {
           if let error = player.error { failure(error) }
           upNext
         }.padding(.horizontal, 24).padding(.bottom, 24)
+      }
+      .background {
+        // Solid behind the cover and titles, fading into the canvas by the
+        // queue; fixed while the page scrolls.
+        CoverWash(swatch: swatch, solidUntil: 0.4, fadeEnd: 0.85).ignoresSafeArea()
+      }
+      .task(id: current?.artworkSource) {
+        // The cover's own width, so the image comes from memory. A song
+        // without a cover gives the brand canvas.
+        let next = await model.coverSwatch(current?.artworkSource, width: 1024)
+        if !Task.isCancelled { swatch = next }
       }
       .navigationTitle("Now playing").navigationBarTitleDisplayMode(.inline)
       .toolbar { Button("Done") { dismiss() } }
