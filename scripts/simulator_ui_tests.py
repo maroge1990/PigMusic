@@ -58,6 +58,12 @@ def paired() -> dict[str, str]:
     )
 
 
+def booted() -> set[str]:
+    """UDIDs of the simulators running now, whoever started them."""
+    listing = json.loads(simctl("list", "devices", "booted", "-j").stdout)["devices"]
+    return {device["udid"] for runtime in listing.values() for device in runtime}
+
+
 def xcodebuild(*args) -> subprocess.CompletedProcess:
     return subprocess.run(["xcodebuild", *args], capture_output=True, text=True)
 
@@ -155,6 +161,9 @@ def main(argv=None):
             built[kind] = build(scheme, devices[kind])
     failed = []
     server = None
+    # Other projects share the Mac's simulators: only the devices this run
+    # boots are shut down afterwards, never all of them.
+    running_before = booted()
     try:
         server, account = start_server()
         # The Watch boots only beside its booted iPhone.
@@ -207,7 +216,9 @@ def main(argv=None):
         elif server:
             stop_server(server)
         if not args.keep:
-            simctl("shutdown", "all", check=False)
+            for udid in devices.values():
+                if udid not in running_before:
+                    simctl("shutdown", udid, check=False)
     if failed:
         print("Failed:", "; ".join(failed), file=sys.stderr)
         return 1
