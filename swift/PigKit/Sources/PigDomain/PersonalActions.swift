@@ -30,6 +30,12 @@ public struct AcquisitionResult: Codable, Sendable {
   public let existing: Int
   public let skipped: Int
   public let downloadsEnabled: Bool
+  public init(created: Int, existing: Int, skipped: Int, downloadsEnabled: Bool) {
+    self.created = created
+    self.existing = existing
+    self.skipped = skipped
+    self.downloadsEnabled = downloadsEnabled
+  }
 }
 public struct AcquisitionRequest: Codable, Sendable, Identifiable {
   public let id: String

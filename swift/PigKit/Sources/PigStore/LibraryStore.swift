@@ -121,6 +121,28 @@ public actor LibraryStore {
     }
   }
 
+  /// Reads, changes and saves one cached value in a single transaction, so
+  /// two changes to it can't overwrite each other (#206).
+  public func updateCached<T: Codable & Sendable>(
+    _ key: String, as type: T.Type, _ change: @Sendable (inout T?) -> Void
+  ) throws {
+    try database.write { db in
+      var value = try String.fetchOne(
+        db, sql: "SELECT value FROM metadata WHERE key=?", arguments: ["cache:" + key]
+      ).map { try LibraryCodec.decoder().decode(T.self, from: Data($0.utf8)) }
+      change(&value)
+      if let value {
+        let json = String(decoding: try LibraryCodec.encoder().encode(value), as: UTF8.self)
+        try db.execute(
+          sql:
+            "INSERT INTO metadata VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+          arguments: ["cache:" + key, json])
+      } else {
+        try db.execute(sql: "DELETE FROM metadata WHERE key=?", arguments: ["cache:" + key])
+      }
+    }
+  }
+
   public func revision() throws -> String? {
     try database.read {
       try String.fetchOne($0, sql: "SELECT value FROM metadata WHERE key='revision'")

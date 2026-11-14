@@ -61,6 +61,9 @@ enum PlayOrigin: Hashable {
   @ObservationIgnored private var flushingEdits = false
   var mutationActive = false
   var canMutate: Bool { service != nil && !busy && !syncing && !mutationActive }
+  /// Requests wait in their own outbox, so a sync or another change in
+  /// progress doesn't stop one (#206); only a signed-in library is needed.
+  var canRequest: Bool { store != nil && person != nil }
   var songCount = 0
   var albumCount = 0
   var artistCount = 0
@@ -355,6 +358,8 @@ enum PlayOrigin: Hashable {
     server = origin.absoluteString
     self.service = service
     store = database
+    requestedSongs = Set(await RequestOutbox.pending(database).map(\.id))
+    try account.check(stamp)
     let backgroundIdentifier = "au.com.pig.music.downloads." + artworkNamespace
     let archive =
       try BackgroundTransferHub.archive(for: backgroundIdentifier)
@@ -541,6 +546,8 @@ enum PlayOrigin: Hashable {
       guard account.isCurrent(stamp) else { return }
       await adoptServerPreferences(service, generation: stamp)
       let editsApplied = await flushEdits()
+      guard account.isCurrent(stamp) else { return }
+      await flushRequests()
       guard account.isCurrent(stamp) else { return }
       if editsApplied {
         let artworkBefore = try? await store?.artworkRevision()
@@ -893,6 +900,95 @@ enum PlayOrigin: Hashable {
       if account.isCurrent(stamp) { pendingEdits = try await store.pendingMutations() }
     } catch { if account.isCurrent(stamp) { message = error.userMessage } }
     return applied
+  }
+  // MARK: Song requests (#206)
+
+  /// Songs this account asked for here: waiting for their Undo, waiting in
+  /// the request outbox, or sent. They show Requested at once.
+  var requestedSongs: Set<String> = []
+  @ObservationIgnored private var flushingRequests = false
+  static func undoKey(request id: String) -> String { "request:" + id }
+  static func undoKey(cancelRequest id: String) -> String { "request-cancel:" + id }
+  func isRequested(_ id: String) -> Bool {
+    requestedSongs.contains(id) || undo.hides(Self.undoKey(request: id))
+  }
+  /// Asks the server for `track` at once, with Undo (D-79): when the Undo
+  /// runs out the request joins the outbox, which sends it now or, offline,
+  /// the next time the server answers. Nothing on screen waits for it.
+  func requestLater(_ track: Track) {
+    let stamp = account.generation
+    undo.schedule(Self.undoKey(request: track.id), label: "Requested " + track.title) {
+      [weak self] in
+      // Only for the account that asked.
+      guard let self, account.isCurrent(stamp), let store else { return false }
+      do {
+        try await RequestOutbox.add(track, to: store)
+      } catch {
+        if account.isCurrent(stamp) { message = error.userMessage }
+        return false
+      }
+      guard account.isCurrent(stamp) else { return false }
+      requestedSongs.insert(track.id)
+      // The Undo chain doesn't wait on the network.
+      Task { await self.flushRequests() }
+      return true
+    }
+  }
+  /// Sends the request outbox; a failure to reach the server keeps it for
+  /// the next refresh.
+  func flushRequests() async {
+    guard !flushingRequests, let store, let service, person != nil else { return }
+    flushingRequests = true
+    defer { flushingRequests = false }
+    let stamp = account.generation
+    // A request made while one was sent goes in the next round.
+    for _ in 0..<10 {
+      let outcome: RequestOutbox.Outcome
+      do {
+        outcome = try await RequestOutbox.send(
+          store: store, isCurrent: { [account] in account.isCurrent(stamp) }
+        ) { try await service.requestMusic($0) }
+      } catch {
+        if account.isCurrent(stamp) { message = error.userMessage }
+        return
+      }
+      switch outcome {
+      case .sent:
+        guard account.isCurrent(stamp) else { return }
+        requestsRevision += 1
+        if await RequestOutbox.pending(store).isEmpty {
+          await refreshServerRequests()
+          return
+        }
+      case .refused(let ids, let reason):
+        guard account.isCurrent(stamp) else { return }
+        requestedSongs.subtract(ids)
+        message = reason
+      case .offline, .stale:
+        return
+      case .signedOut:
+        revoked(generation: stamp)
+        return
+      }
+    }
+  }
+  /// Cancels this person's request for a song at once, with Undo (D-79).
+  func cancelRequestLater(_ item: RequestGroupItem, done: @escaping @MainActor (Bool) -> Void) {
+    let stamp = account.generation
+    undo.schedule(
+      Self.undoKey(cancelRequest: item.id), label: "Cancelled the request for " + item.title
+    ) { [weak self] in
+      guard let self, account.isCurrent(stamp) else { return false }
+      do {
+        let result = try await performPersonal { try await $0.cancelRequest(id: item.id) }
+        requestsRevision += 1
+        done(result.continuesForOthers)
+        return true
+      } catch {
+        if account.isCurrent(stamp) { message = error.userMessage }
+        return false
+      }
+    }
   }
   func discardEdit(_ id: String) async {
     guard !flushingEdits, let store else { return }
@@ -1406,6 +1502,7 @@ enum PlayOrigin: Hashable {
     removals = PlaylistRemovalLedger()
     appliedEdits = []
     hiddenMixSongs = []
+    requestedSongs = []
     watch?.disconnect()
     // Stale for every operation still running; live updates stop.
     account.end()

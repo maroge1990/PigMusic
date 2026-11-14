@@ -42,13 +42,20 @@ struct SongActionsView: View {
             Button("Add to my library", systemImage: "plus") {
               Task { await add() }
             }.disabled(loading || !model.canMutate)
+          } else if track.serverState == "requested" || model.isRequested(track.id) {
+            // #206: the same mark as an album page's requested songs.
+            Label("Requested", systemImage: "clock").foregroundStyle(.secondary)
           } else if track.serverState == "not_in_library" {
-            Button(
-              track.id.hasPrefix("mix:") ? "Add to my library" : "Request song",
-              systemImage: "arrow.down.circle"
-            ) {
-              Task { await request() }
-            }.disabled(loading || !model.canMutate)
+            if track.id.hasPrefix("mix:") {
+              Button("Add to my library", systemImage: "arrow.down.circle") {
+                Task { await request() }
+              }.disabled(loading || !model.canMutate)
+            } else {
+              // At once, with Undo; sent when the server can be reached (#206).
+              Button("Request song", systemImage: "arrow.down.circle") {
+                model.requestLater(track)
+              }.disabled(!model.canRequest)
+            }
           }
         }
         Section {
@@ -83,6 +90,7 @@ struct SongActionsView: View {
         if loading { ProgressView() }
         if let message { Section { StatusText(message) } }
       }.pigCanvas().navigationTitle("Song actions").navigationBarTitleDisplayMode(.inline)
+        .undoBar(model.undo)
         .toolbar { Button("Done") { dismiss() }.disabled(loading) }
         .task { await loadFavourite() }
     }.interactiveDismissDisabled(model.mutationActive)
@@ -155,7 +163,9 @@ struct RequestsView: View {
       if loaded && groups.isEmpty { StatusText("No music requests") }
       ForEach(groups) { group in
         DisclosureGroup {
-          ForEach(group.items) { item in songRow(item) }
+          ForEach(
+            group.items.filter { !model.undo.hides(AppModel.undoKey(cancelRequest: $0.id)) }
+          ) { item in songRow(item) }
           let failed = group.items.filter { ["failed", "cancelled"].contains($0.status) }
           if failed.count > 1 {
             Button("Retry \(failed.count) songs") { Task { await retry(failed) } }
@@ -179,6 +189,7 @@ struct RequestsView: View {
           .buttonStyle(.pigSecondary)
       }
     }.pigCanvas().navigationTitle("Music requests").navigationBarTitleDisplayMode(.inline)
+      .undoBar(model.undo)
       .toolbar {
         Button("Refresh", systemImage: "arrow.clockwise") { Task { await load(reset: true) } }
           .disabled(loading)
@@ -210,7 +221,7 @@ struct RequestsView: View {
           .disabled(loading || !model.canMutate)
       }
       if ["waiting_for_sources", "searching", "downloading", "validating"].contains(item.status) {
-        Button("Cancel my request", role: .destructive) { Task { await cancel(item) } }
+        Button("Cancel my request", role: .destructive) { cancel(item) }
           .disabled(loading || !model.canMutate)
       }
     }
@@ -223,14 +234,14 @@ struct RequestsView: View {
       await load(reset: true)
     } catch { self.error = error.userMessage }
   }
-  private func cancel(_ item: RequestGroupItem) async {
-    do {
-      let result = try await model.performPersonal { try await $0.cancelRequest(id: item.id) }
-      await load(reset: true)
+  /// At once, with Undo (D-79): sent when the Undo runs out (#206).
+  private func cancel(_ item: RequestGroupItem) {
+    notice = nil
+    model.cancelRequestLater(item) { continuesForOthers in
       notice =
-        result.continuesForOthers
+        continuesForOthers
         ? "Your request was cancelled. The shared download continues for another person." : nil
-    } catch { self.error = error.userMessage }
+    }
   }
   private func load(reset: Bool) async {
     guard !loading else { return }
