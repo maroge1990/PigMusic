@@ -103,12 +103,12 @@ struct WatchDownloadsView: View {
     .toolbar {
       if let watch = model.watch {
         let records = watch.downloads?.records ?? []
-        Button("Clear finished") {
+        Button("Clear") {
           Task {
             await watch.downloads?.clearFinished(
               ids: Set(records.filter { onWatch($0, watch: watch) }.map(\.id)))
           }
-        }.disabled(!records.contains { onWatch($0, watch: watch) && $0.cleared != true })
+        }.accessibilityLabel("Clear finished").disabled(!records.contains { onWatch($0, watch: watch) && $0.cleared != true })
       }
     }
     .confirmationDialog(

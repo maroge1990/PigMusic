@@ -182,7 +182,8 @@ struct RequestsView: View {
       .toolbar {
         Button("Refresh", systemImage: "arrow.clockwise") { Task { await load(reset: true) } }
           .disabled(loading)
-        Button("Clear finished") { Task { await clear() } }.disabled(loading || !model.canMutate)
+        Button("Clear") { Task { await clear() } }.accessibilityLabel("Clear finished")
+          .disabled(loading || !model.canMutate)
       }
       .task { await load(reset: true) }
       // Live: the server's request queue changed.

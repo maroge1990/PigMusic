@@ -111,7 +111,8 @@ private struct DownloadList: View {
     }
     .undoBar(model.undo)
     .toolbar {
-      Button("Clear finished") { Task { await downloads.clearFinished() } }
+      Button("Clear") { Task { await downloads.clearFinished() } }
+        .accessibilityLabel("Clear finished")
         .disabled(!transfers.contains { $0.state == "ready" })
     }
     .task {
