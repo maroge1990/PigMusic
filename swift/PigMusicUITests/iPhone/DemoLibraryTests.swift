@@ -36,6 +36,20 @@ final class DemoLibraryTests: XCTestCase {
     expect(miniPlayer)
   }
 
+  /// #207: the splash pig sits where the launch screen drew it, the centre of
+  /// the whole screen, so it doesn't drop when the splash takes over.
+  func testTheSplashPigSitsInTheMiddleOfTheScreen() {
+    continueAfterFailure = false
+    app.launchArguments = ["--demo", "--hold-splash"]
+    app.launch()
+    let pig = app.otherElements["PigMusic is loading"].firstMatch
+    expect(pig, timeout: 30)
+    let screen = app.windows.firstMatch.frame
+    XCTAssertEqual(pig.frame.midX, screen.midX, accuracy: 1)
+    XCTAssertEqual(pig.frame.midY, screen.midY, accuracy: 1)
+    XCTAssertEqual(pig.frame.width, 180, accuracy: 1)
+  }
+
   /// #62: an album opened from Home looks like the same album in Library.
   func testAHomeAlbumOpensAsALibraryAlbum() {
     launch()

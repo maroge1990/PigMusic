@@ -83,6 +83,8 @@ extension View {
 }
 
 /// Matches the static launch composition; disappears immediately when restoration finishes.
+/// The pig is centred on the whole screen, as the launch screen draws it, so
+/// it doesn't move when the splash takes over (#207).
 public struct PigBrandSplash: View {
   @Environment(\.colorScheme) private var scheme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -107,8 +109,10 @@ public struct PigBrandSplash: View {
         Image("PigIconBody").resizable().scaledToFit()
         Image("PigIconFace").resizable().scaledToFit()
       }.frame(width: size, height: size)
+        .accessibilityElement(children: .ignore).accessibilityLabel("PigMusic is loading")
     }
-    .accessibilityElement(children: .ignore).accessibilityLabel("PigMusic is loading")
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .ignoresSafeArea()
     .onAppear {
       guard !reduceMotion && !reduceTransparency else { return }
       withAnimation(.easeInOut(duration: 4).repeatForever(autoreverses: true)) { bloom = true }

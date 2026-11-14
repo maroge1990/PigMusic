@@ -13,7 +13,7 @@ import UIKit
   var body: some Scene {
     WindowGroup {
       RootView(model: model)
-        .overlay { if starting { PigBrandSplash().transition(.opacity) } }
+        .overlay { if starting { PigBrandSplash().transition(splashExit) } }
         .task {
           await model.restore()
           finishStarting()
@@ -37,7 +37,17 @@ import UIKit
 extension PigMusicApp {
   fileprivate func finishStarting() {
     guard starting else { return }
-    withAnimation(.easeOut(duration: 0.25)) { starting = false }
+    #if DEBUG
+      // UI tests measure the splash: --hold-splash keeps it on screen.
+      if ProcessInfo.processInfo.arguments.contains("--hold-splash") { return }
+    #endif
+    withAnimation(.easeInOut(duration: 0.4)) { starting = false }
+  }
+  /// The pig grows a little as it fades into the app (#207); a plain fade
+  /// with Reduce Motion.
+  fileprivate var splashExit: AnyTransition {
+    UIAccessibility.isReduceMotionEnabled
+      ? .opacity : .opacity.combined(with: .scale(scale: 1.08))
   }
 }
 
