@@ -537,3 +537,37 @@ def test_a_tap_through_the_api_streams_youtubes_bytes_by_range(tmp_path, monkeyp
         assert played.content.startswith(b"\x00\x00\x00\x18ftyp")
         assert [(m, r) for m, r, _ in cdn] == [("GET", "bytes=0-11")]
         assert "googlevideo.com" in cdn[0][2]
+
+
+def test_only_the_update_that_failed_is_set_aside(tmp_path, releases):
+    """Codex, sources confirmation (medium): an update activated while a
+    lookup falls back to the pinned version must not be the one set aside."""
+    folder = tmp_path / "update"
+    folder.mkdir()
+
+    def install(version, body):
+        (folder / f"yt-dlp-{version}.zip").write_bytes(body)
+        (folder / "verified.json").write_text(
+            json.dumps(
+                {
+                    "version": version,
+                    "sha256": hashlib.sha256(body).hexdigest(),
+                    "file": f"yt-dlp-{version}.zip",
+                }
+            )
+        )
+
+    install("2099.04.05", releases("2099.04.05", broken=True))
+    youtube = YouTube(tmp_path)
+
+    def ask(request, update):
+        if update is not None:
+            return {"error": "invalid_response"}
+        # A healthy newer release is activated during the pinned retry.
+        install("2099.05.06", releases("2099.05.06"))
+        return address()
+
+    youtube.ask = ask
+    youtube.resolve(VIDEO)
+    assert youtube.quarantined() == {"2099.04.05"}
+    assert youtube.update_path().name == "yt-dlp-2099.05.06.zip"

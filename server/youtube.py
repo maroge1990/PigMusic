@@ -313,6 +313,11 @@ class YouTube:
 
     def update_path(self):
         """The verified newer yt-dlp, or None for the pinned one."""
+        return self.selected()[1]
+
+    def selected(self):
+        """(version, path) of the verified newer yt-dlp, read from one record,
+        or (None, None) for the pinned one."""
         record = self.directory / "update" / "verified.json"
         try:
             saved = json.loads(record.read_text())
@@ -322,10 +327,10 @@ class YouTube:
                 and version_key(saved["version"]) > version_key(pinned_version())
                 and hashlib.sha256(path.read_bytes()).hexdigest() == saved["sha256"]
             ):
-                return path
+                return saved["version"], path
         except (OSError, ValueError, KeyError, TypeError):
             pass
-        return None
+        return None, None
 
     def quarantined(self):
         """Updates that failed where the pinned yt-dlp worked (D-95)."""
@@ -362,16 +367,15 @@ class YouTube:
         cache = self.directory / "cache"
         cache.mkdir(parents=True, exist_ok=True)
         request = {"video_id": video_id, "cache": str(cache)}
-        update = self.update_path()
+        # The version is kept with its path: an update activated meanwhile is
+        # never the one set aside (Codex, sources confirmation).
+        version, update = self.selected()
         value = self.ask(request, update)
         if update is not None and value.get("error") == "invalid_response":
             # An update that breaks where the pinned version works is set
             # aside for good, so YouTube keeps working (Codex, sources round 1).
             pinned = self.ask(request, None)
             if pinned.get("error") != "invalid_response":
-                version = json.loads(
-                    (self.directory / "update" / "verified.json").read_text()
-                )["version"]
                 self.quarantine(version)
                 log.warning("yt-dlp %s set aside: the pinned version works", version)
             value = pinned
