@@ -632,6 +632,7 @@ export function PersonalLibrary({
                     await refresh();
                   },
                   `${p.name} is back.`,
+                  pending.done,
                 );
                 pending.done.then(
                   (sent) => sent && void refresh(),

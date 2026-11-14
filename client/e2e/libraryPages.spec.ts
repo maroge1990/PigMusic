@@ -349,3 +349,38 @@ test("a playlist is renamed, then deleted at once with Undo", async ({
   expect(calls[1]).toBe("DELETE?revision=2");
   expect(asked).toEqual([]);
 });
+
+test("two playlists deleted in a row each keep their own Undo", async ({
+  page,
+}) => {
+  // Codex, #183 round 1 (medium): a second Undo never hides the first.
+  await page.clock.install();
+  const deleted: string[] = [];
+  const playlist = (id: string, name: string) => (route: Route) => {
+    if (route.request().method() === "DELETE") deleted.push(id);
+    return route.fulfill({ json: { id, name, revision: 1, entries: [] } });
+  };
+  await mockApi(page, {
+    answers: {
+      "/v1/playlists/p1": playlist("p1", "Road trip"),
+      "/v1/playlists/p2": playlist("p2", "Gym"),
+    },
+  });
+  for (const id of ["p1", "p2"]) {
+    await page.goto(`/#/library/playlist/${id}`);
+    await page.getByText("Playlist options").click();
+    await page.getByRole("button", { name: "Delete playlist" }).click();
+    await expect(page).toHaveURL(/#\/library\/[a-z]+$/);
+  }
+  const bar = page.locator(".undo-bar");
+  await expect(bar.getByRole("button", { name: "Undo" })).toHaveCount(2);
+  await bar
+    .locator("p", { hasText: "Road trip deleted." })
+    .getByRole("button", { name: "Undo" })
+    .click();
+  await expect(bar).toContainText("Road trip is back.");
+  await page.clock.runFor(11_000);
+  await expect.poll(() => deleted).toEqual(["p2"]);
+  // Once sent, its Undo is gone: it can no longer be taken back.
+  await expect(bar.getByRole("button", { name: "Undo" })).toHaveCount(0);
+});
