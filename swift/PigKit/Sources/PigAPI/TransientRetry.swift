@@ -7,16 +7,29 @@ import PigDomain
 /// such as a reused connection the server or tunnel had already closed. Only
 /// reads, and requests that are safe to repeat, are retried.
 public struct TransientRetryMiddleware: ClientMiddleware {
-  /// POSTs without a body that only mint something and change no state.
-  static let repeatable: Set<String> = ["playback_url_api_v1_playback__track_id__url_post"]
+  /// POSTs the server answers the same way when they arrive twice: minting a
+  /// playback address, setting a favourite to a value, listens and edits
+  /// carrying their own IDs (#188).
+  static let repeatable: Set<String> = [
+    "playback_url_api_v1_playback__track_id__url_post",
+    "favourite_api_v1_favourites_post",
+    "play_events_api_v1_play_events_post",
+    "native_mutation_api_v1_mutations_post",
+  ]
   let delays: [Duration]
-  public init(delays: [Duration] = [.milliseconds(250), .seconds(1)]) { self.delays = delays }
+  /// About 15 s in all: the phone lost every request for 10–20 s after
+  /// opening the app while the server answered them (#188).
+  public init(
+    delays: [Duration] = [.milliseconds(250), .seconds(1), .seconds(2), .seconds(4), .seconds(8)]
+  ) { self.delays = delays }
   public func intercept(
     _ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String,
     next: (HTTPRequest, HTTPBody?, URL) async throws -> (HTTPResponse, HTTPBody?)
   ) async throws -> (HTTPResponse, HTTPBody?) {
+    // A body can be sent again only if it can be read again.
+    let resendable = body.map { $0.iterationBehavior == .multiple } ?? true
     let safe =
-      body == nil
+      resendable
       && (request.method == .get || request.method == .head
         || Self.repeatable.contains(operationID))
     var attempt = 0

@@ -88,3 +88,38 @@ func fastOrdinarySuccessesAndRedirectsStayUnlogged(_ status: Int) {
     duration: .milliseconds(40), serverTiming: "app;dur=32.4, handler;dur=25.3", failure: nil)
   #expect(NativeService.diagnosticsLine(trace) == nil)
 }
+
+@Test func aWrappedConnectionFailureIsLoggedByItsCode() {
+  // #188: the runtime hands middlewares a ClientError around the URLError,
+  // so the phone logged "ClientError" and the code was lost.
+  let wrapped = ClientError(
+    operationID: "me", operationInput: (), request: nil, requestBody: nil, baseURL: nil,
+    response: nil, responseBody: nil, causeDescription: "Transport failed",
+    underlyingError: URLError(.cannotConnectToHost))
+  #expect(RequestTraceMiddleware.describe(wrapped) == "URLError -1004")
+  #expect(RequestTraceMiddleware.describe(CancellationError()) == "cancelled")
+}
+
+@Test func aFailedOrSlowRequestsConnectionIsDescribed() {
+  // #188: which protocol, a reused connection or a new one, and the network.
+  #expect(
+    NetworkMetricsLog.line(
+      requestID: "0123456789abcdef", protocolName: "h3", reused: false, cellular: true,
+      failure: URLError(.cannotConnectToHost), duration: .milliseconds(445))
+      == "connection h3 new cellular, URLError -1004 after 445 ms (id 0123456789abcdef)")
+  #expect(
+    NetworkMetricsLog.line(
+      requestID: "0123456789abcdef", protocolName: "h2", reused: true, cellular: false,
+      failure: nil, duration: .milliseconds(1500))
+      == "connection h2 reused wifi or wired, answered after 1500 ms (id 0123456789abcdef)")
+  // A quick answer is not logged.
+  #expect(
+    NetworkMetricsLog.line(
+      requestID: "0123456789abcdef", protocolName: "h2", reused: true, cellular: false,
+      failure: nil, duration: .milliseconds(200)) == nil)
+  // Without a request ID the line can't be matched to the server's log.
+  #expect(
+    NetworkMetricsLog.line(
+      requestID: nil, protocolName: "h3", reused: false, cellular: false,
+      failure: URLError(.timedOut), duration: .seconds(20))?.hasSuffix("(id unknown)") == true)
+}

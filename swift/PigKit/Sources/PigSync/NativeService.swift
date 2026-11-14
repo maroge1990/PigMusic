@@ -77,7 +77,8 @@ public actor NativeService: LibrarySource {
       // A request on a dead connection fails within 20 s of silence, and a
       // safe one is then retried on a new connection (TransientRetryMiddleware).
       configuration.timeoutIntervalForRequest = 20
-      return URLSession(configuration: configuration)
+      return URLSession(
+        configuration: configuration, delegate: Self.connectionLog, delegateQueue: nil)
     }
     self.connections = connections
     client = try PigClient.make(
@@ -86,6 +87,10 @@ public actor NativeService: LibrarySource {
       trace: RequestTraceMiddleware(newID: ServerTiming.newRequestID) { trace in
         if let line = Self.diagnosticsLine(trace) { DiagnosticsLog.shared.record("network", line) }
       })
+  }
+  /// Which connection carried a failed or slow request (#188).
+  private static let connectionLog = NetworkMetricsLog { line in
+    DiagnosticsLog.shared.record("network", line)
   }
   /// Every playback address, as a baseline, and any request that was slow or
   /// failed, with the server's share of the wait and the ID its log uses.

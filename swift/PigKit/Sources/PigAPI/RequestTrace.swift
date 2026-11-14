@@ -61,9 +61,12 @@ public struct RequestTraceMiddleware: ClientMiddleware {
     }
   }
   /// Short and free of URLs: "URLError -1001", "cancelled" or the type's name.
+  /// The runtime wraps a transport's URLError in a ClientError (#188).
   static func describe(_ error: Error) -> String {
-    if let error = error as? URLError { return "URLError \(error.code.rawValue)" }
-    if error is CancellationError { return "cancelled" }
+    if let error = error.networkFailure { return "URLError \(error.code.rawValue)" }
+    if error is CancellationError || (error as? ClientError)?.underlyingError is CancellationError {
+      return "cancelled"
+    }
     return String(describing: type(of: error))
   }
 }
