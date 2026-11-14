@@ -11,7 +11,7 @@ from ..artist_identity import Ambiguous, cached_identities, resolve_artist
 from ..catalogue import RELEASE_INC, release_tracks, credit, edition_rank
 from ..library import normalise
 from ..queue_states import ACTIVE
-from ..matching import title_key
+from ..matching import title_key as matching_title_key
 from ..releases import release_query
 from ..api_models import (
     CatalogueGroupsDTO,
@@ -25,6 +25,12 @@ from ..api_models import (
 )
 from ..conditional import CONDITIONAL_RESPONSES, conditional_json
 from ..user_library import track_dto
+
+
+def title_key(title):
+    """Saved albums match release groups without edition qualifiers, but a
+    bare year still tells albums apart ("Weezer (1994)", "Weezer (2001)")."""
+    return matching_title_key(title, keep_years=True)
 
 
 # Covers fetched as soon as an artist's discography is opened: a phone's

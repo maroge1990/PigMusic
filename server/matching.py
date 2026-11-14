@@ -42,13 +42,17 @@ SONG_TOLERANCE = 8
 ACQUISITION_TOLERANCE = 5
 
 
-def strip_edition(title):
+def strip_edition(title, keep_years=False):
     """The title without trailing edition qualifiers, punctuation kept:
     "Go Your Own Way - 2004 Remaster" is "Go Your Own Way", "Brat (Deluxe)"
-    is "Brat", but "Brat (Live)" stays. Featured-artist credits go too."""
+    is "Brat", but "Brat (Live)" stays. Featured-artist credits go too.
+    With `keep_years`, a bare year stays: "Weezer (1994)" and "Weezer (2001)"
+    are different albums."""
     text = title or ""
     while found := QUALIFIER.search(text):
         qualifier = found.group(1) if found.group(1) is not None else found.group(2)
+        if keep_years and re.fullmatch(r"\s*(19|20)\d\d\s*", qualifier):
+            break
         if not (
             FEATURE.match(qualifier)
             or EDITION.search(qualifier)
@@ -73,9 +77,9 @@ def album_title(title, artist=None):
     return strip_edition(text) or (title or "")
 
 
-def title_key(title):
+def title_key(title, keep_years=False):
     """Titles compare without edition qualifiers (see `strip_edition`)."""
-    return normalise(strip_edition(title)) or normalise(title)
+    return normalise(strip_edition(title, keep_years)) or normalise(title)
 
 
 def lead_artist(artist):

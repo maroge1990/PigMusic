@@ -189,3 +189,14 @@ def test_discover_matches_saved_albums_with_the_shared_title_key():
     key = discover.title_key
     assert key("Rumours - 2004 Remaster") == key("Rumours (Deluxe)") == key("Rumours")
     assert key("Rumours (Live)") != key("Rumours")
+
+
+def test_discover_keeps_albums_a_bare_year_tells_apart():
+    """Codex round 1 (#170): "Weezer (1994)" and "Weezer (2001)" are
+    different albums; a dated remaster is still the same one."""
+    from server.routes import discover
+
+    key = discover.title_key
+    assert key("Weezer (1994)") != key("Weezer (2001)")
+    assert key("Weezer (2001) [Deluxe Edition]") == key("Weezer (2001)")
+    assert key("Rumours - 2004 Remaster") == key("Rumours")
