@@ -872,17 +872,22 @@ class Downloader:
         if not ffmpeg:
             raise ValueError("FFmpeg is required to convert a lossless download")
         with self.timings().step("convert", profile=profile):
-            result = run_checked(
-                [ffmpeg, "-v", "error", "-nostdin", "-y", "-i", str(path)]
-                + ["-map", "0:a:0", "-vn", "-map_metadata", "-1"]
-                + ([] if rate in (44100, 48000) else ["-ar", "44100"])
-                + ["-c:a", codec, "-b:a", bitrate, str(output)],
-                check,
-                timeout=180,
-            )
-            if result.returncode or not output.is_file():
+            try:
+                result = run_checked(
+                    [ffmpeg, "-v", "error", "-nostdin", "-y", "-i", str(path)]
+                    + ["-map", "0:a:0", "-vn", "-map_metadata", "-1"]
+                    + ([] if rate in (44100, 48000) else ["-ar", "44100"])
+                    + ["-c:a", codec, "-b:a", bitrate, str(output)],
+                    check,
+                    timeout=180,
+                )
+                if result.returncode or not output.is_file():
+                    raise ValueError("Converting the lossless original failed")
+            except BaseException:
+                # Cancelled, a deadline, a timeout or a failed run: no
+                # partial output stays in staging (Codex round 1).
                 output.unlink(missing_ok=True)
-                raise ValueError("Converting the lossless original failed")
+                raise
         return output, {
             "codec": "flac",
             "sample_rate_hz": rate,

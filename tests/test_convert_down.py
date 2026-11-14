@@ -169,3 +169,28 @@ def test_a_failed_download_says_why_and_a_member_sees_only_their_own(tmp_path):
     assert users.request_log("someone", job["id"])["lines"] == lines
     with pytest.raises(LookupError):
         users.request_log("another person", job["id"])
+
+
+def test_an_interrupted_conversion_leaves_nothing_in_staging(tmp_path, monkeypatch):
+    """Codex round 1 (#196): a cancelled or timed-out FFmpeg run left its
+    partial output behind."""
+    from server import downloader
+    from server.downloader import Cancelled
+
+    store, job, worker, _ = worker_offering(tmp_path, flac(tmp_path, "g.flac"))
+    path = worker.staging / "x.flac"
+    shutil.copyfile(tmp_path / "g.flac", path)
+
+    real = downloader.run_checked
+
+    def interrupted(argv, check, timeout, **kwargs):
+        if "-c:a" not in argv:  # Not the conversion (the lossless check).
+            return real(argv, check, timeout, **kwargs)
+        with open(argv[-1], "wb") as partial:
+            partial.write(b"partial")
+        raise Cancelled()
+
+    monkeypatch.setattr(downloader, "run_checked", interrupted)
+    with pytest.raises(Cancelled):
+        worker.convert_down(job, path, "mp3_320")
+    assert [p.name for p in worker.staging.iterdir()] == ["x.flac"]
