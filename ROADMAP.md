@@ -5,20 +5,20 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 14 Nov 2026 (midday, Melbourne).*
+*Overwritten at the end of every session. 14 Nov 2026 (afternoon, Melbourne).*
 
-- **Live:** release `measure-20261113-v1`, server `9051fac`, applied by Mark 14 Nov 06:52 Melbourne. Healthy; carries
-  batch 'measure' (#191). Rollback: container `PigMusic-before-measure-20261113-v1`, backup `pre-measure-20261113-v1`.
-  D-78 clean-up of the older rollbacks (web, artwork, findings) waits on Mark's hands. The counters started from zero
-  at this release: the first numbers go on #191 after a few days of use.
+- **Live:** release `sources-20261114-v1`, server `dad65a5`, applied by Mark 14 Nov ~12:50 Melbourne. Healthy; carries
+  batches 'measure' (#191), 'lookahead' (#192) and 'sources' (#94, #193). YouTube works from the server (search
+  1.05 s, address 2.8 s). Rollback: container `PigMusic-before-sources-20261114-v1`, backup
+  `pre-sources-20261114-v1`. Six older rollback containers wait for the D-78 clean-up (Mark's hands). Counters for
+  #191 started at the measure release (14 Nov 06:52): first numbers after a few days.
+- **YouTube trial (#193, D-91):** started 14 Nov ~12:50, ends ~21 Nov. Then: the numbers on #193 and #191, a hand
+  sample of wrong versions, and Mark decides keep or remove (#201).
 - **Mark away (D-94):** Claude keeps pushing reviewed server and web batches and prepares each release (CI, verify,
   preflight); Mark applies the newest prepared release when back. Decisions taken before he left: YouTube trial
   (D-91), convert down from verified lossless if the numbers help (D-92), keep and document `server.admin` (D-93),
   yt-dlp updates itself for the trial (D-95), #199's tint stays out of TestFlight until he approves screenshots
-  (being built early in its own session for his review, on its own branch).
-- **Release `lookahead-20261114-v1` ready (D-94), apply step with Mark:** image `sha-0af997b` (batch 3 and the
-  opentelemetry-api CVE bump); Unraid verify and preflight passed 14 Nov ~11:10. Superseded by the batch 4 release
-  once that is prepared; Mark applies only the newest.
+  (built early and approved 14 Nov on branch `claude/cover-tint-199-6af23e`, D-96; it joins batch 9).
 - **Batch 3 'lookahead' (#192), pushed `f0bee7d`..`47ef935`:** JioSaavn matches kept 6 h and re-checked on the tap;
   release pages, Home and settled searches look up their first songs ahead of the tap. Look-ahead never asks the
   relays or starts a transfer, has its own JioSaavn budget, and a tap overtakes a look-ahead still waiting. Two Codex
@@ -55,8 +55,8 @@ Mark's single testing round (D-86).
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | ~~Idle CPU regression~~ (closed 13 Nov: post-restart catch-up, no regression) | #190 | server | — | — | — |
 | 2 | Measure: counters and a report for the targets (pushed 13 Nov) | #191 | server, web admin | 2 | release; baseline posted on #191 | — |
-| 3 | Look up the songs on screen before the tap (pushed 14 Nov) | #192 | server | 2 | release | — |
-| 4 | Sources (audit 8, pushed 14 Nov): SoundCloud out, Monochrome diagnosed, YouTube for instant listening as a one-week trial (D-91, D-95), FreeMp3Cloud and zvu4no out of instant (D-89) | #94, #193 | server | 2 | release, then the trial week | — |
+| 3 | ~~Look up the songs on screen before the tap~~ (released 14 Nov, closed) | #192 | server | 2 | release | — |
+| 4 | Sources (audit 8, released 14 Nov; #94 closed, YouTube trial to ~21 Nov): SoundCloud out, Monochrome diagnosed, YouTube for instant listening as a one-week trial (D-91, D-95), FreeMp3Cloud and zvu4no out of instant (D-89) | #94, #193 | server | 2 | release, then the trial week | — |
 | 5 | Agency and words (audit 6): Undo over confirm | #183 | web (+ native half) | 2 | release; native half in the TestFlight build | — |
 | 6 | Artwork: Deezer first for covers and artist photos (measure first) | #194 | server | 2 | release | — |
 | 7 | Server dead code and duplicates (audit 7), with any retirement whose pass mark is met | #169, #170, #173 parts 1 and 3, #201 | server | 1 | release | Mark: keep or delete `server.admin` |
