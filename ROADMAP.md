@@ -5,7 +5,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 15 Nov 2026 (Melbourne).*
+*Overwritten at the end of every session. 15 Nov 2026 (Melbourne), later.*
 
 - **Live:** release `native-20261114-v2`, server `6ab9f7e` (D-99), healthy. Rollback: container
   `PigMusic-before-native-20261114-v2`, backup `pre-native-20261114-v2`. No server change since.
@@ -22,7 +22,13 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   excluded by the household drops them with a notice); Cancel my request with Undo. Codex round 1 (a high: 5xx
   dropped queued requests; a medium: Requested stuck after cancel) and round 2 (a medium: skipped songs marked
   Requested) and two confirmation findings (the notice cleared by a refresh) were fixed with tests; the last
-  confirmation approved. Native build 0.2.0 (26) bumped for TestFlight; the upload needs Mark's Mac password.
+  confirmation approved. Build 26 was not uploaded: Mark chose one TestFlight after batch 11 (build 27).
+- **Batch 11 'Made for you' (#202, #203), pushed `8d52a1f`..`4cc75d9`:** similar songs when a queue ends (server
+  `/radio/continuation`, keep_playing preference merged so older apps can't reset it; web and iPhone, "Similar songs"
+  in Up next; iPhone fetches ahead and plays on) and Rewind (server `/rewind`, web `#/home/rewind`, iPhone Home ›
+  Your Rewind). Migration 14 `listen_details` keeps what each listen was, so a year survives mix clean-up; a listen
+  counts as the song's length (the apps report once at 30 s). Codex round 1 (a high and two mediums), round 2 (a
+  medium) and the confirmation approved. Server and web: release next; iPhone: TestFlight (27) with batch 10b.
 - **#188:** build 25's export: no transport failures while online (baseline 54 of 166), all HTTP/2; replies still
   take 1.5 s median (p90 3.1 s) on the path, not the server. Next: ask Mark whether HTTP/3 stays off, then suggest
   "Always use HTTPS".
@@ -54,8 +60,8 @@ Mark's single testing round (D-86).
 | 8 | ~~Downloads: fake-lossless check, convert down from verified lossless, a readable log per download~~ (released 14 Nov, D-98) | #195, #196, #197 | server, web | 2 | release | — |
 | 9 | ~~Native (audit 9 + app fixes): dead code, search merge, Watch audio sharing, connection resilience, cover colours, native Undo, first-sound report~~ (pushed 14 Nov, TestFlight 0.2.0 (25)) | #176, #177, #178, #188, #199, #183, #191 | iPhone, Watch | 2 | TestFlight 0.2.0 (25) | — |
 | 10 | **In progress.** Product review checklist and Mark's single testing round on build 25 (D-86); its fixes are batch 10b (#199, #206, #207) in TestFlight (26) | #184 | all | none (10b: 2) | docs; TestFlight (26) | Mark's areas 2 and 4 |
-| 11 | Made for you: keep playing similar songs, Rewind | #202, #203 | server, web, iPhone | 2 | release; native in TestFlight (26) | — |
-| 12 | Retire what batches 4, 6 and 8 replaced, once their pass marks are met | #201 | server, web, iPhone | 2 | release; native in TestFlight (26) | the trials and two-week measurements |
+| 11 | ~~Made for you: keep playing similar songs, Rewind~~ (pushed 15 Nov) | #202, #203 | server, web, iPhone | 2 | release; native in TestFlight (27) | — |
+| 12 | Retire what batches 4, 6 and 8 replaced, once their pass marks are met | #201 | server, web, iPhone | 2 | release; native in a later TestFlight | the trials and two-week measurements |
 
 Later: #204 concerts on artist pages (Mark picks a provider and area) · #205 Music Haptics (if Apple's framework
 allows a third-party player) · #198 Mornye-Python as a lossless source (only if Monochrome fails; Mark's decision on
