@@ -273,6 +273,7 @@ struct RequestsView: View {
     loading = true
     do {
       _ = try await model.performPersonal { try await $0.clearFinishedRequests() }
+      model.requestedSongs.requestsChanged()
     } catch is CancellationError {
       loading = false
       return

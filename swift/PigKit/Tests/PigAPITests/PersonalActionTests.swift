@@ -92,8 +92,8 @@ struct PersonalActionTests {
     let transport = ActionTransport(#"{"code":"unavailable","detail":"Unavailable"}"#, status: 503)
     do {
       _ = try await service(transport).requestMusic([track])
-      Issue.record("Expected unavailable")
-    } catch is NativeFailure {}
+      Issue.record("Expected the server to be busy")
+    } catch is ServerBusy {}  // Kept by the request outbox for later (#206).
     #expect(await transport.sent.count == 1)
     let expired = ActionTransport(#"{"code":"unauthorized","detail":"Sign in"}"#, status: 401)
     await #expect(throws: NativeFailure.authentication) {

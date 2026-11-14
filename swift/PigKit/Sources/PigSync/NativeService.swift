@@ -26,6 +26,10 @@ public enum NativeFailure: Error, LocalizedError, Sendable, Equatable {
   }
 }
 
+/// The server answered but can't act now (a rate limit, a restart, a proxy
+/// error): unlike `NativeFailure.unavailable`, trying again later can work.
+public struct ServerBusy: Error, Sendable {}
+
 extension Error {
   /// Whether this failure belongs to the song alone, so a queue may pass
   /// over it. An unreachable server or a server error fails every song:
@@ -548,6 +552,10 @@ public actor NativeService: LibrarySource {
     {
     case .ok(let response): return try LibraryCodec.convert(response.body.json)
     case .unauthorized: throw NativeFailure.authentication
+    // Busy or restarting: the request outbox keeps it for the next try
+    // (Codex round 1 on #206).
+    case .tooManyRequests, .serviceUnavailable: throw ServerBusy()
+    case .undocumented(let status, _) where status >= 500: throw ServerBusy()
     default:
       throw NativeFailure.unavailable(
         "The request could not be confirmed. Refresh Requests before trying again.")

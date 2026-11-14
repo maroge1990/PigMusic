@@ -358,7 +358,7 @@ enum PlayOrigin: Hashable {
     server = origin.absoluteString
     self.service = service
     store = database
-    requestedSongs = Set(await RequestOutbox.pending(database).map(\.id))
+    requestedSongs = RequestMarks(waiting: Set(await RequestOutbox.pending(database).map(\.id)))
     try account.check(stamp)
     let backgroundIdentifier = "au.com.pig.music.downloads." + artworkNamespace
     let archive =
@@ -903,9 +903,9 @@ enum PlayOrigin: Hashable {
   }
   // MARK: Song requests (#206)
 
-  /// Songs this account asked for here: waiting for their Undo, waiting in
-  /// the request outbox, or sent. They show Requested at once.
-  var requestedSongs: Set<String> = []
+  /// Songs this account asked for here, in the outbox or sent (#206); with
+  /// those waiting for their Undo they show Requested at once.
+  var requestedSongs = RequestMarks()
   @ObservationIgnored private var flushingRequests = false
   static func undoKey(request id: String) -> String { "request:" + id }
   static func undoKey(cancelRequest id: String) -> String { "request-cancel:" + id }
@@ -928,7 +928,7 @@ enum PlayOrigin: Hashable {
         return false
       }
       guard account.isCurrent(stamp) else { return false }
-      requestedSongs.insert(track.id)
+      requestedSongs.queued(track.id)
       // The Undo chain doesn't wait on the network.
       Task { await self.flushRequests() }
       return true
@@ -953,8 +953,9 @@ enum PlayOrigin: Hashable {
         return
       }
       switch outcome {
-      case .sent:
+      case .sent(let ids, _):
         guard account.isCurrent(stamp) else { return }
+        requestedSongs.sent(ids)
         requestsRevision += 1
         if await RequestOutbox.pending(store).isEmpty {
           await refreshServerRequests()
@@ -962,7 +963,7 @@ enum PlayOrigin: Hashable {
         }
       case .refused(let ids, let reason):
         guard account.isCurrent(stamp) else { return }
-        requestedSongs.subtract(ids)
+        requestedSongs.refused(ids)
         message = reason
       case .offline, .stale:
         return
@@ -981,6 +982,8 @@ enum PlayOrigin: Hashable {
       guard let self, account.isCurrent(stamp) else { return false }
       do {
         let result = try await performPersonal { try await $0.cancelRequest(id: item.id) }
+        // The list can't be matched to songs: no sent song stays Requested.
+        requestedSongs.requestsChanged()
         requestsRevision += 1
         done(result.continuesForOthers)
         return true
@@ -1502,7 +1505,7 @@ enum PlayOrigin: Hashable {
     removals = PlaylistRemovalLedger()
     appliedEdits = []
     hiddenMixSongs = []
-    requestedSongs = []
+    requestedSongs = RequestMarks()
     watch?.disconnect()
     // Stale for every operation still running; live updates stop.
     account.end()

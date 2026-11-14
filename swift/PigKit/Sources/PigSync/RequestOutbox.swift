@@ -8,8 +8,8 @@ import PigStore
 /// is sent the next time the server can be reached. One entry per song.
 @MainActor public enum RequestOutbox {
   public enum Outcome: Equatable, Sendable {
-    /// Everything waiting was sent, or nothing was waiting.
-    case sent(downloadsEnabled: Bool)
+    /// These songs were sent (none when nothing was waiting).
+    case sent([String], downloadsEnabled: Bool)
     /// The server couldn't be reached: every request stays for the next try.
     case offline
     /// The server answered no to these songs: they leave the outbox.
@@ -45,17 +45,18 @@ import PigStore
   ) async throws -> Outcome {
     let tracks = Array(await pending(store).prefix(500))
     guard isCurrent() else { return .stale }
-    guard !tracks.isEmpty else { return .sent(downloadsEnabled: true) }
+    guard !tracks.isEmpty else { return .sent([], downloadsEnabled: true) }
     let ids = Set(tracks.map(\.id))
     do {
       let result = try await request(tracks)
       guard isCurrent() else { return .stale }
       try await remove(ids, from: store)
-      return .sent(downloadsEnabled: result.downloadsEnabled)
+      return .sent(tracks.map(\.id), downloadsEnabled: result.downloadsEnabled)
     } catch NativeFailure.authentication {
       return .signedOut
     } catch NativeFailure.unavailable(let message) {
       // The server answered and said no: trying again would say no again.
+      // (A busy or restarting server throws ServerBusy and is kept.)
       guard isCurrent() else { return .stale }
       try await remove(ids, from: store)
       return .refused(tracks.map(\.id), message)

@@ -31,7 +31,7 @@ private struct Offline: Error {}
       sent.append($0.map(\.id))
       return done
     }
-    #expect(outcome == .sent(downloadsEnabled: true))
+    #expect(outcome == .sent(["first", "second"], downloadsEnabled: true))
     #expect(sent == [["first", "second"]])
     #expect(await RequestOutbox.pending(store).isEmpty)
   }
@@ -58,7 +58,7 @@ private struct Offline: Error {}
       try await RequestOutbox.add(second, to: store)
       return done
     }
-    #expect(outcome == .sent(downloadsEnabled: true))
+    #expect(outcome == .sent(["first"], downloadsEnabled: true))
     #expect(await RequestOutbox.pending(store).map(\.id) == ["second"])
   }
 
