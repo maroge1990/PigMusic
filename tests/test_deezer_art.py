@@ -303,3 +303,42 @@ def test_a_corrupt_deezer_image_falls_back_to_the_archive(tmp_path):
 
     assert run(ask()) == image_bytes()
     assert asked[-1] == "coverartarchive.org"
+
+
+def test_a_failed_deezer_photo_download_still_asks_the_other_sources(tmp_path):
+    """Codex round 1 (#194): a Deezer CDN failure goes on to ArtistGrid."""
+    from server.store import Store
+
+    (tmp_path / "media-settings.json").write_text(
+        json.dumps({"portraits": True}), encoding="utf-8"
+    )
+    store = Store(tmp_path)
+    linked = {
+        "artist/"
+        + ARTIST: {
+            "name": "New Order",
+            "relations": [{"url": {"resource": "https://www.deezer.com/artist/3998"}}],
+        }
+    }
+    portraits = Portraits(store, Catalogue(linked), Artwork(store, Catalogue(linked)))
+    asked = []
+
+    def handle(request):
+        asked.append(request.url.host)
+        if request.url.host == "api.deezer.com":
+            return httpx.Response(200, json={"picture_xl": PHOTO})
+        if request.url.host == "cdn-images.dzcdn.net":
+            return httpx.Response(503)
+        if request.url.host == "artists.artistgrid.cx":
+            return httpx.Response(200, content=b"name\nNew Order\n")
+        if request.url.host == "assets.artistgrid.cx":
+            return httpx.Response(200, content=image_bytes())
+        return httpx.Response(404)
+
+    async def get():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+            return await portraits.get(client, "New Order", ARTIST)
+
+    found = run(get())
+    assert found is not None and found.is_file()
+    assert asked[-1] == "assets.artistgrid.cx"

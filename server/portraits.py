@@ -83,13 +83,24 @@ class Portraits:
                 return target
             if await self.artwork.waiting(missing):
                 return None
-            url, source, unsure = None, None, False
+            failures = (
+                httpx.HTTPError,
+                ValueError,
+                OSError,
+                KeyError,
+                TypeError,
+                Image.DecompressionBombError,
+            )
+            unsure = False
             try:
                 url = await self.artwork.deezer.photo(client, name, artist_id)
-                source = "deezer" if url else None
-            except (httpx.HTTPError, ValueError, KeyError, TypeError):
-                unsure = True  # Deezer may have one: ask again soon.
-            if not url and config.get("fanart_key"):
+                if url:
+                    return await self.keep(client, deezer_image(url), target, "deezer")
+            except failures:
+                # Deezer may have one: ask again soon, after the other sources.
+                unsure = True
+            url = None
+            if config.get("fanart_key"):
                 try:
                     if not artist_id:
                         data = await self.catalogue.get(
@@ -109,52 +120,46 @@ class Portraits:
                         photos = data.get("artistthumb", [])
                         photos.sort(key=lambda p: int(p.get("likes", 0)), reverse=True)
                         url = photos[0]["url"] if photos else None
-                        source = "fanart" if url else None
                 except (httpx.HTTPError, ValueError, KeyError):
                     pass
+            source = "fanart"
             try:
                 if not url:
                     url = await self.artistgrid(client, name)
                     source = "artistgrid"
-                if url and source == "deezer":
-                    url = deezer_image(url)
-                elif url:
-                    parts = urlsplit(url)
-                    if (
-                        parts.scheme != "https"
-                        or parts.hostname
-                        not in {"assets.artistgrid.cx", "assets.fanart.tv"}
-                        or parts.username
-                        or parts.password
-                        or parts.port not in {None, 443}
-                    ):
-                        raise ValueError("Untrusted portrait address")
                 if url:
-                    async with client.stream(
-                        "GET", url, timeout=12, follow_redirects=False
-                    ) as response:
-                        response.raise_for_status()
-                        content = bytearray()
-                        async for chunk in response.aiter_bytes():
-                            content.extend(chunk)
-                            if len(content) > 5_000_000:
-                                raise ValueError("Portrait too large")
-                    await asyncio.to_thread(self.artwork.save, bytes(content), target)
-                    self.artwork.counted("photo", source)
-                    return target
-            except (
-                httpx.HTTPError,
-                ValueError,
-                OSError,
-                KeyError,
-                Image.DecompressionBombError,
-            ):
+                    return await self.keep(client, url, target, source)
+            except failures:
                 if not url:
                     await self.artwork.missing("artistgrid-index", 300)
                 await self.artwork.missing(missing, 300)
                 return None
             await self.artwork.missing(missing, 300 if unsure else 86400)
             return None
+
+    async def keep(self, client, url, target, source):
+        """Download a trusted portrait address and save it; raises on failure."""
+        parts = urlsplit(url)
+        if source != "deezer" and (
+            parts.scheme != "https"
+            or parts.hostname not in {"assets.artistgrid.cx", "assets.fanart.tv"}
+            or parts.username
+            or parts.password
+            or parts.port not in {None, 443}
+        ):
+            raise ValueError("Untrusted portrait address")
+        async with client.stream(
+            "GET", url, timeout=12, follow_redirects=False
+        ) as response:
+            response.raise_for_status()
+            content = bytearray()
+            async for chunk in response.aiter_bytes():
+                content.extend(chunk)
+                if len(content) > 5_000_000:
+                    raise ValueError("Portrait too large")
+        await asyncio.to_thread(self.artwork.save, bytes(content), target)
+        self.artwork.counted("photo", source)
+        return target
 
 
 def portrait_target(store, name, artist_id=None):
