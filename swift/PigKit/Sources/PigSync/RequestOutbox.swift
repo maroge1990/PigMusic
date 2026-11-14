@@ -30,6 +30,14 @@ import PigStore
     public var downloadsEnabled = true
     public var stop: Stop = .done
     public init() {}
+    /// What to tell the person: a refusal's reason, or that a song was left
+    /// out (Codex round 2: nothing may vanish without a word).
+    public func notice(titles: [String: String]) -> String? {
+      if let reason { return reason }
+      guard let id = skipped.first else { return nil }
+      return
+        "\(titles[id] ?? "That song") is excluded from this server's downloads, so it wasn't requested."
+    }
   }
 
   static let key = "request-outbox"

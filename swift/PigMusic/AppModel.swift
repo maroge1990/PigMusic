@@ -491,6 +491,8 @@ enum PlayOrigin: Hashable {
     let began = DiagnosticsLog.shared.activeTime
     syncing = true
     defer { if account.isCurrent(stamp) { syncing = false } }
+    // Shown after this refresh's own message, which would otherwise clear it.
+    var requestNotice: String?
     do {
       let current = try await service.me()
       guard account.isCurrent(stamp) else { return }
@@ -547,7 +549,7 @@ enum PlayOrigin: Hashable {
       await adoptServerPreferences(service, generation: stamp)
       let editsApplied = await flushEdits()
       guard account.isCurrent(stamp) else { return }
-      await flushRequests()
+      requestNotice = await flushRequests()
       guard account.isCurrent(stamp) else { return }
       if editsApplied {
         let artworkBefore = try? await store?.artworkRevision()
@@ -582,6 +584,7 @@ enum PlayOrigin: Hashable {
       message = nil
       syncFailed = true
     }
+    if let requestNotice, account.isCurrent(stamp) { message = requestNotice }
     // A category chosen during this sync, changed or failed, loads now;
     // `syncing` stays set until this finishes, so a later choice joins it.
     while account.isCurrent(stamp), reloadGate.takePending() {
@@ -930,17 +933,23 @@ enum PlayOrigin: Hashable {
       guard account.isCurrent(stamp) else { return false }
       requestedSongs.queued(track.id)
       // The Undo chain doesn't wait on the network.
-      Task { await self.flushRequests() }
+      Task {
+        let notice = await self.flushRequests()
+        if let notice, self.account.isCurrent(stamp) { self.message = notice }
+      }
       return true
     }
   }
   /// Sends the request outbox; a failure to reach the server keeps it for
-  /// the next refresh.
-  func flushRequests() async {
-    guard !flushingRequests, let store, let service, person != nil else { return }
+  /// the next refresh. Returns what to tell the person about a song left out
+  /// or refused; the caller shows it last, so a refresh finishing doesn't
+  /// clear it (Codex confirmation round).
+  func flushRequests() async -> String? {
+    guard !flushingRequests, let store, let service, person != nil else { return nil }
     flushingRequests = true
     defer { flushingRequests = false }
     let stamp = account.generation
+    var notice: String?
     // A request made while one was sent goes in the next round.
     for _ in 0..<10 {
       let titles = Dictionary(
@@ -952,19 +961,13 @@ enum PlayOrigin: Hashable {
           store: store, isCurrent: { [account] in account.isCurrent(stamp) }
         ) { try await service.requestMusic($0) }
       } catch {
-        if account.isCurrent(stamp) { message = error.userMessage }
-        return
+        return account.isCurrent(stamp) ? error.userMessage : nil
       }
-      guard account.isCurrent(stamp) else { return }
+      guard account.isCurrent(stamp) else { return nil }
       requestedSongs.sent(report.requested)
       requestedSongs.refused(report.skipped + report.refused)
-      if let reason = report.reason {
-        message = reason
-      } else if let id = report.skipped.first {
-        // Codex round 2: a song the server left out is not requested.
-        message =
-          "\(titles[id] ?? "That song") is excluded from this server's downloads, so it wasn't requested."
-      }
+      // Codex round 2: a song left out or refused says so.
+      notice = report.notice(titles: titles) ?? notice
       if !report.requested.isEmpty || !report.skipped.isEmpty || !report.refused.isEmpty {
         requestsRevision += 1
       }
@@ -972,15 +975,18 @@ enum PlayOrigin: Hashable {
       case .done:
         if await RequestOutbox.pending(store).isEmpty {
           await refreshServerRequests()
-          return
+          return notice
         }
-      case .offline, .stale:
-        return
+      case .offline:
+        return notice
+      case .stale:
+        return nil
       case .signedOut:
         revoked(generation: stamp)
-        return
+        return nil
       }
     }
+    return notice
   }
   /// Cancels this person's request for a song at once, with Undo (D-79).
   func cancelRequestLater(_ item: RequestGroupItem, done: @escaping @MainActor (Bool) -> Void) {

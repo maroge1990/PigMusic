@@ -53,6 +53,17 @@ private struct Offline: Error {}
     #expect(await RequestOutbox.pending(store).isEmpty)
   }
 
+  @Test func aLeftOutOrRefusedSongIsExplained() {
+    var report = RequestOutbox.Report()
+    #expect(report.notice(titles: [:]) == nil)
+    report.skipped = ["first"]
+    #expect(
+      report.notice(titles: ["first": "First"])
+        == "First is excluded from this server's downloads, so it wasn't requested.")
+    report.reason = "No."
+    #expect(report.notice(titles: ["first": "First"]) == "No.")
+  }
+
   @Test func offlineKeepsEveryRequestForTheNextTry() async throws {
     let (store, root) = try makeStore()
     defer { try? FileManager.default.removeItem(at: root) }
