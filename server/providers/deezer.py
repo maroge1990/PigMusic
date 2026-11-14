@@ -23,8 +23,10 @@ def identify(target, context):
             "https://api.deezer.com/search?"
             + urlencode(
                 {
-                    "q": f"artist:\"{target['artist']}\" track:\"{target['title']}\"",
-                    "limit": 5,
+                    # Deezer answers nothing to artist:"..." track:"..."
+                    # (Nov 2026); free text, matched below, still works.
+                    "q": f"{target['artist']} {target['title']}",
+                    "limit": 10,
                 }
             ),
             ("deezer.com",),
@@ -32,7 +34,7 @@ def identify(target, context):
         )
         if not isinstance(body, dict):
             return set()
-        for raw in body.get("data", [])[:5]:
+        for raw in body.get("data", [])[:10]:
             if not isinstance(raw, dict):
                 continue
             candidate = {

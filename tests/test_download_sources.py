@@ -403,6 +403,32 @@ def test_metadata_success_does_not_mask_repeated_transfer_outages():
     assert health.snapshot("monochrome")["next_retry_at"] == 1300
 
 
+def test_deezer_lookup_asks_in_free_text_because_field_search_finds_nothing(
+    monkeypatch,
+):
+    # Deezer's track search answers nothing to artist:"..." track:"..." (measured
+    # 14 Nov 2026, #194); a free-text query matched locally still works.
+    from urllib.parse import parse_qs, urlsplit
+    from server.providers import deezer
+
+    raw = {
+        "id": 123,
+        "artist": {"name": "Artist"},
+        "title": "Song",
+        "album": {"title": "Album"},
+        "duration": 200,
+    }
+
+    def get(url, hosts, context):
+        if "/search?" not in url:
+            return {"isrc": "AA1234567890"}
+        query = parse_qs(urlsplit(url).query)["q"][0]
+        return {"data": [] if ":" in query else [raw]}
+
+    monkeypatch.setattr(deezer, "get_json", get)
+    assert deezer.identify(TARGET, Context("lossless")) == {"AA1234567890"}
+
+
 def test_deezer_cannot_invent_identity_or_rescue_conflicting_known_isrc(monkeypatch):
     from server.providers import deezer
 
