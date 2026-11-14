@@ -582,7 +582,7 @@ def personal_router(store, artist_jobs, recovery, mixes=None):
                 raise HTTPException(413, "Import is larger than 20MB")
 
         def prepare():
-            from ..library import parse_apple
+            from ..apple_export import parse_apple
 
             source = parse_apple(bytes(body))
             personal = {t["id"] for t in users.projection(identity(request))["tracks"]}

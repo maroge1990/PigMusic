@@ -1274,7 +1274,7 @@ class UserLibrary:
 
     @coordinated
     def import_playlists(self, user_id, raw):
-        from .library import parse_apple
+        from .apple_export import parse_apple
 
         source = parse_apple(raw)
         by_track = {t["id"]: track_dto(t) for t in source["tracks"]}

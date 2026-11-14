@@ -12,7 +12,7 @@ One Unraid container supervises FastAPI and a pinned internal slskd. FastAPI ser
 | --- | --- |
 | HTTP composition, provider lifetime | `server/app.py`, `server/routes/` |
 | Durable state, queue claims, library refresh | `server/store.py`, `server/migrations/` |
-| Album grouping, Apple XML import; classification | `server/library.py`; `server/releases.py` |
+| Album grouping and classification; Apple XML import | `server/library.py`, `server/releases.py`; `server/apple_export.py` |
 | Contextual matching | `server/matching.py` |
 | MusicBrainz cache and rate limit | `server/catalogue.py` |
 | Acquisition, validation and tagging; sources | `server/downloader.py`, `server/providers/`, `server/soulseek.py`, `server/vendor/` |

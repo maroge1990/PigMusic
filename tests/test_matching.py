@@ -1,7 +1,8 @@
 import json
 
 from server.catalogue import Catalogue
-from server.library import build_library, build_migration
+from server.apple_export import build_migration
+from server.library import build_library
 from server.matching import LibraryIndex
 from server.playlists import Playlists
 from server.recovery import Recovery

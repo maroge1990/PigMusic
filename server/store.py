@@ -16,14 +16,8 @@ from pathlib import Path
 from .migrations import migrate
 from .cover_store import CoverStore
 
-from .library import (
-    build_library,
-    build_migration,
-    identifier,
-    load_json,
-    normalise,
-    parse_apple,
-)
+from .apple_export import build_migration, parse_apple
+from .library import build_library, identifier, load_json, normalise
 from .media import settings as media_settings, public_settings
 from .quality import policy, actual_profile, rank, PROFILES, satisfies
 from .providers import REGISTRY, supports
