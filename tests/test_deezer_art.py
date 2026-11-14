@@ -277,3 +277,29 @@ def test_portrait_prefers_deezer_and_a_deezer_failure_is_retried_soon(tmp_path):
         conn.execute("DELETE FROM documents WHERE name LIKE 'portrait-missing:%'")
     found = run(get({"artist/3998": lambda r: {"picture_xl": PHOTO}}))
     assert found is not None and found.is_file()
+
+
+def test_a_corrupt_deezer_image_falls_back_to_the_archive(tmp_path):
+    """Codex round 1 (#194): bytes that are not an image must not block CAA."""
+
+    class Store:
+        cover_dir = tmp_path
+
+    asked = []
+
+    def handle(request):
+        asked.append(request.url.host)
+        if request.url.host == "api.deezer.com":
+            return httpx.Response(200, json={"data": [album()]})
+        if request.url.host == "cdn-images.dzcdn.net":
+            return httpx.Response(200, content=b"not an image")
+        return httpx.Response(200, content=image_bytes())
+
+    artwork = Artwork(Store(), Catalogue({"release/" + RELEASE: RELEASE_ENTITY}))
+
+    async def ask():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+            return await artwork.front(client, "release", RELEASE)
+
+    assert run(ask()) == image_bytes()
+    assert asked[-1] == "coverartarchive.org"

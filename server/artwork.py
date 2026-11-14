@@ -254,9 +254,18 @@ class Artwork:
             url = await self.deezer.cover(client, kind, item_id)
             if url:
                 content = await self.fetch(client, url, address=deezer_image)
+                # Decoded here, so a broken image still reaches the archive.
+                await asyncio.to_thread(self.check, content)
                 self.counted("cover", "deezer")
                 return content
-        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        except (
+            httpx.HTTPError,
+            ValueError,
+            KeyError,
+            TypeError,
+            OSError,
+            Image.DecompressionBombError,
+        ):
             pass  # Optional first source: the archive is asked next.
         content = await self.archive_front(client, kind, item_id)
         self.counted("cover", "cover-art-archive")
@@ -321,6 +330,14 @@ class Artwork:
                         raise ValueError("Artwork too large")
                 return bytes(content)
         raise ValueError("Too many artwork redirects")
+
+    @staticmethod
+    def check(content):
+        """Raise unless `content` decodes as an image of an allowed size."""
+        with Image.open(io.BytesIO(content)) as image:
+            if image.width * image.height > 20_000_000:
+                raise ValueError("Artwork too large")
+            image.load()
 
     @staticmethod
     def save(content, target):
