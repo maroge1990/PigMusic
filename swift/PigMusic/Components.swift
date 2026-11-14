@@ -188,7 +188,10 @@ struct DetailHeader: View {
   var openArtist: (() -> Void)?
   /// Art drawn by the page itself (a mix's), in place of a cover (#158).
   var art: AnyView?
+  /// Album and artist pages wash the header in the cover's colour (#199).
+  var tinted = false
   @Environment(\.colorScheme) private var scheme
+  @State private var swatch: CoverRGB?
   var body: some View {
     HStack(alignment: .center, spacing: 16) {
       Group {
@@ -223,7 +226,92 @@ struct DetailHeader: View {
       }
       Spacer(minLength: 0)
     }
+    .background {
+      // Under the navigation bar and out to the screen's edges, fading into
+      // the canvas below the header; it scrolls away with the header.
+      GeometryReader { proxy in
+        let above: CGFloat = 640
+        let below: CGFloat = 140
+        let height = above + proxy.size.height + below
+        CoverWash(swatch: swatch, solidUntil: (above + proxy.size.height * 0.5) / height)
+          .frame(width: proxy.size.width + 80, height: height)
+          .offset(x: -40, y: -above)
+      }
+    }
     .accessibilityElement(children: openArtist == nil ? .combine : .contain)
+    .task(id: "\(tinted)|\(String(describing: source))|\(model.artworkRefresh)") {
+      guard tinted, art == nil else {
+        swatch = nil
+        return
+      }
+      // The header's own cover (the same width, so it comes from memory).
+      let next = await model.coverSwatch(source, width: 512)
+      if !Task.isCancelled { swatch = next }
+    }
+  }
+}
+
+/// Samples a cover for its colour (#199) off the main actor: the image is
+/// drawn into a 32 x 32 sRGB bitmap and quantized by `CoverPalette`.
+enum CoverSampler {
+  static func swatch(_ image: CGImage) async -> CoverRGB? {
+    await Task.detached(priority: .utility) { () -> CoverRGB? in
+      let side = 32
+      var pixels = [UInt8](repeating: 0, count: side * side * 4)
+      let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+          let context = CGContext(
+            data: buffer.baseAddress, width: side, height: side, bitsPerComponent: 8,
+            bytesPerRow: side * 4, space: space,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return false }
+        context.interpolationQuality = .medium
+        context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+        return true
+      }
+      return drawn ? CoverPalette.swatch(rgba: pixels) : nil
+    }.value
+  }
+}
+
+/// A cover's colour washed behind a page (#199): solid at the top, fading
+/// into the brand canvas. Nothing is drawn (the brand canvas shows) without
+/// a cover, when no tint of it keeps the brand's text roles at AA contrast,
+/// with Reduce Transparency (like the corner bloom) or with Increase Contrast.
+struct CoverWash: View {
+  let swatch: CoverRGB?
+  /// Share of the height that stays solid before the fade.
+  var solidUntil: Double = 0.5
+  /// Share of the height where the fade reaches the canvas.
+  var fadeEnd: Double = 1
+  @Environment(\.self) private var environment
+  @Environment(\.colorScheme) private var scheme
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  @Environment(\.colorSchemeContrast) private var contrast
+  var body: some View {
+    if let wash {
+      LinearGradient(
+        stops: [
+          .init(color: wash, location: 0), .init(color: wash, location: solidUntil),
+          .init(color: wash.opacity(0), location: fadeEnd),
+        ], startPoint: .top, endPoint: .bottom
+      )
+      .accessibilityHidden(true).allowsHitTesting(false)
+    }
+  }
+  private var wash: Color? {
+    guard let swatch, !reduceTransparency, contrast != .increased else { return nil }
+    let roles = CoverTintRoles(
+      canvas: rgb(PigBrand.canvas(scheme)), text: rgb(PigBrand.text(scheme)),
+      secondary: rgb(PigBrand.secondary(scheme)), textAccent: rgb(PigBrand.textAccent(scheme)),
+      accent: rgb(PigBrand.accent(scheme)))
+    return CoverTint.wash(swatch, dark: scheme == .dark, roles: roles).map {
+      Color(red: $0.red, green: $0.green, blue: $0.blue)
+    }
+  }
+  private func rgb(_ colour: Color) -> CoverRGB {
+    let resolved = colour.resolve(in: environment)
+    return CoverRGB(Double(resolved.red), Double(resolved.green), Double(resolved.blue))
   }
 }
 

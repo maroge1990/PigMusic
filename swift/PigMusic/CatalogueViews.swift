@@ -619,7 +619,7 @@ struct CatalogueReleaseView: View {
             model: model, source: .release(releaseId),
             fallback: groupId.map { .releaseGroup($0) }, eyebrow: "ALBUM", title: release.title,
             artist: release.artist,
-            openArtist: release.artistId == nil ? nil : { showingArtist = true }
+            openArtist: release.artistId == nil ? nil : { showingArtist = true }, tinted: true
           ).preparesPlayback(release.songs.map(\.track), model: model)
           controls(release)
           if release.songs.isEmpty {
@@ -642,7 +642,8 @@ struct CatalogueReleaseView: View {
         } else {
           DetailHeader(
             model: model, source: .release(releaseId),
-            fallback: groupId.map { .releaseGroup($0) }, eyebrow: "ALBUM", title: title)
+            fallback: groupId.map { .releaseGroup($0) }, eyebrow: "ALBUM", title: title,
+            tinted: true)
           if let error {
             StatusText(error, kind: .error)
             Button("Try again") { Task { await load() } }.buttonStyle(.pigSecondary)
