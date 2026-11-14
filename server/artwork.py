@@ -9,9 +9,10 @@ from pathlib import PurePosixPath
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
-from PIL import Image, ImageOps
+from PIL import Image
 
 from .catalogue import credit, mbid, settled
+from .images import save_image
 from .deezer_art import DeezerArt, DeezerRefused, deezer_image
 from .library import normalise, identifier
 from .matching import album_title, lead_artist, strip_edition, title_key
@@ -349,14 +350,4 @@ class Artwork:
 
     @staticmethod
     def save(content, target):
-        with Image.open(io.BytesIO(content)) as image:
-            if image.width * image.height > 20_000_000:
-                raise ValueError("Artwork too large")
-            image = ImageOps.exif_transpose(image).convert("RGB")
-            image.thumbnail((1024, 1024))
-            temporary = target.with_suffix(".tmp")
-            try:
-                image.save(temporary, "JPEG", quality=84)
-                temporary.replace(target)
-            finally:
-                temporary.unlink(missing_ok=True)
+        save_image(content, target, (1024, 1024), quality=84)

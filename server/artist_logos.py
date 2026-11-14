@@ -1,7 +1,7 @@
 """Display-only Fanart artist wordmarks, kept as transparent PNGs."""
 
-import asyncio, hashlib, io, time
-from PIL import Image, ImageOps
+import asyncio, hashlib, time
+from .images import save_image
 from .library import identifier
 from .catalogue import mbid, settled
 from .media import settings
@@ -55,18 +55,16 @@ class Logos:
     @staticmethod
     def save(content, target):
         # Re-encoding strips anything but pixels; transparency is the point.
-        with Image.open(io.BytesIO(content)) as picture:
-            if picture.width * picture.height > 8_000_000:
-                raise ValueError("Artwork too large")
-            picture = ImageOps.exif_transpose(picture).convert("RGBA")
-            picture.thumbnail((800, 310))
-            target.parent.mkdir(exist_ok=True)
-            temporary = target.with_suffix(".tmp")
-            try:
-                picture.save(temporary, "PNG", optimize=True)
-                temporary.replace(target)
-            finally:
-                temporary.unlink(missing_ok=True)
+        target.parent.mkdir(exist_ok=True)
+        save_image(
+            content,
+            target,
+            (800, 310),
+            mode="RGBA",
+            format="PNG",
+            limit=8_000_000,
+            optimize=True,
+        )
 
 
 def logo_target(store, artist_id):

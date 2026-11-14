@@ -1,13 +1,12 @@
 """Local content-addressed presentation images; no provider calls."""
 
 import io
-import os
 import re
-import tempfile
 import threading
-from pathlib import Path
 
 from PIL import Image, ImageFilter
+
+from .images import write_atomically
 
 SIZES = {128, 256, 512, 1024, 1600}
 LOCK = threading.RLock()
@@ -51,11 +50,5 @@ def variant(target, width, soft=False):
                 image = image.filter(ImageFilter.GaussianBlur(max(2, width / 32)))
             buffer = io.BytesIO()
             image.save(buffer, "WEBP", quality=80)
-        descriptor, temporary = tempfile.mkstemp(prefix=".variant-", dir=directory)
-        try:
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(buffer.getvalue())
-            os.replace(temporary, output)
-        finally:
-            Path(temporary).unlink(missing_ok=True)
+        write_atomically(buffer.getvalue(), output)
     return output

@@ -5,7 +5,6 @@ Only appdata is written. Library audio and tag files remain read-only.
 
 import base64
 import hashlib
-import io
 import json
 import os
 import re
@@ -16,7 +15,9 @@ import time
 from pathlib import Path
 
 import ijson
-from PIL import Image, ImageOps
+from PIL import Image
+
+from .images import reencode, write_atomically
 
 HASH = re.compile(r"[0-9a-f]{64}\Z")
 WEEK = 7 * 86400
@@ -57,29 +58,11 @@ class CoverStore:
     def save(self, content):
         if not content or len(content) > 5_000_000:
             raise ValueError("Artwork must be between 1 byte and 5 MB")
-        with Image.open(io.BytesIO(content)) as image:
-            if image.width * image.height > 30_000_000:
-                raise ValueError("Artwork dimensions exceed the limit")
-            image = ImageOps.exif_transpose(image).convert("RGB")
-            image.thumbnail((1024, 1024))
-            output = io.BytesIO()
-            image.save(output, "JPEG", quality=84)
-        data = output.getvalue()
+        data = reencode(content, (1024, 1024), limit=30_000_000, quality=84)
         sha = hashlib.sha256(data).hexdigest()
         with self.lock:
-            target = self.directory / (sha + ".jpg")
             if not self.path(sha):
-                descriptor, temporary = tempfile.mkstemp(
-                    prefix=".cover-", suffix=".tmp", dir=self.directory
-                )
-                try:
-                    with os.fdopen(descriptor, "wb") as stream:
-                        stream.write(data)
-                        stream.flush()
-                        os.fsync(stream.fileno())
-                    os.replace(temporary, target)
-                finally:
-                    Path(temporary).unlink(missing_ok=True)
+                write_atomically(data, self.directory / (sha + ".jpg"), durable=True)
         self.metadata(sha)
         return sha
 

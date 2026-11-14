@@ -1,7 +1,7 @@
 """Display-only, bounded Fanart artist backdrops."""
 
-import asyncio, hashlib, io, time
-from PIL import Image, ImageOps
+import asyncio, hashlib
+from .images import save_image
 from .library import identifier
 from .catalogue import mbid
 from .media import settings
@@ -45,17 +45,7 @@ class Backgrounds:
 
     @staticmethod
     def save(content, target):
-        with Image.open(io.BytesIO(content)) as picture:
-            if picture.width * picture.height > 20_000_000:
-                raise ValueError("Artwork too large")
-            picture = ImageOps.exif_transpose(picture).convert("RGB")
-            picture.thumbnail((1600, 900))
-            temporary = target.with_suffix(".tmp")
-            try:
-                picture.save(temporary, "JPEG", quality=86)
-                temporary.replace(target)
-            finally:
-                temporary.unlink(missing_ok=True)
+        save_image(content, target, (1600, 900), quality=86)
 
 
 def background_target(store, artist_id):
