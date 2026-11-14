@@ -74,11 +74,21 @@ Whether and when to adopt these is tracked in the [roadmap](../ROADMAP.md).
 Accounts stop one person from browsing or editing another's library, playlists, favourites, requests or listening history. The administrator manages the server and its files, so they are trusted with all server data. This model does not protect against a compromised administrator, NAS, Mac or Unraid host.
 
 - **Credentials:** Argon2id password hashes. Opaque session tokens stored as hashes. Secure, HttpOnly, SameSite=Strict cookies. Browser writes need a same-origin check and the Pig request header. Devices use Bearer tokens.
-- **Revocation:** Revoking a session, disabling a member or removing a membership is re-checked on every media access, including signed URLs and Range requests. The last administrator can't be disabled. Password reset is available through the interactive admin CLI.
+- **Revocation:** Revoking a session, disabling a member or removing a membership is re-checked on every media access, including signed URLs and Range requests. The last administrator can't be disabled. Password reset is available through the [server terminal](#owner-recovery-from-the-server-terminal).
 - **Never logged or exported:** passwords, bearer tokens, setup codes.
 - **First-run installation code:** The one exception. Before any owner exists, startup prints a 128-bit installation code to the operator-only container console. It is never returned over HTTP, and it stops working once an owner exists. Keep startup logs private.
 - **HTTP hardening:** Same-origin CSP with no inline scripts, frame denial and HSTS. JSON bodies are capped at 1 MB before parsing (Apple XML imports at 20 MB). Validation errors omit submitted values. Failed sign-ins are rate limited, and only the administrator sees security activity.
 - **Dependencies:** CI audits the locked Python (runtime and test locks) and npm dependencies before publishing an image. The image holds only the runtime lock; its build fails if pytest is importable.
+
+### Owner recovery from the server terminal
+
+If the owner's password is lost, reset it from Unraid's terminal (D-93). The command asks for the new password twice, refuses a piped password, prints nothing secret, and signs out every session of that account:
+
+```sh
+docker exec -it PigMusic python -m server.admin reset-password --username <owner>
+```
+
+`create-owner` instead of `reset-password` creates the first owner without the web form's installation code (only while no owner exists). Both write to the live database under `/data`; nothing else needs to stop.
 
 ## Private configuration
 
