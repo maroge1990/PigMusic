@@ -65,6 +65,7 @@ from .soulseek import Soulseek
 from .artwork import Artwork
 from .portraits import Portraits
 from .popularity import Popularity
+from .api_models import DownloadLogDTO
 from .artist_backgrounds import Backgrounds
 from .artist_logos import Logos
 from .home import HomeDiscovery
@@ -1096,6 +1097,13 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             "artwork_revision": image_revision,
             "media": public_settings(store),
         }
+
+    @app.get("/api/v1/admin/queue/{request_id}/log", response_model=DownloadLogDTO)
+    def queue_log(request_id: str):
+        try:
+            return store.request_log(request_id)
+        except LookupError:
+            raise HTTPException(404, "Request not found")
 
     class QueueEntry(BaseModel):
         id: str = Field(max_length=200)

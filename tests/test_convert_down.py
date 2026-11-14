@@ -1,5 +1,6 @@
 """#196 (D-92, D-98): a verified lossless original converted down."""
 
+import json
 import shutil
 import subprocess
 
@@ -111,3 +112,60 @@ def test_converting_up_or_to_another_profile_is_refused(tmp_path):
     for profile in ("lossless", "mp3_128", "native_standard"):
         with pytest.raises(ValueError, match="Only MP3 320 and AAC 256"):
             worker.convert_down(job, path, profile)
+
+
+def test_each_download_reads_as_a_story_without_peers(tmp_path):
+    """#197: a converted download's log reads in order, names no peer, and
+    goes when the job is cleared."""
+    store, job, worker, _ = worker_offering(tmp_path, flac(tmp_path, "g.flac"))
+    worker.process(job)
+    lines = [line["text"] for line in store.request_log(job["id"])["lines"]]
+    order = [
+        "Searched Monochrome for Lossless (FLAC): 1 matching copy",
+        "Downloaded a copy from Monochrome",
+        "Checked the lossless original: passed",
+        "Converted the lossless original to MP3 320 kbps",
+        "Checked the file: passed",
+        "Wrote the song's details and cover into the file",
+        "Played the whole file through: no errors",
+        "Filed it in the library under",
+        "Done",
+    ]
+    found = [
+        next(i for i, text in enumerate(lines) if text.startswith(o)) for o in order
+    ]
+    assert found == sorted(found), lines
+    assert "FLAC" in lines[found[0]]
+    payload = json.dumps(store.request_log(job["id"]))
+    assert "claim_token" not in payload and "username" not in payload
+    store.clear_queue(finished_only=True)
+    with pytest.raises(LookupError):
+        store.request_log(job["id"])
+
+
+def test_a_failed_download_says_why_and_a_member_sees_only_their_own(tmp_path):
+    from server.user_library import UserLibrary
+
+    store, job, worker, _ = worker_offering(
+        tmp_path, flac(tmp_path, "f.flac", fake=True)
+    )
+    worker.process(job)
+    lines = store.request_log(job["id"])["lines"]
+    assert any(
+        "refused, Lossless download looks like lossy" in l["text"] for l in lines
+    )
+    assert lines[-1]["ok"] is False and "looks like lossy audio" in lines[-1]["text"]
+    with store.connect() as conn:
+        payload = json.loads(
+            conn.execute(
+                "SELECT payload FROM queue WHERE id=?", (job["id"],)
+            ).fetchone()[0]
+        )
+        payload["requested_by"] = ["someone"]
+        conn.execute(
+            "UPDATE queue SET payload=? WHERE id=?", (json.dumps(payload), job["id"])
+        )
+    users = UserLibrary(store)
+    assert users.request_log("someone", job["id"])["lines"] == lines
+    with pytest.raises(LookupError):
+        users.request_log("another person", job["id"])

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from .. import search_rank
 from ..library import identifier, normalise
 from ..api_models import (
+    DownloadLogDTO,
     AlbumDetail,
     ArtistDetail,
     PlaylistDTO,
@@ -671,6 +672,13 @@ def personal_router(store, artist_jobs, recovery, mixes=None):
     async def retry_request(request_id: str, request: Request):
         try:
             return await run(users.retry_request, identity(request), request_id)
+        except LookupError:
+            raise HTTPException(404, "Request not found")
+
+    @router.get("/requests/{request_id}/log", response_model=DownloadLogDTO)
+    async def request_log(request_id: str, request: Request):
+        try:
+            return await run(users.request_log, identity(request), request_id)
         except LookupError:
             raise HTTPException(404, "Request not found")
 

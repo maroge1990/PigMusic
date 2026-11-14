@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { api } from "./api";
 import { Cover, catalogueCover } from "./Cover";
+import { DownloadLog } from "./DownloadLog";
 import { Empty, InlineError } from "./EmptyState";
 import { formatRelative } from "./format";
 import { friendlyRequestError } from "./requestError";
@@ -262,6 +263,14 @@ export function PersonalRequests() {
                               {friendlyRequestError(item.error)}
                             </p>
                           )}
+                          <DownloadLog
+                            path={
+                              "/v1/requests/" +
+                              encodeURIComponent(item.id) +
+                              "/log"
+                            }
+                            title={item.title}
+                          />
                         </div>
                         <StateBadge
                           state={badge[tone]}

@@ -98,7 +98,7 @@ test("Downloads shows one card per request, with detail inside", async ({
   await expect(meteora).toContainText("5 min ago");
   await expect(meteora.locator("summary .cover")).toHaveCount(1);
   await expect(meteora.getByText("Soulseek")).toBeHidden();
-  await meteora.locator("summary").click();
+  await meteora.locator(":scope > summary").click();
   await expect(meteora).toContainText("In your library · Soulseek · FLAC");
   await meteora.getByRole("button", { name: "Retry Meteora song 2" }).click();
   await expect.poll(() => posted).toContain("retry m2");
@@ -113,4 +113,61 @@ test("Downloads shows one card per request, with detail inside", async ({
       document.documentElement.clientWidth,
   );
   expect(overflow).toBeLessThanOrEqual(1);
+});
+
+test("#197: a download opens to its story, loaded once, failures marked", async ({
+  page,
+}) => {
+  let asked = 0;
+  await mockApi(page, {
+    answers: {
+      "/v1/requests/groups": (route) => route.fulfill({ json: groups }),
+      "/v1/requests/m2/log": (route) => {
+        asked += 1;
+        return route.fulfill({
+          json: {
+            id: "m2",
+            status: "failed",
+            lines: [
+              {
+                text: "Searched Soulseek for MP3 320 kbps: no matching copy",
+                ok: true,
+                seconds: 32.5,
+              },
+              {
+                text: "Searched Soulseek for Lossless (FLAC): 2 matching copies (first: FLAC 34 MB)",
+                ok: true,
+                seconds: 12,
+              },
+              {
+                text: "Checked the lossless original: refused, Lossless download looks like lossy audio",
+                ok: false,
+                seconds: 0.4,
+              },
+              { text: "No source had a copy", ok: false },
+            ],
+          },
+        });
+      },
+      "/v1/requests": (route) =>
+        route.fulfill({ json: { items: [], next_offset: null, active: 0 } }),
+    },
+  });
+  await page.goto("/#/downloads");
+  const meteora = page.locator(".request-group").filter({ hasText: "Meteora" });
+  await meteora.locator(":scope > summary").click();
+  await page.getByLabel("Details of the download of Meteora song 2").click();
+  const story = page
+    .locator(".download-log")
+    .filter({ hasText: "Searched Soulseek for MP3 320 kbps" });
+  await expect(story.locator("li")).toHaveCount(4);
+  await expect(story.locator("li").nth(1)).toContainText("FLAC 34 MB");
+  await expect(story.locator("li").nth(1)).toContainText("12.0 s");
+  // A refused step says so in words, not by colour alone.
+  await expect(story.locator("li.download-log-failed")).toHaveCount(2);
+  await expect(story.locator("li").nth(2)).toContainText("Problem:");
+  // Closing and opening again does not ask again.
+  await page.getByLabel("Details of the download of Meteora song 2").click();
+  await page.getByLabel("Details of the download of Meteora song 2").click();
+  expect(asked).toBe(1);
 });

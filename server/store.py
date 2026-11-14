@@ -1807,6 +1807,22 @@ class Store:
             ],
         }
 
+    def request_log(self, request_id):
+        """Any request told step by step, for the owner (#197)."""
+        from .download_log import story
+
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT payload,status FROM queue WHERE id=?", (request_id,)
+            ).fetchone()
+        if not row:
+            raise LookupError("Request not found")
+        return {
+            "id": request_id,
+            "status": row[1],
+            "lines": story(json.loads(row[0]), row[1]),
+        }
+
     def clear_queue(self, finished_only=False, entries=None):
         """Clear finished entries (the one Clear everyone has), or with
         `finished_only=False` cancel and remove everything, or only

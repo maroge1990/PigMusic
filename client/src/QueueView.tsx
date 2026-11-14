@@ -2,6 +2,7 @@ import { Music2 } from "lucide-react";
 import type { Library } from "./types";
 import { Empty, Loading } from "./EmptyState";
 import { SectionHeader } from "./PageHeader";
+import { DownloadLog } from "./DownloadLog";
 import { sourceName } from "./sources";
 type QueueItem = {
   id: string;
@@ -115,6 +116,10 @@ export function QueueView({
               {item.error && item.status === "failed" && (
                 <span className="inline-error">{item.error}</span>
               )}
+              <DownloadLog
+                path={`/v1/admin/queue/${encodeURIComponent(item.id)}/log`}
+                title={item.title}
+              />
             </div>
             {["failed", "cancelled"].includes(item.status) ? (
               <button

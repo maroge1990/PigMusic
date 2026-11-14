@@ -290,6 +290,20 @@ class RequestDTO(BaseModel):
     error: str | None = None
 
 
+class DownloadLogLineDTO(BaseModel):
+    text: str
+    ok: bool
+    seconds: float | None = None
+
+
+class DownloadLogDTO(BaseModel):
+    """One download's story in plain words (#197); never names a peer."""
+
+    id: str
+    status: str
+    lines: list[DownloadLogLineDTO]
+
+
 class RequestList(BaseModel):
     total: int
     active: int

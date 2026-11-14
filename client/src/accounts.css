@@ -825,3 +825,40 @@ main h1[tabindex="-1"]:focus {
 .apple-import .owner-tools {
   margin-top: var(--space-24);
 }
+
+/* A download told step by step (#197), under a request or a queue entry. */
+.download-log > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--secondary);
+  font-size: var(--type-footnote);
+  cursor: pointer;
+}
+.download-log ol,
+.request-group-songs .download-log ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.download-log li,
+.request-group-songs .download-log li {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding: 2px 0;
+  border: 0;
+  font-size: var(--type-footnote);
+}
+.download-log li > span,
+.request-group-songs .download-log li > span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.download-log li small {
+  color: var(--secondary);
+}
+.download-log .download-log-failed {
+  color: var(--danger);
+}

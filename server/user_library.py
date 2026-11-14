@@ -1205,6 +1205,23 @@ class UserLibrary:
             raise LookupError("Request not found")
         raise ValueError("Only failed or cancelled requests can be retried")
 
+    def request_log(self, user_id, request_id):
+        """This person's request told step by step (#197)."""
+        from .download_log import story
+
+        with self.store.connect() as conn:
+            row = conn.execute(
+                "SELECT payload,status FROM queue WHERE id=? AND " + _MINE,
+                (request_id, user_id),
+            ).fetchone()
+        if not row:
+            raise LookupError("Request not found")
+        return {
+            "id": request_id,
+            "status": row[1],
+            "lines": story(json.loads(row[0]), row[1]),
+        }
+
     def queue(self, user_id, offset=0, limit=200):
         if offset < 0 or not 1 <= limit <= 200:
             raise ValueError("Invalid request page bounds")

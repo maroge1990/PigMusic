@@ -194,6 +194,17 @@ class SourceDeadline(Exception):
     """One source's time is up; the next source is tried (#132)."""
 
 
+def describe(candidate):
+    """A copy found, for the job's log (#197): format and size, no peer."""
+    extension = str(candidate.get("extension") or "").lstrip(".").upper()
+    quality = str(candidate.get("quality") or "")
+    size = candidate.get("size")
+    return {
+        "format": " ".join(p for p in (extension, quality) if p) or None,
+        "mb": round(size / 1_000_000, 1) if isinstance(size, (int, float)) else None,
+    }
+
+
 def outcome_of(exc):
     if isinstance(exc, Cancelled):
         return "cancelled"
@@ -929,6 +940,7 @@ class Downloader:
                             self.runtime.health.outcome(source)
                     candidates = [c for c in candidates if matches(job, c)]
                     searched["candidates"] = len(candidates)
+                    searched["found"] = [describe(c) for c in candidates[:3]]
                 if job.get("exact_quality") and profile == "mp3_128":
                     exact = lambda c: not re.search(
                         r"(?<!\d)(?:192|256|320)(?!\d)", str(c.get("quality", ""))
@@ -975,7 +987,10 @@ class Downloader:
                         transferred = True
                         if convert:
                             converted, original = self.convert_down(job, path, profile)
-                            provenance = {**(provenance or {}), "converted_from": original}
+                            provenance = {
+                                **(provenance or {}),
+                                "converted_from": original,
+                            }
                             self.complete(
                                 job,
                                 converted,
@@ -989,7 +1004,10 @@ class Downloader:
                                 job, path, extension, source, profile, provenance
                             )
                         self.timings().won = (
-                            source + "/" + profile + (" from lossless" if convert else "")
+                            source
+                            + "/"
+                            + profile
+                            + (" from lossless" if convert else "")
                         )
                         self.runtime.health.outcome(source, transfer=True)
                         return True
