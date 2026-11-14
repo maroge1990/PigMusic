@@ -38,10 +38,10 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   13 gives each queue entry an incarnation, so Cancel all clears only what was shown. Two Codex rounds; one high per
   round and five mediums fixed and confirmed. The native half (iPhone swipe Undo, Watch Remove, haptics, dividers)
   moves to batch 9.
-- **Release `artwork-20261114-v1` prepared for Mark's apply** (image `sha-8f14547`, verify and preflight passed 14 Nov
-  ~15:00). It carries batches 5 'agency' and 6 'artwork' and supersedes `agency-20261114-v1`, which was never applied.
-  Migration 13 (queue incarnations) comes with it: rolling back past it needs the backup `pre-artwork-20261114-v1`.
-  Nobody has used the app since 13 Nov 17:10, so #191's counters are still empty.
+- **Release `deadcode-20261114-v1` prepared for Mark's apply** (image `sha-a3a1c25`, verify and preflight passed 14 Nov
+  ~16:08). It carries batches 5 'agency', 6 'artwork' and 7 'dead code' and supersedes `agency-20261114-v1` and
+  `artwork-20261114-v1`, neither applied. Migration 13 (queue incarnations) comes with it: rolling back past it needs
+  the backup `pre-deadcode-20261114-v1`. Nobody has used the app since 13 Nov 17:10, so #191's counters are empty.
 - **Batch 6 'artwork' (#194), pushed `7887886`..`887a2dd`:** measured first (on #194): Deezer-first gives a cover to
   70 of 77 catalogue songs in active mixes (today 43) and a photo to 165 of 181 library artists (today 101). Deezer
   is now first for catalogue covers (barcode, MusicBrainz link, else same artist and title with version words kept)
