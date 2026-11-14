@@ -76,15 +76,48 @@ private func close(_ colour: CoverRGB?, _ red: Double, _ green: Double, _ blue: 
   #expect(tinted > 9 * 9 * 9 * 2 * 9 / 10)
 }
 
-@Test func washActuallyTakesTheCoversHue() throws {
+@Test func washIsAHintOfTheCoversHue() throws {
   let red = try #require(CoverTint.wash(CoverRGB(0.8, 0.1, 0.1), dark: false, roles: lightRoles))
-  #expect(red.red > red.green + 0.05 && red.red > red.blue + 0.05)
+  #expect(red.red > red.green + 0.04 && red.red > red.blue + 0.04)
   let blue = try #require(CoverTint.wash(CoverRGB(0.1, 0.2, 0.8), dark: true, roles: darkRoles))
-  #expect(blue.blue > blue.red + 0.03 && blue.blue > blue.green + 0.03)
+  #expect(blue.blue > blue.red + 0.04 && blue.blue > blue.green + 0.04)
 }
 
-@Test func washFallsBackToTheCanvasWhenNoStrengthPassesTheFloor() {
-  // Roles that can't reach the floor on anything near the canvas: no tint.
+@Test func washIsTheCanvasWithAQuarterOfTheToneBlendedIn() {
+  // D-96: brand first, a hint of cover. The wash is the canvas moved a
+  // quarter of the way to the toned cover colour, never the raw cover.
+  let swatch = CoverRGB(0.18, 0.38, 0.55)
+  for (dark, roles) in [(false, lightRoles), (true, darkRoles)] {
+    let tone = CoverTint.tone(swatch, dark: dark)
+    let expected = roles.canvas.mixed(with: tone, 0.25)
+    #expect(CoverTint.wash(swatch, dark: dark, roles: roles) == expected)
+  }
+}
+
+@Test func washStaysCloseToTheCanvasForEveryCover() {
+  // Even a pure, saturated cover moves no channel of the canvas by more
+  // than 0.08 and its luminance by no more than a quarter: the canvas stays
+  // the page's colour and the rose accent its only strong one.
+  for red in stride(from: 0.0, through: 1, by: 0.25) {
+    for green in stride(from: 0.0, through: 1, by: 0.25) {
+      for blue in stride(from: 0.0, through: 1, by: 0.25) {
+        for (dark, roles) in [(false, lightRoles), (true, darkRoles)] {
+          guard let wash = CoverTint.wash(CoverRGB(red, green, blue), dark: dark, roles: roles)
+          else { continue }
+          let canvas = roles.canvas
+          let moved = max(
+            abs(wash.red - canvas.red), abs(wash.green - canvas.green),
+            abs(wash.blue - canvas.blue))
+          #expect(moved <= 0.08)
+          #expect(wash.contrast(with: canvas) < 1.25)
+        }
+      }
+    }
+  }
+}
+
+@Test func washFallsBackToTheCanvasWhenTheBlendFailsTheFloor() {
+  // Roles that fail the floor on the blend: no tint, the plain canvas.
   var weak = lightRoles
   weak.secondary = CoverRGB(0.7, 0.7, 0.7)
   #expect(CoverTint.wash(CoverRGB(0.2, 0.5, 0.2), dark: false, roles: weak) == nil)

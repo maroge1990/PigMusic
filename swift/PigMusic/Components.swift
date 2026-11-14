@@ -274,10 +274,12 @@ enum CoverSampler {
   }
 }
 
-/// A cover's colour washed behind a page (#199): solid at the top, fading
-/// into the brand canvas. Nothing is drawn (the brand canvas shows) without
-/// a cover, when no tint of it keeps the brand's text roles at AA contrast,
-/// with Reduce Transparency (like the corner bloom) or with Increase Contrast.
+/// A hint of the cover's colour over the brand canvas (#199, D-96): the
+/// toned cover colour at a quarter opacity, so the canvas and its corner
+/// bloom stay underneath, fading to the plain canvas. Nothing is drawn
+/// without a cover, when the brand's text roles would fall below AA on the
+/// blend, with Reduce Transparency (like the corner bloom) or with Increase
+/// Contrast.
 struct CoverWash: View {
   let swatch: CoverRGB?
   /// Share of the height that stays solid before the fade.
@@ -301,13 +303,14 @@ struct CoverWash: View {
   }
   private var wash: Color? {
     guard let swatch, !reduceTransparency, contrast != .increased else { return nil }
+    let dark = scheme == .dark
     let roles = CoverTintRoles(
       canvas: rgb(PigBrand.canvas(scheme)), text: rgb(PigBrand.text(scheme)),
       secondary: rgb(PigBrand.secondary(scheme)), textAccent: rgb(PigBrand.textAccent(scheme)),
       accent: rgb(PigBrand.accent(scheme)))
-    return CoverTint.wash(swatch, dark: scheme == .dark, roles: roles).map {
-      Color(red: $0.red, green: $0.green, blue: $0.blue)
-    }
+    guard CoverTint.wash(swatch, dark: dark, roles: roles) != nil else { return nil }
+    let tone = CoverTint.tone(swatch, dark: dark)
+    return Color(red: tone.red, green: tone.green, blue: tone.blue).opacity(CoverTint.strength)
   }
   private func rgb(_ colour: Color) -> CoverRGB {
     let resolved = colour.resolve(in: environment)
