@@ -10,7 +10,7 @@ This page describes how PigMusic looks and is laid out: which Pig family brand f
 - On detail pages, settings go below the music.
 - Headers are compact.
 - Home shows artists and albums (no song recommendations).
-- Destructive actions that can be undone act at once with an Undo (D-79): the web's status line, the iPhone's Undo bar and the Watch's Undo row offer it for about 10 s, and the change is sent when it runs out, or at once when the page closes or the app leaves the foreground. A dialog is kept only for what cannot be undone (emptying Trash, signing out everywhere, resetting or disabling a person).
+- Destructive actions that can be undone act at once with an Undo (D-79): the web's status line, the iPhone's Undo bar and the Watch's Undo row offer it for about 10 s, and the change is sent when it runs out, or at once when the page closes or the app leaves the foreground. A dialog is kept only for what cannot be undone (emptying Trash, signing out everywhere, resetting or disabling a person). On the iPhone a song request and cancelling one also act at once with Undo; a request then waits in the phone's request outbox until the server confirms it, so nothing locks while it is sent.
 - iPhone haptics: a light tap when something leaves with an Undo, success for a favourite, a queued song or a finished batch of downloads, an error when something fails. Nothing else buzzes.
 - Rows drawn in a stack are separated by a hairline from the title's edge, as system lists are; no full-width rules under headers.
 
