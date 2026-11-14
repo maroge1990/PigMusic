@@ -37,7 +37,7 @@ from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
 from mutagen.flac import FLAC, Picture
 from mutagen.oggopus import OggOpus
 from mutagen.oggvorbis import OggVorbis
-from .lossless_check import REFUSE_BELOW, lossy_cutoff
+from .lossless_check import lossy_cutoff
 from .soulseek import Soulseek
 
 from .audio import probe_file, validate_streams
@@ -614,14 +614,11 @@ class Downloader:
             cutoff = lossy_cutoff(
                 path, probe.get("sample_rate_hz") or 0, probe["duration"], check
             )
-            if cutoff and cutoff < REFUSE_BELOW:
-                raise ValueError(
-                    "Lossless download looks like lossy audio "
-                    f"(nothing above about {cutoff / 1000:.1f} kHz)"
-                )
+            # A suspicion, never a refusal: a steep mastering filter looks
+            # the same (Codex, batch 8). Recorded; convert_down needs "passed".
             probe["lossless_check"] = (
                 f"suspect: nothing above about {cutoff / 1000:.1f} kHz, "
-                "an MP3 320 or a steep mastering filter"
+                "a lossy source or a steep mastering filter"
                 if cutoff
                 else "passed"
             )
@@ -859,12 +856,17 @@ class Downloader:
         if profile not in CONVERT_TO:
             raise ValueError("Only MP3 320 and AAC 256 are made by conversion")
         check = lambda: self.check(job["id"])
-        with self.timings().step("validate", profile="lossless") as checked:
+        with self.timings().step("validate", profile="lossless"):
             original = self.validate(path, job, "lossless", check=check)
-            if str(original.get("lossless_check", "")).startswith("suspect"):
-                checked["note"] = original["lossless_check"]
-        if (original.get("channels") or 0) > 2:
-            raise ValueError("Lossless original has more than two channels")
+            if original.get("lossless_check") != "passed":
+                # D-92: only a verified lossless original is converted.
+                raise ValueError(
+                    "Lossless original not verified as lossless ("
+                    + str(original.get("lossless_check"))
+                    + ")"
+                )
+            if (original.get("channels") or 0) > 2:
+                raise ValueError("Lossless original has more than two channels")
         codec, extension, bitrate = CONVERT_TO[profile]
         output = path.with_name(path.stem + "-converted" + extension)
         rate = original.get("sample_rate_hz") or 0

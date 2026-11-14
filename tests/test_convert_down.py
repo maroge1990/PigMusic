@@ -98,7 +98,7 @@ def test_a_fake_or_multichannel_original_is_never_converted(tmp_path, kind):
     item = store.queue()["items"][0]
     assert item["status"] == "failed"
     assert (
-        "looks like lossy audio" in item["error"]
+        "not verified as lossless" in item["error"]
         if kind == "fake"
         else "more than two channels" in item["error"]
     )
@@ -151,10 +151,8 @@ def test_a_failed_download_says_why_and_a_member_sees_only_their_own(tmp_path):
     )
     worker.process(job)
     lines = store.request_log(job["id"])["lines"]
-    assert any(
-        "refused, Lossless download looks like lossy" in l["text"] for l in lines
-    )
-    assert lines[-1]["ok"] is False and "looks like lossy audio" in lines[-1]["text"]
+    assert any("not verified as lossless" in l["text"] for l in lines)
+    assert lines[-1]["ok"] is False and "not verified as lossless" in lines[-1]["text"]
     with store.connect() as conn:
         payload = json.loads(
             conn.execute(

@@ -6,10 +6,11 @@ hard shelf. Genuine recordings slope off gradually, or are quiet throughout.
 The check averages the spectrum of short windows from the middle of the
 song and finds a drop of at least SHELF_DB within 1 kHz whose top lies
 between 16 and 21 kHz, when the audio below it stands clearly above the
-file's own floor. A cutoff below REFUSE_BELOW refuses the file; one at or
-above it is noted as a suspicion only, since a steep mastering filter at
-20 kHz looks the same as an MP3 320. Plain Python (no numpy in the image):
-about 0.2 s a song.
+file's own floor. A cutoff is a suspicion, never proof: a master filtered
+steeply at 19 to 20 kHz looks the same as an MP3 (Codex, batch 8). So a
+suspect FLAC is kept for a lossless download, marked in its record and
+log, and only a clean one may be converted down (D-92). Plain Python (no
+numpy in the image): about 0.2 s a song.
 """
 
 import array
@@ -27,10 +28,6 @@ LOW, HIGH = 14_000, 21_500  # Bands from LOW to HIGH, BAND wide.
 SHELF_DB = 30.0  # Drop within two bands (1 kHz) that marks a lossy cutoff.
 ABOVE_FLOOR_DB = 30.0  # The audio below the drop must stand this far over the floor.
 CUTOFFS = (16_000, 21_000)  # Where a lossy encoder's cutoff can lie.
-# A cutoff from here up is only a suspicion, never a refusal (Codex round 1):
-# an MP3 320 (about 20.5 kHz) and a genuine master's steep 20 kHz low-pass
-# look alike. Below it lie MP3 256 kbps and lower and AAC's usual cutoffs.
-REFUSE_BELOW = 20_000
 
 
 def _fft(values):
