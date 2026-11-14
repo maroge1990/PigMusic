@@ -262,3 +262,93 @@ def test_rewind_names_the_mixes_that_worked(tmp_path, monkeypatch):
         year = http.get("/api/v1/rewind", params={"period": "year"}).json()
     assert year["top_mixes"] == [{"title": "Daily blend", "plays": 2}]
     assert year["top_songs"][0]["track"]["title"] in {"Song 0", "Song 1"}
+
+
+def report(http, track_id, played_at, event):
+    """A listen as both apps report it: once, at 30 s heard."""
+    answer = http.post(
+        "/api/v1/play-events",
+        json={
+            "events": [
+                {
+                    "track_id": track_id,
+                    "seconds": 30,
+                    "played_at": played_at,
+                    "event_id": event,
+                }
+            ]
+        },
+    )
+    assert answer.status_code == 200, answer.text
+
+
+def test_rewind_minutes_count_the_songs_heard_not_the_30_s_report(
+    tmp_path, monkeypatch
+):
+    # Codex round 1: the apps send seconds=30 once per listen; a four-minute
+    # song listened to counts as four minutes.
+    app, owner = protected(tmp_path, monkeypatch)
+    store = app.state.store
+    mixes = store.mixes
+    user, token = member(app, owner)
+    station(app, monkeypatch, [], [])
+    songs = [track(n, duration=240) for n in range(2)]
+    for song in songs:
+        cached(mixes, song, now=time.time())
+    daily = mixes.stage(user, "daily", mixes.day(), "Daily blend", "Reason", songs)
+    mixes.publish(daily, songs, mixes.day())
+    now = int(time.time())
+    with client(app, token) as http:
+        report(http, f"mix:{daily}:0", now - 600, "one")
+        report(http, f"mix:{daily}:1", now - 300, "two")
+        week = http.get("/api/v1/rewind", params={"period": "year"}).json()
+    assert week["plays"] == 2 and week["minutes"] == 8
+    assert week["top_artists"][0]["minutes"] == 4
+
+
+def test_rewind_keeps_a_year_of_listening_after_old_mixes_are_deleted(
+    tmp_path, monkeypatch
+):
+    # Codex round 1: retired editions are deleted after 31 days; their
+    # listens still rank songs, artists and mixes, and keep artists not new.
+    app, owner = protected(tmp_path, monkeypatch)
+    store = app.state.store
+    mixes = store.mixes
+    user, token = member(app, owner)
+    station(app, monkeypatch, [], [])
+    songs = [track(n, duration=180, artist="Kept Artist") for n in range(2)]
+    for song in songs:
+        cached(mixes, song, now=time.time())
+    daily = mixes.stage(user, "daily", mixes.day(), "Old blend", "Reason", songs)
+    mixes.publish(daily, songs, mixes.day())
+    now = int(time.time())
+    with client(app, token) as http:
+        report(http, f"mix:{daily}:0", now - 600, "kept")
+        with store.connect() as conn:
+            conn.execute("DELETE FROM mix_editions WHERE id=?", (daily,))
+        year = http.get("/api/v1/rewind", params={"period": "year"}).json()
+    assert year["top_artists"][0]["name"] == "Kept Artist"
+    assert year["top_mixes"] == [{"title": "Old blend", "plays": 1}]
+    song = year["top_songs"][0]["track"]
+    assert song["title"] == "Song 0" and song["available"] is False
+
+
+def test_the_migration_keeps_details_of_earlier_mix_listens(tmp_path, monkeypatch):
+    import importlib
+
+    app, owner = protected(tmp_path, monkeypatch)
+    store = app.state.store
+    mixes = store.mixes
+    user, _ = member(app, owner)
+    songs = [track(n, artist="Earlier") for n in range(2)]
+    daily = mixes.stage(user, "daily", mixes.day(), "Earlier blend", "Reason", songs)
+    listen(store, user, f"mix:{daily}:1", int(time.time()) - 100, event="earlier")
+    listen(store, user, "mix:gone:0", int(time.time()) - 90, event="gone")
+    migration = importlib.import_module("server.migrations.0014_listen_details")
+    with store.connect() as conn:
+        conn.execute("DROP TABLE listen_details")
+        migration.up(conn)
+        rows = conn.execute(
+            "SELECT event_id,title,artist,mix_title FROM listen_details"
+        ).fetchall()
+    assert rows == [("earlier", "Song 1", "Earlier", "Earlier blend")]

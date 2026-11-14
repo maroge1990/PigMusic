@@ -1466,6 +1466,45 @@ class UserLibrary:
             self.store,
             [e["track_id"] for e in events if not e["track_id"].startswith("mix:")],
         )
+        from .listening import COLUMNS, details
+
+        with self.store.connect() as conn:
+            # What each listen was, kept with it for Rewind (#203): mix
+            # editions and library files don't last as long as a year.
+            mix_titles = {}
+            for track_id in mix_tracks:
+                identity = track_id.split(":")[1]
+                if identity not in mix_titles:
+                    row = conn.execute(
+                        "SELECT json_extract(payload,'$.title') FROM mix_editions WHERE id=?",
+                        (identity,),
+                    ).fetchone()
+                    mix_titles[identity] = row[0] if row else None
+            acquired = dict(
+                conn.execute(
+                    "SELECT id,payload FROM acquired WHERE id IN (SELECT value FROM json_each(?))",
+                    (
+                        json.dumps(
+                            [
+                                e["track_id"]
+                                for e in events
+                                if not e["track_id"].startswith("mix:")
+                            ]
+                        ),
+                    ),
+                )
+            )
+
+        def described(track_id):
+            if track_id in mix_tracks:
+                return details(
+                    mix_tracks[track_id], mix_titles.get(track_id.split(":")[1])
+                )
+            track = self.store.snapshot_tracks.get(track_id)
+            if track is None and track_id in acquired:
+                track = json.loads(acquired[track_id])
+            return details(track) if track and track.get("title") else None
+
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             added = 0
@@ -1484,7 +1523,7 @@ class UserLibrary:
                     or event["played_at"] < now - 30 * 86400
                 ):
                     continue
-                added += conn.execute(
+                inserted = conn.execute(
                     "INSERT OR IGNORE INTO play_events(user_id,track_id,played_at,seconds,device_session_id,event_id) VALUES (?,?,?,?,?,?)",
                     (
                         user_id,
@@ -1495,6 +1534,13 @@ class UserLibrary:
                         event["event_id"],
                     ),
                 ).rowcount
+                added += inserted
+                about = described(event["track_id"]) if inserted else None
+                if about:
+                    conn.execute(
+                        f"INSERT OR IGNORE INTO listen_details(user_id,event_id,{COLUMNS}) VALUES (?,?,?,?,?,?,?,?,?)",
+                        (user_id, event["event_id"], *about),
+                    )
                 if event["track_id"] in mix_tracks:
                     from .mix_cache import mix_key
 

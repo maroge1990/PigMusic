@@ -41,16 +41,17 @@ def rewind(store, mixes, user, period):
     start = period_start(period, now, zone)
     with store.connect() as conn:
         rows = conn.execute(
-            "SELECT track_id,seconds FROM play_events WHERE user_id=? AND played_at>=? AND played_at<=? AND seconds>=?",
+            f"""SELECT p.track_id,p.seconds,{DETAIL} FROM play_events p
+            LEFT JOIN listen_details d ON d.user_id=p.user_id AND d.event_id=p.event_id
+            WHERE p.user_id=? AND p.played_at>=? AND p.played_at<=? AND p.seconds>=?""",
             (user, start, int(now) + 300, LISTEN_SECONDS),
         ).fetchall()
-        before = [
-            r[0]
-            for r in conn.execute(
-                "SELECT DISTINCT track_id FROM play_events WHERE user_id=? AND played_at<? AND seconds>=?",
-                (user, start, LISTEN_SECONDS),
-            )
-        ]
+        before = conn.execute(
+            f"""SELECT DISTINCT p.track_id,{DETAIL} FROM play_events p
+            LEFT JOIN listen_details d ON d.user_id=p.user_id AND d.event_id=p.event_id
+            WHERE p.user_id=? AND p.played_at<? AND p.seconds>=?""",
+            (user, start, LISTEN_SECONDS),
+        ).fetchall()
         members = {
             r[0]
             for r in conn.execute(
@@ -64,34 +65,54 @@ def rewind(store, mixes, user, period):
     }
     known = {}
 
-    def resolve(track_id):
+    def resolve(track_id, kept):
+        """The song: the library's, the kept details, or the mix entry."""
+        if track_id in library:
+            return library[track_id]
+        if kept[0] is not None:
+            return {
+                "title": kept[0],
+                "artist": kept[1],
+                "album": kept[2],
+                "album_artist": kept[3],
+                "musicbrainz_release_id": kept[4],
+                "duration": kept[5],
+            }
         if track_id not in known:
-            track = library.get(track_id)
-            if track is None and track_id.startswith("mix:"):
+            track = None
+            if track_id.startswith("mix:"):
                 try:
                     track = mixes.entry(user, track_id)
                 except LookupError:
-                    track = None
+                    pass
             known[track_id] = track
         return known[track_id]
 
     songs, song_ids, artists, artist_names = Counter(), {}, Counter(), {}
     artist_seconds, albums, album_info, editions = Counter(), Counter(), {}, Counter()
-    for track_id, seconds in rows:
+    mix_titles, total = {}, 0
+    for track_id, seconds, *kept in rows:
+        track = resolve(track_id, kept)
+        # The apps report a listen once, at 30 s: a listen counts as the
+        # song's length when it's known (Codex round 1).
+        heard = max(seconds, (track or {}).get("duration") or 0)
+        total += heard
         if track_id.startswith("mix:"):
-            editions[track_id.split(":")[1]] += 1
-        track = resolve(track_id)
+            identity = track_id.split(":")[1]
+            editions[identity] += 1
+            if kept[6]:
+                mix_titles.setdefault(identity, kept[6])
         if not track:
             continue
         key = mix_key(track)
         songs[key] += 1
         # The library copy plays from Rewind; a mix entry only while it lasts.
         if key not in song_ids or track_id in library:
-            song_ids[key] = track_id
+            song_ids[key] = (track_id, track)
         name = track.get("artist") or ""
         if name:
             artists[name.casefold()] += 1
-            artist_seconds[name.casefold()] += seconds
+            artist_seconds[name.casefold()] += heard
             artist_names.setdefault(name.casefold(), name)
         if track.get("album"):
             album = (
@@ -100,34 +121,47 @@ def rewind(store, mixes, user, period):
             )
             albums[album] += 1
             album_info.setdefault(album, track)
-    earlier = {(t.get("artist") or "").casefold() for t in map(resolve, before) if t}
-    with store.connect() as conn:
-        titles = {
-            identity: conn.execute(
-                "SELECT payload FROM mix_editions WHERE id=? AND user_id=?",
-                (identity, user),
-            ).fetchone()
-            for identity in editions
-        }
+    earlier = set()
+    for track_id, *kept in before:
+        track = resolve(track_id, kept)
+        if track and track.get("artist"):
+            earlier.add(track["artist"].casefold())
+    missing = [identity for identity in editions if identity not in mix_titles]
+    if missing:
+        with store.connect() as conn:
+            for identity in missing:
+                row = conn.execute(
+                    "SELECT json_extract(payload,'$.title') FROM mix_editions WHERE id=? AND user_id=?",
+                    (identity, user),
+                ).fetchone()
+                if row and row[0]:
+                    mix_titles[identity] = row[0]
     top_mixes = Counter()
     for identity, count in editions.items():
-        if titles.get(identity):
-            top_mixes[json.loads(titles[identity][0]).get("title") or "Mix"] += count
+        if identity in mix_titles:
+            top_mixes[mix_titles[identity]] += count
 
     def song(key):
-        track_id = song_ids[key]
-        track = resolve(track_id)
+        track_id, track = song_ids[key]
         if track_id in library:
             from .user_library import track_dto
 
             return {**track_dto(track), "server_state": "in_library"}
-        _, identity, index = track_id.split(":")
-        dto = mixes.track_dto(identity, int(index), track, members)
-        if dto:
-            return dto.model_dump()
-        # No longer playable: shown, not played.
+        if track_id.startswith("mix:"):
+            _, identity, index = track_id.split(":")
+            entry = known.get(track_id)
+            if entry is None and track_id not in known:
+                try:
+                    entry = mixes.entry(user, track_id)
+                except LookupError:
+                    entry = None
+            if entry:
+                dto = mixes.track_dto(identity, int(index), entry, members)
+                if dto:
+                    return dto.model_dump()
+        # No longer playable here: shown, not played.
         return {
-            **{k: v for k, v in track.items() if k in SHOWN},
+            **{k: v for k, v in track.items() if k in SHOWN and v is not None},
             "id": track_id,
             "available": False,
             "server_state": "not_in_library",
@@ -140,7 +174,7 @@ def rewind(store, mixes, user, period):
         "end": int(now),
         "timezone": str(zone),
         "plays": len(rows),
-        "minutes": round(sum(seconds for _, seconds in rows) / 60),
+        "minutes": round(total / 60),
         "top_songs": [
             {"track": song(key), "plays": count}
             for key, count in songs.most_common(TOP)
@@ -171,6 +205,9 @@ def rewind(store, mixes, user, period):
             for title, count in top_mixes.most_common(TOP)
         ],
     }
+
+
+DETAIL = "d.title,d.artist,d.album,d.album_artist,d.release_id,d.duration,d.mix_title"
 
 
 SHOWN = {
