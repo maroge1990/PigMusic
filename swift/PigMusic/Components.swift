@@ -275,7 +275,7 @@ enum CoverSampler {
 }
 
 /// A hint of the cover's colour over the brand canvas (#199, D-96): the
-/// toned cover colour at a quarter opacity, so the canvas and its corner
+/// toned cover colour at 45% opacity (D-100), so the canvas and its corner
 /// bloom stay underneath, fading to the plain canvas. Nothing is drawn
 /// without a cover, when the brand's text roles would fall below AA on the
 /// blend, with Reduce Transparency (like the corner bloom) or with Increase

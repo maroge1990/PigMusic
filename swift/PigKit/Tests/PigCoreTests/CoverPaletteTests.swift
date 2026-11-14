@@ -83,20 +83,20 @@ private func close(_ colour: CoverRGB?, _ red: Double, _ green: Double, _ blue: 
   #expect(blue.blue > blue.red + 0.04 && blue.blue > blue.green + 0.04)
 }
 
-@Test func washIsTheCanvasWithAQuarterOfTheToneBlendedIn() {
-  // D-96: brand first, a hint of cover. The wash is the canvas moved a
-  // quarter of the way to the toned cover colour, never the raw cover.
+@Test func washIsTheCanvasWith45PercentOfTheToneBlendedIn() {
+  // D-96 and D-100: brand first, a hint of cover. The wash is the canvas
+  // moved 45% of the way to the toned cover colour, never the raw cover.
   let swatch = CoverRGB(0.18, 0.38, 0.55)
   for (dark, roles) in [(false, lightRoles), (true, darkRoles)] {
     let tone = CoverTint.tone(swatch, dark: dark)
-    let expected = roles.canvas.mixed(with: tone, 0.25)
+    let expected = roles.canvas.mixed(with: tone, 0.45)
     #expect(CoverTint.wash(swatch, dark: dark, roles: roles) == expected)
   }
 }
 
 @Test func washStaysCloseToTheCanvasForEveryCover() {
   // Even a pure, saturated cover moves no channel of the canvas by more
-  // than 0.08 and its luminance by no more than a quarter: the canvas stays
+  // than 0.14 and its contrast with the canvas stays under 1.5: the canvas stays
   // the page's colour and the rose accent its only strong one.
   for red in stride(from: 0.0, through: 1, by: 0.25) {
     for green in stride(from: 0.0, through: 1, by: 0.25) {
@@ -108,10 +108,24 @@ private func close(_ colour: CoverRGB?, _ red: Double, _ green: Double, _ blue: 
           let moved = max(
             abs(wash.red - canvas.red), abs(wash.green - canvas.green),
             abs(wash.blue - canvas.blue))
-          #expect(moved <= 0.08)
-          #expect(wash.contrast(with: canvas) < 1.25)
+          #expect(moved <= 0.14)
+          #expect(wash.contrast(with: canvas) < 1.5)
         }
       }
+    }
+  }
+}
+
+@Test func aColourfulCoverVisiblyTintsTheCanvas() throws {
+  // D-100: at a quarter the wash could not be seen on a device. A saturated
+  // cover moves some channel of the canvas by at least 0.1 in both appearances.
+  for (dark, roles) in [(false, lightRoles), (true, darkRoles)] {
+    for swatch in [CoverRGB(0.1, 0.2, 0.8), CoverRGB(0.8, 0.1, 0.1), CoverRGB(0.1, 0.6, 0.25)] {
+      let wash = try #require(CoverTint.wash(swatch, dark: dark, roles: roles))
+      let canvas = roles.canvas
+      let moved = max(
+        abs(wash.red - canvas.red), abs(wash.green - canvas.green), abs(wash.blue - canvas.blue))
+      #expect(moved >= 0.1)
     }
   }
 }

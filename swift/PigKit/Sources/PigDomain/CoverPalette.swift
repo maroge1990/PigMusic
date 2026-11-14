@@ -145,7 +145,7 @@ public struct CoverTintRoles: Sendable {
 /// How a cover's colour becomes a hint on the brand canvas (D-96: brand
 /// first, a hint of cover). The canvas stays the page's background and the
 /// rose accent its only strong colour: the cover's colour, toned to the
-/// appearance, is laid over the canvas at a quarter strength, and only when
+/// appearance, is laid over the canvas at 45% strength, and only when
 /// the brand's text roles stay legible on the result (brand 1.8 section 16:
 /// 4.5:1 for text, 3:1 for marks).
 public enum CoverTint {
@@ -153,8 +153,9 @@ public enum CoverTint {
   public static let textFloor = 4.5
   /// Floor for non-text marks.
   public static let markFloor = 3.0
-  /// How much of the toned colour is blended into the canvas.
-  public static let strength = 0.25
+  /// How much of the toned colour is blended into the canvas (D-100: 45%;
+  /// a quarter could not be seen on a device).
+  public static let strength = 0.45
 
   /// The cover's hue at a lightness that suits the appearance (pale in
   /// light, deep in dark), its saturation capped so it never shouts.
