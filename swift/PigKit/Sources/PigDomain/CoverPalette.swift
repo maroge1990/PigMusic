@@ -142,29 +142,34 @@ public struct CoverTintRoles: Sendable {
   }
 }
 
-/// How a cover's colour becomes a page background that keeps the brand's
-/// text roles legible (brand 1.8 section 16: 4.5:1 for text, 3:1 for marks).
+/// How a cover's colour becomes a hint on the brand canvas (D-96: brand
+/// first, a hint of cover). The canvas stays the page's background and the
+/// rose accent its only strong colour: the cover's colour, toned to the
+/// appearance, is laid over the canvas at a quarter strength, and only when
+/// the brand's text roles stay legible on the result (brand 1.8 section 16:
+/// 4.5:1 for text, 3:1 for marks).
 public enum CoverTint {
   /// Text contrast floor (WCAG AA for body-size text).
   public static let textFloor = 4.5
   /// Floor for non-text marks.
   public static let markFloor = 3.0
+  /// How much of the toned colour is blended into the canvas.
+  public static let strength = 0.25
 
-  /// The background colour at the tint's strongest point, or nil when no
-  /// tint of this cover keeps every role above the floor (the page keeps the
-  /// brand canvas). The cover's hue is kept; its lightness is moved to suit
-  /// the appearance (a pale wash in light, a deep one in dark) and its
-  /// saturation is capped, so the cover colours the page without shouting.
-  public static func wash(_ swatch: CoverRGB, dark: Bool, roles: CoverTintRoles) -> CoverRGB? {
+  /// The cover's hue at a lightness that suits the appearance (pale in
+  /// light, deep in dark), its saturation capped so it never shouts.
+  public static func tone(_ swatch: CoverRGB, dark: Bool) -> CoverRGB {
     let (hue, saturation, _) = swatch.hsl
-    let toned = CoverRGB(
+    return CoverRGB(
       hue: hue, saturation: min(saturation, dark ? 0.5 : 0.6), lightness: dark ? 0.24 : 0.82)
-    // The strongest tint that passes; weaker ones sit closer to the canvas.
-    for strength in stride(from: 0.7, through: 0.3, by: -0.1) {
-      let candidate = roles.canvas.mixed(with: toned, strength)
-      if passes(candidate, roles: roles) { return candidate }
-    }
-    return nil
+  }
+
+  /// The page colour where the wash is strongest (the canvas with the toned
+  /// cover blended in at `strength`), or nil when a role would fall below
+  /// its floor there, so the page keeps the plain canvas.
+  public static func wash(_ swatch: CoverRGB, dark: Bool, roles: CoverTintRoles) -> CoverRGB? {
+    let blended = roles.canvas.mixed(with: tone(swatch, dark: dark), strength)
+    return passes(blended, roles: roles) ? blended : nil
   }
 
   /// Every role readable on `background`.

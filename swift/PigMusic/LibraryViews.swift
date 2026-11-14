@@ -525,9 +525,9 @@ struct NowPlayingView: View {
         }.padding(.horizontal, 24).padding(.bottom, 24)
       }
       .background {
-        // Solid behind the cover and titles, fading into the canvas by the
-        // queue; fixed while the page scrolls.
-        CoverWash(swatch: swatch, solidUntil: 0.4, fadeEnd: 0.85).ignoresSafeArea()
+        // Behind the cover and titles, fading to the plain canvas before the
+        // controls; fixed while the page scrolls.
+        CoverWash(swatch: swatch, solidUntil: 0.35, fadeEnd: 0.7).ignoresSafeArea()
       }
       .task(id: current?.artworkSource) {
         // The cover's own width, so the image comes from memory. A song
