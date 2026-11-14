@@ -1,4 +1,6 @@
 import { api } from "./api";
+import { restoreFromTrash } from "./trashUndo";
+import { offerUndo } from "./UndoBar";
 import { useState } from "react";
 
 /** Owner-only: move the server's files to recoverable trash for everyone. */
@@ -16,18 +18,22 @@ export function RemoveFromServer({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function remove() {
-    if (
-      !confirm(
-        `Move ${title} to recoverable trash on the server? It is removed for everyone.${kind === "artists" ? " Artist monitoring will stop." : ""}`,
-      )
-    )
-      return;
+    // Acts at once for everyone; Undo puts it back (D-79).
     setBusy(true);
     setError("");
     try {
       // api() turns any error answer into a sentence, never "[object Object]".
-      await api(`/v1/admin/${kind}/${id}/remove`, { method: "POST" });
+      const done = await api<{ restorable?: string[] }>(
+        `/v1/admin/${kind}/${id}/remove`,
+        { method: "POST" },
+      );
       window.dispatchEvent(new Event("music-library-changed"));
+      if (done.restorable?.length)
+        offerUndo(
+          `${title} removed from the server for everyone.${kind === "artists" ? " Artist monitoring is off." : ""}`,
+          () => restoreFromTrash(done.restorable!),
+          `${title} is back.${kind === "artists" ? " Turn artist monitoring on again from the artist page." : ""}`,
+        );
       removed?.();
     } catch (e) {
       setError((e as Error).message);
@@ -42,7 +48,7 @@ export function RemoveFromServer({
         disabled={busy}
         onClick={() => void remove()}
       >
-        Remove from server…
+        Remove from server
       </button>
       {error && (
         <span className="inline-error" role="alert">

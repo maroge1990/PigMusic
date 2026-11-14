@@ -130,17 +130,26 @@ test("People warns about wrong passwords tried against an account", async ({
   ).toBeVisible();
 });
 
-test("Remove from server asks first, then removes the song for everyone", async ({
+test("Remove from server acts at once and Undo puts the song back", async ({
   page,
 }) => {
+  // D-79 (#183): no dialog; the song is removed for everyone at once and
+  // Undo restores what went to Trash.
   const removed: string[] = [];
+  const restored: unknown[] = [];
   let libraryReads = 0;
   await mockApi(page, {
     role: "owner",
     answers: {
       "/v1/admin/tracks/t1/remove": (route: Route) => {
         removed.push(route.request().method());
-        return route.fulfill({ json: { removed: true } });
+        return route.fulfill({
+          json: { id: "r1", status: "removed", restorable: ["r1"] },
+        });
+      },
+      "/v1/admin/library/trash/restore": (route: Route) => {
+        restored.push(route.request().postDataJSON());
+        return route.fulfill({ json: { restored: ["r1"], failed: [] } });
       },
     },
   });
@@ -149,51 +158,63 @@ test("Remove from server asks first, then removes the song for everyone", async 
       libraryReads += 1;
   });
   const asked: string[] = [];
-  let answer = false;
   page.on("dialog", (dialog) => {
     asked.push(dialog.message());
-    void (answer ? dialog.accept() : dialog.dismiss());
+    void dialog.dismiss();
   });
   await page.goto(`/#/library/album/${album.id}`);
   const open = page.getByRole("button", { name: "More options for Von dutch" });
   const menu = page.getByRole("menu", { name: "Von dutch" });
   await open.click();
-  await menu.getByRole("button", { name: "Remove from server…" }).click();
-  await expect.poll(() => asked.length).toBe(1);
-  expect(asked[0]).toBe(
-    "Move Von dutch to recoverable trash on the server? It is removed for everyone.",
-  );
-  expect(removed).toEqual([]);
-  answer = true;
   const before = libraryReads;
-  if (!(await menu.isVisible())) await open.click();
-  await menu.getByRole("button", { name: "Remove from server…" }).click();
+  await menu.getByRole("button", { name: "Remove from server" }).click();
   await expect.poll(() => removed).toEqual(["POST"]);
+  expect(asked).toEqual([]);
   // Every open library view reads the library again.
   await expect.poll(() => libraryReads).toBeGreaterThan(before);
-  await expect(menu.getByRole("alert")).toHaveCount(0);
+  const undo = page.locator(".undo-bar");
+  await expect(undo).toContainText(
+    "Von dutch removed from the server for everyone.",
+  );
+  await undo.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(() => restored).toEqual([{ identities: ["r1"] }]);
+  await expect(undo).toContainText("Von dutch is back.");
 });
 
-test("removing an album from the server returns to the albums", async ({
+test("removing an album from the server returns to the albums, with Undo", async ({
   page,
 }) => {
   const removed: string[] = [];
+  const restored: unknown[] = [];
   await mockApi(page, {
     role: "owner",
     answers: {
       "/v1/admin/albums/album-1/remove": (route: Route) => {
         removed.push(route.request().method());
-        return route.fulfill({ json: { removed: true } });
+        return route.fulfill({
+          json: { removed: 2, restorable: ["r1", "r2"] },
+        });
+      },
+      "/v1/admin/library/trash/restore": (route: Route) => {
+        restored.push(route.request().postDataJSON());
+        return route.fulfill({ json: { restored: ["r1"], failed: ["r2"] } });
       },
     },
   });
-  page.on("dialog", (dialog) => void dialog.accept());
   await page.goto(`/#/library/album/${album.id}`);
   const tools = page.locator("details.owner-tools");
   await tools.locator("summary").click();
-  await tools.getByRole("button", { name: "Remove from server…" }).click();
+  await tools.getByRole("button", { name: "Remove from server" }).click();
   await expect.poll(() => removed).toEqual(["POST"]);
   await expect(page).toHaveURL(/#\/library\/albums$/);
+  // The Undo stays after leaving the album, and a song that can't come back
+  // is said plainly.
+  const undo = page.locator(".undo-bar");
+  await undo.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(() => restored).toEqual([{ identities: ["r1", "r2"] }]);
+  await expect(undo).toContainText(
+    "1 of 2 songs couldn't be put back; they're still in Removed music.",
+  );
 });
 
 test("Removed music lists songs and restores one", async ({ page }) => {

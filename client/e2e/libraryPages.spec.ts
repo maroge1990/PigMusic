@@ -296,8 +296,18 @@ test("cancelling a removal keeps the song", async ({ page }) => {
 });
 
 // Playlist options rename a playlist, and delete it only once confirmed.
-test("a playlist is renamed, then deleted once confirmed", async ({ page }) => {
+test("a playlist is renamed, then deleted at once with Undo", async ({
+  page,
+}) => {
+  // D-79 (#183): no dialog; the playlist leaves at once, and the delete is
+  // sent after the Undo time unless Undo is pressed.
+  await page.clock.install();
   const calls: string[] = [];
+  const asked: string[] = [];
+  page.on("dialog", (dialog) => {
+    asked.push(dialog.message());
+    void dialog.dismiss();
+  });
   await mockApi(page, {
     answers: {
       "/v1/playlists/p1": (route: Route) => {
@@ -319,16 +329,23 @@ test("a playlist is renamed, then deleted once confirmed", async ({ page }) => {
   await page.getByRole("button", { name: "Rename" }).click();
   await expect.poll(() => calls.length).toBe(1);
   expect(calls[0]).toBe('PATCH {"revision":2,"name":"Long drive"}');
-  page.once("dialog", (dialog) => dialog.dismiss());
+  // Undo within the time: nothing is sent.
   await page.getByRole("button", { name: "Delete playlist" }).click();
-  await expect(page).toHaveURL(/playlist\/p1$/);
+  await expect(page).toHaveURL(/#\/library\/[a-z]+$/);
+  const undo = page.locator(".undo-bar");
+  await expect(undo).toContainText("Road trip deleted.");
+  await undo.getByRole("button", { name: "Undo" }).click();
+  await expect(undo).toContainText("Road trip is back.");
+  await page.clock.runFor(15_000);
   expect(calls).toHaveLength(1);
-  page.once("dialog", (dialog) => dialog.accept());
+  // Without Undo, the delete is sent once the time has passed.
+  await page.goto("/#/library/playlist/p1");
+  await page.getByText("Playlist options").click();
   await page.getByRole("button", { name: "Delete playlist" }).click();
+  await page.clock.runFor(5_000);
+  expect(calls).toHaveLength(1);
+  await page.clock.runFor(6_000);
   await expect.poll(() => calls.length).toBe(2);
   expect(calls[1]).toBe("DELETE?revision=2");
-  await expect(page.getByRole("status").first()).toContainText(
-    "Playlist deleted",
-  );
-  await expect(page).toHaveURL(/#\/library\/[a-z]+$/);
+  expect(asked).toEqual([]);
 });

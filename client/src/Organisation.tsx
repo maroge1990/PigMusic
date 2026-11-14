@@ -107,12 +107,7 @@ export function Organisation({ notify }: { notify: (s: string) => void }) {
     }
   }
   async function apply() {
-    if (
-      !confirm(
-        `Apply the reviewed naming${tags ? " and tagging" : ""} changes to ${selected.length} songs? Originals will be preserved.`,
-      )
-    )
-      return;
+    // Starts at once (D-79): each applied change has Undo in History below.
     setBusy(true);
     setError("");
     try {
@@ -239,6 +234,10 @@ export function Organisation({ notify }: { notify: (s: string) => void }) {
           >
             Apply reviewed changes · {selected.length}
           </button>
+          <p>
+            Starts at once. Originals are kept, and each change can be undone
+            from the list below.
+          </p>
         </>
       )}
       {history.map((item) => (

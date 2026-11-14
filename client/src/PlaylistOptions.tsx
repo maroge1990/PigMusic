@@ -8,7 +8,7 @@ export function PlaylistOptions({
 }: {
   playlist: Playlist;
   rename: (name: FormDataEntryValue | null) => void;
-  /** Deletes the playlist once the person has confirmed. */
+  /** Deletes the playlist at once; the app offers Undo (D-79). */
   remove: () => void;
 }) {
   return (
@@ -31,16 +31,7 @@ export function PlaylistOptions({
         </label>
         <button type="submit">Rename</button>
       </form>
-      <button
-        onClick={() => {
-          if (
-            confirm("Delete this playlist? Music files stay in your library.")
-          )
-            remove();
-        }}
-      >
-        Delete playlist
-      </button>
+      <button onClick={remove}>Delete playlist</button>
     </details>
   );
 }

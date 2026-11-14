@@ -9,7 +9,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { api, updateArtworkRevision } from "./api";
+import { api, apiFetch, updateArtworkRevision } from "./api";
 import { formatCount, formatDuration } from "./format";
 import { PageHeader, SectionHeader } from "./PageHeader";
 import { Cover } from "./Cover";
@@ -17,6 +17,8 @@ import { Empty, Loading } from "./EmptyState";
 import { MediaSettings } from "./MediaSettings";
 import { AdminGlance } from "./AdminGlance";
 import { QueueView, type Queue, type QueueAction } from "./QueueView";
+import { defer, isPending } from "./deferred";
+import { offerUndo } from "./UndoBar";
 import {
   DownloadSettingsPanel,
   ServerLibraryTools,
@@ -25,6 +27,9 @@ import {
 } from "./SystemView";
 import { go, type Route } from "./routes";
 import type { Album, Library, Migration } from "./types";
+
+/** A whole-queue clear waiting for its Undo time (D-79, #183). */
+const CLEAR_QUEUE = "queue:clear";
 
 const AdminPeople = lazy(() =>
   import("./AdminPeople").then((m) => ({ default: m.AdminPeople })),
@@ -167,7 +172,8 @@ export function AdminTools({ route }: { route: Route }) {
           incoming ||
           (await api<Queue>("/v1/admin/queue", { signal: controller.signal }));
         if (controller.signal.aborted) return;
-        setQueue(q);
+        // A clear waiting for its Undo time shows as done (D-79, #183).
+        setQueue(isPending(CLEAR_QUEUE) ? { ...q, items: [] } : q);
         updateArtworkRevision(q.artwork_revision);
         const signature = `${q.library_revision}:${JSON.stringify(q.media || {})}`;
         if (
@@ -687,14 +693,34 @@ export function AdminTools({ route }: { route: Route }) {
       (t) =>
         !["completed", "downloaded", "cancelled", "failed"].includes(t.status),
     );
-    if (
-      !finished &&
-      unfinished &&
-      !window.confirm(
-        "Cancel every unfinished download and clear the queue? Downloaded music will be kept.",
-      )
-    )
+    if (!finished && unfinished) {
+      // Shows as cleared at once; sent after the Undo time (D-79, #183).
+      const before = queue;
+      const pending = defer(CLEAR_QUEUE, (keepalive) =>
+        apiFetch("/api/v1/admin/queue/clear", {
+          method: "POST",
+          keepalive,
+        }).then((r) => {
+          if (!r.ok) throw new Error("The queue couldn't be cleared.");
+        }),
+      );
+      setQueue({ ...queue, items: [] });
+      offerUndo(
+        "Every unfinished download cancelled and the queue cleared. Downloaded music is kept.",
+        () => {
+          if (!pending.undo()) throw new Error("It was cleared already.");
+          setQueue(before);
+        },
+        "Downloads put back in the queue.",
+      );
+      pending.done.then(
+        (sent) => {
+          if (sent) void api<Queue>("/v1/admin/queue").then(setQueue, () => {});
+        },
+        (e: Error) => setError(e.message),
+      );
       return;
+    }
     setBusy(true);
     try {
       setQueue(

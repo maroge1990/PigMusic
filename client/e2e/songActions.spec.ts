@@ -47,7 +47,7 @@ test("Remove from server shows a readable error for any answer", async ({
     .getByRole("button", { name: "More options for Von dutch" })
     .click();
   const menu = page.getByRole("menu", { name: "Von dutch" });
-  await menu.getByRole("button", { name: "Remove from server…" }).click();
+  await menu.getByRole("button", { name: "Remove from server" }).click();
   const alert = menu.getByRole("alert");
   await expect(alert).toContainText("Something went wrong");
   await expect(alert).not.toContainText("[object");

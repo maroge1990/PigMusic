@@ -5,7 +5,9 @@ import { Shuffle } from "lucide-react";
 import { shuffled } from "./shuffle";
 import { useEffect, useRef, useState } from "react";
 import { Play, ArrowLeft, Download } from "lucide-react";
-import { api } from "./api";
+import { api, apiFetch } from "./api";
+import { defer, isPending } from "./deferred";
+import { offerUndo } from "./UndoBar";
 import { formatCount } from "./format";
 import { PageHeader } from "./PageHeader";
 import { PersonalQuality } from "./PersonalQuality";
@@ -129,7 +131,8 @@ export function PersonalLibrary({
     ]);
     if (run !== refreshes.current) return;
     setLibrary(summary);
-    setPlaylists(list.playlists);
+    // A playlist whose deletion is waiting for its Undo time is gone already.
+    setPlaylists(list.playlists.filter((p) => !isPending("playlist:" + p.id)));
     // Library artwork is always ready, whichever tab opens next.
     whenIdle(() =>
       warmCovers([
@@ -604,15 +607,40 @@ export function PersonalLibrary({
                   await openPlaylist(p.id);
                 })
               }
-              remove={() =>
-                void action(async () => {
-                  await api(
-                    `/v1/playlists/${detail.playlist!.id}?revision=${detail.playlist!.revision}`,
-                    { method: "DELETE" },
-                  );
-                  backToLibrary();
-                }, "Playlist deleted")
-              }
+              remove={() => {
+                // Leaves at once; sent after the Undo time (D-79, #183).
+                const p = detail.playlist!;
+                const pending = defer("playlist:" + p.id, (keepalive) =>
+                  apiFetch(`/api/v1/playlists/${p.id}?revision=${p.revision}`, {
+                    method: "DELETE",
+                    keepalive,
+                  }).then(async (r) => {
+                    if (!r.ok)
+                      throw new Error(
+                        (await r.json().catch(() => ({}))).detail ||
+                          "The playlist couldn't be deleted.",
+                      );
+                  }),
+                );
+                setPlaylists((old) => old.filter((v) => v.id !== p.id));
+                backToLibrary();
+                offerUndo(
+                  `${p.name} deleted.`,
+                  async () => {
+                    if (!pending.undo())
+                      throw new Error("It was deleted already.");
+                    await refresh();
+                  },
+                  `${p.name} is back.`,
+                );
+                pending.done.then(
+                  (sent) => sent && void refresh(),
+                  (e: Error) => {
+                    setError(e.message);
+                    void refresh();
+                  },
+                );
+              }}
             />
           )}
           {owner && detail.quality?.scope === "album" && (

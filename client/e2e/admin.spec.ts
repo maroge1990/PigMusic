@@ -292,12 +292,19 @@ test("the owner reviews duplicate songs and moves them to Removed music", async 
     keeper_album: "Rumours",
   };
   let removed: string[] = [];
+  const restored: unknown[] = [];
   await mockApi(page, {
     role: "owner",
     answers: {
       "/v1/admin/library/duplicates/remove": (route) => {
         removed = route.request().postDataJSON().track_ids;
-        return route.fulfill({ json: { removed: 1, skipped: 0 } });
+        return route.fulfill({
+          json: { removed: 1, skipped: 0, restorable: ["r-dl"] },
+        });
+      },
+      "/v1/admin/library/trash/restore": (route) => {
+        restored.push(route.request().postDataJSON());
+        return route.fulfill({ json: { restored: ["r-dl"], failed: [] } });
       },
       "/v1/admin/library/trash": (route) => route.fulfill({ json: [] }),
       "/v1/admin/library/organisation/history": (route) =>
@@ -324,6 +331,50 @@ test("the owner reviews duplicate songs and moves them to Removed music", async 
     .click();
   await expect(panel).toContainText("No duplicate songs.");
   expect(removed).toEqual(["dl"]);
+  // D-79 (#183): no dialog first, and Undo puts them back.
+  const undo = page.locator(".undo-bar");
+  await undo.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(() => restored).toEqual([{ identities: ["r-dl"] }]);
+  await expect(undo).toContainText("1 duplicates put back.");
+});
+
+test("Cancel all clears the queue at once and Undo keeps every download", async ({
+  page,
+}) => {
+  // D-79 (#183): no dialog; the queue shows as cleared, and the cancel is
+  // sent only after the Undo time.
+  await page.clock.install();
+  let clears = 0;
+  const asked: string[] = [];
+  page.on("dialog", (dialog) => {
+    asked.push(dialog.message());
+    void dialog.dismiss();
+  });
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/admin/queue": (route) => route.fulfill({ json: queue }),
+      "/v1/admin/queue/clear": (route) => {
+        clears += 1;
+        return route.fulfill({ json: { ...queue, items: [] } });
+      },
+    },
+  });
+  await page.goto("/#/admin/downloads");
+  await expect(page.getByText("Two").first()).toBeVisible();
+  await page.getByRole("button", { name: "Cancel all" }).click();
+  await expect(page.getByText("Two")).toHaveCount(0);
+  const undo = page.locator(".undo-bar");
+  await expect(undo).toContainText("Every unfinished download cancelled");
+  await undo.getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByText("Two").first()).toBeVisible();
+  await page.clock.runFor(15_000);
+  expect(clears).toBe(0);
+  // Without Undo it is sent once the time has passed.
+  await page.getByRole("button", { name: "Cancel all" }).click();
+  await page.clock.runFor(11_000);
+  await expect.poll(() => clears).toBe(1);
+  expect(asked).toEqual([]);
 });
 
 test("the owner tidies an album's editions and can undo it", async ({
@@ -456,10 +507,15 @@ test("the owner joins an album split across two editions", async ({ page }) => {
     fingerprint: "a".repeat(64),
   };
   let joined: unknown = null;
-  let confirmed = "";
+  let undone = 0;
+  const asked: string[] = [];
   await mockApi(page, {
     role: "owner",
     answers: {
+      "/v1/admin/library/tidy/history/run/undo": (route) => {
+        undone += 1;
+        return route.fulfill({ json: { id: "run", status: "undone" } });
+      },
       "/v1/admin/library/tidy/dude-2008": (route) => {
         joined = route.request().postDataJSON();
         return route.fulfill({ json: { id: "run", status: "applied" } });
@@ -480,8 +536,8 @@ test("the owner joins an album split across two editions", async ({ page }) => {
     },
   });
   page.on("dialog", (dialog) => {
-    confirmed = dialog.message();
-    return dialog.accept();
+    asked.push(dialog.message());
+    return dialog.dismiss();
   });
   await page.goto("/#/admin/library");
   const panel = page
@@ -493,8 +549,13 @@ test("the owner joins an album split across two editions", async ({ page }) => {
   await expect(panel).toContainText("FLAC becomes track 11 of Dude Ranch");
   await panel.getByRole("button", { name: "Tidy Dude Ranch" }).click();
   await expect(panel).toContainText("No albums on several editions.");
-  expect(confirmed).toContain("join 2 songs into it");
+  // D-79 (#183): it acts at once, and Undo puts the album back.
+  expect(asked).toEqual([]);
   expect(joined).toEqual({ fingerprint: "a".repeat(64) });
+  const undo = page.locator(".undo-bar");
+  await undo.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(() => undone).toBe(1);
+  await expect(undo).toContainText("blink-182 · Dude Ranch put back.");
 });
 
 test("a tidy-up or Undo that stops keeps its reason on screen", async ({

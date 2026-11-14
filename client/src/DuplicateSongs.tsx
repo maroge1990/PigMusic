@@ -1,4 +1,6 @@
 import { apiFetch } from "./api";
+import { restoreFromTrash } from "./trashUndo";
+import { offerUndo } from "./UndoBar";
 import { useState } from "react";
 import { EmptyLine, InlineError } from "./EmptyState";
 
@@ -32,12 +34,7 @@ export function DuplicateSongs({ notify }: { notify: (s: string) => void }) {
     }
   }
   async function remove() {
-    if (
-      !confirm(
-        `Move ${selected.length} duplicate songs to Removed music? Listeners keep the other copy, and you can restore them.`,
-      )
-    )
-      return;
+    // Acts at once; Undo puts them back (D-79).
     setBusy(true);
     try {
       const r = await apiFetch("/api/v1/admin/library/duplicates/remove", {
@@ -47,10 +44,19 @@ export function DuplicateSongs({ notify }: { notify: (s: string) => void }) {
       });
       const d = await r.json();
       if (!r.ok) throw new Error("Removal stopped. Check the library folder.");
-      notify(
+      const message =
         `${d.removed} duplicates moved to Removed music` +
-          (d.skipped ? `; ${d.skipped} left as they were.` : "."),
-      );
+        (d.skipped ? `; ${d.skipped} left as they were.` : ".");
+      notify(message);
+      if (d.restorable?.length)
+        offerUndo(
+          message,
+          async () => {
+            await restoreFromTrash(d.restorable);
+            await review();
+          },
+          `${d.restorable.length} duplicates put back.`,
+        );
       window.dispatchEvent(new Event("music-library-changed"));
       await review();
     } catch (e) {

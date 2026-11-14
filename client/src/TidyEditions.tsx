@@ -1,4 +1,5 @@
 import { apiFetch } from "./api";
+import { offerUndo } from "./UndoBar";
 import { useState } from "react";
 import { EmptyLine, InlineError } from "./EmptyState";
 
@@ -81,28 +82,29 @@ export function TidyEditions({ notify }: { notify: (s: string) => void }) {
       const d = await r.json().catch(() => ({}));
       throw new Error(d.detail || "Stopped. Check the library folder.");
     }
+    return (await r.json().catch(() => null)) as { id?: string } | null;
   }
   async function tidy(album: Album) {
-    const moved = album.remove.length + album.replace.length * 2;
-    const joined = album.join?.length ?? 0;
-    const changes = [
-      moved ? `move ${moved} files to Removed music` : "",
-      joined ? `join ${joined} songs into it` : "",
-    ].filter(Boolean);
-    if (
-      !confirm(
-        `Keep ${album.keep.title} and ${changes.join(" and ")}? Listeners keep their songs, and you can undo this.`,
-      )
-    )
-      return;
+    // Acts at once; Undo puts the album back (D-79).
     setBusy(true);
     setError("");
     let failure = "";
     try {
-      await post("/api/v1/admin/library/tidy/" + album.id, {
+      const done = await post("/api/v1/admin/library/tidy/" + album.id, {
         fingerprint: album.fingerprint,
       });
-      notify(`${album.artist} · ${album.keep.title} tidied.`);
+      const message = `${album.artist} · ${album.keep.title} tidied.`;
+      notify(message);
+      if (done?.id)
+        offerUndo(
+          message,
+          async () => {
+            await post(`/api/v1/admin/library/tidy/history/${done.id}/undo`);
+            window.dispatchEvent(new Event("music-library-changed"));
+            await review();
+          },
+          `${album.artist} · ${album.keep.title} put back.`,
+        );
     } catch (e) {
       failure = (e as Error).message;
     }

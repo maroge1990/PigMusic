@@ -67,7 +67,7 @@ export function QueueView({
               disabled={busy || !queue?.items.length}
               onClick={() => clearQueue(false)}
             >
-              Cancel all…
+              Cancel all
             </button>
           </>
         }
