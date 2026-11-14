@@ -3,11 +3,8 @@
 PigMusic applies its own strict match and quality gates after search.
 """
 TIMEOUT_FREEMP3CLOUD_SEARCH = 20
-TIMEOUT_FREEMP3CLOUD_DOWNLOAD = 120
 TIMEOUT_ZVU4NO_SEARCH = 15
-TIMEOUT_ZVU4NO_DOWNLOAD = 120
 TIMEOUT_JIOSAAVN_SEARCH = 20
-TIMEOUT_JIOSAAVN_DOWNLOAD = 120
 
 
 def parse_duration(seconds):

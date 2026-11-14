@@ -25,14 +25,13 @@ a front end for the same API through someone else's proxy. We skip the proxy.
 import base64
 import html
 import re
-from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
 from Crypto.Cipher import DES
 from Crypto.Util.Padding import unpad
 
-from .compat import TIMEOUT_JIOSAAVN_DOWNLOAD, TIMEOUT_JIOSAAVN_SEARCH
+from .compat import TIMEOUT_JIOSAAVN_SEARCH
 from .compat import score_search_result_with_breakdown, parse_duration
 
 _API_URL = "https://www.jiosaavn.com/api.php"
@@ -175,48 +174,3 @@ def search_jiosaavn(query: str, limit: int) -> list[dict]:
 
     except Exception as e:
         raise RuntimeError("JioSaavn search unavailable") from e
-
-
-def check_health() -> tuple[bool, str]:
-    """A real search for a Western track, which only turns up from India.
-
-    Karaoke covers alone mean the Indian-address header has stopped working and
-    we are back to the local catalogue, which is a failure worth seeing.
-    """
-    try:
-        data = _api("search.getResults", q="nirvana lithium", p=1, n=5)
-    except Exception as e:
-        return False, f"unreachable ({e})"
-    songs = data.get("results") or []
-    for song in songs:
-        if "nirvana" in _artist_of(song).lower() and _stream_url(song.get("more_info") or {}):
-            return True, ""
-    if songs:
-        return False, "search is geo-filtered again (only covers came back)"
-    return False, "search answered without a playable stream"
-
-
-def download_jiosaavn_track(download_url: str, output_path: Path) -> None:
-    """Stream a JioSaavn track (AAC in MP4) directly to output_path."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with httpx.stream(
-        "GET",
-        download_url,
-        headers=_HEADERS,
-        timeout=TIMEOUT_JIOSAAVN_DOWNLOAD,
-        follow_redirects=True,
-    ) as resp:
-        resp.raise_for_status()
-        expected_size = int(resp.headers.get("content-length", 0))
-        with open(output_path, "wb") as f:
-            for chunk in resp.iter_bytes(chunk_size=16384):
-                f.write(chunk)
-
-    actual_size = output_path.stat().st_size
-    if actual_size == 0:
-        output_path.unlink(missing_ok=True)
-        raise RuntimeError("JioSaavn download produced an empty file")
-    if expected_size > 0 and actual_size < expected_size:
-        output_path.unlink(missing_ok=True)
-        raise RuntimeError(f"JioSaavn download truncated: got {actual_size} of {expected_size} bytes")

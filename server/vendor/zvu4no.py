@@ -9,12 +9,11 @@ thumbnail, and a data.zvu4it.org download URL.
 import hashlib
 import html
 import re
-from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 import httpx
 
-from .compat import TIMEOUT_ZVU4NO_DOWNLOAD, TIMEOUT_ZVU4NO_SEARCH
+from .compat import TIMEOUT_ZVU4NO_SEARCH
 from .compat import score_search_result_with_breakdown, parse_duration
 
 _BASE_URL = "https://zvu4it.org"
@@ -128,30 +127,3 @@ def search_zvu4no(query: str, limit: int) -> list[dict]:
 
     except Exception as e:
         raise RuntimeError("zvu4no search unavailable") from e
-        return []
-
-
-def download_zvu4no_track(download_url: str, output_path: Path) -> None:
-    """Stream a zvu4no track directly to output_path."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with httpx.stream(
-        "GET",
-        download_url,
-        headers=_HEADERS,
-        timeout=TIMEOUT_ZVU4NO_DOWNLOAD,
-        follow_redirects=True,
-    ) as resp:
-        resp.raise_for_status()
-        expected_size = int(resp.headers.get("content-length", 0))
-        with open(output_path, "wb") as f:
-            for chunk in resp.iter_bytes(chunk_size=16384):
-                f.write(chunk)
-
-    actual_size = output_path.stat().st_size
-    if actual_size == 0:
-        output_path.unlink(missing_ok=True)
-        raise RuntimeError("zvu4no download produced an empty file")
-    if expected_size > 0 and actual_size < expected_size:
-        output_path.unlink(missing_ok=True)
-        raise RuntimeError(f"zvu4no download truncated: got {actual_size} of {expected_size} bytes")

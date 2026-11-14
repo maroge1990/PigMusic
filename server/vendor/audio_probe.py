@@ -11,25 +11,6 @@ from pathlib import Path
 import mutagen
 
 
-AUDIO_EXTENSIONS = {
-    ".aac",
-    ".aif",
-    ".aiff",
-    ".ape",
-    ".flac",
-    ".m4a",
-    ".mp3",
-    ".mp4",
-    ".oga",
-    ".ogg",
-    ".opus",
-    ".wav",
-    ".wave",
-    ".wma",
-    ".wv",
-}
-
-
 def _digits_to_int(value: str) -> int:
     numbers = [int(number) for number in re.findall(r"\d+", value or "")]
     return max(numbers) if numbers else 0
