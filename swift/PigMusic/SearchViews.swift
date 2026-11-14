@@ -196,7 +196,7 @@ struct SavedArtistView: View {
             Text("Songs").font(PigType.sectionTitle).padding(.bottom, 6)
             ForEach(Array(songs.prefix(10).enumerated()), id: \.element.id) { index, track in
               SongRow(model: model, track: track) { model.play(songs, at: index) }
-              Divider()
+              RowSeparator()
             }
           }
         }
@@ -640,7 +640,7 @@ private struct ApplePlaylistView: View {
           LazyVStack(spacing: 0) {
             ForEach(songs) { song in
               row(song)
-              Divider()
+              RowSeparator()
             }
           }
           if songs.isEmpty {

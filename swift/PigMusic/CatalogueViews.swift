@@ -58,7 +58,7 @@ struct CatalogueArtistView: View {
               SongRow(model: model, track: track) {
                 model.play(popularSongs, at: index, origin: .catalogue(artistId: artistId))
               }
-              Divider()
+              RowSeparator()
             }
           }
         }

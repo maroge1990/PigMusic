@@ -141,7 +141,7 @@ struct LibraryView: View {
       LazyVStack(spacing: 0) {
         ForEach(Array(model.songs.enumerated()), id: \.element.id) { index, track in
           SongRow(model: model, track: track) { model.play(model.songs, at: index) }
-          Divider()
+          RowSeparator()
         }
       }
       more(.tracks, shown: model.songs.count, total: model.songCount)
@@ -168,7 +168,7 @@ struct LibraryView: View {
               Image(systemName: "chevron.right").foregroundStyle(.tertiary)
             }.padding(.vertical, 4)
           }.buttonStyle(.plain)
-          Divider()
+          RowSeparator()
         }
       }
     }
@@ -677,7 +677,7 @@ struct NowPlayingView: View {
       }.padding(.bottom, 6)
       ForEach(player.queue.items.dropFirst(player.queue.index + 1).prefix(50)) { item in
         UpNextRow(model: model, item: item)
-        Divider()
+        RowSeparator()
       }
     }
   }

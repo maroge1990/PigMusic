@@ -172,7 +172,7 @@ struct HomeView: View {
           VStack(spacing: 0) {
             ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
               SongRow(model: model, track: track) { model.play(all, at: index) }
-              Divider()
+              RowSeparator()
             }
           }
           // The chart holds up to 100 songs (#55); the rest are a tap away.

@@ -506,8 +506,8 @@ struct SongRow: View {
 struct DetailSettings<Content: View>: View {
   @ViewBuilder let content: Content
   var body: some View {
+    // Space, not a rule, sets the settings apart (#183).
     VStack(alignment: .leading, spacing: 12) {
-      Divider()
       Text("Settings").font(PigType.sectionTitle)
       content
     }.padding(.top, 24)
@@ -644,7 +644,7 @@ struct AlbumSongList: View {
     LazyVStack(spacing: 0) {
       ForEach(Array(tracks.enumerated()), id: \.offset) { index, song in
         SongRow(model: model, track: song, number: number(index, song)) { play(index) }
-        Divider()
+        RowSeparator(numbered: true)
       }
     }
   }
@@ -752,4 +752,17 @@ struct StatusMessage: Equatable {
   let kind: StatusText.Kind
   static func info(_ text: String) -> StatusMessage { StatusMessage(text: text, kind: .info) }
   static func error(_ text: String) -> StatusMessage { StatusMessage(text: text, kind: .error) }
+}
+
+/// Between rows of a song or album list drawn in a stack: a hairline from the
+/// title's edge, as the system's lists draw it, not a rule across the screen
+/// (#183).
+struct RowSeparator: View {
+  /// Rows that start with a track number instead of artwork.
+  var numbered = false
+  @ScaledMetric(relativeTo: .body) private var artwork: CGFloat = 56
+  @ScaledMetric(relativeTo: .subheadline) private var number: CGFloat = 38
+  var body: some View {
+    Divider().padding(.leading, numbered ? number : artwork).accessibilityHidden(true)
+  }
 }
