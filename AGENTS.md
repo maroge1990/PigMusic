@@ -93,7 +93,7 @@ Every fix for a Codex finding is confirmed by Codex before it ships (D-71): a fo
 ## Conventions
 
 - Layout and brand rules: [docs/DESIGN.md](docs/DESIGN.md). Admin-only options always go at the bottom of shared views; native apps have no admin tools.
-- Product rules (never transcode to reach a quality; favourites and imports never trigger downloads; a song matches any edition unless `explicit_edition`; live/remix/demo stay distinct): [docs/PRODUCT.md](docs/PRODUCT.md).
+- Product rules (never transcode up to reach a quality, converting down only from a verified lossless original (D-98); favourites and imports never trigger downloads; a song matches any edition unless `explicit_edition`; live/remix/demo stay distinct): [docs/PRODUCT.md](docs/PRODUCT.md).
 - Match surrounding code style: Black (Python), Prettier (web), existing Swift formatting.
 - Docs describe the present and are overwritten; one home per fact.
 

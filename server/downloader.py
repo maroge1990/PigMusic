@@ -54,6 +54,12 @@ from .storage import download_root, file_sha256, library_root
 
 PROVIDERS = SEARCH_PROVIDERS
 log = logging.getLogger("pig_music.downloads")
+# Lossy profiles a verified lossless original may be converted down to
+# (D-92): encoder, container and bitrate.
+CONVERT_TO = {
+    "mp3_320": ("libmp3lame", ".mp3", "320k"),
+    "aac_256": ("aac", ".m4a", "256k"),
+}
 VERSION_WORDS = {
     "live",
     "remix",
@@ -824,11 +830,54 @@ class Downloader:
         with timings.step("commit"):
             self.store.publish_request(job, path, target, probe, sha)
 
-    def attempt(self, job, profile, errors):
-        effective = {**job, "quality_profile": profile}
+    def convert_down(self, job, path, profile):
+        """A lossy `profile` copy of the lossless download at `path`, and what
+        the original was. The original is validated as lossless first (the
+        recording checks and #195's fake-lossless check); more than two
+        channels are refused rather than silently downmixed. Converting up
+        is never possible here: only a verified FLAC is converted (D-92)."""
+        if profile not in CONVERT_TO:
+            raise ValueError("Only MP3 320 and AAC 256 are made by conversion")
+        check = lambda: self.check(job["id"])
+        with self.timings().step("validate", profile="lossless"):
+            original = self.validate(path, job, "lossless", check=check)
+        if (original.get("channels") or 0) > 2:
+            raise ValueError("Lossless original has more than two channels")
+        codec, extension, bitrate = CONVERT_TO[profile]
+        output = path.with_name(path.stem + "-converted" + extension)
+        rate = original.get("sample_rate_hz") or 0
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            raise ValueError("FFmpeg is required to convert a lossless download")
+        with self.timings().step("convert", profile=profile):
+            result = run_checked(
+                [ffmpeg, "-v", "error", "-nostdin", "-y", "-i", str(path)]
+                + ["-map", "0:a:0", "-vn", "-map_metadata", "-1"]
+                + ([] if rate in (44100, 48000) else ["-ar", "44100"])
+                + ["-c:a", codec, "-b:a", bitrate, str(output)],
+                check,
+                timeout=180,
+            )
+            if result.returncode or not output.is_file():
+                output.unlink(missing_ok=True)
+                raise ValueError("Converting the lossless original failed")
+        return output, {
+            "codec": "flac",
+            "sample_rate_hz": rate,
+            "bits_per_sample": original.get("bits_per_sample"),
+            "channels": original.get("channels"),
+            "lossless_checked": True,
+        }
+
+    def attempt(self, job, profile, errors, convert=False):
+        """Try each enabled source for `profile`. With `convert` (D-92, #196),
+        search for a lossless original instead, check it in full (including
+        the fake-lossless check, #195) and convert it down to `profile`."""
+        wanted = "lossless" if convert else profile
+        effective = {**job, "quality_profile": wanted}
         for source in self.store.download_settings()["sources"]:
             self.check(job["id"])
-            if not supports(source, profile):
+            if not supports(source, wanted):
                 continue
             self.context.source_deadline = min(
                 self.deadlines.get(job["id"], float("inf")), time.monotonic() + 240
@@ -848,7 +897,7 @@ class Downloader:
                     timings=self.timings().payload(),
                 )
                 context = Context(
-                    profile,
+                    wanted,
                     check=lambda: self.check(job["id"]),
                     deadline=min(
                         self.context.source_deadline,
@@ -856,7 +905,7 @@ class Downloader:
                     ),
                 )
                 with self.timings().step(
-                    "search", source=source, profile=profile
+                    "search", source=source, profile=wanted
                 ) as searched:
                     if REGISTRY[source].adapter:
                         candidates = self.runtime.search(source, effective, context)
@@ -894,6 +943,7 @@ class Downloader:
                         / f"{job['id']}-{job.get('claim_token','legacy')}{extension}"
                     )
                     transferred = False
+                    converted = None
                     try:
                         self.state(
                             job["id"],
@@ -912,7 +962,7 @@ class Downloader:
                                     {
                                         **candidate,
                                         "source": source,
-                                        "effective_profile": profile,
+                                        "effective_profile": wanted,
                                     },
                                     path,
                                 )
@@ -923,8 +973,24 @@ class Downloader:
                                 except OSError:
                                     pass
                         transferred = True
-                        self.complete(job, path, extension, source, profile, provenance)
-                        self.timings().won = source + "/" + profile
+                        if convert:
+                            converted, original = self.convert_down(job, path, profile)
+                            provenance = {**(provenance or {}), "converted_from": original}
+                            self.complete(
+                                job,
+                                converted,
+                                converted.suffix,
+                                source,
+                                profile,
+                                provenance,
+                            )
+                        else:
+                            self.complete(
+                                job, path, extension, source, profile, provenance
+                            )
+                        self.timings().won = (
+                            source + "/" + profile + (" from lossless" if convert else "")
+                        )
                         self.runtime.health.outcome(source, transfer=True)
                         return True
                     except (Cancelled, QualityDeadline, SourceDeadline):
@@ -956,6 +1022,8 @@ class Downloader:
                         errors.append(f"{source}: {message}")
                     finally:
                         path.unlink(missing_ok=True)
+                        if converted is not None:
+                            converted.unlink(missing_ok=True)
                 if not candidates:
                     errors.append(
                         f"{source}: no candidate passed recording/version matching"
@@ -1017,6 +1085,22 @@ class Downloader:
                 errors.append("Preferred quality attempt reached its time limit")
             finally:
                 self.deadlines.pop(job["id"], None)
+            # A verified lossless original converted down (D-92, D-98, #196):
+            # not for genuine-128 replacements or quality upgrades.
+            if (
+                preferred in CONVERT_TO
+                and not job.get("exact_quality")
+                and not job.get("upgrade_only")
+            ):
+                self.deadlines[job["id"]] = budget()
+                try:
+                    if self.attempt(job, preferred, errors, convert=True):
+                        result = "completed"
+                        return
+                except QualityDeadline:
+                    errors.append("Conversion from lossless reached its time limit")
+                finally:
+                    self.deadlines.pop(job["id"], None)
             fallback = desired["fallback"]
             if (
                 preferred == "lossless"
