@@ -70,6 +70,16 @@ struct HomeView: View {
             }
           }.padding(.horizontal)
         }
+        NavigationLink {
+          RewindView(model: model)
+        } label: {
+          CollectionRow(
+            "Your Rewind", subtitle: "Your listening this week, month and year"
+          ) {
+            Image(systemName: "clock.arrow.circlepath").font(.title2)
+              .frame(width: 44, height: 44).accessibilityHidden(true)
+          }
+        }.buttonStyle(.plain).padding(.horizontal)
         if let recent = model.homeContent[.recent]?.albums, !recent.isEmpty {
           Shelf(title: "Recently added") {
             ForEach(recent) { album in
@@ -447,5 +457,106 @@ extension AppModel {
       mixesPreparing: current?.mixesPreparing, radio: current?.radio)
     homeContent[.mixes] = updated
     try? await store?.cache(updated, key: "home:mixes")
+  }
+}
+
+/// Rewind (#203): the person's listening for the week, month or year so far,
+/// with "Play your top songs".
+struct RewindView: View {
+  let model: AppModel
+  @State private var period = "week"
+  @State private var rewind: Rewind?
+  @State private var error: String?
+  @State private var loading = false
+  private static let periods = [("week", "Week"), ("month", "Month"), ("year", "Year")]
+  var body: some View {
+    List {
+      Picker("Period", selection: $period) {
+        ForEach(Self.periods, id: \.0) { Text($0.1).tag($0.0) }
+      }.pickerStyle(.segmented).listRowBackground(Color.clear)
+      if let error { StatusText(error, kind: .error) }
+      if loading && rewind == nil { ProgressView("Loading your Rewind…") }
+      if let rewind {
+        if rewind.plays == 0 {
+          StatusText("Nothing played yet this \(period).")
+        } else {
+          content(rewind)
+        }
+      }
+    }
+    .pigCanvas().navigationTitle("Rewind").navigationBarTitleDisplayMode(.inline)
+    .task(id: period) { await load() }
+    .refreshable { await load() }
+  }
+  @ViewBuilder private func content(_ rewind: Rewind) -> some View {
+    Section {
+      HStack(spacing: 24) {
+        figure("\(rewind.minutes)", rewind.minutes == 1 ? "minute" : "minutes")
+        figure("\(rewind.plays)", rewind.plays == 1 ? "listen" : "listens")
+      }
+      if !rewind.playable.isEmpty {
+        Button("Play your top songs", systemImage: "play.fill") {
+          model.play(rewind.playable)
+        }.pigPrimaryAction()
+      }
+    }
+    Section("Top songs") {
+      ForEach(rewind.topSongs) { song in
+        CollectionRow(
+          song.track.title,
+          subtitle: song.track.artist + " · " + plays(song.plays)
+            + (song.available ? "" : " · No longer available")
+        ) {
+          ArtworkThumb(model: model, source: song.track.artworkSource, title: song.track.title)
+        }.accessibilityElement(children: .combine)
+      }
+    }
+    Section("Top artists") {
+      ForEach(rewind.topArtists) { artist in
+        LabeledContent(artist.name, value: plays(artist.plays) + " · \(artist.minutes) min")
+      }
+    }
+    Section("Top albums") {
+      ForEach(rewind.topAlbums) { album in
+        CollectionRow(album.title, subtitle: album.artist + " · " + plays(album.plays)) {
+          ArtworkThumb(model: model, source: cover(album.coverUrl), title: album.title)
+        }.accessibilityElement(children: .combine)
+      }
+    }
+    if !rewind.newArtists.isEmpty {
+      Section("New to you") {
+        ForEach(rewind.newArtists, id: \.self) { Text($0) }
+      }
+    }
+    if !rewind.topMixes.isEmpty {
+      Section("Mixes you played most") {
+        ForEach(rewind.topMixes) { mix in
+          LabeledContent(mix.title, value: plays(mix.plays))
+        }
+      }
+    }
+  }
+  private func figure(_ value: String, _ unit: String) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(value).font(.largeTitle.weight(.bold)).monospacedDigit()
+      Text(unit).font(PigType.caption).foregroundStyle(.secondary)
+    }.accessibilityElement(children: .combine)
+  }
+  private func plays(_ count: Int) -> String { count == 1 ? "1 listen" : "\(count) listens" }
+  /// Rewind's album covers are the server's release artwork addresses.
+  private func cover(_ url: String?) -> AppModel.ArtworkSource? {
+    let prefix = "/api/v1/catalogue/artwork/release/"
+    guard let url, url.hasPrefix(prefix) else { return nil }
+    return .release(String(url.dropFirst(prefix.count)))
+  }
+  private func load() async {
+    loading = true
+    error = nil
+    defer { loading = false }
+    let asked = period
+    do {
+      let answer = try await model.readCatalogue { try await $0.rewind(period: asked) }
+      if asked == period { rewind = answer }
+    } catch is CancellationError {} catch { self.error = error.userMessage }
   }
 }

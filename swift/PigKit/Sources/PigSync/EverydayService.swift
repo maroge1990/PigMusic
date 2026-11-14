@@ -38,6 +38,27 @@ extension NativeService {
     default: throw NativeFailure.unavailable("Your radio is unavailable. Try again shortly.")
     }
   }
+  /// Similar songs for when a queue ends (#202).
+  public func radioContinuation(seeds: [String], exclude: [String]) async throws -> RadioBatch {
+    switch try await client.radio_continuation_api_v1_radio_continuation_post(
+      .init(body: .json(.init(exclude: exclude, seeds: seeds))))
+    {
+    case .ok(let value): return try LibraryCodec.convert(value.body.json, to: RadioBatch.self)
+    case .unauthorized: throw NativeFailure.authentication
+    default: throw NativeFailure.unavailable("Similar songs are unavailable. Try again shortly.")
+    }
+  }
+  /// The person's listening for "week", "month" or "year" so far (#203).
+  public func rewind(period: String) async throws -> Rewind {
+    guard let value = Operations.rewind_api_v1_rewind_get.Input.Query.periodPayload(
+      rawValue: period)
+    else { throw NativeFailure.unavailable("Choose a week, a month or a year.") }
+    switch try await client.rewind_api_v1_rewind_get(.init(query: .init(period: value))) {
+    case .ok(let answer): return try LibraryCodec.convert(answer.body.json, to: Rewind.self)
+    case .unauthorized: throw NativeFailure.authentication
+    default: throw NativeFailure.unavailable("Your Rewind is unavailable. Try again shortly.")
+    }
+  }
   public func radioFeedback(trackId: String, action: String) async throws {
     switch try await client.radio_feedback_api_v1_radio_feedback_post(
       .init(body: .json(.init(action: action, track_id: trackId))))

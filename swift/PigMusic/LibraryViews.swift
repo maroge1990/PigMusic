@@ -410,7 +410,7 @@ struct AccountView: View {
           Text(model.server).font(PigType.footnote).foregroundStyle(.secondary)
             .textSelection(.enabled)
         }
-        NavigationLink("Appearance") { PreferencesView(model: model) }
+        NavigationLink("Preferences") { PreferencesView(model: model) }
         NavigationLink("Password") { PasswordView(model: model) }
         NavigationLink("Devices and sessions") { SessionsView(model: model) }
         NavigationLink("Your music quality") { QualityView(model: model) }
@@ -675,7 +675,15 @@ struct NowPlayingView: View {
         Spacer()
         NavigationLink("Edit") { QueueEditorView(model: model) }
       }.padding(.bottom, 6)
-      ForEach(player.queue.items.dropFirst(player.queue.index + 1).prefix(50)) { item in
+      let upcoming = Array(player.queue.items.dropFirst(player.queue.index + 1).prefix(50))
+      // Where similar songs begin when the queue ran out (#202).
+      let similarStart = upcoming.firstIndex { model.similarIDs.contains($0.track.id) }
+      ForEach(Array(upcoming.enumerated()), id: \.element.id) { offset, item in
+        if offset == similarStart {
+          Text("Similar songs").font(PigType.caption.weight(.semibold))
+            .foregroundStyle(.secondary).padding(.top, 10).padding(.bottom, 4)
+            .accessibilityAddTraits(.isHeader)
+        }
         UpNextRow(model: model, item: item)
         RowSeparator()
       }

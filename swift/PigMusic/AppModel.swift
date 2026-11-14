@@ -253,7 +253,7 @@ enum PlayOrigin: Hashable {
     // Edits are queued and sent in order, so the server ends on the latest.
     let confirmed = (try? await saveEdit(OfflineMutation(action: "preferences", preferences: value)))
     guard preferenceChanges.isLatest(change) else { return nil }
-    if preferences.appearance != value.appearance {
+    if preferences != value {
       // A sync replaced it while this save was sending: the choice stands.
       preferences = value
       await cachePreferences()
@@ -429,18 +429,25 @@ enum PlayOrigin: Hashable {
         queue.items.count - queue.index - 1 <= 5
       {
         self.refillRadio()
+      } else if queue.current != nil, queue.index == queue.items.count - 1 {
+        // The last song started: similar songs join Up next ahead of time,
+        // so the queue plays on without a gap (#202).
+        self.continueQueue()
       }
     }
     player.onSkip = { [weak self] track, heard in
-      guard let self, self.radioIDs.contains(track.id), heard < 30, let service = self.service
+      guard let self, self.radioIDs.contains(track.id) || self.similarIDs.contains(track.id),
+        heard < 30, let service = self.service
       else { return }
       Task { try? await service.radioFeedback(trackId: track.id, action: "skip") }
     }
     player.onQueueEnd = { [weak self] in
-      guard let self, let current = self.player.queue.current,
-        self.radioIDs.contains(current.track.id)
-      else { return }
-      self.refillRadio(continuing: true)
+      guard let self, let current = self.player.queue.current else { return }
+      if self.radioIDs.contains(current.track.id) {
+        self.refillRadio(continuing: true)
+      } else {
+        self.continueQueue(continuing: true)
+      }
     }
     // In order, so an older position never overwrites a newer one (#97).
     let checkpoints = OrderedWrites()
@@ -1362,6 +1369,43 @@ enum PlayOrigin: Hashable {
       if continuing { play(added) } else { player.enqueue(added) }
     }
   }
+  /// Songs added to the queue as similar songs when it ran out (#202).
+  var similarIDs: Set<String> = []
+  @ObservationIgnored private var continuationLoading = false
+  /// Adds similar songs after the last song of a queue that isn't the radio,
+  /// unless the person turned it off or repeat is on (#202). At the very end
+  /// they play as a fresh queue, as the radio does.
+  func continueQueue(continuing: Bool = false) {
+    let queue = player.queue
+    guard !continuationLoading, let current = queue.current,
+      QueueContinuation.continues(
+        keepPlaying: preferences.keepPlaying, repeating: player.repeatMode != .off,
+        radio: radioIDs.contains(current.track.id))
+    else { return }
+    let (seeds, exclude) = QueueContinuation.request(
+      queue: queue.items.map(\.track.id), current: queue.index)
+    continuationLoading = true
+    let stamp = account.generation
+    Task {
+      defer { continuationLoading = false }
+      guard
+        let batch = try? await readCatalogue({
+          try await $0.radioContinuation(seeds: seeds, exclude: exclude)
+        }), account.isCurrent(stamp)
+      else { return }
+      // The queue changed while asking (a new album started): not for it.
+      guard player.queue.items.map(\.track.id) == queue.items.map(\.track.id) else { return }
+      let known = Set(player.queue.items.map(\.track.id))
+      let added = batch.tracks.filter { !known.contains($0.id) }
+      guard !added.isEmpty else { return }
+      similarIDs.formUnion(added.map(\.id))
+      if continuing && player.queue.index == player.queue.items.count - 1 && !player.playing {
+        play(added)
+      } else {
+        player.enqueue(added)
+      }
+    }
+  }
   /// Where the playing queue was started: the player's artist link opens the
   /// matching artist page (library, or the full catalogue page).
   var playOrigin: PlayOrigin = .library
@@ -1525,6 +1569,7 @@ enum PlayOrigin: Hashable {
     hiddenMixSongs = []
     requestedSongs = RequestMarks()
     heldRequestNotice = nil
+    similarIDs = []
     watch?.disconnect()
     // Stale for every operation still running; live updates stop.
     account.end()

@@ -1,11 +1,24 @@
 import Foundation
 
-public struct AccountPreferences: Codable, Sendable {
+public struct AccountPreferences: Codable, Sendable, Equatable {
   public var appearance: String
   public var defaultTab: String
-  public init(appearance: String = "system", defaultTab: String = "artists") {
+  /// Similar songs when a queue ends (#202): on unless turned off.
+  public var keepPlaying: Bool
+  public init(appearance: String = "system", defaultTab: String = "artists", keepPlaying: Bool = true)
+  {
     self.appearance = appearance
     self.defaultTab = defaultTab
+    self.keepPlaying = keepPlaying
+  }
+  private enum CodingKeys: String, CodingKey { case appearance, defaultTab, keepPlaying }
+  /// Tolerant: a copy saved by an older build, or an older server's answer,
+  /// has no `keepPlaying` and means on.
+  public init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    appearance = try values.decodeIfPresent(String.self, forKey: .appearance) ?? "system"
+    defaultTab = try values.decodeIfPresent(String.self, forKey: .defaultTab) ?? "artists"
+    keepPlaying = try values.decodeIfPresent(Bool.self, forKey: .keepPlaying) ?? true
   }
 }
 /// Numbers successive local changes so that only the latest one's outcome is

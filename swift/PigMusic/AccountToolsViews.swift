@@ -18,14 +18,21 @@ struct PreferencesView: View {
         Text("Light").tag("light")
         Text("Dark").tag("dark")
       }
+      Section {
+        Toggle("Keep playing similar songs", isOn: $preferences.keepPlaying)
+      } header: {
+        Text("Playback")
+      } footer: {
+        Text("When an album, playlist or search ends, similar songs carry on.")
+      }
       if let message { StatusText(message) }
-    }.pigCanvas().navigationTitle("Appearance").navigationBarTitleDisplayMode(.inline).task {
+    }.pigCanvas().navigationTitle("Preferences").navigationBarTitleDisplayMode(.inline).task {
       preferences = model.preferences
       loaded = true
     }
-    .onChange(of: preferences.appearance) { _, appearance in
-      guard loaded, appearance != model.preferences.appearance else { return }
-      Task { await save(preferences) }
+    .onChange(of: preferences) { _, value in
+      guard loaded, value != model.preferences else { return }
+      Task { await save(value) }
     }
   }
   private func save(_ value: AccountPreferences) async {
