@@ -195,6 +195,7 @@ def report(conn, since=None, until=None, artists=None):
         for kind in ("mix", "library")
     }
     artwork = {}
+    supplied = {}
     for metric, label, outcome, ms, detail in rows:
         if metric == "tap":
             if outcome == "played":
@@ -219,6 +220,10 @@ def report(conn, since=None, until=None, artists=None):
             if outcome == "completed":
                 source = detail or "unknown"
                 entry["by_source"][source] = entry["by_source"].get(source, 0) + 1
+        elif metric == "artwork-source":
+            # Which source supplied each image saved (#194; #201's pass mark).
+            entry = supplied.setdefault(label, {})
+            entry[outcome] = entry.get(outcome, 0) + 1
         elif metric == "artwork":
             # A cover is a placeholder when no answer for it in the period
             # was the picture; one served late still counts as shown.
@@ -272,6 +277,7 @@ def report(conn, since=None, until=None, artists=None):
             "distinct": seen,
             "placeholders": seen - shown,
             "placeholder_share": share(seen - shown, seen),
+            "sources": supplied,
         },
         "artists": (
             None

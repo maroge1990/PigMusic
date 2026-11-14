@@ -1016,6 +1016,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                 return None
             content = await fanart_download(app.state.http, cover["url"])
             await asyncio.to_thread(artwork.save, content, target)
+            artwork.counted("cover", "fanart")
             return target
         except Exception:
             # Optional enrichment; the placeholder cover remains.

@@ -13,6 +13,9 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "loop_timing: measures event-loop stalls against a short limit"
     )
+    config.addinivalue_line(
+        "markers", "deezer_art: asks Deezer for artwork (through the test's transport)"
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -76,3 +79,19 @@ def youtube_stays_offline(monkeypatch):
     monkeypatch.setattr(youtube, "fetch", fetch)
     if ask is not None:
         monkeypatch.setattr(youtube.YouTube, "ask", offline_ask)
+
+
+@pytest.fixture(autouse=True)
+def deezer_art_stays_quiet(monkeypatch, request):
+    # Deezer is asked first for covers and artist photos (#194). Other tests
+    # count their MusicBrainz, archive and Fanart requests, so Deezer finds
+    # nothing unless a test is marked deezer_art (tests/test_deezer_art.py).
+    if request.node.get_closest_marker("deezer_art"):
+        return
+    from server.deezer_art import DeezerArt
+
+    async def nothing(self, *args, **kwargs):
+        return None
+
+    monkeypatch.setattr(DeezerArt, "cover", nothing)
+    monkeypatch.setattr(DeezerArt, "photo", nothing)

@@ -40,6 +40,7 @@ Snapshot track IDs stay stable, album edition anchors keep album IDs on their fi
 - **Idle loops do work only when something changed.** Between hourly full checks the export pass visits only songs not yet published and songs the last pass left waiting; re-checking every published song every 15 s cost about 30% of a core while idle. Only library artwork (album covers, library artists' portraits) rebuilds the library; other artwork jobs only bump the artwork revision. The Docker health check runs every 2 minutes. (`45d0f3b`, `bc20fc2`, `a4bf992`, `c4a7887`)
 - **Lock order is `covers.lock`, then `library_lock`.** See [library refresh](architecture/library-identity.md#library-refresh-and-lock-order).
 - **Reads may reuse a passed mount check briefly; everything that writes, moves or deletes checks the NAS marker afresh.** (`f817343`)
+- **Artwork sources, in order.** Library albums use the art in their files first. Catalogue covers (releases, release groups, and library albums without file art) ask Deezer first, then the Cover Art Archive, then Fanart; artist photos ask Deezer first, then Fanart, then ArtistGrid (`server/deezer_art.py`). Deezer is matched by a release's barcode or a Deezer link MusicBrainz holds; a search is accepted only for the same artist and the same album title with its version words ("Live") kept, and an artist only when one Deezer artist has the name. Every saved image counts its source (`artwork-source`), the measure for retiring the fallbacks (#201). Tests keep Deezer silent unless marked `deezer_art`.
 
 ## Runtime topology
 

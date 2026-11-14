@@ -96,6 +96,12 @@ def lines(result):
             f"  {kind}: {entry['served']} served, {entry['missing']} missing, "
             f"{entry['placeholders']} of {entry['distinct']} never shown"
         )
+    for kind, counts in sorted(art.get("sources", {}).items()):
+        total = sum(counts.values())
+        yield f"  {kind}s fetched: " + ", ".join(
+            f"{source} {count} ({percent(count / total)})"
+            for source, count in sorted(counts.items(), key=lambda c: -c[1])
+        )
     if result["artists"]:
         artists = result["artists"]
         yield (

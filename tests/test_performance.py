@@ -218,12 +218,15 @@ def test_report_script_prints_the_targets_from_a_copy(tmp_path, capsys):
     counters.record("tap", "Remote · JioSaavn", "played", 900, at=now - 60)
     counters.record("tap", "none", "no match", 2000, at=now - 60)
     counters.record("download", "mix", "completed", 1, "soulseek/mp3_320", at=now - 60)
+    for source in ("deezer", "deezer", "deezer", "cover-art-archive"):
+        counters.record("artwork-source", "cover", source, at=now - 60)
     counters.flush(now)
     main([str(counters.path), "--artists", "19,20"])
     text = capsys.readouterr().out
     assert "1 of 2 taps played (50.0%, target 90.0%)  below target" in text
     assert "Downloads (mix): 1 completed, 0 failed" in text
     assert "19 of 20 (95.0%, target 95.0%)  meets target" in text
+    assert "covers fetched: deezer 3 (75.0%), cover-art-archive 1 (25.0%)" in text
     main([str(counters.path), "--json"])
     assert '"played_share": 0.5' in capsys.readouterr().out
 

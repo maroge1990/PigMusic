@@ -13,6 +13,7 @@ from PIL import Image
 
 from .artwork import quoted
 from .catalogue import settled
+from .deezer_art import deezer_image
 from .library import identifier, normalise
 from .media import settings
 from .fanart import Fanart
@@ -68,9 +69,11 @@ class Portraits:
         key = target.stem
         if target.exists():
             return target
+        # ":deezer" (#194): misses remembered before Deezer was asked retry.
         missing = (
             "portrait-missing:"
             + key
+            + ":deezer"
             + (":fanart" if config.get("fanart_key") else ":grid")
         )
         if await self.artwork.waiting(missing):
@@ -80,8 +83,13 @@ class Portraits:
                 return target
             if await self.artwork.waiting(missing):
                 return None
-            url = None
-            if config.get("fanart_key"):
+            url, source, unsure = None, None, False
+            try:
+                url = await self.artwork.deezer.photo(client, name, artist_id)
+                source = "deezer" if url else None
+            except (httpx.HTTPError, ValueError, KeyError, TypeError):
+                unsure = True  # Deezer may have one: ask again soon.
+            if not url and config.get("fanart_key"):
                 try:
                     if not artist_id:
                         data = await self.catalogue.get(
@@ -101,12 +109,16 @@ class Portraits:
                         photos = data.get("artistthumb", [])
                         photos.sort(key=lambda p: int(p.get("likes", 0)), reverse=True)
                         url = photos[0]["url"] if photos else None
+                        source = "fanart" if url else None
                 except (httpx.HTTPError, ValueError, KeyError):
                     pass
             try:
                 if not url:
                     url = await self.artistgrid(client, name)
-                if url:
+                    source = "artistgrid"
+                if url and source == "deezer":
+                    url = deezer_image(url)
+                elif url:
                     parts = urlsplit(url)
                     if (
                         parts.scheme != "https"
@@ -117,6 +129,7 @@ class Portraits:
                         or parts.port not in {None, 443}
                     ):
                         raise ValueError("Untrusted portrait address")
+                if url:
                     async with client.stream(
                         "GET", url, timeout=12, follow_redirects=False
                     ) as response:
@@ -127,6 +140,7 @@ class Portraits:
                             if len(content) > 5_000_000:
                                 raise ValueError("Portrait too large")
                     await asyncio.to_thread(self.artwork.save, bytes(content), target)
+                    self.artwork.counted("photo", source)
                     return target
             except (
                 httpx.HTTPError,
@@ -139,7 +153,7 @@ class Portraits:
                     await self.artwork.missing("artistgrid-index", 300)
                 await self.artwork.missing(missing, 300)
                 return None
-            await self.artwork.missing(missing, 86400)
+            await self.artwork.missing(missing, 300 if unsure else 86400)
             return None
 
 

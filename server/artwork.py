@@ -12,6 +12,7 @@ import httpx
 from PIL import Image, ImageOps
 
 from .catalogue import credit, mbid, settled
+from .deezer_art import DeezerArt, deezer_image
 from .library import normalise, identifier
 from .matching import album_title, lead_artist, strip_edition, title_key
 
@@ -68,6 +69,13 @@ class Artwork:
         self.store, self.catalogue = store, catalogue
         self.locks = {}
         self.slots = asyncio.Semaphore(3)
+        self.deezer = DeezerArt(catalogue)
+
+    def counted(self, kind, source):
+        """Which source supplied a saved image (#191, #201's pass mark)."""
+        performance = getattr(self.store, "performance", None)
+        if performance is not None:
+            performance.record("artwork-source", kind, source)
 
     def target(self, album):
         return self.store.cover_dir / (
@@ -241,6 +249,20 @@ class Artwork:
                     return None
 
     async def front(self, client, kind, item_id):
+        """Deezer's cover first (#194), else the Cover Art Archive's."""
+        try:
+            url = await self.deezer.cover(client, kind, item_id)
+            if url:
+                content = await self.fetch(client, url, address=deezer_image)
+                self.counted("cover", "deezer")
+                return content
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            pass  # Optional first source: the archive is asked next.
+        content = await self.archive_front(client, kind, item_id)
+        self.counted("cover", "cover-art-archive")
+        return content
+
+    async def archive_front(self, client, kind, item_id):
         """Front cover for a release, else for that same release group.
 
         Many tagged editions (regional pressings, reissues) have no scan of
