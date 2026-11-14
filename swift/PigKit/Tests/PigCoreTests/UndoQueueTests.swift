@@ -102,3 +102,18 @@ import Testing
   #expect(PlaylistRemoval.rebased(position: 0, revision: 4, after: [2]) == .init(0, 5))
   #expect(PlaylistRemoval.rebased(position: 2, revision: 4, after: [0, 1]) == .init(0, 6))
 }
+
+@Test func aRemovalOnlyQueuedOfflineNeverShiftsTheNextOne() {
+  // Codex confirmation (batch 9, high): a removal queued offline may conflict
+  // and be discarded; if the next one had been shifted over it, it would
+  // remove another song. From [A, B, C] at revision 0: A is only queued.
+  var ledger = PlaylistRemovalLedger()
+  #expect(ledger.plan(playlist: "p", position: 0, revision: 0) == .init(0, 0))
+  ledger.record(playlist: "p", position: 0, revision: 0, applied: false)
+  // B keeps its own position and revision: refused for review if A is gone.
+  #expect(ledger.plan(playlist: "p", position: 1, revision: 0) == .init(1, 0))
+  // Once the server applies a removal, the next one from that version shifts.
+  ledger.record(playlist: "p", position: 0, revision: 0, applied: true)
+  #expect(ledger.plan(playlist: "p", position: 1, revision: 0) == .init(0, 1))
+  #expect(ledger.plan(playlist: "q", position: 1, revision: 0) == .init(1, 0))
+}

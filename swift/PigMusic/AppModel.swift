@@ -1315,14 +1315,17 @@ enum PlayOrigin: Hashable {
             OfflineMutation(action: "favourite", track: entry.entryTrack, favourite: false))
           return true
         }
-        let version = playlistId + "@" + String(revision)
-        let sent = PlaylistRemoval.rebased(
-          position: position, revision: revision, after: sentRemovals[version] ?? [])
-        try await saveEdit(
+        let sent = removals.plan(playlist: playlistId, position: position, revision: revision)
+        let confirmed = try await saveEdit(
           OfflineMutation(
             action: "remove", playlistId: playlistId, revision: sent.revision,
             position: sent.position))
-        sentRemovals[version, default: []].append(position)
+        // Only a removal the server has applied shifts the next ones. One that
+        // is merely queued (offline) may yet conflict and be discarded, so a
+        // removal after it keeps its own revision and can only be refused
+        // for review, never remove another song (Codex confirmation).
+        removals.record(
+          playlist: playlistId, position: position, revision: revision, applied: confirmed)
         return true
       } catch {
         message = error.userMessage + " Refresh the playlist before removing the song again."
@@ -1330,8 +1333,8 @@ enum PlayOrigin: Hashable {
       }
     }
   }
-  /// Positions removed from each playlist version by this iPhone, in order.
-  @ObservationIgnored private var sentRemovals: [String: [Int]] = [:]
+  /// The playlist removals the server applied, which shift the next ones.
+  @ObservationIgnored private var removals = PlaylistRemovalLedger()
   static func undoKey(playlist: String, revision: Int, position: Int) -> String {
     "playlist-entry:\(playlist)@\(revision)#\(position)"
   }
@@ -1382,7 +1385,7 @@ enum PlayOrigin: Hashable {
     // The ended account's waiting actions are dropped, never sent with the
     // next account's sign-in (Codex).
     undo.discardAll()
-    sentRemovals = [:]
+    removals = PlaylistRemovalLedger()
     hiddenMixSongs = []
     watch?.disconnect()
     // Stale for every operation still running; live updates stop.
