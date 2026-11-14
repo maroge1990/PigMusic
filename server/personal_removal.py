@@ -6,12 +6,11 @@ import time
 import uuid
 from pathlib import Path
 
+from .queue_states import ACTIVE
 from .lifecycle import coordinated
 from .matching import same_song
 from .media import track_file
 from .user_library import bump, initialise_owner
-
-ACTIVE = {"waiting_for_sources", "searching", "downloading", "validating", "importing"}
 
 
 class RemovalChanged(ValueError):

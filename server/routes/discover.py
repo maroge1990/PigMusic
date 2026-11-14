@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from ..artist_identity import Ambiguous, cached_identities, resolve_artist
 from ..catalogue import RELEASE_INC, release_tracks, credit, edition_rank
 from ..library import normalise
+from ..queue_states import ACTIVE
 from ..matching import title_key
 from ..releases import release_query
 from ..api_models import (
@@ -29,7 +30,6 @@ from ..user_library import track_dto
 # Covers fetched as soon as an artist's discography is opened: a phone's
 # first screen of release tiles.
 ARTIST_PAGE_COVERS = 24
-ACTIVE = {"waiting_for_sources", "searching", "downloading", "validating", "importing"}
 
 
 def discover_router(store, catalogue, popularity=None, warmer=None, http_client=None):

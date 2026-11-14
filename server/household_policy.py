@@ -3,12 +3,11 @@
 import json
 import time
 import uuid
+from .queue_states import ACTIVE, sql
 from .lifecycle import coordinated
 from .library import identifier, normalise
 from .quality import PROFILES, rank, actual_profile, options
 from .user_library import bump, track_dto
-
-ACTIVE = {"waiting_for_sources", "searching", "downloading", "validating", "importing"}
 
 
 class HouseholdPolicy:
@@ -21,7 +20,7 @@ class HouseholdPolicy:
             members.setdefault(track, set()).add(user)
         active = {}
         for key, raw in conn.execute(
-            "SELECT id,payload FROM queue WHERE status IN ('waiting_for_sources','searching','downloading','validating','importing')"
+            "SELECT id,payload FROM queue WHERE status IN " + sql(ACTIVE)
         ):
             job = json.loads(raw)
             active.setdefault(job.get("library_track_id"), []).append((key, raw))

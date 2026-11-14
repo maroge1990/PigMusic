@@ -11,6 +11,7 @@ import re
 import time
 from urllib.parse import urlsplit
 
+from .queue_states import ACTIVE, CANCELLABLE, FINISHED, RETRYABLE, sql
 from .library import identifier, normalise
 from .media import public_settings, saved_track_ids
 from .paths import versioned
@@ -69,8 +70,6 @@ def _quality(item):
     return QUALITY_LABELS.get(profile, codec or None)
 
 
-_ACTIVE = ("waiting_for_sources", "searching", "downloading", "validating", "importing")
-_ACTIVE_SQL = "(" + ",".join(f"'{s}'" for s in _ACTIVE) + ")"
 _MINE = "EXISTS (SELECT 1 FROM json_each(queue.payload,'$.requested_by') WHERE value=?)"
 _PRESENTED = TRACK_FIELDS | {
     "source",
@@ -100,7 +99,7 @@ def _job(key, raw, status, created, updated):
 def _present(job):
     """A queue job as its requester sees it: no paths, no provider errors."""
     job = {k: v for k, v in job.items() if k in _PRESENTED}
-    active = job["status"] in _ACTIVE
+    active = job["status"] in ACTIVE
     job["server_state"] = (
         "requested"
         if active
@@ -718,7 +717,8 @@ class UserLibrary:
         jobs = []
         for request_id, status, raw in conn.execute(
             "SELECT id,status,payload FROM queue WHERE status IN "
-            "('waiting_for_sources','searching','downloading','validating','importing','failed') "
+            + sql(ACTIVE + ("failed",))
+            + " "
             "AND EXISTS (SELECT 1 FROM json_each(queue.payload,'$.requested_by') WHERE value=?)",
             (user_id,),
         ):
@@ -1144,7 +1144,7 @@ class UserLibrary:
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
-                "SELECT id,payload FROM queue WHERE status IN ('completed','downloaded','failed','cancelled') "
+                "SELECT id,payload FROM queue WHERE status IN " + sql(FINISHED) + " "
                 "AND EXISTS (SELECT 1 FROM json_each(queue.payload,'$.requested_by') WHERE value=?)",
                 (user_id,),
             ).fetchall()
@@ -1171,12 +1171,7 @@ class UserLibrary:
             ).fetchone()
             if not row or user_id not in json.loads(row[1]).get("requested_by", []):
                 raise LookupError("Request not found")
-            if row[0] not in {
-                "waiting_for_sources",
-                "searching",
-                "downloading",
-                "validating",
-            }:
+            if row[0] not in CANCELLABLE:
                 raise ValueError("Only active requests can be cancelled")
             payload = json.loads(row[1])
             payload["requested_by"] = [
@@ -1195,7 +1190,7 @@ class UserLibrary:
             conn.execute("BEGIN IMMEDIATE")
             result = conn.execute(
                 "UPDATE queue SET status='waiting_for_sources',updated_at=CURRENT_TIMESTAMP "
-                "WHERE id=? AND status IN ('failed','cancelled') AND EXISTS "
+                "WHERE id=? AND status IN " + sql(RETRYABLE) + " AND EXISTS "
                 "(SELECT 1 FROM json_each(queue.payload,'$.requested_by') WHERE value=?)",
                 (request_id, user_id),
             )
@@ -1219,7 +1214,7 @@ class UserLibrary:
             ).fetchone()[0]
             in_progress = conn.execute(
                 "SELECT count(*) FROM queue WHERE status IN "
-                + _ACTIVE_SQL
+                + sql(ACTIVE)
                 + " AND "
                 + _MINE,
                 (user_id,),
@@ -1228,7 +1223,7 @@ class UserLibrary:
                 "SELECT id,payload,status,created_at,updated_at FROM queue WHERE "
                 + _MINE
                 + " ORDER BY CASE WHEN status IN "
-                + _ACTIVE_SQL
+                + sql(ACTIVE)
                 + " THEN 0 ELSE 1 END,created_at DESC,id LIMIT ? OFFSET ?",
                 (user_id, limit, offset),
             ).fetchall()
@@ -1270,7 +1265,7 @@ class UserLibrary:
         result.sort(key=lambda g: g["state"] not in {"active", "waiting"})
         return {
             "total": len(result),
-            "active": sum(job["status"] in _ACTIVE for job in jobs),
+            "active": sum(job["status"] in ACTIVE for job in jobs),
             "offset": offset,
             "next_offset": offset + limit if offset + limit < len(result) else None,
             "downloads_enabled": downloads_enabled,

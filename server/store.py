@@ -1,3 +1,4 @@
+from .queue_states import ACTIVE, CANCELLABLE, FINISHED, RETRYABLE, sql
 from .lifecycle import TimedRLock, coordinated, step
 import itertools
 import json
@@ -1118,7 +1119,8 @@ class Store:
     def retry_request(self, request_id):
         with self.connect() as conn:
             result = conn.execute(
-                "UPDATE queue SET status='waiting_for_sources',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('failed','cancelled')",
+                "UPDATE queue SET status='waiting_for_sources',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN "
+                + sql(RETRYABLE),
                 (request_id,),
             )
             if not result.rowcount:
@@ -1191,7 +1193,7 @@ class Store:
             active
             if active is not None
             else conn.execute(
-                "SELECT id,payload FROM queue WHERE status IN ('waiting_for_sources','searching','downloading','validating','importing')"
+                "SELECT id,payload FROM queue WHERE status IN " + sql(ACTIVE)
             ).fetchall()
         )
         for request_id, raw in active:
@@ -1824,9 +1826,7 @@ class Store:
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             if finished_only:
-                conn.execute(
-                    "DELETE FROM queue WHERE status IN ('completed','downloaded','failed','cancelled')"
-                )
+                conn.execute("DELETE FROM queue WHERE status IN " + sql(FINISHED))
             elif entries is not None:
                 conn.executemany(
                     "DELETE FROM queue WHERE id=? AND incarnation=?",
@@ -1839,7 +1839,8 @@ class Store:
     def cancel_request(self, request_id):
         with self.connect() as conn:
             result = conn.execute(
-                "UPDATE queue SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('waiting_for_sources','searching','downloading','validating')",
+                "UPDATE queue SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN "
+                + sql(CANCELLABLE),
                 (request_id,),
             )
             if not result.rowcount:
