@@ -31,6 +31,13 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   one. Admin, System lists each instant source's taps and answers for the trial. Two Codex rounds; two highs and
   three mediums fixed and confirmed. The trial week starts when its release is applied; Mark decides keep or remove
   after it (#193, #201).
+- **Batch 5 'agency' (#183, web half), pushed `a3ae43c`..`933686b`:** destructive actions act at once with Undo
+  (D-79): Remove from server and duplicates restore from Trash, Tidy runs its own undo, Organisation starts at once
+  with per-change Undo, a playlist delete and Cancel all wait 10 s for Undo (sent at once if the page closes).
+  Dialogs stay for empty Trash, sign out everywhere, reset or disable a person, replace the Apple review. Migration
+  13 gives each queue entry an incarnation, so Cancel all clears only what was shown. Two Codex rounds; one high per
+  round and five mediums fixed and confirmed. The native half (iPhone swipe Undo, Watch Remove, haptics, dividers)
+  moves to batch 9.
 - **#190 closed:** no regression. Measure idle at least an hour after a restart (server 0.55–0.84% of a core, engine
   2.64%, about 4 h after a restart). #171 still waits for a night's lock holds (the 14 Nov release restarted it).
 - **Parity plan:** D-88 to D-90; issues #191–#205; order in **Now**. Audit of 13 Nov: report
@@ -57,7 +64,7 @@ Mark's single testing round (D-86).
 | 2 | Measure: counters and a report for the targets (pushed 13 Nov) | #191 | server, web admin | 2 | release; baseline posted on #191 | — |
 | 3 | ~~Look up the songs on screen before the tap~~ (released 14 Nov, closed) | #192 | server | 2 | release | — |
 | 4 | Sources (audit 8, released 14 Nov; #94 closed, YouTube trial to ~21 Nov): SoundCloud out, Monochrome diagnosed, YouTube for instant listening as a one-week trial (D-91, D-95), FreeMp3Cloud and zvu4no out of instant (D-89) | #94, #193 | server | 2 | release, then the trial week | — |
-| 5 | Agency and words (audit 6): Undo over confirm | #183 | web (+ native half) | 2 | release; native half in the TestFlight build | — |
+| 5 | Agency and words (audit 6): Undo over confirm (web pushed 14 Nov; native half in batch 9) | #183 | web (+ native half) | 2 | release; native half in the TestFlight build | — |
 | 6 | Artwork: Deezer first for covers and artist photos (measure first) | #194 | server | 2 | release | — |
 | 7 | Server dead code and duplicates (audit 7), with any retirement whose pass mark is met | #169, #170, #173 parts 1 and 3, #201 | server | 1 | release | Mark: keep or delete `server.admin` |
 | 8 | Downloads: fake-lossless check, convert down from verified lossless, a readable log per download | #195, #196, #197 | server, web | 2 | release | Mark's decision on #196 (product rule) |
