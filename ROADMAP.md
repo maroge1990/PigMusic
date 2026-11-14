@@ -5,13 +5,14 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 14 Nov 2026 (late afternoon, Melbourne).*
+*Overwritten at the end of every session. 14 Nov 2026 (16:30, Melbourne).*
 
-- **Live:** release `sources-20261114-v1`, server `dad65a5`, applied by Mark 14 Nov ~12:50 Melbourne. Healthy; carries
-  batches 'measure' (#191), 'lookahead' (#192) and 'sources' (#94, #193). YouTube works from the server (search
-  1.05 s, address 2.8 s). Rollback: container `PigMusic-before-sources-20261114-v1`, backup
-  `pre-sources-20261114-v1`. Six older rollback containers wait for the D-78 clean-up (Mark's hands). Counters for
-  #191 started at the measure release (14 Nov 06:52): first numbers after a few days.
+- **Live:** release `deadcode-20261114-v1`, server `a3a1c25`, applied by Claude 14 Nov 16:24 Melbourne with Mark's
+  permission (D-97, this release only). Healthy, migration 13 in place, no errors. Carries batches 'measure' (#191),
+  'lookahead' (#192), 'sources' (#94, #193), 'agency' (#183 web), 'artwork' (#194) and 'dead code' (#169, #170, #173).
+  Rollback: container `PigMusic-before-deadcode-20261114-v1`, backup `pre-deadcode-20261114-v1` (needed to go back
+  past migration 13). Six older rollback containers wait for the D-78 clean-up (Mark's hands). #191's counters
+  started 14 Nov 06:52; nobody has used the app since 13 Nov 17:10, so they are still empty.
 - **YouTube trial (#193, D-91):** started 14 Nov ~12:50, ends ~21 Nov. Then: the numbers on #193 and #191, a hand
   sample of wrong versions, and Mark decides keep or remove (#201).
 - **Mark away (D-94):** Claude keeps pushing reviewed server and web batches and prepares each release (CI, verify,
@@ -38,10 +39,6 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   13 gives each queue entry an incarnation, so Cancel all clears only what was shown. Two Codex rounds; one high per
   round and five mediums fixed and confirmed. The native half (iPhone swipe Undo, Watch Remove, haptics, dividers)
   moves to batch 9.
-- **Release `deadcode-20261114-v1` prepared for Mark's apply** (image `sha-a3a1c25`, verify and preflight passed 14 Nov
-  ~16:08). It carries batches 5 'agency', 6 'artwork' and 7 'dead code' and supersedes `agency-20261114-v1` and
-  `artwork-20261114-v1`, neither applied. Migration 13 (queue incarnations) comes with it: rolling back past it needs
-  the backup `pre-deadcode-20261114-v1`. Nobody has used the app since 13 Nov 17:10, so #191's counters are empty.
 - **Batch 6 'artwork' (#194), pushed `7887886`..`887a2dd`:** measured first (on #194): Deezer-first gives a cover to
   70 of 77 catalogue songs in active mixes (today 43) and a photo to 165 of 181 library artists (today 101). Deezer
   is now first for catalogue covers (barcode, MusicBrainz link, else same artist and title with version words kept)
@@ -83,9 +80,9 @@ Mark's single testing round (D-86).
 | 2 | Measure: counters and a report for the targets (pushed 13 Nov) | #191 | server, web admin | 2 | release; baseline posted on #191 | — |
 | 3 | ~~Look up the songs on screen before the tap~~ (released 14 Nov, closed) | #192 | server | 2 | release | — |
 | 4 | Sources (audit 8, released 14 Nov; #94 closed, YouTube trial to ~21 Nov): SoundCloud out, Monochrome diagnosed, YouTube for instant listening as a one-week trial (D-91, D-95), FreeMp3Cloud and zvu4no out of instant (D-89) | #94, #193 | server | 2 | release, then the trial week | — |
-| 5 | Agency and words (audit 6): Undo over confirm (web pushed 14 Nov; native half in batch 9) | #183 | web (+ native half) | 2 | release; native half in the TestFlight build | — |
-| 6 | Artwork: Deezer first for covers and artist photos (pushed 14 Nov) | #194 | server | 2 | release | — |
-| 7 | ~~Server dead code and duplicates (audit 7)~~ (pushed 14 Nov) | #169, #170, #173 parts 1 and 3 | server | 2 | release | — |
+| 5 | Agency and words (audit 6): Undo over confirm (web released 14 Nov; native half in batch 9) | #183 | web (+ native half) | 2 | release; native half in the TestFlight build | — |
+| 6 | Artwork: Deezer first for covers and artist photos (released 14 Nov; placeholder rate after use) | #194 | server | 2 | release | — |
+| 7 | ~~Server dead code and duplicates (audit 7)~~ (released 14 Nov) | #169, #170, #173 parts 1 and 3 | server | 2 | release | — |
 | 8 | Downloads: fake-lossless check, convert down from verified lossless, a readable log per download | #195, #196, #197 | server, web | 2 | release | Mark's decision on #196 (product rule) |
 | 9 | Native (audit 9 + app fixes): dead code, search merge, Watch audio sharing, connection resilience, cover colours | #176, #177, #178, #188, #199 | iPhone, Watch | 2 | **TestFlight 0.2.0 (25)** | Mark approves #199's look from screenshots |
 | 10 | Product review checklist and Mark's single testing round (D-86) | #184 | all | none | docs | Mark's devices |
