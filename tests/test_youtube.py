@@ -571,3 +571,98 @@ def test_only_the_update_that_failed_is_set_aside(tmp_path, releases):
     youtube.resolve(VIDEO)
     assert youtube.quarantined() == {"2099.04.05"}
     assert youtube.update_path().name == "yt-dlp-2099.05.06.zip"
+
+
+def test_youtubes_answer_is_closed_however_the_listener_leaves(tmp_path):
+    """Codex, sources round 2 (high): a listener who skips or seeks away
+    must never leave the connection to YouTube's CDN open."""
+
+    class Body(httpx.AsyncByteStream):
+        def __init__(self):
+            self.closed = False
+
+        async def __aiter__(self):
+            for _ in range(1000):
+                yield b"a" * 1024
+                await asyncio.sleep(0.01)
+
+        async def aclose(self):
+            self.closed = True
+
+    def stream_of(body):
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(206, stream=body)
+            )
+        )
+        youtube = YouTube(tmp_path)
+        return YouTubeStream(youtube, VIDEO, address(), client)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "headers": [],
+        "asgi": {"spec_version": "2.4"},
+    }
+
+    async def receive():
+        await asyncio.sleep(3600)
+
+    async def scenario():
+        # The send fails while a chunk is going out.
+        body = Body()
+        reply = await stream_of(body).response("GET", "bytes=0-")
+        sent = []
+
+        async def failing(message):
+            sent.append(message["type"])
+            if message["type"] == "http.response.body":
+                raise OSError("listener gone")
+
+        with pytest.raises(Exception):
+            await reply(scope, receive, failing)
+        assert body.closed
+        # The response is cancelled mid-stream (the listener sought away).
+        body = Body()
+        reply = await stream_of(body).response("GET", "bytes=0-")
+
+        async def slow(message):
+            await asyncio.sleep(0.05)
+
+        task = asyncio.ensure_future(reply(scope, receive, slow))
+        await asyncio.sleep(0.2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert body.closed
+
+    asyncio.run(scenario())
+
+
+def test_a_head_of_unknown_size_never_says_the_file_is_empty(tmp_path):
+    """Codex, sources round 2 (medium): a HEAD with no known size must not
+    answer Content-Length: 0; it learns the size from one byte's range."""
+
+    def stream_with_headers(headers):
+        asked = []
+
+        def handler(request):
+            asked.append(request.headers.get("range"))
+            return httpx.Response(206, content=b"a", headers=headers)
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        youtube = YouTube(tmp_path)
+        return YouTubeStream(youtube, VIDEO, {**address(), "size": None}, client), asked
+
+    async def scenario():
+        stream, asked = stream_with_headers({"Content-Range": "bytes 0-0/4096"})
+        reply = await stream.response("HEAD", None)
+        assert reply.status_code == 200 and asked == ["bytes=0-0"]
+        assert reply.headers["content-length"] == "4096"
+        assert reply.headers["content-type"] == "audio/mp4"
+        stream, asked = stream_with_headers({})
+        reply = await stream.response("HEAD", None)
+        assert "content-length" not in reply.headers
+        assert reply.headers["content-type"] == "audio/mp4"
+
+    asyncio.run(scenario())

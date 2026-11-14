@@ -30,7 +30,9 @@ import zipfile
 from collections import OrderedDict
 from pathlib import Path
 
+import anyio
 import httpx
+from starlette.responses import Response, StreamingResponse
 
 from .providers.contracts import Context, ProviderError
 from .providers.network import client as guarded_client, stream as guarded_stream
@@ -544,10 +546,8 @@ class YouTubeStream:
         self.source = "youtube"
 
     async def response(self, method, range_header):
-        from fastapi.responses import Response, StreamingResponse
-
         headers = {"Cache-Control": "private, no-store", "Accept-Ranges": "bytes"}
-        if method == "HEAD" and self.address.get("size"):
+        if method == "HEAD" and not range_header and self.address.get("size"):
             return Response(
                 status_code=200,
                 headers={
@@ -556,7 +556,9 @@ class YouTubeStream:
                     "Content-Type": "audio/mp4",
                 },
             )
-        upstream = await self.open(method, range_header)
+        # A HEAD learns the whole size from one byte's Content-Range.
+        asked = range_header or ("bytes=0-0" if method == "HEAD" else None)
+        upstream = await self.open(method, asked)
         if upstream.status_code in {401, 403}:
             # The address was refused: one fresh address, then give up.
             await upstream.aclose()
@@ -566,7 +568,7 @@ class YouTubeStream:
                 self.address = await self.youtube.address(self.video_id, fresh=True)
             except (ProviderError, TimeoutError, ValueError):
                 return Response(status_code=503, headers=headers)
-            upstream = await self.open(method, range_header)
+            upstream = await self.open(method, asked)
             if upstream.status_code in {401, 403}:
                 await upstream.aclose()
                 await asyncio.to_thread(self.youtube.refused_now)
@@ -576,26 +578,31 @@ class YouTubeStream:
             status = 416 if upstream.status_code == 416 else 502
             await upstream.aclose()
             return Response(status_code=status, headers=headers)
+        if method == "HEAD":
+            await upstream.aclose()
+            if range_header:
+                status = upstream.status_code
+                for name in ("Content-Length", "Content-Range"):
+                    if name in upstream.headers:
+                        headers[name] = upstream.headers[name]
+            else:
+                status = 200
+                total = whole_size(upstream)
+                if total is not None:
+                    headers["Content-Length"] = str(total)
+            reply = Response(
+                status_code=status, headers=headers, media_type="audio/mp4"
+            )
+            if "Content-Length" not in headers:
+                # Unknown size: never the "0" Starlette adds to an empty
+                # body, which a player would read as an empty file (Codex,
+                # sources round 2).
+                del reply.headers["content-length"]
+            return reply
         for name in ("Content-Length", "Content-Range"):
             if name in upstream.headers:
                 headers[name] = upstream.headers[name]
-        if method == "HEAD":
-            await upstream.aclose()
-            return Response(status_code=upstream.status_code, headers=headers)
-
-        async def body():
-            try:
-                async for chunk in upstream.aiter_raw(65536):
-                    yield chunk
-            finally:
-                await upstream.aclose()
-
-        return StreamingResponse(
-            body(),
-            status_code=upstream.status_code,
-            headers=headers,
-            media_type="audio/mp4",
-        )
+        return Passthrough(upstream, upstream.status_code, headers)
 
     async def open(self, method, range_header):
         url = self.address["url"]
@@ -613,3 +620,40 @@ class YouTubeStream:
             timeout=httpx.Timeout(10, read=20),
         )
         return await self.client.send(request, stream=True, follow_redirects=False)
+
+
+def whole_size(upstream):
+    """The whole file's size from a ranged answer, or None."""
+    found = re.fullmatch(
+        r"bytes \d+-\d+/(\d+)", upstream.headers.get("Content-Range", "")
+    )
+    if found:
+        return int(found.group(1))
+    if (
+        upstream.status_code == 200
+        and upstream.headers.get("Content-Length", "").isdigit()
+    ):
+        return int(upstream.headers["Content-Length"])
+    return None
+
+
+class Passthrough(StreamingResponse):
+    """Streams YouTube's answer and always closes it when the response ends,
+    however it ends: finished, a failed send, or a listener who skipped or
+    sought away (Codex, sources round 2)."""
+
+    def __init__(self, upstream, status_code, headers):
+        self.upstream = upstream
+        super().__init__(
+            upstream.aiter_raw(65536),
+            status_code=status_code,
+            headers=headers,
+            media_type="audio/mp4",
+        )
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            with anyio.CancelScope(shield=True):
+                await self.upstream.aclose()
