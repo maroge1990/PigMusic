@@ -5,7 +5,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 14 Nov 2026 (16:30, Melbourne).*
+*Overwritten at the end of every session. 14 Nov 2026 (evening, Melbourne).*
 
 - **Live:** release `deadcode-20261114-v1`, server `a3a1c25`, applied by Claude 14 Nov 16:24 Melbourne with Mark's
   permission (D-97, this release only). Healthy, migration 13 in place, no errors. Carries batches 'measure' (#191),
@@ -46,6 +46,13 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   and ArtistGrid. Each saved image counts its source for #201's pass mark. Also fixed: Deezer's track search
   answers nothing to `artist:"…" track:"…"`, so Monochrome's ISRC lookup never found one; it asks in free text.
   Two Codex rounds; four mediums fixed and confirmed.
+- **Batch 8 'downloads' (#195, #196, #197), pushed `988ed64`..`88fb8c1`:** measured first (on #196: 8 of 60 failed songs
+  had only lossless Soulseek copies), then Mark chose convert-down (D-98). Every FLAC download gets a spectral check:
+  a cutoff marks it "suspect" in its record and log but never refuses it (a steep mastering filter looks the same);
+  when an MP3 320 or AAC 256 download finds nothing, a verified (clean) lossless original from Soulseek or Monochrome
+  is converted down, never a suspect or multichannel one. Every download has a plain-words log (Details on the web,
+  member's own or owner's queue; no peer names). Two Codex rounds; two highs and two mediums fixed and confirmed.
+  Not released yet.
 - **Batch 7 'dead code' (#169, #170, #173 parts 1 and 3), pushed `c1d6b63`..`0b23b1c`:** unused vendor and server code
   removed (about 150 lines); `server.admin` documented in OPERATIONS.md and tested (D-93); one image save helper
   (`server/images.py`), per-key locks that are forgotten when idle (`server/keyed_locks.py`), one Fanart request
@@ -83,7 +90,7 @@ Mark's single testing round (D-86).
 | 5 | Agency and words (audit 6): Undo over confirm (web released 14 Nov; native half in batch 9) | #183 | web (+ native half) | 2 | release; native half in the TestFlight build | — |
 | 6 | Artwork: Deezer first for covers and artist photos (released 14 Nov; placeholder rate after use) | #194 | server | 2 | release | — |
 | 7 | ~~Server dead code and duplicates (audit 7)~~ (released 14 Nov) | #169, #170, #173 parts 1 and 3 | server | 2 | release | — |
-| 8 | Downloads: fake-lossless check, convert down from verified lossless, a readable log per download | #195, #196, #197 | server, web | 2 | release | Mark's decision on #196 (product rule) |
+| 8 | ~~Downloads: fake-lossless check, convert down from verified lossless, a readable log per download~~ (pushed 14 Nov, D-98) | #195, #196, #197 | server, web | 2 | release | — |
 | 9 | Native (audit 9 + app fixes): dead code, search merge, Watch audio sharing, connection resilience, cover colours | #176, #177, #178, #188, #199 | iPhone, Watch | 2 | **TestFlight 0.2.0 (25)** | Mark approves #199's look from screenshots |
 | 10 | Product review checklist and Mark's single testing round (D-86) | #184 | all | none | docs | Mark's devices |
 | 11 | Made for you: keep playing similar songs, Rewind | #202, #203 | server, web, iPhone | 2 | release; native in TestFlight (26) | — |
