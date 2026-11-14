@@ -8,11 +8,20 @@ from urllib.parse import urlsplit
 from .keyed_locks import KeyedLocks
 from .catalogue import settled
 
+# One budget for every Fanart request (metadata and images, for portraits,
+# logos, backgrounds and covers alike); FIFO, so no kind starves another.
+FANART_SLOTS = 4
+
 
 class Fanart:
     def __init__(self, store):
         self.store = store
         self.locks = KeyedLocks()
+        self.slots = asyncio.Semaphore(FANART_SLOTS)
+
+    async def download(self, client, url, limit=5_000_000):
+        async with self.slots:
+            return await download(client, url, limit)
 
     async def get(self, client, artist_id, token):
         return await self.read(client, "music/" + artist_id, token)
@@ -34,12 +43,13 @@ class Fanart:
             cached = await asyncio.to_thread(self.store.read_document, key)
             if cached.get("expires", 0) > time.time():
                 return cached["data"]
-            response = await client.get(
-                "https://webservice.fanart.tv/v3.2/" + path,
-                headers={"api-key": token},
-                timeout=12,
-                follow_redirects=False,
-            )
+            async with self.slots:
+                response = await client.get(
+                    "https://webservice.fanart.tv/v3.2/" + path,
+                    headers={"api-key": token},
+                    timeout=12,
+                    follow_redirects=False,
+                )
             # Fanart answers 404 when it has no images; that is a cacheable answer.
             if response.status_code == 404:
                 data = {}

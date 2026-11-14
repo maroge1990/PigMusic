@@ -6,7 +6,7 @@ from .images import save_image
 from .library import identifier
 from .catalogue import mbid
 from .media import settings
-from .fanart import Fanart, best, download
+from .fanart import Fanart, best
 
 
 class Backgrounds:
@@ -37,7 +37,7 @@ class Backgrounds:
                 if not photo:
                     await self.artwork.missing(key, 86400)
                     return None
-                content = await download(client, photo["url"])
+                content = await self.fanart.download(client, photo["url"])
                 await asyncio.to_thread(self.save, content, target)
                 return target
             except Exception:

@@ -1,6 +1,7 @@
 """Bounded portrait enrichment with album artwork as the existing fallback."""
 
 import asyncio
+from contextlib import nullcontext
 import hashlib
 import csv
 import io
@@ -149,15 +150,16 @@ class Portraits:
             or parts.port not in {None, 443}
         ):
             raise ValueError("Untrusted portrait address")
-        async with client.stream(
-            "GET", url, timeout=12, follow_redirects=False
-        ) as response:
-            response.raise_for_status()
-            content = bytearray()
-            async for chunk in response.aiter_bytes():
-                content.extend(chunk)
-                if len(content) > 5_000_000:
-                    raise ValueError("Portrait too large")
+        async with self.fanart.slots if source == "fanart" else nullcontext():
+            async with client.stream(
+                "GET", url, timeout=12, follow_redirects=False
+            ) as response:
+                response.raise_for_status()
+                content = bytearray()
+                async for chunk in response.aiter_bytes():
+                    content.extend(chunk)
+                    if len(content) > 5_000_000:
+                        raise ValueError("Portrait too large")
         await asyncio.to_thread(self.artwork.save, bytes(content), target)
         self.artwork.counted("photo", source)
         return target

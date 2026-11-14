@@ -6,7 +6,7 @@ from .images import save_image
 from .library import identifier
 from .catalogue import mbid, settled
 from .media import settings
-from .fanart import Fanart, best, download
+from .fanart import Fanart, best
 
 
 class Logos:
@@ -44,7 +44,7 @@ class Logos:
                         {"retry_after": time.time() + 86400},
                     )
                     return None
-                content = await download(client, logo["url"], 3_000_000)
+                content = await self.fanart.download(client, logo["url"], 3_000_000)
                 await asyncio.to_thread(self.save, content, target)
                 return target
             except Exception:

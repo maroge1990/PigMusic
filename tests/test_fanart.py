@@ -100,3 +100,39 @@ def test_album_images_cache_an_empty_answer(tmp_path):
 
     assert asyncio.run(run()) == ({}, {})
     assert calls == ["/v3.2/music/albums/group"]
+
+
+def test_every_fanart_request_shares_one_budget(tmp_path):
+    """#170: portraits, logos, backgrounds and covers had their own semaphores
+    (up to 12 Fanart requests at once); one shared budget now caps them."""
+    import asyncio
+
+    import httpx
+
+    from server.fanart import Fanart, FANART_SLOTS
+    from server.store import Store
+
+    fanart = Fanart(Store(tmp_path))
+    state = {"now": 0, "most": 0}
+
+    async def handle(request):
+        state["now"] += 1
+        state["most"] = max(state["most"], state["now"])
+        await asyncio.sleep(0.02)
+        state["now"] -= 1
+        if request.url.host == "assets.fanart.tv":
+            return httpx.Response(200, content=b"image")
+        return httpx.Response(200, json={"artistthumb": []})
+
+    async def scenario():
+        transport = httpx.MockTransport(handle)
+        async with httpx.AsyncClient(transport=transport) as client:
+            reads = [fanart.get(client, f"artist-{n}", "token") for n in range(8)]
+            downloads = [
+                fanart.download(client, f"https://assets.fanart.tv/{n}.jpg")
+                for n in range(8)
+            ]
+            await asyncio.gather(*reads, *downloads)
+
+    asyncio.run(scenario())
+    assert state["most"] == FANART_SLOTS

@@ -48,7 +48,7 @@ from .artist_backgrounds import background_target
 from pydantic import BaseModel, Field
 
 from .library import identifier
-from .fanart import Fanart, best as best_fanart, download as fanart_download
+from .fanart import Fanart, best as best_fanart
 from .storage import download_root
 from .store import Store
 from .downloader import Downloader
@@ -1006,7 +1006,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             if not cover:
                 await artwork.missing(memory, 86400)
                 return None
-            content = await fanart_download(app.state.http, cover["url"])
+            content = await fanart.download(app.state.http, cover["url"])
             await asyncio.to_thread(artwork.save, content, target)
             artwork.counted("cover", "fanart")
             return target
