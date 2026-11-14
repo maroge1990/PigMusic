@@ -5,74 +5,41 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 14 Nov 2026 (evening, Melbourne).*
+*Overwritten at the end of every session. 14 Nov 2026 (night, Melbourne).*
 
-- **Live:** release `downloads-20261114-v1`, server `4e87476`, applied by Claude 14 Nov 17:43 Melbourne (D-99: Claude
-  applies releases and tests on the live server, telling Mark after). Healthy, no errors. Carries everything through
-  batch 8 'downloads'. Rollback: container `PigMusic-before-downloads-20261114-v1`, backup
-  `pre-downloads-20261114-v1` (migration 13 since `deadcode-20261114-v1`). Live check: the fake-lossless check passed
-  40 of 40 sampled library FLACs (no false suspicion, about 1.6 s each with the NAS read). Older rollback containers
-  wait for the D-78 clean-up (Mark's hands). Nobody has used the app since 13 Nov 17:10, so #191's counters are
-  still empty.
+- **Live:** release `native-20261114-v2`, server `6ab9f7e`, applied by Claude 14 Nov ~20:20 Melbourne (D-99). Healthy,
+  no errors. Carries everything through batch 9's two server fixes. Rollback: container
+  `PigMusic-before-native-20261114-v2`, backup `pre-native-20261114-v2` (migration 13 since `deadcode-20261114-v1`).
+  A failed first verify left an empty release folder `native-20261114-v1` on Unraid: include it in the D-78 clean-up.
+  Nobody has used the app since 13 Nov 17:10, so #191's counters and #194's cover numbers are still empty.
+- **Batch 9 'native' (#176, #177, #178, #188 app half, #199, #183 native half, #191 iPhone report), pushed
+  `58c6949`..`128fc44`:** dead PigKit code out and probe tools in their own PigProbes target; one search pipeline
+  (offline and the demo search the iPhone's library); one reading of audio-session events for phone and Watch, and the
+  Watch bridge checks every 30 s instead of 2 s; about 15 s of retries for safe requests (now also favourites, listens
+  and edits) and diagnostics naming the URLError and the connection (HTTP/3 or not); the iPhone reports first sound;
+  the cover tint (D-96); swipe Remove, Hide and Cancel (and the Watch's Remove) act at once with Undo, haptics, inset
+  row hairlines. Two server fixes found on the way and released: a stale native edit answers 409 (was 400), and
+  members may report first sound (was owner-only). Two Codex rounds: round 1's two highs (deferred removal could hit
+  the wrong song; Undo crossing accounts) and three follow-ups found in confirmations were fixed with failing-first
+  tests; the last confirmation and round 2 approved. No finding issues are open.
+- **TestFlight 0.2.0 (25):** batch 9 plus the native half of batch 5, on main at `128fc44` (native CI green). The
+  upload waits for Mark to type his Mac password (`ssh -t mac /Users/markrogers/pigmusic-archives/testflight.sh`, ends
+  with TESTFLIGHT-UPLOAD-OK). It is the build for Mark's single testing round (batch 10, D-86).
 - **YouTube trial (#193, D-91):** started 14 Nov ~12:50, ends ~21 Nov. Then: the numbers on #193 and #191, a hand
-  sample of wrong versions, and Mark decides keep or remove (#201).
-- **Releases (D-99):** Claude pushes reviewed server and web batches, prepares each release (CI, verify, preflight)
-  and applies it when nobody is playing, then tells Mark. Decisions taken before he left: YouTube trial
-  (D-91), convert down from verified lossless if the numbers help (D-92), keep and document `server.admin` (D-93),
-  yt-dlp updates itself for the trial (D-95), #199's tint stays out of TestFlight until he approves screenshots
-  (built early and approved 14 Nov on branch `claude/cover-tint-199-6af23e`, D-96; it joins batch 9).
-- **Batch 3 'lookahead' (#192), pushed `f0bee7d`..`47ef935`:** JioSaavn matches kept 6 h and re-checked on the tap;
-  release pages, Home and settled searches look up their first songs ahead of the tap. Look-ahead never asks the
-  relays or starts a transfer, has its own JioSaavn budget, and a tap overtakes a look-ahead still waiting. Two Codex
-  rounds; one high and four mediums fixed and confirmed (D-71).
-- **Batch 4 'sources' (#94, #193), pushed `f64577f`..`e770e93`:** SoundCloud out with its uploader review (#94;
-  Monochrome is never searched because the saved profile is MP3 320 and it offers only lossless, useful once
-  convert-down lands, #196). YouTube for instant listening on a one-week trial (D-91): asked with JioSaavn, which
-  wins; FreeMp3Cloud and zvu4no out of instant listening; bytes passed through the server; yt-dlp updates itself
-  (D-95) only to a checksum-matched release that runs in the worker, and a broken one is set aside for the pinned
-  one. Admin, System lists each instant source's taps and answers for the trial. Two Codex rounds; two highs and
-  three mediums fixed and confirmed. The trial week starts when its release is applied; Mark decides keep or remove
-  after it (#193, #201).
-- **Batch 5 'agency' (#183, web half), pushed `a3ae43c`..`933686b`:** destructive actions act at once with Undo
-  (D-79): Remove from server and duplicates restore from Trash, Tidy runs its own undo, Organisation starts at once
-  with per-change Undo, a playlist delete and Cancel all wait 10 s for Undo (sent at once if the page closes).
-  Dialogs stay for empty Trash, sign out everywhere, reset or disable a person, replace the Apple review. Migration
-  13 gives each queue entry an incarnation, so Cancel all clears only what was shown. Two Codex rounds; one high per
-  round and five mediums fixed and confirmed. The native half (iPhone swipe Undo, Watch Remove, haptics, dividers)
-  moves to batch 9.
-- **Batch 6 'artwork' (#194), pushed `7887886`..`887a2dd`:** measured first (on #194): Deezer-first gives a cover to
-  70 of 77 catalogue songs in active mixes (today 43) and a photo to 165 of 181 library artists (today 101). Deezer
-  is now first for catalogue covers (barcode, MusicBrainz link, else same artist and title with version words kept)
-  and artist photos (MusicBrainz link, else a unique name on a complete page), then the Cover Art Archive, Fanart
-  and ArtistGrid. Each saved image counts its source for #201's pass mark. Also fixed: Deezer's track search
-  answers nothing to `artist:"…" track:"…"`, so Monochrome's ISRC lookup never found one; it asks in free text.
-  Two Codex rounds; four mediums fixed and confirmed.
-- **Batch 8 'downloads' (#195, #196, #197), pushed `988ed64`..`88fb8c1`:** measured first (on #196: 8 of 60 failed songs
-  had only lossless Soulseek copies), then Mark chose convert-down (D-98). Every FLAC download gets a spectral check:
-  a cutoff marks it "suspect" in its record and log but never refuses it (a steep mastering filter looks the same);
-  when an MP3 320 or AAC 256 download finds nothing, a verified (clean) lossless original from Soulseek or Monochrome
-  is converted down, never a suspect or multichannel one. Every download has a plain-words log (Details on the web,
-  member's own or owner's queue; no peer names). Two Codex rounds; two highs and two mediums fixed and confirmed.
-  Released 14 Nov 17:43 in `downloads-20261114-v1`.
-- **Batch 7 'dead code' (#169, #170, #173 parts 1 and 3), pushed `c1d6b63`..`0b23b1c`:** unused vendor and server code
-  removed (about 150 lines); `server.admin` documented in OPERATIONS.md and tested (D-93); one image save helper
-  (`server/images.py`), per-key locks that are forgotten when idle (`server/keyed_locks.py`), one Fanart request
-  budget, discover's own title rule replaced by the shared one (bare years kept), queue states named once
-  (`server/queue_states.py`), the Apple import moved to `server/apple_export.py`. Not done, by choice: one cached-fetch
-  helper for Fanart, Home and MusicBrainz (they differ in priority, outage and 404 handling), the YouTube remnants
-  (YouTube is back for the trial). No #201 retirement has met its pass mark yet. Two Codex rounds; one medium fixed
-  and confirmed.
-- **#190 closed:** no regression. Measure idle at least an hour after a restart (server 0.55–0.84% of a core, engine
-  2.64%, about 4 h after a restart). #171 still waits for a night's lock holds (the 14 Nov release restarted it).
-- **Parity plan:** D-88 to D-90; issues #191–#205; order in **Now**. Audit of 13 Nov: report
-  https://claude.ai/artifact/91KX6g4ciEB7npgbpR4aCH, handover https://claude.ai/artifact/C5NUCuD6V6v8EaYR2n5b7G.
-- **Pushed, not on a device yet:** batch 'iphone-brand' (#180), `0addcab`..`50c9099`. Under D-86 the native batches
-  go to TestFlight together as 0.2.0 (25) at the end; no build bump until then.
-- **#188 (P1):** iPhone requests fail for 10–20 s after opening the app. Cloudflare HTTP/3 off since 13 Nov ~12:10
-  Melbourne as a test; compare Mark's next diagnostics export with the baseline (54 failed of 166 logged requests).
-- **CI:** flakes in #189. **iPhone/Watch:** TestFlight 0.2.0 (24); #168 and build 23's items wait for Mark (D-86).
-- **Ways of working:** area batches (D-50), Codex rounds per D-59 and D-71, Claude pushes; releases at any time under
-  D-87; D-58 closing. Household details live only in the gitignored `.private/` (D-45).
+  sample of wrong versions, and Mark decides keep or remove (D-100, #201).
+- **#188 (P1):** the app half is in build 25. HTTP/3 off at Cloudflare since 13 Nov as a test; compare Mark's next
+  diagnostics export with the baseline (54 failed of 166 logged requests); the new lines name the protocol. Then ask
+  whether HTTP/3 stays off, and suggest "Always use HTTPS".
+- **Retirement checks 28 Nov (#201):** Deezer artwork (fallback sources under 1%, placeholders at or under 2%) and
+  convert-down (mix downloads at or over 80%). Act only if the pass mark is met.
+- **#171** waits for a night's `lifecycle_lock` holds, measured at least an hour after a restart (the 14 Nov releases
+  restarted it). **#190 closed.** **CI:** flakes in #189 (a ProgressiveSource timing test passed on rerun 14 Nov).
+- **Earlier batches 1–8:** done and released by 14 Nov (details in the issues and git log); #169, #170, #190, #192,
+  #94 closed.
+- **Ways of working:** area batches (D-50), Codex rounds per D-59 and D-71, Claude pushes and releases (D-99); D-58
+  closing. Household details live only in the gitignored `.private/` (D-45). The Mac is shared: check for other
+  builds first; the tap-through script now shuts down only the simulators it booted; over SSH, FFmpeg needs
+  `/opt/homebrew/bin` on PATH.
 
 ## Now: finish the audit and reach parity
 
@@ -92,8 +59,8 @@ Mark's single testing round (D-86).
 | 6 | Artwork: Deezer first for covers and artist photos (released 14 Nov; placeholder rate after use) | #194 | server | 2 | release | — |
 | 7 | ~~Server dead code and duplicates (audit 7)~~ (released 14 Nov) | #169, #170, #173 parts 1 and 3 | server | 2 | release | — |
 | 8 | ~~Downloads: fake-lossless check, convert down from verified lossless, a readable log per download~~ (released 14 Nov, D-98) | #195, #196, #197 | server, web | 2 | release | — |
-| 9 | Native (audit 9 + app fixes): dead code, search merge, Watch audio sharing, connection resilience, cover colours | #176, #177, #178, #188, #199 | iPhone, Watch | 2 | **TestFlight 0.2.0 (25)** | Mark approves #199's look from screenshots |
-| 10 | Product review checklist and Mark's single testing round (D-86) | #184 | all | none | docs | Mark's devices |
+| 9 | ~~Native (audit 9 + app fixes): dead code, search merge, Watch audio sharing, connection resilience, cover colours, native Undo, first-sound report~~ (pushed 14 Nov, TestFlight 0.2.0 (25)) | #176, #177, #178, #188, #199, #183, #191 | iPhone, Watch | 2 | TestFlight 0.2.0 (25) | — |
+| 10 | **Next.** Product review checklist and Mark's single testing round on build 25 (D-86) | #184 | all | none | docs | Mark's devices |
 | 11 | Made for you: keep playing similar songs, Rewind | #202, #203 | server, web, iPhone | 2 | release; native in TestFlight (26) | — |
 | 12 | Retire what batches 4, 6 and 8 replaced, once their pass marks are met | #201 | server, web, iPhone | 2 | release; native in TestFlight (26) | the trials and two-week measurements |
 
