@@ -5,7 +5,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 14 Nov 2026 (morning, Melbourne).*
+*Overwritten at the end of every session. 14 Nov 2026 (midday, Melbourne).*
 
 - **Live:** release `measure-20261113-v1`, server `9051fac`, applied by Mark 14 Nov 06:52 Melbourne. Healthy; carries
   batch 'measure' (#191). Rollback: container `PigMusic-before-measure-20261113-v1`, backup `pre-measure-20261113-v1`.
@@ -14,15 +14,23 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 - **Mark away (D-94):** Claude keeps pushing reviewed server and web batches and prepares each release (CI, verify,
   preflight); Mark applies the newest prepared release when back. Decisions taken before he left: YouTube trial
   (D-91), convert down from verified lossless if the numbers help (D-92), keep and document `server.admin` (D-93),
-  yt-dlp updates itself for the trial (D-95), #199's tint stays out of TestFlight until he approves screenshots.
+  yt-dlp updates itself for the trial (D-95), #199's tint stays out of TestFlight until he approves screenshots
+  (being built early in its own session for his review, on its own branch).
+- **Release `lookahead-20261114-v1` ready (D-94), apply step with Mark:** image `sha-0af997b` (batch 3 and the
+  opentelemetry-api CVE bump); Unraid verify and preflight passed 14 Nov ~11:10. Superseded by the batch 4 release
+  once that is prepared; Mark applies only the newest.
 - **Batch 3 'lookahead' (#192), pushed `f0bee7d`..`47ef935`:** JioSaavn matches kept 6 h and re-checked on the tap;
-  release pages, Home and settled searches look up their first songs on JioSaavn ahead of the tap. Look-ahead never
-  asks the relays or starts a transfer, has its own JioSaavn budget (two at once, across everyone), and a tap
-  overtakes a look-ahead still waiting. Two Codex rounds; one high and four mediums fixed, each confirmed (D-71).
-- **Batch 4 'sources' (#94, #193), in progress:** SoundCloud out with its uploader review (`f6caa58`, not reviewed
-  yet). Monochrome is never searched because the saved profile is MP3 320 and it offers only lossless (#94); it
-  becomes useful with convert-down (#196). YouTube for instant listening: search, isolated lookup worker, byte proxy
-  and checked self-update written and tested against YouTube (search ~0.9 s, address ~2 s), not yet wired into taps.
+  release pages, Home and settled searches look up their first songs ahead of the tap. Look-ahead never asks the
+  relays or starts a transfer, has its own JioSaavn budget, and a tap overtakes a look-ahead still waiting. Two Codex
+  rounds; one high and four mediums fixed and confirmed (D-71).
+- **Batch 4 'sources' (#94, #193), pushed `f64577f`..`e770e93`:** SoundCloud out with its uploader review (#94;
+  Monochrome is never searched because the saved profile is MP3 320 and it offers only lossless, useful once
+  convert-down lands, #196). YouTube for instant listening on a one-week trial (D-91): asked with JioSaavn, which
+  wins; FreeMp3Cloud and zvu4no out of instant listening; bytes passed through the server; yt-dlp updates itself
+  (D-95) only to a checksum-matched release that runs in the worker, and a broken one is set aside for the pinned
+  one. Admin, System lists each instant source's taps and answers for the trial. Two Codex rounds; two highs and
+  three mediums fixed and confirmed. The trial week starts when its release is applied; Mark decides keep or remove
+  after it (#193, #201).
 - **#190 closed:** no regression. Measure idle at least an hour after a restart (server 0.55–0.84% of a core, engine
   2.64%, about 4 h after a restart). #171 still waits for a night's lock holds (the 14 Nov release restarted it).
 - **Parity plan:** D-88 to D-90; issues #191–#205; order in **Now**. Audit of 13 Nov: report
@@ -48,7 +56,7 @@ Mark's single testing round (D-86).
 | 1 | ~~Idle CPU regression~~ (closed 13 Nov: post-restart catch-up, no regression) | #190 | server | — | — | — |
 | 2 | Measure: counters and a report for the targets (pushed 13 Nov) | #191 | server, web admin | 2 | release; baseline posted on #191 | — |
 | 3 | Look up the songs on screen before the tap (pushed 14 Nov) | #192 | server | 2 | release | — |
-| 4 | Sources (audit 8): SoundCloud out, Monochrome diagnosed, YouTube for instant listening as a one-week trial (D-91, D-95), FreeMp3Cloud and zvu4no out of instant (D-89) | #94, #193 | server | 2 | release, then the trial week | — |
+| 4 | Sources (audit 8, pushed 14 Nov): SoundCloud out, Monochrome diagnosed, YouTube for instant listening as a one-week trial (D-91, D-95), FreeMp3Cloud and zvu4no out of instant (D-89) | #94, #193 | server | 2 | release, then the trial week | — |
 | 5 | Agency and words (audit 6): Undo over confirm | #183 | web (+ native half) | 2 | release; native half in the TestFlight build | — |
 | 6 | Artwork: Deezer first for covers and artist photos (measure first) | #194 | server | 2 | release | — |
 | 7 | Server dead code and duplicates (audit 7), with any retirement whose pass mark is met | #169, #170, #173 parts 1 and 3, #201 | server | 1 | release | Mark: keep or delete `server.admin` |
