@@ -7,17 +7,29 @@ import PigStore
 /// waits here, so being offline or closing the app doesn't lose it, and it
 /// is sent the next time the server can be reached. One entry per song.
 @MainActor public enum RequestOutbox {
-  public enum Outcome: Equatable, Sendable {
-    /// These songs were sent (none when nothing was waiting).
-    case sent([String], downloadsEnabled: Bool)
-    /// The server couldn't be reached: every request stays for the next try.
+  /// Why sending stopped.
+  public enum Stop: Equatable, Sendable {
+    /// Every request waiting was answered.
+    case done
+    /// The server couldn't be reached or was busy: the rest stay for later.
     case offline
-    /// The server answered no to these songs: they leave the outbox.
-    case refused([String], String)
-    /// The account changed: nothing is sent or acknowledged for it.
+    /// The account changed: nothing more is sent or acknowledged for it.
     case stale
-    /// The server ended this device's session; the requests stay.
+    /// The server ended this device's session; the rest stay.
     case signedOut
+  }
+  /// What the server said, song by song.
+  public struct Report: Equatable, Sendable {
+    /// Asked for, or already asked for: these songs are requested.
+    public var requested: [String] = []
+    /// Left out by the server (excluded from the household's downloads).
+    public var skipped: [String] = []
+    /// Refused, with the server's reason.
+    public var refused: [String] = []
+    public var reason: String?
+    public var downloadsEnabled = true
+    public var stop: Stop = .done
+    public init() {}
   }
 
   static let key = "request-outbox"
@@ -36,38 +48,58 @@ import PigStore
     }
   }
 
-  /// Sends the waiting requests (at most 500, the server's limit per
-  /// request) through `request`. Only the songs sent leave the outbox, so
-  /// one requested meanwhile waits for the next send.
+  /// Sends the waiting requests through `request`, one song per request, so
+  /// the server's counts say what happened to each song (Codex round 2: a
+  /// batch answer can't tell which song was left out). A song leaves the
+  /// outbox once the server has answered for it; a song requested meanwhile
+  /// waits for the next send.
   public static func send(
     store: LibraryStore, isCurrent: () -> Bool,
     request: ([Track]) async throws -> AcquisitionResult
-  ) async throws -> Outcome {
-    let tracks = Array(await pending(store).prefix(500))
-    guard isCurrent() else { return .stale }
-    guard !tracks.isEmpty else { return .sent([], downloadsEnabled: true) }
-    let ids = Set(tracks.map(\.id))
-    do {
-      let result = try await request(tracks)
-      guard isCurrent() else { return .stale }
-      try await remove(ids, from: store)
-      return .sent(tracks.map(\.id), downloadsEnabled: result.downloadsEnabled)
-    } catch NativeFailure.authentication {
-      return .signedOut
-    } catch NativeFailure.unavailable(let message) {
-      // The server answered and said no: trying again would say no again.
-      // (A busy or restarting server throws ServerBusy and is kept.)
-      guard isCurrent() else { return .stale }
-      try await remove(ids, from: store)
-      return .refused(tracks.map(\.id), message)
-    } catch {
-      return isCurrent() ? .offline : .stale
+  ) async throws -> Report {
+    var report = Report()
+    for track in await pending(store) {
+      guard isCurrent() else {
+        report.stop = .stale
+        return report
+      }
+      do {
+        let result = try await request([track])
+        guard isCurrent() else {
+          report.stop = .stale
+          return report
+        }
+        try await remove(track.id, from: store)
+        report.downloadsEnabled = report.downloadsEnabled && result.downloadsEnabled
+        if result.created + result.existing > 0 {
+          report.requested.append(track.id)
+        } else {
+          report.skipped.append(track.id)
+        }
+      } catch NativeFailure.authentication {
+        report.stop = .signedOut
+        return report
+      } catch NativeFailure.unavailable(let message) {
+        // The server answered and said no: trying again would say no again.
+        // (A busy or restarting server throws ServerBusy and is kept.)
+        guard isCurrent() else {
+          report.stop = .stale
+          return report
+        }
+        try await remove(track.id, from: store)
+        report.refused.append(track.id)
+        report.reason = message
+      } catch {
+        report.stop = isCurrent() ? .offline : .stale
+        return report
+      }
     }
+    return report
   }
 
-  private static func remove(_ ids: Set<String>, from store: LibraryStore) async throws {
+  private static func remove(_ id: String, from store: LibraryStore) async throws {
     try await store.updateCached(key, as: [Track].self) { tracks in
-      tracks = (tracks ?? []).filter { !ids.contains($0.id) }
+      tracks = (tracks ?? []).filter { $0.id != id }
     }
   }
 }

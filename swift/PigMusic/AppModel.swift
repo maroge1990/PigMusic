@@ -943,28 +943,37 @@ enum PlayOrigin: Hashable {
     let stamp = account.generation
     // A request made while one was sent goes in the next round.
     for _ in 0..<10 {
-      let outcome: RequestOutbox.Outcome
+      let titles = Dictionary(
+        (await RequestOutbox.pending(store)).map { ($0.id, $0.title) },
+        uniquingKeysWith: { first, _ in first })
+      let report: RequestOutbox.Report
       do {
-        outcome = try await RequestOutbox.send(
+        report = try await RequestOutbox.send(
           store: store, isCurrent: { [account] in account.isCurrent(stamp) }
         ) { try await service.requestMusic($0) }
       } catch {
         if account.isCurrent(stamp) { message = error.userMessage }
         return
       }
-      switch outcome {
-      case .sent(let ids, _):
-        guard account.isCurrent(stamp) else { return }
-        requestedSongs.sent(ids)
+      guard account.isCurrent(stamp) else { return }
+      requestedSongs.sent(report.requested)
+      requestedSongs.refused(report.skipped + report.refused)
+      if let reason = report.reason {
+        message = reason
+      } else if let id = report.skipped.first {
+        // Codex round 2: a song the server left out is not requested.
+        message =
+          "\(titles[id] ?? "That song") is excluded from this server's downloads, so it wasn't requested."
+      }
+      if !report.requested.isEmpty || !report.skipped.isEmpty || !report.refused.isEmpty {
         requestsRevision += 1
+      }
+      switch report.stop {
+      case .done:
         if await RequestOutbox.pending(store).isEmpty {
           await refreshServerRequests()
           return
         }
-      case .refused(let ids, let reason):
-        guard account.isCurrent(stamp) else { return }
-        requestedSongs.refused(ids)
-        message = reason
       case .offline, .stale:
         return
       case .signedOut:

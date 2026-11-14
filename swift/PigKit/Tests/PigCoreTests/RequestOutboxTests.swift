@@ -11,7 +11,8 @@ private struct Offline: Error {}
 @MainActor struct RequestOutboxTests {
   private let first = Track(id: "first", title: "First", artist: "Artist")
   private let second = Track(id: "second", title: "Second", artist: "Artist")
-  private let done = AcquisitionResult(created: 1, existing: 0, skipped: 0, downloadsEnabled: true)
+  private let created = AcquisitionResult(
+    created: 1, existing: 0, skipped: 0, downloadsEnabled: true)
 
   private func makeStore() throws -> (LibraryStore, URL) {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -19,7 +20,7 @@ private struct Offline: Error {}
     return (try LibraryStore(path: root.appendingPathComponent("requests.sqlite").path), root)
   }
 
-  @Test func aRequestWaitsOnceAndIsSentWithTheOthers() async throws {
+  @Test func eachSongIsRequestedOnceAndOnItsOwn() async throws {
     let (store, root) = try makeStore()
     defer { try? FileManager.default.removeItem(at: root) }
     try await RequestOutbox.add(first, to: store)
@@ -27,12 +28,28 @@ private struct Offline: Error {}
     try await RequestOutbox.add(first, to: store)
     #expect(await RequestOutbox.pending(store).map(\.id) == ["first", "second"])
     var sent: [[String]] = []
-    let outcome = try await RequestOutbox.send(store: store, isCurrent: { true }) {
+    let report = try await RequestOutbox.send(store: store, isCurrent: { true }) {
       sent.append($0.map(\.id))
-      return done
+      return created
     }
-    #expect(outcome == .sent(["first", "second"], downloadsEnabled: true))
-    #expect(sent == [["first", "second"]])
+    #expect(report.stop == .done && report.requested == ["first", "second"])
+    #expect(sent == [["first"], ["second"]])
+    #expect(await RequestOutbox.pending(store).isEmpty)
+  }
+
+  @Test func aSongTheServerLeavesOutIsNotRequested() async throws {
+    // Codex round 2: an answer of 200 with skipped=1 created no request.
+    let (store, root) = try makeStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try await RequestOutbox.add(first, to: store)
+    try await RequestOutbox.add(second, to: store)
+    let report = try await RequestOutbox.send(store: store, isCurrent: { true }) { tracks in
+      tracks[0].id == "first"
+        ? AcquisitionResult(created: 0, existing: 0, skipped: 1, downloadsEnabled: true)
+        : AcquisitionResult(created: 0, existing: 1, skipped: 0, downloadsEnabled: false)
+    }
+    #expect(report.skipped == ["first"] && report.requested == ["second"])
+    #expect(!report.downloadsEnabled)
     #expect(await RequestOutbox.pending(store).isEmpty)
   }
 
@@ -40,25 +57,41 @@ private struct Offline: Error {}
     let (store, root) = try makeStore()
     defer { try? FileManager.default.removeItem(at: root) }
     try await RequestOutbox.add(first, to: store)
-    let outcome = try await RequestOutbox.send(store: store, isCurrent: { true }) { _ in
+    try await RequestOutbox.add(second, to: store)
+    var calls = 0
+    let report = try await RequestOutbox.send(store: store, isCurrent: { true }) { _ in
+      calls += 1
       throw Offline()
     }
-    #expect(outcome == .offline)
-    #expect(await RequestOutbox.pending(store).map(\.id) == ["first"])
-    // The app closing in between changes nothing: the request is stored.
+    #expect(report.stop == .offline && calls == 1)
+    #expect(await RequestOutbox.pending(store).map(\.id) == ["first", "second"])
+    // The app closing in between changes nothing: the requests are stored.
     let reopened = try LibraryStore(path: root.appendingPathComponent("requests.sqlite").path)
-    #expect(await RequestOutbox.pending(reopened).map(\.id) == ["first"])
+    #expect(await RequestOutbox.pending(reopened).map(\.id) == ["first", "second"])
+  }
+
+  @Test func goingOfflineHalfwayKeepsOnlyTheUnanswered() async throws {
+    let (store, root) = try makeStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try await RequestOutbox.add(first, to: store)
+    try await RequestOutbox.add(second, to: store)
+    let report = try await RequestOutbox.send(store: store, isCurrent: { true }) { tracks in
+      if tracks[0].id == "second" { throw Offline() }
+      return created
+    }
+    #expect(report.stop == .offline && report.requested == ["first"])
+    #expect(await RequestOutbox.pending(store).map(\.id) == ["second"])
   }
 
   @Test func aRequestMadeWhileSendingWaitsForTheNextSend() async throws {
     let (store, root) = try makeStore()
     defer { try? FileManager.default.removeItem(at: root) }
     try await RequestOutbox.add(first, to: store)
-    let outcome = try await RequestOutbox.send(store: store, isCurrent: { true }) { _ in
+    let report = try await RequestOutbox.send(store: store, isCurrent: { true }) { _ in
       try await RequestOutbox.add(second, to: store)
-      return done
+      return created
     }
-    #expect(outcome == .sent(["first"], downloadsEnabled: true))
+    #expect(report.requested == ["first"])
     #expect(await RequestOutbox.pending(store).map(\.id) == ["second"])
   }
 
@@ -66,10 +99,13 @@ private struct Offline: Error {}
     let (store, root) = try makeStore()
     defer { try? FileManager.default.removeItem(at: root) }
     try await RequestOutbox.add(first, to: store)
-    let outcome = try await RequestOutbox.send(store: store, isCurrent: { true }) { _ in
-      throw NativeFailure.unavailable("No.")
+    try await RequestOutbox.add(second, to: store)
+    let report = try await RequestOutbox.send(store: store, isCurrent: { true }) { tracks in
+      if tracks[0].id == "first" { throw NativeFailure.unavailable("No.") }
+      return created
     }
-    #expect(outcome == .refused(["first"], "No."))
+    #expect(report.refused == ["first"] && report.reason == "No.")
+    #expect(report.requested == ["second"] && report.stop == .done)
     #expect(await RequestOutbox.pending(store).isEmpty)
   }
 
@@ -80,35 +116,20 @@ private struct Offline: Error {}
     var asked = false
     let before = try await RequestOutbox.send(store: store, isCurrent: { false }) { _ in
       asked = true
-      return done
+      return created
     }
-    #expect(before == .stale && !asked)
+    #expect(before.stop == .stale && !asked)
     var current = true
     let after = try await RequestOutbox.send(store: store, isCurrent: { current }) { _ in
       current = false
-      return done
+      return created
     }
-    #expect(after == .stale)
+    #expect(after.stop == .stale && after.requested.isEmpty)
     #expect(await RequestOutbox.pending(store).map(\.id) == ["first"])
     let signedOut = try await RequestOutbox.send(store: store, isCurrent: { true }) { _ in
       throw NativeFailure.authentication
     }
-    #expect(signedOut == .signedOut)
+    #expect(signedOut.stop == .signedOut)
     #expect(await RequestOutbox.pending(store).map(\.id) == ["first"])
-  }
-
-  @Test func atMost500SongsGoInOneRequest() async throws {
-    let (store, root) = try makeStore()
-    defer { try? FileManager.default.removeItem(at: root) }
-    for index in 0..<501 {
-      try await RequestOutbox.add(Track(id: "\(index)", title: "Song", artist: "A"), to: store)
-    }
-    var sizes: [Int] = []
-    _ = try await RequestOutbox.send(store: store, isCurrent: { true }) {
-      sizes.append($0.count)
-      return done
-    }
-    #expect(sizes == [500])
-    #expect(await RequestOutbox.pending(store).map(\.id) == ["500"])
   }
 }
