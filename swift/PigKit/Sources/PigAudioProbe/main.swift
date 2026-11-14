@@ -1,5 +1,6 @@
 import Foundation
 import PigPlayback
+import PigProbes
 
 let arguments = CommandLine.arguments
 let bounded = arguments.dropFirst().first == "--bounded"

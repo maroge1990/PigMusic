@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import PigPlayback
 
 /// Offline decoding/rendering probe. It is not the streaming playback engine.
 public enum PCMTransitionProbe {

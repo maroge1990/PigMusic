@@ -155,6 +155,30 @@ def test_shared_sections_work_for_both_people(tmp_path, monkeypatch):
             assert "Road trip" in [p["name"] for p in listed]
 
 
+def test_a_stale_native_edit_answers_conflict_not_bad_request(tmp_path, monkeypatch):
+    # The phone's outbox keeps a 409 for review ("changed on the server") but
+    # marks a 400 as an edit the server could not apply (#176's contract test).
+    import uuid
+
+    app = household(tmp_path, monkeypatch)
+    with TestClient(app, base_url="https://private.ts.net") as client:
+        sign_in(client, "member")
+
+        def mutate(action, **values):
+            body = {"operation_id": str(uuid.uuid4()), "action": action, **values}
+            return client.post("/api/v1/mutations", headers=WRITE, json=body)
+
+        created = mutate("create", name="Offline")
+        assert created.status_code == 200, created.text
+        playlist = created.json()["playlist_id"]
+        renamed = mutate("rename", playlist_id=playlist, revision=1, name="Fresh")
+        assert renamed.status_code == 200, renamed.text
+        stale = mutate("rename", playlist_id=playlist, revision=1, name="Stale")
+        assert stale.status_code == 409, stale.text
+        invalid = mutate("rename", playlist_id=playlist, revision=2, name=" ")
+        assert invalid.status_code == 400, invalid.text
+
+
 def test_admin_access_reports_public_origin_to_owner_only(tmp_path, monkeypatch):
     monkeypatch.setenv("PIG_MUSIC_PUBLIC_ORIGIN", "https://music.example.test")
     app = household(tmp_path, monkeypatch)

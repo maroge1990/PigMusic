@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import PigPlayback
 
 public enum BoundedAudioEngineProbe {
   public struct Result: Sendable {

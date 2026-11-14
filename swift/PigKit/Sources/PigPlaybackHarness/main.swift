@@ -2,6 +2,7 @@ import Foundation
 import PigAPI
 import PigDomain
 import PigPlayback
+import PigProbes
 import PigSync
 
 // Plays a queue against a real server with the phone's own code: the API

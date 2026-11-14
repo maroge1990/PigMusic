@@ -725,8 +725,10 @@ def personal_router(store, artist_jobs, recovery, mixes=None):
     async def native_mutation(body: NativeMutationInput, request: Request):
         from ..native_mutations import NativeMutations
 
+        # Not run(): PlaylistConflict is a ValueError, and run() would answer it
+        # 400, which the phone's outbox reads as an edit it cannot apply.
         try:
-            return await run(
+            return await asyncio.to_thread(
                 NativeMutations(store).apply,
                 identity(request),
                 body.model_dump(exclude_none=True),
@@ -735,6 +737,8 @@ def personal_router(store, artist_jobs, recovery, mixes=None):
             raise HTTPException(404, "Playlist not found")
         except PlaylistConflict as exc:
             raise HTTPException(409, str(exc))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
 
     @router.get("/quality", response_model=QualityDTO)
     async def quality(request: Request):

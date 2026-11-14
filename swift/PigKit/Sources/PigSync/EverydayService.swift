@@ -179,63 +179,6 @@ extension NativeService {
     default: throw NativeFailure.unavailable("This playlist is unavailable. Refresh your library.")
     }
   }
-  public func createPlaylist(name: String) async throws -> Playlist {
-    switch try await client.create_api_v1_playlists_post(.init(body: .json(.init(name: name)))) {
-    case .ok(let value): return try LibraryCodec.convert(value.body.json)
-    case .unauthorized: throw NativeFailure.authentication
-    default:
-      throw NativeFailure.unavailable(
-        "Creation was not confirmed. Refresh playlists before trying again.")
-    }
-  }
-  public func addToPlaylist(id: String, track: Track) async throws -> Playlist {
-    switch try await client.add_song_api_v1_playlists__playlist_id__songs_post(
-      .init(
-        path: .init(playlist_id: id), query: .init(allow_repeat: true), body: .json(input(track))))
-    {
-    case .ok(let value): return try LibraryCodec.convert(value.body.json)
-    case .unauthorized: throw NativeFailure.authentication
-    default:
-      throw NativeFailure.unavailable(
-        "Addition was not confirmed. Refresh this playlist before trying again.")
-    }
-  }
-  public func editPlaylist(id: String, revision: Int, name: String? = nil, order: [Int]? = nil)
-    async throws -> Playlist
-  {
-    switch try await client.edit_api_v1_playlists__playlist_id__patch(
-      .init(
-        path: .init(playlist_id: id),
-        body: .json(.init(name: name, order: order, revision: revision))))
-    {
-    case .ok(let value): return try LibraryCodec.convert(value.body.json)
-    case .unauthorized: throw NativeFailure.authentication
-    case .conflict: throw NativeFailure.changed
-    default:
-      throw NativeFailure.unavailable("The edit was not confirmed. Refresh before reapplying it.")
-    }
-  }
-  public func removePlaylistEntry(id: String, revision: Int, position: Int) async throws -> Playlist
-  {
-    switch try await client.remove_song_api_v1_playlists__playlist_id__songs__position__delete(
-      .init(path: .init(playlist_id: id, position: position), query: .init(revision: revision)))
-    {
-    case .ok(let value): return try LibraryCodec.convert(value.body.json)
-    case .unauthorized: throw NativeFailure.authentication
-    case .conflict: throw NativeFailure.changed
-    default: throw NativeFailure.unavailable("Removal was not confirmed. Refresh this playlist.")
-    }
-  }
-  public func deletePlaylist(id: String, revision: Int) async throws {
-    switch try await client.delete_api_v1_playlists__playlist_id__delete(
-      .init(path: .init(playlist_id: id), query: .init(revision: revision)))
-    {
-    case .ok: return
-    case .unauthorized: throw NativeFailure.authentication
-    case .conflict: throw NativeFailure.changed
-    default: throw NativeFailure.unavailable("Deletion was not confirmed. Refresh playlists.")
-    }
-  }
   public func importApple(_ data: Data) async throws -> ImportResult {
     switch try await client.import_apple_api_v1_imports_apple_post(
       .init(body: .xml(HTTPBody(data))))
@@ -252,19 +195,6 @@ extension NativeService {
     case .ok(let value): return try LibraryCodec.convert(value.body.json)
     case .unauthorized: throw NativeFailure.authentication
     default: throw NativeFailure.unavailable("Preferences are unavailable.")
-    }
-  }
-  public func savePreferences(_ value: AccountPreferences) async throws -> AccountPreferences {
-    guard
-      let appearance = Components.Schemas.Preferences.appearancePayload(rawValue: value.appearance),
-      let tab = Components.Schemas.Preferences.default_tabPayload(rawValue: value.defaultTab)
-    else { throw NativeFailure.unavailable("Choose supported preferences.") }
-    switch try await client.save_preferences_api_v1_preferences_put(
-      .init(body: .json(.init(appearance: appearance, default_tab: tab))))
-    {
-    case .ok(let value): return try LibraryCodec.convert(value.body.json)
-    case .unauthorized: throw NativeFailure.authentication
-    default: throw NativeFailure.unavailable("Preferences were not confirmed.")
     }
   }
   public func sessions() async throws -> [AccountSession] {
