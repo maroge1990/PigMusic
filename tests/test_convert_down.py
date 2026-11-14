@@ -9,7 +9,7 @@ import pytest
 from server.downloader import Downloader
 from server.providers.runtime import Runtime
 from server.store import Store
-from tests.test_downloader import queued
+from test_downloader import queued
 
 pytestmark = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs FFmpeg")
 

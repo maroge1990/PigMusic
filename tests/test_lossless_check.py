@@ -104,7 +104,7 @@ def test_other_sample_rates(made):
 def test_the_downloader_marks_a_suspect_flac_and_passes_a_genuine_one(tmp_path):
     from server.downloader import Downloader
     from server.store import Store
-    from tests.test_downloader import queued
+    from test_downloader import queued
 
     store = Store(tmp_path / "data")
     job = queued(store)  # A 3 s song.
