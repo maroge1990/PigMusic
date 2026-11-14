@@ -347,7 +347,7 @@ export function AppShell() {
           </p>
         )}
         {section === "home" ? (
-          <Home />
+          <Home route={route} />
         ) : section === "search" || section === "library" ? (
           <PersonalLibrary user={user} route={{ ...route, section }} />
         ) : section === "downloads" ? (

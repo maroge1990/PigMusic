@@ -1,0 +1,38 @@
+/* Rewind (#203): the period's totals, then ranked lists of songs, artists,
+ * new names and mixes. */
+.rewind-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-24);
+  margin: var(--space-16) 0 0;
+}
+.rewind-totals dt {
+  color: var(--secondary);
+  font-size: var(--type-footnote);
+}
+.rewind-totals dd {
+  margin: 0;
+  font-size: var(--type-title);
+  font-weight: 650;
+}
+.rewind-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rewind-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+  min-height: 2.75rem;
+  padding: var(--space-8) 0;
+  border-bottom: 1px solid var(--border);
+}
+.rewind-list li > span {
+  display: grid;
+  min-width: 0;
+}
+.rewind-list small {
+  color: var(--secondary);
+}

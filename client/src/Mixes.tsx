@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Ellipsis,
+  History,
   EyeOff,
   ListMusic,
   Play,
@@ -441,6 +442,12 @@ export function Mixes() {
       <SectionHeader
         title="Your mixes"
         subtitle="Familiar favourites. Something new. Made for today."
+        actions={
+          <a className="small-button" href="#/home/rewind">
+            <History size={16} aria-hidden="true" />
+            Your Rewind
+          </a>
+        }
       />
       {feed?.mixes.length || feed?.radio ? (
         <div className="mix-row">
