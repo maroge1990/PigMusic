@@ -1325,7 +1325,11 @@ enum PlayOrigin: Hashable {
             OfflineMutation(action: "favourite", track: entry.entryTrack, favourite: false))
           return true
         }
-        let sent = removals.plan(playlist: playlistId, position: position, revision: revision)
+        // Already removed from this version (a stale copy showed it again):
+        // nothing to send, or its neighbour would go.
+        guard
+          let sent = removals.plan(playlist: playlistId, position: position, revision: revision)
+        else { return true }
         let confirmed = try await saveEdit(
           OfflineMutation(
             action: "remove", playlistId: playlistId, revision: sent.revision,
@@ -1344,7 +1348,11 @@ enum PlayOrigin: Hashable {
     }
   }
   /// The playlist removals the server applied, which shift the next ones.
-  @ObservationIgnored private var removals = PlaylistRemovalLedger()
+  private var removals = PlaylistRemovalLedger()
+  /// Whether this iPhone already removed that song of that playlist version.
+  func removed(_ playlist: Playlist, at position: Int) -> Bool {
+    removals.removed(playlist: playlist.id, position: position, revision: playlist.revision)
+  }
   static func undoKey(playlist: String, revision: Int, position: Int) -> String {
     "playlist-entry:\(playlist)@\(revision)#\(position)"
   }

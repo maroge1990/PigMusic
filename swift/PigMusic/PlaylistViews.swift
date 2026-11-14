@@ -167,7 +167,9 @@ struct PlaylistView: View {
   /// their removal's Undo (#183).
   private var shown: [(position: Int, entry: PlaylistEntry)] {
     (playlist.entries ?? []).enumerated().filter {
-      !model.undo.hides(
+      // A stale copy can still list a song this iPhone removed (Codex).
+      !model.removed(playlist, at: $0.offset)
+        && !model.undo.hides(
         AppModel.undoKey(
           playlist: playlist.id, revision: playlist.revision, position: $0.offset))
     }.map { ($0.offset, $0.element) }

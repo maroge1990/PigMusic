@@ -30,10 +30,17 @@ public struct PlaylistRemovalLedger: Sendable {
   private static func key(_ playlist: String, _ revision: Int) -> String {
     playlist + "@" + String(revision)
   }
-  /// What to send for the song at `position` of `playlist` at `revision`.
-  public func plan(playlist: String, position: Int, revision: Int) -> PlaylistRemoval.Sent {
-    PlaylistRemoval.rebased(
-      position: position, revision: revision, after: applied[Self.key(playlist, revision)] ?? [])
+  /// What to send for the song at `position` of `playlist` at `revision`;
+  /// nil when that song is already removed (a stale copy of the playlist
+  /// shows it again): sending it would remove its neighbour (Codex).
+  public func plan(playlist: String, position: Int, revision: Int) -> PlaylistRemoval.Sent? {
+    let earlier = applied[Self.key(playlist, revision)] ?? []
+    guard !earlier.contains(position) else { return nil }
+    return PlaylistRemoval.rebased(position: position, revision: revision, after: earlier)
+  }
+  /// Whether this iPhone already removed the song at `position` of that version.
+  public func removed(playlist: String, position: Int, revision: Int) -> Bool {
+    applied[Self.key(playlist, revision)]?.contains(position) ?? false
   }
   /// A removal was sent; it counts only once the server has applied it.
   public mutating func record(playlist: String, position: Int, revision: Int, applied: Bool) {

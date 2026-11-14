@@ -117,3 +117,15 @@ import Testing
   #expect(ledger.plan(playlist: "p", position: 1, revision: 0) == .init(0, 1))
   #expect(ledger.plan(playlist: "q", position: 1, revision: 0) == .init(1, 0))
 }
+
+@Test func aSongAlreadyRemovedFromAVersionIsNeverRemovedAgain() {
+  // Codex confirmation (batch 9, high): a stale cached copy showed A again
+  // after its removal; removing it again was sent as position 0 at
+  // revision 1 and removed B.
+  var ledger = PlaylistRemovalLedger()
+  ledger.record(playlist: "p", position: 0, revision: 0, applied: true)
+  #expect(ledger.removed(playlist: "p", position: 0, revision: 0))
+  #expect(ledger.plan(playlist: "p", position: 0, revision: 0) == nil)
+  #expect(ledger.plan(playlist: "p", position: 1, revision: 0) == .init(0, 1))
+  #expect(!ledger.removed(playlist: "p", position: 0, revision: 1))
+}
