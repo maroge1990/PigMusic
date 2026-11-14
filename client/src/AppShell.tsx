@@ -19,6 +19,7 @@ import {
 import { PersonalLibrary } from "./PersonalLibrary";
 import { AccountSettings } from "./AccountSettings";
 import { Home } from "./Home";
+import { setKeepPlaying } from "./keepPlaying";
 import { FirstRun } from "./FirstRun";
 import { SignIn } from "./SignIn";
 import { ToolBoundary } from "./ToolBoundary";
@@ -120,9 +121,10 @@ export function AppShell() {
     if (!user) return;
     window.dispatchEvent(new Event("music-signed-in"));
     let active = true;
-    void api<{ appearance?: string }>("/v1/preferences")
-      .then(({ appearance = "system" }) => {
+    void api<{ appearance?: string; keep_playing?: boolean }>("/v1/preferences")
+      .then(({ appearance = "system", keep_playing }) => {
         if (!active) return;
+        if (typeof keep_playing === "boolean") setKeepPlaying(keep_playing);
         try {
           localStorage.setItem("pig-music-appearance", appearance);
         } catch {

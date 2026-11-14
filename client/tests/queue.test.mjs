@@ -182,3 +182,78 @@ test("a damaged or empty saved queue is ignored", () => {
     { songs: [{ key: "a" }], cursor: 0, position: 0 },
   );
 });
+
+// #202: a queue that ends carries on with similar songs.
+test("only the end of a queue that is not radio continues with similar songs", () => {
+  const album = [song("a"), song("b")];
+  assert.equal(q.continuesWithSimilar(album, 1, 1, "off", true), true);
+  // Turned off, repeat on, going back, or songs still left: no.
+  assert.equal(q.continuesWithSimilar(album, 1, 1, "off", false), false);
+  assert.equal(q.continuesWithSimilar(album, 1, 1, "all", true), false);
+  assert.equal(q.continuesWithSimilar(album, 1, 1, "one", true), false);
+  assert.equal(q.continuesWithSimilar(album, 1, -1, "off", true), false);
+  assert.equal(q.continuesWithSimilar(album, 0, 1, "off", true), false);
+  assert.equal(q.continuesWithSimilar([], -1, 1, "off", true), false);
+  // Radio waits for its own next page instead.
+  const radio = [song("r", { radio: true, cache_id: "mix:radio:0" })];
+  assert.equal(q.continuesWithSimilar(radio, 0, 1, "off", true), false);
+  // Similar songs that ran out continue again.
+  const similar = [song("a"), song("s", { similar: true, cache_id: "x" })];
+  assert.equal(q.continuesWithSimilar(similar, 1, 1, "off", true), true);
+});
+
+test("similar songs continue from the songs heard, leaving out the queue", () => {
+  const saved = (id) => song(id, { saved: { id: "lib-" + id } });
+  const songs = [
+    ...Array.from({ length: 11 }, (_, i) => saved("s" + i)),
+    song("mix", { cache_id: "mix:e:3", saved: { id: "lib-x" } }),
+    song("household", { state: "server", server: { id: "hh-1" } }),
+    song("catalogue", { state: "missing" }),
+    saved("s0"),
+  ];
+  const { seeds, exclude } = q.similarRequest(songs, 12);
+  // The last ten heard, most recent last; a mix entry by its mix id.
+  assert.deepEqual(seeds, [
+    ...Array.from({ length: 8 }, (_, i) => "lib-s" + (i + 3)),
+    "mix:e:3",
+    "hh-1",
+  ]);
+  // Every song the server knows, once, including those still to come.
+  assert.equal(exclude.length, 13);
+  assert.ok(exclude.includes("lib-s0") && exclude.includes("hh-1"));
+  assert.ok(!exclude.includes(undefined));
+  const long = Array.from({ length: 600 }, (_, i) => saved("l" + i));
+  const capped = q.similarRequest(long, 599);
+  assert.equal(capped.exclude.length, 500);
+  assert.equal(capped.exclude.at(-1), "lib-l599");
+});
+
+test("similar songs skip ones already queued and are headed in Up next", () => {
+  const queued = [song("a", { saved: { id: "lib-a" } })];
+  const batch = [
+    song("a2", { saved: { id: "lib-a" }, similar: true }),
+    song("b", { saved: { id: "lib-b" }, similar: true }),
+  ];
+  assert.deepEqual(keys(q.freshSimilarSongs(queued, batch)), ["b"]);
+  const songs = [...queued, song("x"), ...batch];
+  assert.equal(q.startsSimilar(songs, 1, true), false);
+  assert.equal(q.startsSimilar(songs, 2, false), true);
+  assert.equal(q.startsSimilar(songs, 3, false), false);
+  // The first song shown is similar: the heading still names them.
+  assert.equal(q.startsSimilar(songs, 3, true), true);
+});
+
+test("a similar song skipped early steers by its library or mix id", () => {
+  const similar = song("s", { similar: true, saved: { id: "lib-s" } });
+  assert.equal(q.serverSongId(similar), "lib-s");
+  assert.equal(q.skipSteersRadio(similar, 5, 30), true);
+  assert.equal(q.skipSteersRadio(similar, 30, 30), false);
+  assert.equal(
+    q.skipSteersRadio(song("p", { saved: { id: "l" } }), 0, 30),
+    false,
+  );
+  assert.equal(
+    q.skipSteersRadio(song("c", { similar: true, state: "missing" }), 0, 30),
+    false,
+  );
+});

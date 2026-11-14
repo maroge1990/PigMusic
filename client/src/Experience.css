@@ -468,6 +468,11 @@
 .np-queue .np-queue-tools button:disabled {
   opacity: 0.3;
 }
+.np-queue-group h4 {
+  margin: var(--space-12) 0 var(--space-4);
+  font-size: var(--type-footnote);
+  color: var(--media-secondary);
+}
 .np-queue-more {
   color: var(--media-secondary);
   font-size: var(--type-footnote);

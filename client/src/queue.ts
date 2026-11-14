@@ -10,6 +10,10 @@ export type RepeatMode = "off" | "all" | "one";
 
 export const QUEUE_KEY = "pig-music-queue";
 export const REPEAT_KEY = "pig-music-repeat";
+/** Similar songs continue from at most this many songs heard last. */
+const SIMILAR_SEEDS = 10;
+/** The server is told about at most this many queued songs to leave out. */
+const SIMILAR_EXCLUDE = 500;
 /** At most this many songs are saved for the next visit. */
 const SAVED_SONGS = 500;
 /** Radio asks for more once this few songs are left after the current one. */
@@ -113,17 +117,75 @@ export function previousRestarts(currentTime: number, cursor: number): boolean {
   return currentTime > RESTART_AFTER || cursor <= 0;
 }
 
-/** A radio song skipped before it counts as a listen steers the station. */
+/** The id the server gave this song: its mix entry, else its library file.
+ * A catalogue song the server has no file for has none. */
+export function serverSongId(
+  song: Song | null | undefined,
+): string | undefined {
+  return (
+    song?.cache_id ||
+    (song?.state === "server" ? song.server?.id : undefined) ||
+    song?.saved?.id ||
+    song?.server?.id
+  );
+}
+
+/** A radio or similar song skipped before it counts as a listen steers what
+ * comes next. */
 export function skipSteersRadio(
   song: Song | null | undefined,
   heardSeconds: number | undefined,
   listenSeconds: number,
 ): boolean {
   return (
-    !!song?.radio &&
-    !!song.cache_id &&
+    !!(song?.radio ? song.cache_id : song?.similar && serverSongId(song)) &&
     !(heardSeconds !== undefined && heardSeconds >= listenSeconds)
   );
+}
+
+/** Past the last song of a queue that is not radio, similar songs carry on
+ * unless the person turned that off or repeat is on (#202). */
+export function continuesWithSimilar(
+  songs: Song[],
+  cursor: number,
+  delta: number,
+  repeat: RepeatMode,
+  keepPlaying: boolean,
+): boolean {
+  return (
+    keepPlaying &&
+    repeat === "off" &&
+    delta > 0 &&
+    cursor >= 0 &&
+    cursor === songs.length - 1 &&
+    !songs[cursor].radio
+  );
+}
+
+/** What similar songs continue from: the last songs heard, most recent last,
+ * and every song already queued, which the server leaves out. */
+export function similarRequest(
+  songs: Song[],
+  cursor: number,
+): { seeds: string[]; exclude: string[] } {
+  const ids = (list: Song[]) =>
+    list.map(serverSongId).filter((id): id is string => !!id);
+  const exclude = [...new Set(ids(songs))];
+  return {
+    seeds: ids(songs.slice(0, cursor + 1)).slice(-SIMILAR_SEEDS),
+    exclude: exclude.slice(-SIMILAR_EXCLUDE),
+  };
+}
+
+/** Similar songs without the ones the queue already holds. */
+export function freshSimilarSongs(songs: Song[], batch: Song[]): Song[] {
+  const known = new Set(songs.map(serverSongId).filter(Boolean));
+  return batch.filter((s) => !known.has(serverSongId(s)));
+}
+
+/** Up next names the similar songs where they start. */
+export function startsSimilar(songs: Song[], at: number, first: boolean) {
+  return !!songs[at]?.similar && (first || !songs[at - 1]?.similar);
 }
 
 /** Radio asks for its next songs once few are left after the current one. */

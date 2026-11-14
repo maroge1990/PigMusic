@@ -9,6 +9,7 @@ import type { Person } from "./AppShell";
 import { PageHeader } from "./PageHeader";
 import { formatRelative } from "./format";
 import { InlineError, Loading } from "./EmptyState";
+import { keepPlaying, setKeepPlaying } from "./keepPlaying";
 
 type Session = {
   id: string;
@@ -37,6 +38,44 @@ export function AccountSettings({
   const [sessions, setSessions] = useState<Session[]>();
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [similar, setSimilar] = useState(keepPlaying);
+  useEffect(() => {
+    let active = true;
+    void api<{ keep_playing?: boolean }>("/v1/preferences")
+      .then(({ keep_playing }) => {
+        if (!active || typeof keep_playing !== "boolean") return;
+        setKeepPlaying(keep_playing);
+        setSimilar(keep_playing);
+      })
+      .catch(() => {
+        /* The last known choice stays. */
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  function changeKeepPlaying(keep_playing: boolean) {
+    setSimilar(keep_playing);
+    setKeepPlaying(keep_playing);
+    setError("");
+    void api<{ default_tab: string }>("/v1/preferences")
+      .then((p) =>
+        api<{ keep_playing?: boolean }>("/v1/preferences", {
+          ...json({ ...p, keep_playing }),
+          method: "PUT",
+        }),
+      )
+      .then((saved) => {
+        if (typeof saved?.keep_playing !== "boolean") return;
+        setKeepPlaying(saved.keep_playing);
+        setSimilar(saved.keep_playing);
+      })
+      .catch((e) => {
+        setKeepPlaying(!keep_playing);
+        setSimilar(!keep_playing);
+        setError(e.message);
+      });
+  }
   async function load() {
     const preferences = await api<{
       preferences: { scope: string; item_id: string; preferred: string }[];
@@ -112,6 +151,17 @@ export function AccountSettings({
             <option value="light">Light</option>
             <option value="dark">Dark</option>
           </select>
+        </label>
+      </section>
+      <section className="account-section">
+        <h2>Playback</h2>
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={similar}
+            onChange={(e) => changeKeepPlaying(e.target.checked)}
+          />
+          Keep playing similar songs when the music ends
         </label>
       </section>
       <section className="account-section">

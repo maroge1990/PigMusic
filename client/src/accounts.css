@@ -52,6 +52,20 @@
   display: grid;
   gap: var(--space-8);
 }
+/* A switch-like choice: the box beside its sentence, the whole row a target. */
+.account-section .check-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  min-height: 2.75rem;
+}
+.account-section .check-row input {
+  width: 1.25rem;
+  height: 1.25rem;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
 .sign-in-card input,
 .account-section input,
 .personal-app input,

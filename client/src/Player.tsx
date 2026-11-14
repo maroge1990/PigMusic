@@ -11,7 +11,14 @@ import {
   recordListen,
 } from "./listens";
 import { MiniPlayer } from "./MiniPlayer";
-import { fromMixTrack, fromTrack, songBody, type Song } from "./songs";
+import {
+  fromMixTrack,
+  fromSimilarTrack,
+  fromTrack,
+  songBody,
+  type Song,
+} from "./songs";
+import { keepPlaying } from "./keepPlaying";
 import { startFailure } from "./playStart";
 import { StartClock, startSource, type StartAction } from "./firstSound";
 import { resolve, type Playing } from "./playbackSource";
@@ -19,7 +26,9 @@ import { NowPlaying, useNowPlayingFocus } from "./NowPlaying";
 import {
   afterEnd,
   canGoPrevious,
+  continuesWithSimilar,
   freshRadioSongs,
+  freshSimilarSongs,
   hasNext as queueHasNext,
   insertNext,
   lastRadioSong,
@@ -33,6 +42,8 @@ import {
   removeUpcoming as removeFromQueue,
   REPEAT_KEY,
   serializeQueue,
+  serverSongId,
+  similarRequest,
   skipSteersRadio,
   stepIndex,
   upcomingToPrepare,
@@ -263,13 +274,45 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       });
     return radioRequest.current;
   }
-  /** Skipping a radio song before it counts as a listen steers the station. */
+  const similarRequestRef = useRef<Promise<number> | null>(null);
+  /** A queue that ended carries on with similar songs (#202); resolves to how
+   * many arrived. */
+  function continueWithSimilar(): Promise<number> {
+    if (similarRequestRef.current) return similarRequestRef.current;
+    const songs = queue.current;
+    similarRequestRef.current = api<{ tracks: Track[] }>(
+      "/v1/radio/continuation",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(similarRequest(songs, cursor.current)),
+      },
+    )
+      .then((batch) => {
+        // A new queue or a stop while waiting: these songs belong to no one.
+        if (queue.current !== songs) return 0;
+        const added = freshSimilarSongs(
+          songs,
+          batch.tracks.map(fromSimilarTrack),
+        );
+        songs.push(...added);
+        if (added.length) setQueueVersion((v) => v + 1);
+        return added.length;
+      })
+      .catch(() => 0)
+      .finally(() => {
+        similarRequestRef.current = null;
+      });
+    return similarRequestRef.current;
+  }
+  /** Skipping a radio or similar song before it counts as a listen steers
+   * what comes next. */
   function next() {
     if (skipSteersRadio(song, playEvent.current?.seconds, LISTEN_SECONDS))
       void api("/v1/radio/feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ track_id: song?.cache_id, action: "skip" }),
+        body: JSON.stringify({ track_id: serverSongId(song), action: "skip" }),
       }).catch(() => undefined);
     step(1);
   }
@@ -339,6 +382,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (!next) {
       if (waitsForRadio(queue.current, cursor.current, delta))
         void refillRadio().then((added) => added && step(delta, action));
+      else if (
+        continuesWithSimilar(
+          queue.current,
+          cursor.current,
+          delta,
+          repeat,
+          keepPlaying(),
+        )
+      ) {
+        const songs = queue.current;
+        const at = cursor.current;
+        void continueWithSimilar().then(
+          (added) =>
+            added &&
+            queue.current === songs &&
+            cursor.current === at &&
+            step(delta, action),
+        );
+      }
       return;
     }
     resumeAt.current = 0;

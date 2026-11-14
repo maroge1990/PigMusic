@@ -36,6 +36,8 @@ export type Song = {
   cache_id?: string;
   /** From the person's endless radio: the queue refills as it nears its end. */
   radio?: boolean;
+  /** Similar songs that carried on when a queue ended (#202). */
+  similar?: boolean;
 };
 
 /** A prepared mix or radio entry; plays the library file when there is one. */
@@ -45,6 +47,17 @@ export function fromMixTrack(t: Track, radio = false): Song {
     cache_id: t.id,
     ...(radio ? { radio } : {}),
   };
+}
+
+/** A song the server named by id: a mix entry plays as one, a library song
+ * as itself. */
+export function fromServerTrack(t: Track): Song {
+  return t.id.startsWith("mix:") ? fromMixTrack(t) : fromTrack(t);
+}
+
+/** A similar song that carries on after a queue ended (#202). */
+export function fromSimilarTrack(t: Track): Song {
+  return { ...fromServerTrack(t), similar: true };
 }
 
 export function fromTrack(t: Track, cover?: string | null, key = t.id): Song {

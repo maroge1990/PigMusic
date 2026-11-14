@@ -1,5 +1,5 @@
 import type { ReactNode, RefObject } from "react";
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -16,7 +16,7 @@ import {
 import { Cover } from "./Cover";
 import { PersonalSongActions } from "./PersonalSongActions";
 import type { Playing } from "./playbackSource";
-import type { RepeatMode } from "./queue";
+import { startsSimilar, type RepeatMode } from "./queue";
 import { goToAlbum, goToPlayingArtist, type Song } from "./songs";
 import { InlineError } from "./EmptyState";
 import { formatDuration } from "./format";
@@ -286,34 +286,41 @@ function UpNext({
         {songs.slice(index + 1, index + 21).map((s, i) => {
           const at = index + 1 + i;
           return (
-            <li key={s.key + at}>
-              <button onClick={() => step(i + 1)}>
-                <strong>{s.title}</strong>
-                <small>{s.artist}</small>
-              </button>
-              <span className="np-queue-tools">
-                <button
-                  aria-label={`Move ${s.title} up`}
-                  disabled={i === 0}
-                  onClick={() => moveUpcoming(at, -1)}
-                >
-                  <ArrowUp size={16} />
+            <Fragment key={s.key + at}>
+              {startsSimilar(songs, at, i === 0) && (
+                <li className="np-queue-group">
+                  <h4>Similar songs</h4>
+                </li>
+              )}
+              <li>
+                <button onClick={() => step(i + 1)}>
+                  <strong>{s.title}</strong>
+                  <small>{s.artist}</small>
                 </button>
-                <button
-                  aria-label={`Move ${s.title} down`}
-                  disabled={at === songs.length - 1}
-                  onClick={() => moveUpcoming(at, 1)}
-                >
-                  <ArrowDown size={16} />
-                </button>
-                <button
-                  aria-label={`Remove ${s.title} from Up next`}
-                  onClick={() => removeUpcoming(at)}
-                >
-                  <X size={16} />
-                </button>
-              </span>
-            </li>
+                <span className="np-queue-tools">
+                  <button
+                    aria-label={`Move ${s.title} up`}
+                    disabled={i === 0}
+                    onClick={() => moveUpcoming(at, -1)}
+                  >
+                    <ArrowUp size={16} />
+                  </button>
+                  <button
+                    aria-label={`Move ${s.title} down`}
+                    disabled={at === songs.length - 1}
+                    onClick={() => moveUpcoming(at, 1)}
+                  >
+                    <ArrowDown size={16} />
+                  </button>
+                  <button
+                    aria-label={`Remove ${s.title} from Up next`}
+                    onClick={() => removeUpcoming(at)}
+                  >
+                    <X size={16} />
+                  </button>
+                </span>
+              </li>
+            </Fragment>
           );
         })}
       </ol>
