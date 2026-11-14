@@ -56,6 +56,8 @@ RELEASE_ARTISTS, RELEASE_DAYS = 10, 90
 MIN_MIX = 20
 # Radio keeps this many ready songs ahead of the listener, added in batches.
 RADIO_BUFFER, RADIO_BATCH, RADIO_PAGE = 20, 20, 10
+# A song played within this long never continues a queue (#202).
+CONTINUE_REPEAT = 86400
 # A song no source could supply is not searched again by any mix or radio for
 # this long (#90): one failed round when every source answered with no match,
 # two when a time limit or outage may have hidden it.
@@ -1747,8 +1749,113 @@ class Mixes:
             "preparing": len(payload["tracks"]) - 1 - payload["served"] < RADIO_BUFFER,
         }
 
+    def continuation(self, user, seeds, exclude):
+        """Similar songs for when a queue ends (#202): today's radio songs
+        like the `seeds` (the last songs played) first, library songs before
+        discoveries, then the rest of the radio; the person's library fills
+        in while the radio prepares. Hidden songs, songs played in the last
+        day and anything in `exclude` (the queue) never come back."""
+        identity = self.radio_edition(user, self.day())
+        payload = self.radio_update(identity, lambda p: None)
+        library = {
+            t["id"]: t
+            for t in self.store.user_libraries.projection(user)["tracks"]
+            if t.get("id")
+        }
+
+        def known(track_id):
+            if track_id in library:
+                return library[track_id]
+            try:
+                return self.entry(user, track_id)
+            except LookupError:
+                return None
+
+        seed_tracks = [t for t in map(known, seeds) if t]
+        artists = {t["artist"].casefold() for t in seed_tracks if t.get("artist")}
+        genres = {t["genre"].casefold() for t in seed_tracks if t.get("genre")}
+        taken = {mix_key(t) for t in seed_tracks}
+        taken |= {mix_key(t) for t in map(known, exclude) if t}
+        hidden = self.hidden(user)
+        played = self.history(user, list(library.values()) + payload["tracks"])
+        recent = time.time() - CONTINUE_REPEAT
+
+        def eligible(track):
+            key = mix_key(track)
+            return (
+                key not in hidden and key not in taken and played.get(key, 0) < recent
+            )
+
+        def likeness(track):
+            if track.get("artist", "").casefold() in artists:
+                return 0
+            return 1 if (track.get("genre") or "").casefold() in genres else 2
+
+        with self.store.connect() as conn:
+            members = {
+                r[0]
+                for r in conn.execute(
+                    "SELECT track_id FROM library_members WHERE user_id=?", (user,)
+                )
+            }
+        ranked = sorted(
+            (
+                (likeness(t), t.get("bucket") in DISCOVERY | {"release"}, n)
+                for n, t in enumerate(payload["tracks"])
+                if eligible(t)
+            )
+        )
+        tracks, last = [], -1
+        for _, _, index in ranked:
+            if len(tracks) >= RADIO_PAGE:
+                break
+            track = payload["tracks"][index]
+            if mix_key(track) in taken:
+                continue  # The same song twice in the radio.
+            dto = self.track_dto(identity, index, track, members)
+            if dto:
+                tracks.append(dto)
+                taken.add(mix_key(track))
+                last = max(last, index)
+        if len(tracks) < RADIO_PAGE:
+            # The radio is still preparing: the library is always playable.
+            owned = sorted(
+                (
+                    (likeness(t), t["id"])
+                    for t in library.values()
+                    if t.get("available", True) and eligible(t)
+                )
+            )
+            for _, track_id in owned:
+                if len(tracks) >= RADIO_PAGE:
+                    break
+                track = library[track_id]
+                if mix_key(track) in taken:
+                    continue
+                from .user_library import track_dto as library_dto
+
+                tracks.append(
+                    TrackDTO(**{**library_dto(track), "server_state": "in_library"})
+                )
+                taken.add(mix_key(track))
+        payload = self.radio_update(
+            identity, lambda p: p.update(served=max(p.get("served", -1), last))
+        )
+        return {
+            "id": identity,
+            "title": "Similar songs",
+            "tracks": tracks,
+            "preparing": len(payload["tracks"]) - 1 - payload["served"] < RADIO_BUFFER,
+        }
+
     def radio_feedback(self, user, track_id, action):
-        track = self.entry(user, track_id)
+        # A library song continuing a queue (#202) steers the radio too.
+        library = {
+            t["id"]: t
+            for t in self.store.user_libraries.projection(user)["tracks"]
+            if t.get("id")
+        }
+        track = library.get(track_id) or self.entry(user, track_id)
         with self.store.connect() as conn:
             conn.execute(
                 "INSERT INTO radio_feedback VALUES (?,?,?,?,?)",

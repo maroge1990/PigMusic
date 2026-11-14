@@ -227,7 +227,8 @@ def test_play_history_and_preferences_use_sqlite_off_the_loop(tmp_path, monkeypa
         slow_connections(store, monkeypatch)
         stalls["read"], read = await longest_stall(lambda: preferences(request))
         stalls["history"], played = await longest_stall(lambda: history(request))
-        assert read == saved.model_dump()
+        # The save answers with what was stored, merged (#202).
+        assert read == saved
         assert played == {"events": []}
         return stalls
 

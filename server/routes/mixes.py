@@ -1,6 +1,8 @@
 """Authenticated personal mix editions; cache administration remains web-only."""
 
 import asyncio
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
@@ -15,6 +17,13 @@ class MixFeedback(BaseModel):
 class RadioFeedback(BaseModel):
     track_id: str = Field(max_length=100)
     action: str = Field(pattern="^(skip|like)$")
+
+
+class RadioContinuation(BaseModel):
+    """The last songs played and the queue, for similar songs (#202)."""
+
+    seeds: list[str] = Field(default_factory=list, max_length=10)
+    exclude: list[str] = Field(default_factory=list, max_length=500)
 
 
 class MixCacheSettings(BaseModel):
@@ -35,6 +44,21 @@ def mixes_router(mixes):
     async def radio(request: Request, after: str | None = Query(None, max_length=100)):
         result = await asyncio.to_thread(
             mixes.radio_next, request.state.user["id"], after
+        )
+        if result["preparing"]:
+            mixes.wake.set()
+        return result
+
+    @router.post(
+        "/api/v1/radio/continuation",
+        response_model=RadioBatch,
+        tags=["personal-library"],
+    )
+    async def radio_continuation(body: RadioContinuation, request: Request):
+        seeds = [s[:128] for s in body.seeds]
+        exclude = [s[:128] for s in body.exclude]
+        result = await asyncio.to_thread(
+            mixes.continuation, request.state.user["id"], seeds, exclude
         )
         if result["preparing"]:
             mixes.wake.set()

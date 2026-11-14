@@ -48,9 +48,22 @@ class NativeMutations:
                 preferences = operation.get("preferences")
                 if preferences is None:
                     raise ValueError("Preferences are required")
+                from .routes.personal import merged_preferences
+
+                # An app that doesn't send a setting keeps what was saved (#202).
+                saved = conn.execute(
+                    "SELECT payload FROM user_preferences WHERE user_id=?", (user_id,)
+                ).fetchone()
                 conn.execute(
                     "INSERT INTO user_preferences VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET payload=excluded.payload",
-                    (user_id, json.dumps(preferences)),
+                    (
+                        user_id,
+                        json.dumps(
+                            merged_preferences(
+                                json.loads(saved[0]) if saved else {}, preferences
+                            )
+                        ),
+                    ),
                 )
             else:
                 playlist_id = operation.get("playlist_id")

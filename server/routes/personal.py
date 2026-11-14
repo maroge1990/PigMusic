@@ -161,6 +161,19 @@ class PlayEvents(BaseModel):
 class Preferences(BaseModel):
     appearance: Literal["system", "light", "dark"] = "system"
     default_tab: Literal["artists", "albums", "playlists", "favourites"] = "artists"
+    # Similar songs when a queue ends (#202). Always answered; a client that
+    # leaves it out (an older app) keeps what was saved.
+    keep_playing: bool | None = None
+
+
+def merged_preferences(saved, change):
+    """`change` over `saved`, leaving out what the client didn't send."""
+    return {
+        **Preferences().model_dump(),
+        "keep_playing": True,
+        **(saved or {}),
+        **{k: v for k, v in change.items() if v is not None},
+    }
 
 
 def playlist_dto(value):
@@ -774,16 +787,22 @@ def personal_router(store, artist_jobs, recovery, mixes=None):
             row = conn.execute(
                 "SELECT payload FROM user_preferences WHERE user_id=?", (user_id,)
             ).fetchone()
-        return json.loads(row[0]) if row else Preferences().model_dump()
+        return merged_preferences(json.loads(row[0]) if row else {}, {})
 
-    def write_preferences(user_id, value):
+    def write_preferences(user_id, change):
         import json
 
         with store.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT payload FROM user_preferences WHERE user_id=?", (user_id,)
+            ).fetchone()
+            value = merged_preferences(json.loads(row[0]) if row else {}, change)
             conn.execute(
                 "INSERT INTO user_preferences VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET payload=excluded.payload",
                 (user_id, json.dumps(value)),
             )
+        return value
 
     # SQLite can wait on another writer, so preferences are used off the loop.
     @router.get("/preferences", response_model=Preferences)
@@ -792,7 +811,8 @@ def personal_router(store, artist_jobs, recovery, mixes=None):
 
     @router.put("/preferences", response_model=Preferences)
     async def save_preferences(body: Preferences, request: Request):
-        await asyncio.to_thread(write_preferences, identity(request), body.model_dump())
-        return body
+        return await asyncio.to_thread(
+            write_preferences, identity(request), body.model_dump(exclude_unset=True)
+        )
 
     return router
