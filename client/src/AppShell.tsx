@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { UndoBar } from "./UndoBar";
 import {
   ArrowDownToLine,
   House,
@@ -337,6 +338,7 @@ export function AppShell() {
             </button>
           </div>
         )}
+        <UndoBar />
         {(error || denied) && (
           <p className="error-banner" role="alert">
             {error || "You do not have access to that action."}
