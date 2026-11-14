@@ -860,8 +860,12 @@ enum PlayOrigin: Hashable {
     if applied { await refresh() }
     // The refresh can end this account (Codex on #101): its answer is stale.
     try account.check(stamp)
-    return !pendingEdits.contains { $0.id == mutation.id }
+    // Only the server's receipt confirms it: an edit discarded meanwhile has
+    // also left the outbox (Codex, batch 9).
+    return appliedEdits.remove(mutation.id) != nil
   }
+  /// Edits the server's receipts confirmed, until saveEdit reads them.
+  @ObservationIgnored private var appliedEdits: Set<String> = []
   @discardableResult func flushEdits() async -> Bool {
     guard !flushingEdits, let store, let service, person != nil else { return false }
     flushingEdits = true
@@ -871,7 +875,13 @@ enum PlayOrigin: Hashable {
     do {
       // Edits to one thing stay in order; a network failure stops all.
       let stop = try await EditOutbox.send(
-        store: store, isCurrent: { [account] in account.isCurrent(stamp) }, applied: &applied
+        store: store, isCurrent: { [account] in account.isCurrent(stamp) }, applied: &applied,
+        confirmed: { [weak self] id in
+          guard let self else { return }
+          // Bounded: entries are removed as saveEdit reads them.
+          if appliedEdits.count > 500 { appliedEdits.removeAll() }
+          appliedEdits.insert(id)
+        }
       ) { try await service.applyMutation($0) }
       switch stop {
       case .sent: break
@@ -1386,6 +1396,7 @@ enum PlayOrigin: Hashable {
     // next account's sign-in (Codex).
     undo.discardAll()
     removals = PlaylistRemovalLedger()
+    appliedEdits = []
     hiddenMixSongs = []
     watch?.disconnect()
     // Stale for every operation still running; live updates stop.

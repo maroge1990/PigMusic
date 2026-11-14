@@ -28,9 +28,12 @@ import PigStore
   /// Sends the queued edits in `store` through `apply`. `applied` becomes true
   /// once the server applied one, also when a store error is thrown later.
   /// `isCurrent` is asked before each edit and after each answer, so nothing
-  /// is acknowledged for an account that has ended.
+  /// is acknowledged for an account that has ended. `confirmed` hears the ID
+  /// of each edit the server's receipt says it applied, and of no other: an
+  /// edit leaving the outbox can also mean the person discarded it (Codex).
   public static func send(
     store: LibraryStore, isCurrent: () -> Bool, applied: inout Bool,
+    confirmed: (String) -> Void = { _ in },
     apply: (OfflineMutation) async throws -> OfflineMutationReceipt
   ) async throws -> Stop {
     var blocked: Set<String> = []
@@ -46,6 +49,7 @@ import PigStore
         guard receipt.applied, receipt.operationId == item.id, isCurrent() else { return .stale }
         try await store.acknowledgeMutation(item.id)
         applied = true
+        confirmed(item.id)
       } catch NativeFailure.authentication {
         return .signedOut
       } catch NativeFailure.changed {

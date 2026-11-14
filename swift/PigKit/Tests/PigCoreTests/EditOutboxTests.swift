@@ -134,4 +134,25 @@ private struct Offline: Error {}
         == "favourite:song")
     #expect(EditOutbox.scope(OfflineMutation(action: "create", name: "Run")) == "create:Run")
   }
+
+  @Test func onlyEditsTheServerAppliedAreConfirmed() async throws {
+    // Codex (batch 9): "confirmed" meant "no longer waiting", which a discard
+    // also gives, so a refused removal could shift the next one.
+    let (store, root) = try makeStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let refused = OfflineMutation(action: "remove", playlistId: "a", revision: 0, position: 0)
+    let other = OfflineMutation(action: "append", playlistId: "b", track: song)
+    for edit in [refused, other] { try await store.enqueueMutation(edit) }
+    let server = Server()
+    server.answers = [refused.id: NativeFailure.changed]
+    var applied = false
+    var confirmations: [String] = []
+    _ = try await EditOutbox.send(
+      store: store, isCurrent: { true }, applied: &applied, confirmed: { confirmations.append($0) }
+    ) { try server.apply($0) }
+    #expect(confirmations == [other.id])
+    // Discarded after the conflict: gone from the outbox, still not confirmed.
+    try await store.acknowledgeMutation(refused.id)
+    #expect(try await store.pendingMutations().isEmpty && confirmations == [other.id])
+  }
 }
