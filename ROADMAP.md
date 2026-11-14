@@ -5,7 +5,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 14 Nov 2026 (afternoon, Melbourne).*
+*Overwritten at the end of every session. 14 Nov 2026 (late afternoon, Melbourne).*
 
 - **Live:** release `sources-20261114-v1`, server `dad65a5`, applied by Mark 14 Nov ~12:50 Melbourne. Healthy; carries
   batches 'measure' (#191), 'lookahead' (#192) and 'sources' (#94, #193). YouTube works from the server (search
@@ -38,6 +38,16 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   13 gives each queue entry an incarnation, so Cancel all clears only what was shown. Two Codex rounds; one high per
   round and five mediums fixed and confirmed. The native half (iPhone swipe Undo, Watch Remove, haptics, dividers)
   moves to batch 9.
+- **Release `agency-20261114-v1` (batch 5) prepared, not applied** as of 14 Nov ~14:00 (verify and preflight passed
+  13:51); the next prepared release carries it too. Nobody has used the app since 13 Nov 17:10, so #191's counters
+  are still empty.
+- **Batch 6 'artwork' (#194), pushed `7887886`..`887a2dd`:** measured first (on #194): Deezer-first gives a cover to
+  70 of 77 catalogue songs in active mixes (today 43) and a photo to 165 of 181 library artists (today 101). Deezer
+  is now first for catalogue covers (barcode, MusicBrainz link, else same artist and title with version words kept)
+  and artist photos (MusicBrainz link, else a unique name on a complete page), then the Cover Art Archive, Fanart
+  and ArtistGrid. Each saved image counts its source for #201's pass mark. Also fixed: Deezer's track search
+  answers nothing to `artist:"…" track:"…"`, so Monochrome's ISRC lookup never found one; it asks in free text.
+  Two Codex rounds; four mediums fixed and confirmed.
 - **#190 closed:** no regression. Measure idle at least an hour after a restart (server 0.55–0.84% of a core, engine
   2.64%, about 4 h after a restart). #171 still waits for a night's lock holds (the 14 Nov release restarted it).
 - **Parity plan:** D-88 to D-90; issues #191–#205; order in **Now**. Audit of 13 Nov: report
@@ -65,7 +75,7 @@ Mark's single testing round (D-86).
 | 3 | ~~Look up the songs on screen before the tap~~ (released 14 Nov, closed) | #192 | server | 2 | release | — |
 | 4 | Sources (audit 8, released 14 Nov; #94 closed, YouTube trial to ~21 Nov): SoundCloud out, Monochrome diagnosed, YouTube for instant listening as a one-week trial (D-91, D-95), FreeMp3Cloud and zvu4no out of instant (D-89) | #94, #193 | server | 2 | release, then the trial week | — |
 | 5 | Agency and words (audit 6): Undo over confirm (web pushed 14 Nov; native half in batch 9) | #183 | web (+ native half) | 2 | release; native half in the TestFlight build | — |
-| 6 | Artwork: Deezer first for covers and artist photos (measure first) | #194 | server | 2 | release | — |
+| 6 | Artwork: Deezer first for covers and artist photos (pushed 14 Nov) | #194 | server | 2 | release | — |
 | 7 | Server dead code and duplicates (audit 7), with any retirement whose pass mark is met | #169, #170, #173 parts 1 and 3, #201 | server | 1 | release | Mark: keep or delete `server.admin` |
 | 8 | Downloads: fake-lossless check, convert down from verified lossless, a readable log per download | #195, #196, #197 | server, web | 2 | release | Mark's decision on #196 (product rule) |
 | 9 | Native (audit 9 + app fixes): dead code, search merge, Watch audio sharing, connection resilience, cover colours | #176, #177, #178, #188, #199 | iPhone, Watch | 2 | **TestFlight 0.2.0 (25)** | Mark approves #199's look from screenshots |
