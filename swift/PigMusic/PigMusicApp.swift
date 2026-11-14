@@ -55,6 +55,18 @@ struct RootView: View {
     .tint(PigBrand.accent(scheme))
     .scrollContentBackground(.hidden)
     .background { PigCanvasBackground() }
+    // Haptics (#183): a light tap when something leaves with an Undo, success
+    // when a favourite or queued song is done or a batch of downloads ends,
+    // and an error when something fails. The system turns them off when the
+    // person has (System Haptics).
+    .sensoryFeedback(trigger: model.undo.items.count) { old, new in
+      new > old ? .impact(weight: .light) : nil
+    }
+    .sensoryFeedback(.success, trigger: model.confirmations)
+    .sensoryFeedback(trigger: model.downloads?.running ?? false) { was, now in
+      was && !now ? .success : nil
+    }
+    .sensoryFeedback(trigger: model.message) { _, now in now == nil ? nil : .error }
   }
 }
 

@@ -23,7 +23,11 @@ import WatchKit
         .onChange(of: scenePhase) { _, phase in
           model.sceneActive = phase == .active
           if phase == .active { DiagnosticsLog.shared.foreground() }
-          if phase == .background { DiagnosticsLog.shared.background() }
+          if phase == .background {
+            DiagnosticsLog.shared.background()
+            // Removals waiting for their Undo are sent before the Watch sleeps.
+            model.undo.sendAll()
+          }
           if phase == .active { Task { await model.reload() } }
         }
     }
@@ -274,10 +278,29 @@ private struct WatchNowPlayingRow: View {
 }
 private struct WatchSongs: View {
   let model: WatchModel
-  let ids: [String]
+  let all: [String]
   let title: String
+  init(model: WatchModel, ids: [String], title: String) {
+    self.model = model
+    self.all = ids
+    self.title = title
+  }
+  /// Without songs waiting for their removal's Undo (D-79, #183).
+  private var ids: [String] { all.filter { !model.undo.hides(WatchModel.undoKey($0)) } }
   var body: some View {
     List {
+      // The latest removal, with its Undo, until it is sent.
+      if let item = model.undo.items.last {
+        Button {
+          model.undo.undo(item.id)
+        } label: {
+          VStack(alignment: .leading) {
+            Text("Undo").font(PigType.headline)
+            Text(item.label).font(PigType.caption).foregroundStyle(.secondary).lineLimit(2)
+          }
+        }
+        .accessibilityLabel("Undo: " + item.label)
+      }
       HStack {
         Button {
           Task { await model.play(ids) }
@@ -305,13 +328,21 @@ private struct WatchSongs: View {
           }
           .disabled(!ready)
           .swipeActions {
+            // At once, with Undo (D-79): sent when the Undo runs out.
             Button("Remove", role: .destructive) {
-              Task { await model.send("remove", songIds: [id]) }
+              model.undo.schedule(WatchModel.undoKey(id), label: "Removed " + song.track.title) {
+                await model.send("remove", songIds: [id])
+                return true
+              }
             }
           }
         }
       }
     }.pigBrandedCanvas().navigationTitle(title)
+      // A tap when a song leaves with its Undo (#183).
+      .sensoryFeedback(trigger: model.undo.items.count) { old, new in
+        new > old ? .impact(weight: .light) : nil
+      }
   }
 }
 /// The system Now Playing first: large and glanceable, with Digital Crown

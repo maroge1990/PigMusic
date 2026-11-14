@@ -163,10 +163,17 @@ struct PlaylistView: View {
     _playlist = State(initialValue: playlist)
     _name = State(initialValue: playlist.name)
   }
-  private var songs: [Track] { (playlist.entries ?? []).map(\.playbackTrack) }
+  /// Without songs waiting for their removal's Undo (#183).
+  private var entries: [PlaylistEntry] {
+    (playlist.entries ?? []).filter { !model.undo.hides(AppModel.undoKey($0)) }
+  }
+  private var songs: [Track] { entries.map(\.playbackTrack) }
+  /// A removal is waiting: positions on screen differ from the server's, so
+  /// reordering and renaming wait for it.
+  private var removalWaiting: Bool { entries.count != (playlist.entries ?? []).count }
   /// Songs this library lacks: household files are added, the rest requested
   /// (the server ignores repeat requests).
-  private var missing: [PlaylistEntry] { (playlist.entries ?? []).filter { $0.savedTrack == nil } }
+  private var missing: [PlaylistEntry] { entries.filter { $0.savedTrack == nil } }
   private var locked: Bool {
     loading || !model.canMutate
       || model.pendingEdits.contains(where: { $0.mutation.playlistId == playlist.id })
@@ -207,12 +214,13 @@ struct PlaylistView: View {
         }
       }.listRowSeparator(.hidden).listRowBackground(Color.clear)
       Section {
-        ForEach(Array((playlist.entries ?? []).enumerated()), id: \.element.entryId) {
+        ForEach(Array(entries.enumerated()), id: \.element.entryId) {
           index, entry in
           SongRow(model: model, track: entry.playbackTrack) { model.play(songs, at: index) }
             .swipeActions {
-              Button("Remove", role: .destructive) { Task { await remove(index) } }.disabled(
-                locked)
+              // At once, with Undo (D-79): sent when the Undo runs out.
+              Button("Remove", role: .destructive) { model.removeLater(entry, from: playlist) }
+                .disabled(locked)
             }
         }
         .onMove { from, to in
@@ -221,7 +229,7 @@ struct PlaylistView: View {
           Task { await edit(order: order) }
         }
         // Favourites keep the order they were favourited in; the server has no reorder for them.
-        .moveDisabled(locked || playlist.favourites == true)
+        .moveDisabled(locked || removalWaiting || playlist.favourites == true)
       }
       if playlist.favourites != true {
         // The album pages' settings block. A List (not their ScrollView) keeps
@@ -241,6 +249,7 @@ struct PlaylistView: View {
         }.listRowSeparator(.hidden).listRowBackground(Color.clear)
       }
     }.listStyle(.plain).pigCanvas().navigationTitle(playlist.name).navigationBarTitleDisplayMode(.inline)
+      .undoBar(model.undo)
       .toolbar {
         if playlist.favourites != true { EditButton() }
         Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }.disabled(
@@ -305,27 +314,6 @@ struct PlaylistView: View {
       message =
         confirmed
         ? nil : .info("Change saved on this iPhone. Other playlist changes wait until this one is sent.")
-      if confirmed { reloadAfterEdit = true }
-    } catch { message = .error(error.userMessage + " Refresh before reapplying your edit.") }
-  }
-  private func remove(_ index: Int) async {
-    guard !loading else { return }
-    loading = true
-    defer { loading = false }
-    let id = playlist.id
-    let revision = playlist.revision
-    // Favourites are removed by unfavouriting that exact song; the server rejects
-    // a positional removal, which would block the edits queued behind it.
-    let entries = playlist.entries ?? []
-    let mutation =
-      if playlist.favourites == true, entries.indices.contains(index) {
-        OfflineMutation(action: "favourite", track: entries[index].entryTrack, favourite: false)
-      } else {
-        OfflineMutation(action: "remove", playlistId: id, revision: revision, position: index)
-      }
-    do {
-      let confirmed = try await model.saveEdit(mutation)
-      message = confirmed ? nil : .info("Removed on this iPhone; it will be sent when you're online.")
       if confirmed { reloadAfterEdit = true }
     } catch { message = .error(error.userMessage + " Refresh before reapplying your edit.") }
   }

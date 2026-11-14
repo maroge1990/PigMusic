@@ -23,7 +23,11 @@ private struct DownloadList: View {
   @State private var clearing = false
   @State private var removing: DeviceGroup?
   var body: some View {
-    let transfers = downloads.records.filter { $0.state != "ready" || $0.cleared != true }
+    // A cancel waiting for its Undo has left the list already (#183).
+    let transfers = downloads.records.filter {
+      ($0.state != "ready" || $0.cleared != true)
+        && !model.undo.hides(AppModel.undoKey(download: $0.id))
+    }
     let groups = DeviceGroup.build(downloads.records.filter { $0.state == "ready" })
     List {
       if downloads.records.isEmpty {
@@ -105,6 +109,7 @@ private struct DownloadList: View {
         Button("Remove all device downloads", role: .destructive) { clearing = true }
       }
     }
+    .undoBar(model.undo)
     .toolbar {
       Button("Clear finished") { Task { await downloads.clearFinished() } }
         .disabled(!transfers.contains { $0.state == "ready" })
@@ -157,17 +162,26 @@ private struct TransferRow: View {
     .accessibilityValue(stateLabel)
     .swipeActions {
       if record.state != "ready" {
-        Button("Cancel", role: .destructive) { Task { await downloads.remove(id: record.id) } }
+        Button("Cancel", role: .destructive) { cancel() }
       }
       pauseButton.tint(PigBrand.secondary(scheme))
     }
     .contextMenu {
       pauseButton
       if record.state != "ready" {
-        Button("Cancel download", systemImage: "xmark", role: .destructive) {
-          Task { await downloads.remove(id: record.id) }
-        }
+        Button("Cancel download", systemImage: "xmark", role: .destructive) { cancel() }
       }
+    }
+  }
+  /// At once, with Undo (D-79): the transfer stops when the Undo runs out.
+  private func cancel() {
+    let downloads = downloads
+    let id = record.id
+    model.undo.schedule(
+      AppModel.undoKey(download: id), label: "Cancelled " + record.track.title
+    ) {
+      await downloads.remove(id: id)
+      return true
     }
   }
   @ViewBuilder private var pauseButton: some View {

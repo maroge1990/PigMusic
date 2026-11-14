@@ -21,6 +21,14 @@ enum PlayOrigin: Hashable {
     var person: Person
   }
   var watch: WatchPhoneController?
+  /// Removals, hides and cancels waiting for their Undo (D-79, #183).
+  let undo = UndoQueue()
+  /// Rises when something the person asked for is done (a favourite, a song
+  /// queued): the phone answers with a success tap (#183).
+  var confirmations = 0
+  /// Mix songs hidden this launch, so a hidden song stays hidden on a mix
+  /// page opened again before Home refreshes.
+  var hiddenMixSongs: Set<String> = []
   var downloads: DownloadController?
   var preferences = AccountPreferences()
   var person: Person?
@@ -143,6 +151,9 @@ enum PlayOrigin: Hashable {
     switch change {
     case .stay: return
     case .suspend:
+      // Waiting removals are sent now, as the web sends them when its page
+      // closes (D-79), with time from iOS to finish.
+      await sendWaitingActions()
       // A moment of Control Centre or a notification keeps everything
       // running; only the background stops it (#97).
       account.cancel("live")
@@ -835,6 +846,7 @@ enum PlayOrigin: Hashable {
     try account.check(stamp)
     favourites.change(track.id, value)
     try? await store?.cache(value, key: "favourite:" + track.id)
+    confirmations += 1
     return confirmed
   }
   @discardableResult func saveEdit(_ mutation: OfflineMutation) async throws -> Bool {
@@ -1272,7 +1284,65 @@ enum PlayOrigin: Hashable {
     guard let service, !tracks.isEmpty else { return }
     await service.preparePlayback(tracks)
   }
+  private func sendWaitingActions() async {
+    guard !undo.items.isEmpty else { return }
+    let task = UIApplication.shared.beginBackgroundTask(withName: "Send waiting changes")
+    await undo.sendAllAndWait()
+    if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
+  }
+  /// Removes a playlist song once its Undo has run out (#183). Its position
+  /// and the playlist's revision are read when it is sent, so an earlier
+  /// removal still waiting doesn't shift it.
+  func removeLater(_ entry: PlaylistEntry, from playlist: Playlist) {
+    let playlistId = playlist.id
+    let favourites = playlist.favourites == true
+    undo.schedule(Self.undoKey(entry), label: "Removed from " + playlist.name) { [weak self] in
+      guard let self else { return false }
+      do {
+        // Favourites are removed by unfavouriting that exact song; the server
+        // rejects a positional removal, which would block the edits behind it.
+        if favourites {
+          try await saveEdit(
+            OfflineMutation(action: "favourite", track: entry.entryTrack, favourite: false))
+          return true
+        }
+        let current = try await cachedCatalogue(
+          key: "playlist:" + playlistId,
+          conditional: { try await $0.playlist(id: playlistId, etag: $1) })
+        guard let index = current.entries?.firstIndex(where: { $0.entryId == entry.entryId })
+        else { return true }  // Already gone.
+        try await saveEdit(
+          OfflineMutation(
+            action: "remove", playlistId: playlistId, revision: current.revision, position: index))
+        return true
+      } catch {
+        message = error.userMessage + " Refresh the playlist before removing the song again."
+        return false
+      }
+    }
+  }
+  static func undoKey(_ entry: PlaylistEntry) -> String { "playlist-entry:" + entry.entryId }
+  static func undoKey(mix: String, song: String) -> String { "mix-song:" + mix + ":" + song }
+  static func undoKey(download id: String) -> String { "download:" + id }
+  static func undoKey(watchTransfer id: String) -> String { "watch-transfer:" + id }
+  /// Hides a mix song once its Undo has run out (#183).
+  func hideLater(_ track: Track, from mix: PersonalMix) {
+    let key = Self.undoKey(mix: mix.id, song: track.id)
+    undo.schedule(key, label: "Hidden from " + mix.title) { [weak self] in
+      guard let self else { return false }
+      do {
+        try await performPersonal { try await $0.hideMixSong(track.id) }
+        hiddenMixSongs.insert(key)
+        return true
+      } catch {
+        message = error.userMessage
+        return false
+      }
+    }
+  }
   func signOut() async {
+    // Removals still showing Undo belong to this account: send them first.
+    await undo.sendAllAndWait()
     guard !busy, !mutationActive else { return }
     guard let service else {
       detach()
@@ -1294,6 +1364,9 @@ enum PlayOrigin: Hashable {
   private static let parkedSessions = ParkedSessions(
     store: TokenVault(service: "au.com.pig.music.parked-sign-out", account: "sessions"))
   private func detach() {
+    // An account that ended can no longer send them; they fail and show again.
+    undo.sendAll()
+    hiddenMixSongs = []
     watch?.disconnect()
     // Stale for every operation still running; live updates stop.
     account.end()

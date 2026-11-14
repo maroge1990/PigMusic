@@ -13,6 +13,9 @@ import PigPlayback
   var receipt: CompanionReceipt?
   var link: CompanionLink?
   var message: String?
+  /// Removals waiting for their Undo (D-79, #183).
+  let undo = UndoQueue()
+  static func undoKey(_ id: String) -> String { "watch-song:" + id }
   var queue: [PlaybackOccurrence] = []
   /// False while the Watch screen is off or the app is in the background.
   @ObservationIgnored var sceneActive = true {

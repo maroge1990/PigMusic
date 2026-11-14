@@ -754,6 +754,45 @@ struct StatusMessage: Equatable {
   static func error(_ text: String) -> StatusMessage { StatusMessage(text: text, kind: .error) }
 }
 
+/// The latest action waiting for its Undo (D-79, #183): what happened and an
+/// Undo button, above the bottom of the screen. VoiceOver hears it appear.
+struct UndoBar: View {
+  let queue: UndoQueue
+  @Environment(\.colorScheme) private var scheme
+  var body: some View {
+    if let item = queue.items.last {
+      HStack(spacing: 12) {
+        Text(item.label).font(PigType.footnote).lineLimit(2)
+          .foregroundStyle(PigBrand.text(scheme))
+        Spacer(minLength: 0)
+        Button("Undo") { queue.undo(item.id) }
+          .font(PigType.footnote.weight(.semibold))
+          .foregroundStyle(PigBrand.textAccent(scheme))
+          .frame(minHeight: 44)
+          .accessibilityHint("Puts back " + item.label.lowercased())
+      }
+      .padding(.horizontal, 16).padding(.vertical, 4)
+      .background(PigBrand.raised(scheme), in: RoundedRectangle(cornerRadius: 14))
+      .overlay(RoundedRectangle(cornerRadius: 14).stroke(PigBrand.controlBorder(scheme)))
+      .padding(.horizontal, 16).padding(.bottom, 8)
+      .id(item.id)
+      .transition(.move(edge: .bottom).combined(with: .opacity))
+      .onAppear {
+        AccessibilityNotification.Announcement(item.label + ". Undo is available.").post()
+      }
+    }
+  }
+}
+
+extension View {
+  /// Shows the Undo bar for waiting actions at the bottom of this screen.
+  func undoBar(_ queue: UndoQueue) -> some View {
+    safeAreaInset(edge: .bottom) {
+      UndoBar(queue: queue).animation(.easeOut(duration: 0.2), value: queue.items.last?.id)
+    }
+  }
+}
+
 /// Between rows of a song or album list drawn in a stack: a hairline from the
 /// title's edge, as the system's lists draw it, not a rule across the screen
 /// (#183).

@@ -226,10 +226,15 @@ struct MixDetailView: View {
   @Environment(\.dismiss) private var dismiss
   let model: AppModel
   let mix: PersonalMix
-  @State private var hidden: Set<String> = []
   @State private var notice: StatusMessage?
   @State private var saving = false
-  private var tracks: [Track] { mix.tracks.filter { !hidden.contains($0.id) } }
+  /// Without songs hidden, or waiting for their Undo (#183).
+  private var tracks: [Track] {
+    mix.tracks.filter {
+      let key = AppModel.undoKey(mix: mix.id, song: $0.id)
+      return !model.hiddenMixSongs.contains(key) && !model.undo.hides(key)
+    }
+  }
   var body: some View {
     // A List (not the album pages' ScrollView) keeps swipe to hide; styled
     // plain, with the shared header and action row, it reads as one (#158).
@@ -261,18 +266,13 @@ struct MixDetailView: View {
         ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
           SongRow(model: model, track: track.actionTrack) { model.play(tracks, at: index) }
             .swipeActions {
-              Button("Hide", role: .destructive) {
-                Task {
-                  do {
-                    try await model.performPersonal { try await $0.hideMixSong(track.id) }
-                    hidden.insert(track.id)
-                  } catch { notice = .error(error.userMessage) }
-                }
-              }
+              // At once, with Undo (D-79): sent when the Undo runs out.
+              Button("Hide", role: .destructive) { model.hideLater(track, from: mix) }
             }
         }
       }
     }.listStyle(.plain).pigCanvas().navigationTitle(mix.title).navigationBarTitleDisplayMode(.inline)
+      .undoBar(model.undo)
       .toolbar {
         ToolbarItem(placement: .topBarTrailing) {
           Menu {

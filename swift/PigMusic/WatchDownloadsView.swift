@@ -15,7 +15,10 @@ struct WatchDownloadsView: View {
       if let watch = model.watch {
         let records = watch.downloads?.records ?? []
         let delivered = records.filter { onWatch($0, watch: watch) }
-        let transfers = records.filter { !onWatch($0, watch: watch) || $0.cleared != true }
+        let transfers = records.filter {
+          (!onWatch($0, watch: watch) || $0.cleared != true)
+            && !model.undo.hides(AppModel.undoKey(watchTransfer: $0.id))
+        }
         if records.isEmpty {
           Text("Nothing sent yet. Use Send to Apple Watch on an album, artist, playlist or song.")
             .foregroundStyle(.secondary)
@@ -39,7 +42,16 @@ struct WatchDownloadsView: View {
               .accessibilityElement(children: .combine)
               .swipeActions {
                 if !onWatch(record, watch: watch) {
-                  Button("Cancel", role: .destructive) { Task { await watch.remove(record.id) } }
+                  // At once, with Undo (D-79), like the iPhone's own downloads.
+                  Button("Cancel", role: .destructive) {
+                    let id = record.id
+                    model.undo.schedule(
+                      AppModel.undoKey(watchTransfer: id), label: "Cancelled " + record.track.title
+                    ) {
+                      await watch.remove(id)
+                      return true
+                    }
+                  }
                 }
               }
             }
@@ -87,6 +99,7 @@ struct WatchDownloadsView: View {
       }
     }
     .pigCanvas().navigationTitle("Apple Watch").navigationBarTitleDisplayMode(.inline)
+    .undoBar(model.undo)
     .toolbar {
       if let watch = model.watch {
         let records = watch.downloads?.records ?? []

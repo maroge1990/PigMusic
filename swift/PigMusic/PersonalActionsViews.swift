@@ -53,8 +53,14 @@ struct SongActionsView: View {
         }
         Section {
           if model.player.queue.current != nil {
-            Button("Play next") { model.player.enqueue([track], next: true) }
-            Button("Add to queue") { model.player.enqueue([track]) }
+            Button("Play next") {
+              model.player.enqueue([track], next: true)
+              model.confirmations += 1
+            }
+            Button("Add to queue") {
+              model.player.enqueue([track])
+              model.confirmations += 1
+            }
           }
           NavigationLink("Add to playlist") { AddToPlaylistView(model: model, track: track) }
           if track.serverState == "in_library" || track.serverState == nil {
