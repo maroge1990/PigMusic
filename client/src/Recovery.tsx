@@ -23,18 +23,21 @@ export function RemoveFromServer({
     setError("");
     try {
       // api() turns any error answer into a sentence, never "[object Object]".
-      const done = await api<{ restorable?: string[] }>(
+      const done = await api<{ restorable?: string[]; stopped?: string }>(
         `/v1/admin/${kind}/${id}/remove`,
         { method: "POST" },
       );
       window.dispatchEvent(new Event("music-library-changed"));
+      // Stopped part way: what did move can still be undone (#183).
+      if (done.stopped) setError(done.stopped);
       if (done.restorable?.length)
         offerUndo(
-          `${title} removed from the server for everyone.${kind === "artists" ? " Artist monitoring is off." : ""}`,
+          `${done.stopped ? "Part of " : ""}${title} removed from the server for everyone.${kind === "artists" ? " Artist monitoring is off." : ""}`,
           () => restoreFromTrash(done.restorable!),
           `${title} is back.${kind === "artists" ? " Turn artist monitoring on again from the artist page." : ""}`,
         );
-      removed?.();
+      // Stopped part way: stay, so the reason is read.
+      if (!done.stopped) removed?.();
     } catch (e) {
       setError((e as Error).message);
     } finally {

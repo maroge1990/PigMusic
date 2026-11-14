@@ -453,11 +453,22 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                 record = await asyncio.to_thread(recovery.remove, track["id"])
                 restorable.append(record["id"])
             except (ValueError, OSError):
-                raise HTTPException(
-                    409,
-                    f"Removed {len(restorable)} songs; remaining files need review. All removed songs are recoverable.",
-                )
+                return stopped_removal(restorable)
         return {"removed": len(restorable), "restorable": restorable}
+
+    def stopped_removal(restorable, **extra):
+        """A removal that stopped part way: nothing moved is an error; what
+        did move is answered with its Trash entries, so Undo is still offered
+        (Codex, #183 round 2)."""
+        message = f"Removed {len(restorable)} songs; remaining files need review. All removed songs are recoverable."
+        if not restorable:
+            raise HTTPException(409, message)
+        return {
+            "removed": len(restorable),
+            "restorable": restorable,
+            "stopped": message,
+            **extra,
+        }
 
     @app.post("/api/v1/admin/artists/{artist_id}/remove")
     async def remove_artist(artist_id: str):
@@ -476,10 +487,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                     record = await asyncio.to_thread(recovery.remove, track["id"])
                     restorable.append(record["id"])
                 except (ValueError, OSError):
-                    raise HTTPException(
-                        409,
-                        f"Removed {len(restorable)} songs; remaining files need review. All removed songs are recoverable.",
-                    )
+                    return stopped_removal(restorable, monitor=False)
         return {"removed": len(restorable), "monitor": False, "restorable": restorable}
 
     class OrganiseRequest(BaseModel):

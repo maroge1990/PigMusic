@@ -271,3 +271,40 @@ test("Removed music lists songs and restores one", async ({ page }) => {
   await expect(panel).toContainText("Landslide");
   expect(restored).toEqual(["r1", "r2"]);
 });
+
+test("an album removal that stops part way stays, says why and offers Undo", async ({
+  page,
+}) => {
+  // Codex, #183 round 2 (medium): what did move can still be undone.
+  const restored: unknown[] = [];
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/admin/albums/album-1/remove": (route: Route) =>
+        route.fulfill({
+          json: {
+            removed: 1,
+            restorable: ["r1"],
+            stopped:
+              "Removed 1 songs; remaining files need review. All removed songs are recoverable.",
+          },
+        }),
+      "/v1/admin/library/trash/restore": (route: Route) => {
+        restored.push(route.request().postDataJSON());
+        return route.fulfill({ json: { restored: ["r1"], failed: [] } });
+      },
+    },
+  });
+  await page.goto(`/#/library/album/${album.id}`);
+  const tools = page.locator("details.owner-tools");
+  await tools.locator("summary").click();
+  await tools.getByRole("button", { name: "Remove from server" }).click();
+  await expect(tools.getByRole("alert")).toContainText(
+    "remaining files need review",
+  );
+  await expect(page).toHaveURL(new RegExp(`album/${album.id}$`));
+  const undo = page.locator(".undo-bar");
+  await expect(undo).toContainText("Part of");
+  await undo.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(() => restored).toEqual([{ identities: ["r1"] }]);
+});

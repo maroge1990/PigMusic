@@ -519,3 +519,54 @@ def test_undo_restores_every_song_a_removal_put_in_trash(tmp_path, monkeypatch):
             json={"identities": removed["restorable"]},
         ).json()
         assert again["restored"] == [] and len(again["failed"]) == 2
+
+
+def test_a_removal_that_stops_part_way_still_offers_undo(tmp_path, monkeypatch):
+    """Codex, #183 round 2 (medium): an album or artist removal that stops
+    after moving some songs answers with those songs' Trash entries and
+    where it stopped, so Undo is offered for what did move."""
+    from fastapi.testclient import TestClient
+
+    from server.app import create_app
+    from server.recovery import Recovery
+
+    store, root, path, track = setup(tmp_path, monkeypatch)
+    second = root / "Artist" / "Album" / "Other.mp3"
+    second.write_bytes(b"second song")
+    other = {
+        **track,
+        "id": "other",
+        "title": "Other",
+        "relative_path": "Artist/Album/Other.mp3",
+        "track_number": 2,
+    }
+    (tmp_path / "data" / "library-snapshot.json").write_text(
+        json.dumps({"tracks": [track, other]})
+    )
+    real = Recovery.remove
+    calls = []
+
+    def remove(self, track_id, **kwargs):
+        calls.append(track_id)
+        if len(calls) == 2:
+            raise OSError("disk went away")
+        return real(self, track_id, **kwargs)
+
+    monkeypatch.setattr(Recovery, "remove", remove)
+    app = create_app(tmp_path / "data")
+    with TestClient(app) as client:
+        # The artist route needs a catalogue identity first (offline here);
+        # it answers through the same stopped_removal helper.
+        for kind in ("albums",):
+            calls.clear()
+            item = app.state.store.library[kind][0]
+            reply = client.post(f"/api/v1/admin/{kind}/{item['id']}/remove")
+            assert reply.status_code == 200, reply.text
+            body = reply.json()
+            assert body["removed"] == 1 and len(body["restorable"]) == 1
+            assert "stopped" in body and "recoverable" in body["stopped"]
+            restored = client.post(
+                "/api/v1/admin/library/trash/restore",
+                json={"identities": body["restorable"]},
+            ).json()
+            assert restored["restored"] == body["restorable"]
