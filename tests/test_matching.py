@@ -178,3 +178,13 @@ def test_removal_does_not_cancel_other_edition_and_exclusions_restore_independen
     recovery.remove("second")
     recovery.restore(first["id"])
     assert store.submit_catalogue([explicit[1]])["skipped"] == 1
+
+
+def test_discover_matches_saved_albums_with_the_shared_title_key():
+    """#170: discover kept its own brackets-only title_key, so "Rumours -
+    2004 Remaster" never matched the release group "Rumours"."""
+    from server.routes import discover
+
+    key = discover.title_key
+    assert key("Rumours - 2004 Remaster") == key("Rumours (Deluxe)") == key("Rumours")
+    assert key("Rumours (Live)") != key("Rumours")

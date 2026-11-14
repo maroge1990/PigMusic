@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import re
 from uuid import UUID
 import httpx
 from fastapi import APIRouter, Header, HTTPException, Request, Query
@@ -11,6 +10,7 @@ from pydantic import BaseModel
 from ..artist_identity import Ambiguous, cached_identities, resolve_artist
 from ..catalogue import RELEASE_INC, release_tracks, credit, edition_rank
 from ..library import normalise
+from ..matching import title_key
 from ..releases import release_query
 from ..api_models import (
     CatalogueGroupsDTO,
@@ -24,31 +24,6 @@ from ..api_models import (
 )
 from ..conditional import CONDITIONAL_RESPONSES, conditional_json
 from ..user_library import track_dto
-
-
-# A trailing qualifier that names an edition of the same album. Anything else
-# in brackets ("Live", "Demos", "Remixes") names different recordings.
-EDITION = re.compile(
-    r"\b(deluxe|expanded|edition|remaster(ed)?|anniversary|bonus|special|"
-    r"collector'?s|reissue|explicit|clean|mono|stereo|super)\b",
-    re.I,
-)
-DISTINCT = re.compile(
-    r"\b(live|acoustic|demos?|remix(es)?|instrumentals?|karaoke|sessions?|unplugged)\b",
-    re.I,
-)
-
-
-def title_key(title):
-    """Album titles compare without edition qualifiers: "Brat (Deluxe)" is
-    "brat", but "Brat (Live)" stays a different album."""
-    text = title or ""
-    while found := re.search(r"\s*[\(\[]([^\)\]]*)[\)\]]\s*$", text):
-        qualifier = found.group(1)
-        if not EDITION.search(qualifier) or DISTINCT.search(qualifier):
-            break
-        text = text[: found.start()]
-    return normalise(text) or normalise(title)
 
 
 # Covers fetched as soon as an artist's discography is opened: a phone's
