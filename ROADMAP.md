@@ -7,16 +7,17 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 *Overwritten at the end of every session. 14 Nov 2026 (evening, Melbourne).*
 
-- **Live:** release `deadcode-20261114-v1`, server `a3a1c25`, applied by Claude 14 Nov 16:24 Melbourne with Mark's
-  permission (D-97, this release only). Healthy, migration 13 in place, no errors. Carries batches 'measure' (#191),
-  'lookahead' (#192), 'sources' (#94, #193), 'agency' (#183 web), 'artwork' (#194) and 'dead code' (#169, #170, #173).
-  Rollback: container `PigMusic-before-deadcode-20261114-v1`, backup `pre-deadcode-20261114-v1` (needed to go back
-  past migration 13). Six older rollback containers wait for the D-78 clean-up (Mark's hands). #191's counters
-  started 14 Nov 06:52; nobody has used the app since 13 Nov 17:10, so they are still empty.
+- **Live:** release `downloads-20261114-v1`, server `4e87476`, applied by Claude 14 Nov 17:43 Melbourne (D-99: Claude
+  applies releases and tests on the live server, telling Mark after). Healthy, no errors. Carries everything through
+  batch 8 'downloads'. Rollback: container `PigMusic-before-downloads-20261114-v1`, backup
+  `pre-downloads-20261114-v1` (migration 13 since `deadcode-20261114-v1`). Live check: the fake-lossless check passed
+  40 of 40 sampled library FLACs (no false suspicion, about 1.6 s each with the NAS read). Older rollback containers
+  wait for the D-78 clean-up (Mark's hands). Nobody has used the app since 13 Nov 17:10, so #191's counters are
+  still empty.
 - **YouTube trial (#193, D-91):** started 14 Nov ~12:50, ends ~21 Nov. Then: the numbers on #193 and #191, a hand
   sample of wrong versions, and Mark decides keep or remove (#201).
-- **Mark away (D-94):** Claude keeps pushing reviewed server and web batches and prepares each release (CI, verify,
-  preflight); Mark applies the newest prepared release when back. Decisions taken before he left: YouTube trial
+- **Releases (D-99):** Claude pushes reviewed server and web batches, prepares each release (CI, verify, preflight)
+  and applies it when nobody is playing, then tells Mark. Decisions taken before he left: YouTube trial
   (D-91), convert down from verified lossless if the numbers help (D-92), keep and document `server.admin` (D-93),
   yt-dlp updates itself for the trial (D-95), #199's tint stays out of TestFlight until he approves screenshots
   (built early and approved 14 Nov on branch `claude/cover-tint-199-6af23e`, D-96; it joins batch 9).
@@ -52,8 +53,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   when an MP3 320 or AAC 256 download finds nothing, a verified (clean) lossless original from Soulseek or Monochrome
   is converted down, never a suspect or multichannel one. Every download has a plain-words log (Details on the web,
   member's own or owner's queue; no peer names). Two Codex rounds; two highs and two mediums fixed and confirmed.
-  Release `downloads-20261114-v1` (image `sha-4e87476`) passed the Unraid verify and preflight 14 Nov 17:41; it waits
-  for the apply step (D-94: Mark; D-97 covered only the previous release).
+  Released 14 Nov 17:43 in `downloads-20261114-v1`.
 - **Batch 7 'dead code' (#169, #170, #173 parts 1 and 3), pushed `c1d6b63`..`0b23b1c`:** unused vendor and server code
   removed (about 150 lines); `server.admin` documented in OPERATIONS.md and tested (D-93); one image save helper
   (`server/images.py`), per-key locks that are forgotten when idle (`server/keyed_locks.py`), one Fanart request
@@ -91,7 +91,7 @@ Mark's single testing round (D-86).
 | 5 | Agency and words (audit 6): Undo over confirm (web released 14 Nov; native half in batch 9) | #183 | web (+ native half) | 2 | release; native half in the TestFlight build | — |
 | 6 | Artwork: Deezer first for covers and artist photos (released 14 Nov; placeholder rate after use) | #194 | server | 2 | release | — |
 | 7 | ~~Server dead code and duplicates (audit 7)~~ (released 14 Nov) | #169, #170, #173 parts 1 and 3 | server | 2 | release | — |
-| 8 | ~~Downloads: fake-lossless check, convert down from verified lossless, a readable log per download~~ (pushed 14 Nov, D-98) | #195, #196, #197 | server, web | 2 | release | — |
+| 8 | ~~Downloads: fake-lossless check, convert down from verified lossless, a readable log per download~~ (released 14 Nov, D-98) | #195, #196, #197 | server, web | 2 | release | — |
 | 9 | Native (audit 9 + app fixes): dead code, search merge, Watch audio sharing, connection resilience, cover colours | #176, #177, #178, #188, #199 | iPhone, Watch | 2 | **TestFlight 0.2.0 (25)** | Mark approves #199's look from screenshots |
 | 10 | Product review checklist and Mark's single testing round (D-86) | #184 | all | none | docs | Mark's devices |
 | 11 | Made for you: keep playing similar songs, Rewind | #202, #203 | server, web, iPhone | 2 | release; native in TestFlight (26) | — |
