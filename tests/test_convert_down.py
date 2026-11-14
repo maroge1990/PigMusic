@@ -19,12 +19,12 @@ def ffmpeg(*args):
 
 
 def flac(folder, name, channels=2, fake=False):
-    """3 s of pink noise as FLAC; `fake` makes it from a 320 kbps MP3."""
+    """3 s of pink noise as FLAC; `fake` makes it from a 192 kbps MP3."""
     path = folder / name
     source = "anoisesrc=color=pink:amplitude=0.3:duration=3:sample_rate=44100"
     if fake:
         mp3 = folder / (name + ".mp3")
-        ffmpeg("-f", "lavfi", "-i", source, "-ac", "2", "-b:a", "320k", mp3)
+        ffmpeg("-f", "lavfi", "-i", source, "-ac", "2", "-b:a", "192k", mp3)
         ffmpeg("-i", mp3, path)
     else:
         ffmpeg("-f", "lavfi", "-i", source, "-ac", str(channels), path)

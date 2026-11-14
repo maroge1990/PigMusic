@@ -62,6 +62,8 @@ def _line(step):
     elif name == "validate":
         what = "the lossless original" if profile == LABELS["lossless"] else "the file"
         text = f"Checked {what}: " + ("passed" if ok else f"refused, {outcome}")
+        if ok and step.get("note"):
+            text += f" ({step['note']})"
     elif name == "convert":
         text = f"Converted the lossless original to {profile}" + (
             "" if ok else f": {outcome}"

@@ -37,7 +37,7 @@ from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
 from mutagen.flac import FLAC, Picture
 from mutagen.oggopus import OggOpus
 from mutagen.oggvorbis import OggVorbis
-from .lossless_check import lossy_cutoff
+from .lossless_check import REFUSE_BELOW, lossy_cutoff
 from .soulseek import Soulseek
 
 from .audio import probe_file, validate_streams
@@ -614,11 +614,17 @@ class Downloader:
             cutoff = lossy_cutoff(
                 path, probe.get("sample_rate_hz") or 0, probe["duration"], check
             )
-            if cutoff:
+            if cutoff and cutoff < REFUSE_BELOW:
                 raise ValueError(
                     "Lossless download looks like lossy audio "
                     f"(nothing above about {cutoff / 1000:.1f} kHz)"
                 )
+            probe["lossless_check"] = (
+                f"suspect: nothing above about {cutoff / 1000:.1f} kHz, "
+                "an MP3 320 or a steep mastering filter"
+                if cutoff
+                else "passed"
+            )
         if decode:
             self.decode(path, check)
         return probe
@@ -799,10 +805,12 @@ class Downloader:
         self.check(job["id"])
         self.state(job["id"], "validating", effective_quality=profile)
         timings = self.timings()
-        with timings.step("validate"):
+        with timings.step("validate") as checked:
             probe = self.validate(
                 path, job, profile, decode=False, check=lambda: self.check(job["id"])
             )
+            if str(probe.get("lossless_check", "")).startswith("suspect"):
+                checked["note"] = probe["lossless_check"]
             if (
                 job.get("exact_quality")
                 and profile == "mp3_128"
@@ -822,6 +830,7 @@ class Downloader:
             "duration": probe["duration"],
             "sample_rate_hz": probe["sample_rate_hz"],
             "channels": probe["channels"],
+            "lossless_check": probe.get("lossless_check"),
             "validated_at": int(time.time()),
             **(provenance or {}),
         }
@@ -850,8 +859,10 @@ class Downloader:
         if profile not in CONVERT_TO:
             raise ValueError("Only MP3 320 and AAC 256 are made by conversion")
         check = lambda: self.check(job["id"])
-        with self.timings().step("validate", profile="lossless"):
+        with self.timings().step("validate", profile="lossless") as checked:
             original = self.validate(path, job, "lossless", check=check)
+            if str(original.get("lossless_check", "")).startswith("suspect"):
+                checked["note"] = original["lossless_check"]
         if (original.get("channels") or 0) > 2:
             raise ValueError("Lossless original has more than two channels")
         codec, extension, bitrate = CONVERT_TO[profile]
@@ -877,7 +888,7 @@ class Downloader:
             "sample_rate_hz": rate,
             "bits_per_sample": original.get("bits_per_sample"),
             "channels": original.get("channels"),
-            "lossless_checked": True,
+            "lossless_check": original.get("lossless_check"),
         }
 
     def attempt(self, job, profile, errors, convert=False):
