@@ -153,3 +153,55 @@ def test_a_locked_operation_never_decides_on_a_library_behind_a_download(
 
     destructive(store)
     assert "Song" in seen
+
+
+def test_cancel_all_cancels_only_what_was_on_screen(tmp_path):
+    """Codex, #183 round 1 (high): Cancel all is sent after its Undo time;
+    a request submitted meanwhile must survive it."""
+    from fastapi.testclient import TestClient
+
+    from server.app import create_app
+
+    def song(n):
+        return {
+            "id": f"track-{n}",
+            "artist": "Artist",
+            "album_artist": "Artist",
+            "album": "Album",
+            "title": f"Song {n}",
+            "year": 2020,
+            "duration": 200,
+            "disc_number": 1,
+            "track_number": n,
+            "status": "missing",
+        }
+
+    app = create_app(tmp_path / "data")
+    store = app.state.store
+    store.save_download_settings({"enabled": True, "sources": ["freemp3cloud"]})
+    store.submit_catalogue([song(1), song(2)])
+    shown = [
+        {"id": i["id"], "created_at": i["created_at"]} for i in store.queue()["items"]
+    ]
+    store.submit_catalogue([song(3)])  # Submitted during the Undo time.
+    with TestClient(app) as client:
+        left = client.post("/api/v1/admin/queue/clear", json={"entries": shown})
+        assert left.status_code == 200, left.text
+        titles = [i["title"] for i in left.json()["items"]]
+        assert titles == ["Song 3"]
+        # An entry that is no longer the one shown (deleted and submitted
+        # again) is left alone too.
+        assert (
+            client.post(
+                "/api/v1/admin/queue/clear",
+                json={
+                    "entries": [
+                        {
+                            "id": left.json()["items"][0]["id"],
+                            "created_at": "1999-01-01 00:00:00",
+                        }
+                    ]
+                },
+            ).json()["items"][0]["title"]
+            == "Song 3"
+        )

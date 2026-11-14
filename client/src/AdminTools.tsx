@@ -28,8 +28,15 @@ import {
 import { go, type Route } from "./routes";
 import type { Album, Library, Migration } from "./types";
 
-/** A whole-queue clear waiting for its Undo time (D-79, #183). */
+/** A Cancel all waiting for its Undo time (D-79, #183). */
 const CLEAR_QUEUE = "queue:clear";
+/** The entries that Cancel all covers: only those shown when it was pressed,
+ * so a request submitted during the Undo time survives (Codex, #183). */
+let clearing = new Set<string>();
+const withoutClearing = (q: Queue) =>
+  isPending(CLEAR_QUEUE)
+    ? { ...q, items: q.items.filter((i) => !clearing.has(i.id)) }
+    : q;
 
 const AdminPeople = lazy(() =>
   import("./AdminPeople").then((m) => ({ default: m.AdminPeople })),
@@ -173,7 +180,7 @@ export function AdminTools({ route }: { route: Route }) {
           (await api<Queue>("/v1/admin/queue", { signal: controller.signal }));
         if (controller.signal.aborted) return;
         // A clear waiting for its Undo time shows as done (D-79, #183).
-        setQueue(isPending(CLEAR_QUEUE) ? { ...q, items: [] } : q);
+        setQueue(withoutClearing(q));
         updateArtworkRevision(q.artwork_revision);
         const signature = `${q.library_revision}:${JSON.stringify(q.media || {})}`;
         if (
@@ -696,15 +703,24 @@ export function AdminTools({ route }: { route: Route }) {
     if (!finished && unfinished) {
       // Shows as cleared at once; sent after the Undo time (D-79, #183).
       const before = queue;
+      const entries = queue.items.map((i) => ({
+        id: i.id,
+        created_at: i.created_at ?? "",
+      }));
+      const body = JSON.stringify({ entries });
       const pending = defer(CLEAR_QUEUE, (keepalive) =>
         apiFetch("/api/v1/admin/queue/clear", {
           method: "POST",
-          keepalive,
+          headers: { "Content-Type": "application/json" },
+          body,
+          // Browsers refuse a keepalive body over 64 KB.
+          keepalive: keepalive && body.length < 60_000,
         }).then((r) => {
           if (!r.ok) throw new Error("The queue couldn't be cleared.");
         }),
       );
-      setQueue({ ...queue, items: [] });
+      clearing = new Set(entries.map((e) => e.id));
+      setQueue(withoutClearing(queue));
       offerUndo(
         "Every unfinished download cancelled and the queue cleared. Downloaded music is kept.",
         () => {
@@ -712,6 +728,7 @@ export function AdminTools({ route }: { route: Route }) {
           setQueue(before);
         },
         "Downloads put back in the queue.",
+        pending.done,
       );
       pending.done.then(
         (sent) => {

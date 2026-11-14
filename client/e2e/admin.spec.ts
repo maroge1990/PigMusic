@@ -1112,3 +1112,57 @@ test("compared figures use the brand's rounded tabular numerals (D-84)", async (
     /\bpig-amount\b/,
   );
 });
+
+test("Cancel all spares a request submitted during its Undo time", async ({
+  page,
+}) => {
+  // Codex, #183 round 1 (high): only the entries on screen are cleared.
+  await page.clock.install();
+  const shown = {
+    ...queue,
+    items: queue.items.map((i) => ({
+      ...i,
+      created_at: "2026-11-14 01:00:00",
+    })),
+  };
+  let current = shown;
+  const bodies: unknown[] = [];
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/admin/queue": (route) => route.fulfill({ json: current }),
+      "/v1/admin/queue/clear": (route) => {
+        bodies.push(route.request().postDataJSON());
+        return route.fulfill({ json: { ...current, items: [] } });
+      },
+    },
+  });
+  await page.goto("/#/admin/downloads");
+  await expect(page.getByText("Two").first()).toBeVisible();
+  await page.getByRole("button", { name: "Cancel all" }).click();
+  await expect(page.getByText("Two")).toHaveCount(0);
+  // Someone asks for a new download meanwhile; the next read shows it.
+  current = {
+    ...shown,
+    items: [
+      ...shown.items,
+      {
+        id: "q4",
+        status: "waiting_for_sources",
+        title: "Four",
+        artist: "A",
+        album: "X",
+        created_at: "2026-11-14 01:00:05",
+      },
+    ],
+  };
+  await page.clock.runFor(11_000);
+  await expect.poll(() => bodies.length).toBe(1);
+  expect(bodies[0]).toEqual({
+    entries: shown.items.map((i) => ({ id: i.id, created_at: i.created_at })),
+  });
+  // Its Undo left once it was sent.
+  await expect(
+    page.locator(".undo-bar").getByRole("button", { name: "Undo" }),
+  ).toHaveCount(0);
+});

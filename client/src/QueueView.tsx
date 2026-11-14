@@ -13,6 +13,7 @@ type QueueItem = {
   error?: string;
   received_bytes?: number;
   total_bytes?: number;
+  created_at?: string;
 };
 
 export type QueueAction = "retry" | "cancel";

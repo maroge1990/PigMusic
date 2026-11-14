@@ -1096,9 +1096,23 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             "media": public_settings(store),
         }
 
+    class QueueEntry(BaseModel):
+        id: str = Field(max_length=200)
+        created_at: str = Field(max_length=40)
+
+    class QueueClear(BaseModel):
+        # The entries shown when Cancel all was pressed (D-79, #183); without
+        # them everything is cleared, as before.
+        entries: list[QueueEntry] | None = Field(default=None, max_length=20000)
+
     @app.post("/api/v1/admin/queue/clear")
-    def clear_queue(finished: bool = False):
-        return store.clear_queue(finished_only=finished)
+    def clear_queue(finished: bool = False, body: QueueClear | None = None):
+        entries = (
+            [(e.id, e.created_at) for e in body.entries]
+            if body and body.entries is not None
+            else None
+        )
+        return store.clear_queue(finished_only=finished, entries=entries)
 
     app.include_router(download_sources_router(source_runtime))
 

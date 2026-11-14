@@ -3428,6 +3428,41 @@
         "title": "QualitySavedDTO",
         "type": "object"
       },
+      "QueueClear": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/QueueEntry"
+            },
+            "maxItems": 20000,
+            "nullable": true,
+            "title": "Entries",
+            "type": "array"
+          }
+        },
+        "title": "QueueClear",
+        "type": "object"
+      },
+      "QueueEntry": {
+        "properties": {
+          "created_at": {
+            "maxLength": 40,
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 200,
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "created_at"
+        ],
+        "title": "QueueEntry",
+        "type": "object"
+      },
       "RadioBatch": {
         "properties": {
           "id": {
@@ -10441,6 +10476,17 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueueClear",
+                "nullable": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
