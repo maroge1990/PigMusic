@@ -6,6 +6,10 @@ public struct PCMBlock: Sendable {
   public let sampleRate: Double
   public let channels: [[Float]]
   public var frameCount: Int { channels[0].count }
+  package init(sampleRate: Double, channels: [[Float]]) {
+    self.sampleRate = sampleRate
+    self.channels = channels
+  }
   public func audioBuffer() throws -> AVAudioPCMBuffer {
     guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2),
       let buffer = AVAudioPCMBuffer(

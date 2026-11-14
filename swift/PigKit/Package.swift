@@ -13,6 +13,7 @@ let package = Package(
     .library(name: "PigDownloads", targets: ["PigDownloads"]),
     .library(name: "PigPlayback", targets: ["PigPlayback"]),
     .library(name: "PigCompanion", targets: ["PigCompanion"]),
+    .library(name: "PigProbes", targets: ["PigProbes"]),
     .executable(name: "PigAudioProbe", targets: ["PigAudioProbe"]),
     .executable(name: "PigPlaybackHarness", targets: ["PigPlaybackHarness"]),
   ],
@@ -43,13 +44,17 @@ let package = Package(
     .target(name: "PigDownloads", dependencies: ["PigDomain"]),
     .target(name: "PigPlayback", dependencies: ["PigDomain"]),
     .target(name: "PigCompanion", dependencies: ["PigDomain"]),
-    .executableTarget(name: "PigAudioProbe", dependencies: ["PigPlayback"]),
+    // T2 probe tooling, kept out of the shipped PigPlayback module (#176).
+    .target(name: "PigProbes", dependencies: ["PigPlayback"]),
+    .executableTarget(name: "PigAudioProbe", dependencies: ["PigPlayback", "PigProbes"]),
     .executableTarget(
-      name: "PigPlaybackHarness", dependencies: ["PigAPI", "PigDomain", "PigSync", "PigPlayback"]),
+      name: "PigPlaybackHarness",
+      dependencies: ["PigAPI", "PigDomain", "PigSync", "PigPlayback", "PigProbes"]),
     .testTarget(
       name: "PigCoreTests",
       dependencies: [
         "PigDomain", "PigStore", "PigSync", "PigPlayback", "PigDownloads", "PigCompanion",
+        "PigProbes",
       ]),
     .testTarget(name: "PigAPITests", dependencies: ["PigAPI", "PigDomain", "PigStore", "PigSync"]),
   ]

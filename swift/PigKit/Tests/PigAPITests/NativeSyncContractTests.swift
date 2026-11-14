@@ -135,24 +135,38 @@ final class NativeSyncContractTests: XCTestCase {
     XCTAssertEqual(requestPage.items[0].status, "waiting_for_sources")
     let cleared = try await service.clearFinishedRequests()
     XCTAssertEqual(cleared, 0)  // Active requests are retained.
-    var personalPlaylist = try await service.createPlaylist(name: "Native edits")
-    personalPlaylist = try await service.addToPlaylist(id: personalPlaylist.id, track: tracks[0])
-    personalPlaylist = try await service.addToPlaylist(id: personalPlaylist.id, track: tracks[0])
+    // Every playlist edit goes through the outbox's mutation ledger (#176).
+    let edited = try await service.applyMutation(
+      OfflineMutation(action: "create", name: "Native edits"))
+    let editedId = try XCTUnwrap(edited.playlistId)
+    _ = try await service.applyMutation(
+      OfflineMutation(action: "append", playlistId: editedId, track: tracks[0]))
+    var receipt = try await service.applyMutation(
+      OfflineMutation(action: "append", playlistId: editedId, track: tracks[0]))
+    var personalPlaylist = try await service.playlist(id: editedId)
     XCTAssertEqual((personalPlaylist.entries ?? []).count, 2)
-    let oldRevision = try XCTUnwrap(personalPlaylist.revision)
-    personalPlaylist = try await service.editPlaylist(
-      id: personalPlaylist.id, revision: oldRevision, name: "Renamed", order: [1, 0])
+    let oldRevision = try XCTUnwrap(receipt.revision)
+    receipt = try await service.applyMutation(
+      OfflineMutation(action: "rename", playlistId: editedId, name: "Renamed", revision: oldRevision))
+    receipt = try await service.applyMutation(
+      OfflineMutation(
+        action: "reorder", playlistId: editedId, revision: try XCTUnwrap(receipt.revision),
+        order: [1, 0]))
+    personalPlaylist = try await service.playlist(id: editedId)
     XCTAssertEqual(personalPlaylist.name, "Renamed")
     do {
-      _ = try await service.editPlaylist(
-        id: personalPlaylist.id, revision: oldRevision, name: "Stale")
+      _ = try await service.applyMutation(
+        OfflineMutation(action: "rename", playlistId: editedId, name: "Stale", revision: oldRevision))
       XCTFail("Stale playlist writes must fail")
     } catch NativeFailure.changed {}
-    personalPlaylist = try await service.removePlaylistEntry(
-      id: personalPlaylist.id, revision: try XCTUnwrap(personalPlaylist.revision), position: 0)
+    receipt = try await service.applyMutation(
+      OfflineMutation(
+        action: "remove", playlistId: editedId, revision: try XCTUnwrap(receipt.revision),
+        position: 0))
+    personalPlaylist = try await service.playlist(id: editedId)
     XCTAssertEqual((personalPlaylist.entries ?? []).count, 1)
-    try await service.deletePlaylist(
-      id: personalPlaylist.id, revision: try XCTUnwrap(personalPlaylist.revision))
+    _ = try await service.applyMutation(
+      OfflineMutation(action: "delete", playlistId: editedId, revision: try XCTUnwrap(receipt.revision)))
     let offlineCreate = OfflineMutation(action: "create", name: "Native offline ledger")
     let createdReceipt = try await service.applyMutation(offlineCreate)
     let replayedReceipt = try await service.applyMutation(offlineCreate)
@@ -199,8 +213,11 @@ final class NativeSyncContractTests: XCTestCase {
     XCTAssertEqual(preview.saved, 1)
     let imported = try await service.importApple(xml)
     XCTAssertEqual(imported.playlists, 1)
-    let settings = try await service.savePreferences(
-      AccountPreferences(appearance: "dark", defaultTab: "albums"))
+    _ = try await service.applyMutation(
+      OfflineMutation(
+        action: "preferences",
+        preferences: AccountPreferences(appearance: "dark", defaultTab: "albums")))
+    let settings = try await service.preferences()
     XCTAssertEqual(settings.appearance, "dark")
     let devices = try await service.sessions()
     XCTAssertFalse(devices.isEmpty)

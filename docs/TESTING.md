@@ -49,7 +49,7 @@ The commands, in order of cost, are in [AGENTS.md](../AGENTS.md#test-cheapest-fi
 ## T2: Real media, offline
 
 - **FFmpeg fixture decoding:** the backend suite decodes real disposable audio when FFmpeg is installed (for example `tests/test_downloader.py`).
-- **Apple codecs and transitions:** `scripts/probe_native_audio.py` renders generated tones through a built `PigAudioProbe` (`PigAudioProbe [--bounded] first-audio second-audio output.wav crossfade-seconds`). It never reads household music or providers.
+- **Apple codecs and transitions:** `scripts/probe_native_audio.py` renders generated tones through a built `PigAudioProbe` (its transition types live in the `PigProbes` target, outside the shipped `PigPlayback` module; `PigAudioProbe [--bounded] first-audio second-audio output.wav crossfade-seconds`). It never reads household music or providers.
 - **Phone playback code:** `PigPlaybackHarness` (see [Live playback diagnostics](#live-playback-diagnostics) for what it does) and `scripts.probe_playback` against a local server with a disposable library and a test member. The probe accepts only an HTTPS address, so the local server must be reached over HTTPS.
 - **Download sources:** the isolated [download-source acceptance harness](OPERATIONS.md#download-source-acceptance) verifies real transfers without household appdata or NAS access.
 

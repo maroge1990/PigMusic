@@ -6,16 +6,16 @@ public enum AudioPipelineFailure: Error, Sendable {
 }
 
 /// Owned by the transition actor. Reads compressed files incrementally; never loads a song into RAM.
-final class PCMFileDecoder {
+package final class PCMFileDecoder {
   let file: AVAudioFile
   let converter: AVAudioConverter
   let input: AVAudioPCMBuffer
   let format: AVAudioFormat
-  let expectedFrames: Int64
+  package let expectedFrames: Int64
   private var delivered: Int64 = 0
   private var ended = false
 
-  init(url: URL, format: AVAudioFormat, startSeconds: Double = 0) throws {
+  package init(url: URL, format: AVAudioFormat, startSeconds: Double = 0) throws {
     guard url.isFileURL else { throw AudioPipelineFailure.invalidConfiguration }
     file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
     guard file.length > 0 else { throw AudioPipelineFailure.emptyAudio }
@@ -47,7 +47,7 @@ final class PCMFileDecoder {
       Int64((position * format.sampleRate / file.processingFormat.sampleRate).rounded()))
   }
 
-  func read(maxFrames: Int) throws -> AVAudioPCMBuffer? {
+  package func read(maxFrames: Int) throws -> AVAudioPCMBuffer? {
     guard !ended, delivered < expectedFrames else { return nil }
     let capacity = min(maxFrames, Int(expectedFrames - delivered))
     guard capacity > 0,

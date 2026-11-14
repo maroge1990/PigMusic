@@ -2,6 +2,7 @@ import AVFoundation
 import Foundation
 import PigDomain
 import PigPlayback
+import PigProbes
 import Testing
 
 private func audioDirectory() throws -> URL {

@@ -4,6 +4,7 @@ import PigDomain
 import Testing
 
 @testable import PigPlayback
+import PigProbes
 
 private func marker(_ index: Int, at frame: Int64) -> QueueAudioMarker {
   QueueAudioMarker(index: index, switchFrame: frame, originFrame: frame, durationFrames: 48000)

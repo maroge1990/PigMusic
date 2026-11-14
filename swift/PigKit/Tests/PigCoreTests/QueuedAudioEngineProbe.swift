@@ -1,8 +1,10 @@
 import AVFoundation
 import Foundation
 
+@testable import PigPlayback
+
 /// Silent offline capture of the same multi-occurrence decoder used by the realtime candidate.
-public enum QueuedAudioEngineProbe {
+enum QueuedAudioEngineProbe {
   public struct Result: Sendable {
     public let frames: Int64
     public let peakScheduledFrames: Int64

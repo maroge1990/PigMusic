@@ -3,6 +3,7 @@ import Foundation
 import Testing
 
 @testable import PigPlayback
+import PigProbes
 
 private final class MediaResponses: @unchecked Sendable {
   static let shared = MediaResponses()
