@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 import httpx
 from PIL import Image
 
+from .keyed_locks import KeyedLocks
 from .artwork import quoted
 from .catalogue import settled
 from .deezer_art import deezer_image
@@ -23,7 +24,7 @@ class Portraits:
     def __init__(self, store, catalogue, artwork, fanart=None):
         self.store, self.catalogue, self.artwork = store, catalogue, artwork
         self.fanart = fanart or Fanart(store)
-        self.locks = {}
+        self.locks = KeyedLocks()
         self.index_lock = asyncio.Lock()
         self.slots = asyncio.Semaphore(3)
 
@@ -78,7 +79,7 @@ class Portraits:
         )
         if await self.artwork.waiting(missing):
             return None
-        async with self.locks.setdefault(key, asyncio.Lock()), self.slots:
+        async with self.locks.hold(key), self.slots:
             if target.exists():
                 return target
             if await self.artwork.waiting(missing):

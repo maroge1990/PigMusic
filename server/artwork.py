@@ -11,6 +11,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 import httpx
 from PIL import Image
 
+from .keyed_locks import KeyedLocks
 from .catalogue import credit, mbid, settled
 from .images import save_image
 from .deezer_art import DeezerArt, DeezerRefused, deezer_image
@@ -68,7 +69,7 @@ def artwork_year(album):
 class Artwork:
     def __init__(self, store, catalogue):
         self.store, self.catalogue = store, catalogue
-        self.locks = {}
+        self.locks = KeyedLocks()
         self.slots = asyncio.Semaphore(3)
         self.deezer = DeezerArt(catalogue)
 
@@ -108,8 +109,7 @@ class Artwork:
         key = "missing-artwork:v6:" + album["id"]
         if await self.waiting(key):
             return None
-        lock = self.locks.setdefault(album["id"], asyncio.Lock())
-        async with lock:
+        async with self.locks.hold(album["id"]):
             if target.exists():
                 return target
             if await self.waiting(key):
@@ -220,8 +220,7 @@ class Artwork:
         target = self.store.cover_dir / (identifier(key) + ".jpg")
         if target.exists():
             return target
-        lock = self.locks.setdefault(key, asyncio.Lock())
-        async with lock:
+        async with self.locks.hold(key):
             if target.exists():
                 return target
             if await self.waiting(key):

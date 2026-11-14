@@ -1,6 +1,7 @@
 """Display-only, bounded Fanart artist backdrops."""
 
 import asyncio, hashlib
+from .keyed_locks import KeyedLocks
 from .images import save_image
 from .library import identifier
 from .catalogue import mbid
@@ -11,7 +12,7 @@ from .fanart import Fanart, best, download
 class Backgrounds:
     def __init__(self, store, artwork, fanart=None):
         self.store, self.artwork = store, artwork
-        self.locks = {}
+        self.locks = KeyedLocks()
         self.slots = asyncio.Semaphore(3)
         self.fanart = fanart or Fanart(store)
 
@@ -25,7 +26,7 @@ class Backgrounds:
         key = target.stem
         if target.exists():
             return target
-        async with self.locks.setdefault(key, asyncio.Lock()), self.slots:
+        async with self.locks.hold(key), self.slots:
             if target.exists():
                 return target
             if await self.artwork.waiting(key):

@@ -1,6 +1,7 @@
 """Display-only Fanart artist wordmarks, kept as transparent PNGs."""
 
 import asyncio, hashlib, time
+from .keyed_locks import KeyedLocks
 from .images import save_image
 from .library import identifier
 from .catalogue import mbid, settled
@@ -11,7 +12,7 @@ from .fanart import Fanart, best, download
 class Logos:
     def __init__(self, store, fanart=None):
         self.store = store
-        self.locks = {}
+        self.locks = KeyedLocks()
         self.slots = asyncio.Semaphore(3)
         self.fanart = fanart or Fanart(store)
 
@@ -25,7 +26,7 @@ class Logos:
         if target.exists():
             return target
         key = "missing-" + target.stem
-        async with self.locks.setdefault(target.stem, asyncio.Lock()), self.slots:
+        async with self.locks.hold(target.stem), self.slots:
             if target.exists():
                 return target
             missing = await asyncio.to_thread(self.store.read_document, key)

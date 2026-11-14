@@ -4,6 +4,7 @@ import asyncio, hashlib, json, time
 import httpx, logging
 
 logger = logging.getLogger(__name__)
+from .keyed_locks import KeyedLocks
 from .catalogue import (
     RENEW,
     background_metadata,
@@ -37,7 +38,7 @@ class Popularity:
         self.store = store
         self.catalogue = catalogue
         self.lock = asyncio.Lock()
-        self.artist_locks = {}
+        self.artist_locks = KeyedLocks()
         self.completing = {}
         self.last_request = 0.0
 
@@ -106,7 +107,7 @@ class Popularity:
             return found
         # One lock per artist for both kinds of answer, so a songs-only and a
         # full request never fetch the same recordings at once (#44).
-        async with self.artist_locks.setdefault(full_key, asyncio.Lock()):
+        async with self.artist_locks.hold(full_key):
             found = await known()
             if found is not None:
                 return found

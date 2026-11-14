@@ -5,13 +5,14 @@ import hashlib
 import time
 from urllib.parse import urlsplit
 
+from .keyed_locks import KeyedLocks
 from .catalogue import settled
 
 
 class Fanart:
     def __init__(self, store):
         self.store = store
-        self.locks = {}
+        self.locks = KeyedLocks()
 
     async def get(self, client, artist_id, token):
         return await self.read(client, "music/" + artist_id, token)
@@ -29,7 +30,7 @@ class Fanart:
             + ":"
             + hashlib.sha256(token.encode()).hexdigest()[:12]
         )
-        async with self.locks.setdefault(key, asyncio.Lock()):
+        async with self.locks.hold(key):
             cached = await asyncio.to_thread(self.store.read_document, key)
             if cached.get("expires", 0) > time.time():
                 return cached["data"]

@@ -7,6 +7,7 @@ import re
 import time
 from datetime import date
 import httpx
+from .keyed_locks import KeyedLocks
 from .artist_identity import Ambiguous, cached_identities, resolve_artist
 from .artwork import quoted
 from .catalogue import background_metadata, mbid, credit, settled, warming
@@ -125,7 +126,7 @@ def renew_margin():
 class HomeDiscovery:
     def __init__(self, store, catalogue):
         self.store, self.catalogue = store, catalogue
-        self.locks = {}
+        self.locks = KeyedLocks()
         self.building = {}
 
     async def feed(self, client, path, **params):
@@ -134,7 +135,7 @@ class HomeDiscovery:
         cached = await asyncio.to_thread(self.store.read_document, key)
         if cached and cached.get("until", 0) - renew_margin() > time.time():
             return cached["data"], cached.get("failed", False)
-        async with self.locks.setdefault(key, asyncio.Lock()):
+        async with self.locks.hold(key):
             cached = await asyncio.to_thread(self.store.read_document, key)
             if cached and cached.get("until", 0) - renew_margin() > time.time():
                 return cached["data"], cached.get("failed", False)
