@@ -20,6 +20,8 @@ import Observation
   @ObservationIgnored private var actions: [String: @MainActor () async -> Bool] = [:]
   @ObservationIgnored private var timers: [String: Task<Void, Never>] = [:]
   @ObservationIgnored private var chain: Task<Void, Never>?
+  /// Rises when the account ends: actions queued before it are dropped.
+  @ObservationIgnored private var era = 0
   @ObservationIgnored private let wait: Duration
   @ObservationIgnored private let linger: Duration
   /// `linger`: how long a sent thing stays hidden, so it doesn't flash back
@@ -32,6 +34,11 @@ import Observation
   /// Whether a screen should leave this thing out: waiting or being sent.
   public func hides(_ id: String) -> Bool {
     sending.contains(id) || actions[id] != nil
+  }
+
+  /// Whether anything whose id starts with `prefix` is waiting or being sent.
+  public func pending(prefix: String) -> Bool {
+    items.contains { $0.id.hasPrefix(prefix) } || sending.contains { $0.hasPrefix(prefix) }
   }
 
   /// Offers Undo for `label`, then runs `commit`, which says whether the
@@ -62,6 +69,16 @@ import Observation
     for item in items { send(item.id) }
   }
 
+  /// Drops every action not yet started, waiting or queued behind a send:
+  /// the account that made them has ended (Codex, batch 9).
+  public func discardAll() {
+    era += 1
+    for timer in timers.values { timer.cancel() }
+    timers = [:]
+    actions = [:]
+    items = []
+  }
+
   /// Sends everything waiting and returns once all of it has been sent.
   public func sendAllAndWait() async {
     sendAll()
@@ -75,8 +92,13 @@ import Observation
     sending.insert(id)
     let previous = chain
     let linger = linger
+    let era = era
     chain = Task { [weak self] in
       await previous?.value
+      guard self?.era == era else {
+        self?.sending.remove(id)
+        return
+      }
       guard await action() else {
         self?.sending.remove(id)
         return

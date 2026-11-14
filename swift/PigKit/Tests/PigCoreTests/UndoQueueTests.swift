@@ -61,3 +61,44 @@ import Testing
   for _ in 0..<200 where queue.hides("kept") { try await Task.sleep(for: .milliseconds(10)) }
   #expect(!queue.hides("kept"))
 }
+
+@MainActor @Test func anEndedAccountsActionsAreDroppedEvenOnesQueuedBehindASend() async throws {
+  // Codex (batch 9, high): revocation flushed actions into the next account.
+  let sent = Sent()
+  let queue = UndoQueue(wait: .seconds(600), linger: .zero)
+  let gate = AsyncStream<Void>.makeStream()
+  var started = false
+  queue.schedule("slow", label: "slow") {
+    started = true
+    for await _ in gate.stream { break }
+    sent.ids.append("slow")
+    return true
+  }
+  queue.schedule("behind", label: "behind") {
+    sent.ids.append("behind")
+    return true
+  }
+  queue.schedule("waiting", label: "waiting") {
+    sent.ids.append("waiting")
+    return true
+  }
+  queue.sendAll()  // "slow" starts; "behind" and "waiting" queue behind it.
+  for _ in 0..<200 where !started { try await Task.sleep(for: .milliseconds(5)) }
+  queue.discardAll()
+  gate.continuation.yield()
+  gate.continuation.finish()
+  await queue.sendAllAndWait()
+  #expect(sent.ids == ["slow"])
+  #expect(queue.items.isEmpty && !queue.hides("behind") && !queue.hides("waiting"))
+}
+
+@Test func queuedRemovalsFromOnePlaylistVersionShiftOnlyForEachOther() {
+  // Codex (batch 9, high): entry IDs are positions, so a removal must keep
+  // the position and revision it was made on. From [A, B, C] at revision 4,
+  // remove A (0) then B (1): B is sent as position 0 at revision 5.
+  #expect(PlaylistRemoval.rebased(position: 0, revision: 4, after: []) == .init(0, 4))
+  #expect(PlaylistRemoval.rebased(position: 1, revision: 4, after: [0]) == .init(0, 5))
+  // Removed in the other order: C's position is untouched by a later song.
+  #expect(PlaylistRemoval.rebased(position: 0, revision: 4, after: [2]) == .init(0, 5))
+  #expect(PlaylistRemoval.rebased(position: 2, revision: 4, after: [0, 1]) == .init(0, 6))
+}

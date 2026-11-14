@@ -1290,14 +1290,23 @@ enum PlayOrigin: Hashable {
     await undo.sendAllAndWait()
     if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
   }
-  /// Removes a playlist song once its Undo has run out (#183). Its position
-  /// and the playlist's revision are read when it is sent, so an earlier
-  /// removal still waiting doesn't shift it.
-  func removeLater(_ entry: PlaylistEntry, from playlist: Playlist) {
+  /// Removes a playlist song once its Undo has run out (#183), at the
+  /// position and revision it was removed from (entry IDs are positions):
+  /// shifted only by this iPhone's earlier removals from that revision, so
+  /// any other change makes the server refuse it for review (Codex).
+  func removeLater(at position: Int, from playlist: Playlist) {
+    guard let entries = playlist.entries, entries.indices.contains(position) else { return }
+    let entry = entries[position]
     let playlistId = playlist.id
+    let revision = playlist.revision
     let favourites = playlist.favourites == true
-    undo.schedule(Self.undoKey(entry), label: "Removed from " + playlist.name) { [weak self] in
-      guard let self else { return false }
+    let stamp = account.generation
+    undo.schedule(
+      Self.undoKey(playlist: playlistId, revision: revision, position: position),
+      label: "Removed from " + playlist.name
+    ) { [weak self] in
+      // Only for the account that removed it.
+      guard let self, account.isCurrent(stamp) else { return false }
       do {
         // Favourites are removed by unfavouriting that exact song; the server
         // rejects a positional removal, which would block the edits behind it.
@@ -1306,14 +1315,14 @@ enum PlayOrigin: Hashable {
             OfflineMutation(action: "favourite", track: entry.entryTrack, favourite: false))
           return true
         }
-        let current = try await cachedCatalogue(
-          key: "playlist:" + playlistId,
-          conditional: { try await $0.playlist(id: playlistId, etag: $1) })
-        guard let index = current.entries?.firstIndex(where: { $0.entryId == entry.entryId })
-        else { return true }  // Already gone.
+        let version = playlistId + "@" + String(revision)
+        let sent = PlaylistRemoval.rebased(
+          position: position, revision: revision, after: sentRemovals[version] ?? [])
         try await saveEdit(
           OfflineMutation(
-            action: "remove", playlistId: playlistId, revision: current.revision, position: index))
+            action: "remove", playlistId: playlistId, revision: sent.revision,
+            position: sent.position))
+        sentRemovals[version, default: []].append(position)
         return true
       } catch {
         message = error.userMessage + " Refresh the playlist before removing the song again."
@@ -1321,15 +1330,21 @@ enum PlayOrigin: Hashable {
       }
     }
   }
-  static func undoKey(_ entry: PlaylistEntry) -> String { "playlist-entry:" + entry.entryId }
+  /// Positions removed from each playlist version by this iPhone, in order.
+  @ObservationIgnored private var sentRemovals: [String: [Int]] = [:]
+  static func undoKey(playlist: String, revision: Int, position: Int) -> String {
+    "playlist-entry:\(playlist)@\(revision)#\(position)"
+  }
   static func undoKey(mix: String, song: String) -> String { "mix-song:" + mix + ":" + song }
   static func undoKey(download id: String) -> String { "download:" + id }
   static func undoKey(watchTransfer id: String) -> String { "watch-transfer:" + id }
   /// Hides a mix song once its Undo has run out (#183).
   func hideLater(_ track: Track, from mix: PersonalMix) {
     let key = Self.undoKey(mix: mix.id, song: track.id)
+    let stamp = account.generation
     undo.schedule(key, label: "Hidden from " + mix.title) { [weak self] in
-      guard let self else { return false }
+      // Only for the account that hid it.
+      guard let self, account.isCurrent(stamp) else { return false }
       do {
         try await performPersonal { try await $0.hideMixSong(track.id) }
         hiddenMixSongs.insert(key)
@@ -1364,8 +1379,10 @@ enum PlayOrigin: Hashable {
   private static let parkedSessions = ParkedSessions(
     store: TokenVault(service: "au.com.pig.music.parked-sign-out", account: "sessions"))
   private func detach() {
-    // An account that ended can no longer send them; they fail and show again.
-    undo.sendAll()
+    // The ended account's waiting actions are dropped, never sent with the
+    // next account's sign-in (Codex).
+    undo.discardAll()
+    sentRemovals = [:]
     hiddenMixSongs = []
     watch?.disconnect()
     // Stale for every operation still running; live updates stop.

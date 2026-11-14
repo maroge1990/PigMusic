@@ -163,14 +163,21 @@ struct PlaylistView: View {
     _playlist = State(initialValue: playlist)
     _name = State(initialValue: playlist.name)
   }
-  /// Without songs waiting for their removal's Undo (#183).
-  private var entries: [PlaylistEntry] {
-    (playlist.entries ?? []).filter { !model.undo.hides(AppModel.undoKey($0)) }
+  /// With each song's position in the playlist, without songs waiting for
+  /// their removal's Undo (#183).
+  private var shown: [(position: Int, entry: PlaylistEntry)] {
+    (playlist.entries ?? []).enumerated().filter {
+      !model.undo.hides(
+        AppModel.undoKey(
+          playlist: playlist.id, revision: playlist.revision, position: $0.offset))
+    }.map { ($0.offset, $0.element) }
   }
+  private var entries: [PlaylistEntry] { shown.map(\.entry) }
+  /// A removal from this playlist is waiting or being sent: the page keeps
+  /// the version it was made on until all of them are sent, so a waiting row
+  /// can't come back with a reload.
+  private var removing: Bool { model.undo.pending(prefix: "playlist-entry:" + playlist.id + "@") }
   private var songs: [Track] { entries.map(\.playbackTrack) }
-  /// A removal is waiting: positions on screen differ from the server's, so
-  /// reordering and renaming wait for it.
-  private var removalWaiting: Bool { entries.count != (playlist.entries ?? []).count }
   /// Songs this library lacks: household files are added, the rest requested
   /// (the server ignores repeat requests).
   private var missing: [PlaylistEntry] { entries.filter { $0.savedTrack == nil } }
@@ -214,13 +221,14 @@ struct PlaylistView: View {
         }
       }.listRowSeparator(.hidden).listRowBackground(Color.clear)
       Section {
-        ForEach(Array(entries.enumerated()), id: \.element.entryId) {
-          index, entry in
-          SongRow(model: model, track: entry.playbackTrack) { model.play(songs, at: index) }
+        ForEach(Array(shown.enumerated()), id: \.element.entry.entryId) { index, row in
+          SongRow(model: model, track: row.entry.playbackTrack) { model.play(songs, at: index) }
             .swipeActions {
               // At once, with Undo (D-79): sent when the Undo runs out.
-              Button("Remove", role: .destructive) { model.removeLater(entry, from: playlist) }
-                .disabled(locked)
+              Button("Remove", role: .destructive) {
+                model.removeLater(at: row.position, from: playlist)
+              }
+              .disabled(locked)
             }
         }
         .onMove { from, to in
@@ -229,7 +237,7 @@ struct PlaylistView: View {
           Task { await edit(order: order) }
         }
         // Favourites keep the order they were favourited in; the server has no reorder for them.
-        .moveDisabled(locked || removalWaiting || playlist.favourites == true)
+        .moveDisabled(locked || removing || playlist.favourites == true)
       }
       if playlist.favourites != true {
         // The album pages' settings block. A List (not their ScrollView) keeps
@@ -253,11 +261,12 @@ struct PlaylistView: View {
       .toolbar {
         if playlist.favourites != true { EditButton() }
         Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }.disabled(
-          loading)
+          loading || removing)
       }
       .task { await load() }
       // A sync changed the library: show the playlist as the server now has it.
-      .onChange(of: model.libraryRevision) { Task { await load() } }
+      .onChange(of: model.libraryRevision) { if !removing { Task { await load() } } }
+      .onChange(of: removing) { _, now in if !now { Task { await load() } } }
       .onChange(of: reloadAfterEdit) { _, reload in
         guard reload else { return }
         reloadAfterEdit = false
