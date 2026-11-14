@@ -1795,7 +1795,7 @@ class Store:
     def queue(self):
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT id,payload,status,created_at,updated_at FROM queue ORDER BY created_at DESC,id"
+                "SELECT id,payload,status,created_at,updated_at,incarnation FROM queue ORDER BY created_at DESC,id"
             ).fetchall()
         return {
             "library_revision": self.library_revision,
@@ -1807,6 +1807,8 @@ class Store:
                     "status": r[2],
                     "created_at": r[3],
                     "updated_at": r[4],
+                    # Names this very entry for Cancel all (D-79, #183).
+                    "incarnation": r[5],
                 }
                 for r in rows
             ],
@@ -1815,9 +1817,9 @@ class Store:
     def clear_queue(self, finished_only=False, entries=None):
         """Clear finished entries (the one Clear everyone has), or with
         `finished_only=False` cancel and remove everything, or only
-        `entries`: the (id, created_at) pairs the owner saw when pressing
-        Cancel all, so a request submitted during its Undo time survives
-        (D-79, #183).
+        `entries`: the (id, incarnation) pairs the owner saw when pressing
+        Cancel all, so a request submitted during its Undo time survives,
+        even one deleted and submitted again under the same id (D-79, #183).
 
         Removing an active claim invalidates its token; it cannot publish
         into a newly submitted request with the same deterministic ID.
@@ -1830,8 +1832,8 @@ class Store:
                 )
             elif entries is not None:
                 conn.executemany(
-                    "DELETE FROM queue WHERE id=? AND created_at=?",
-                    [(identity, created) for identity, created in entries],
+                    "DELETE FROM queue WHERE id=? AND incarnation=?",
+                    [(identity, incarnation) for identity, incarnation in entries],
                 )
             else:
                 conn.execute("DELETE FROM queue")

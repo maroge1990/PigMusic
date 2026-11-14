@@ -156,8 +156,10 @@ def test_a_locked_operation_never_decides_on_a_library_behind_a_download(
 
 
 def test_cancel_all_cancels_only_what_was_on_screen(tmp_path):
-    """Codex, #183 round 1 (high): Cancel all is sent after its Undo time;
-    a request submitted meanwhile must survive it."""
+    """Codex, #183 round 1 (high) and its confirmation: Cancel all is sent
+    after its Undo time; a request submitted meanwhile must survive it, also
+    one deleted and submitted again within the same second (same id, same
+    created_at)."""
     from fastapi.testclient import TestClient
 
     from server.app import create_app
@@ -180,28 +182,85 @@ def test_cancel_all_cancels_only_what_was_on_screen(tmp_path):
     store = app.state.store
     store.save_download_settings({"enabled": True, "sources": ["freemp3cloud"]})
     store.submit_catalogue([song(1), song(2)])
-    shown = [
-        {"id": i["id"], "created_at": i["created_at"]} for i in store.queue()["items"]
-    ]
+    items = store.queue()["items"]
+    assert all(i["incarnation"] for i in items)
+    shown = [{"id": i["id"], "incarnation": i["incarnation"]} for i in items]
+    by_title = {i["title"]: i for i in items}
     store.submit_catalogue([song(3)])  # Submitted during the Undo time.
+    # Song 2 is cleared and asked for again at once: the same id, and almost
+    # surely the same created_at, but a new entry.
+    with store.connect() as conn:
+        conn.execute("DELETE FROM queue WHERE id=?", (by_title["Song 2"]["id"],))
+    store.submit_catalogue([song(2)])
+    again = {i["title"]: i for i in store.queue()["items"]}["Song 2"]
+    assert again["id"] == by_title["Song 2"]["id"]
+    assert again["incarnation"] != by_title["Song 2"]["incarnation"]
+    # Song 1 fails and is asked for again: its row is reused, but it is a new
+    # request too.
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE queue SET status='failed' WHERE id=?", (by_title["Song 1"]["id"],)
+        )
+    store.submit_catalogue([song(1)])
+    revived = {i["title"]: i for i in store.queue()["items"]}["Song 1"]
+    assert revived["status"] == "waiting_for_sources"
+    assert revived["incarnation"] != by_title["Song 1"]["incarnation"]
     with TestClient(app) as client:
         left = client.post("/api/v1/admin/queue/clear", json={"entries": shown})
         assert left.status_code == 200, left.text
-        titles = [i["title"] for i in left.json()["items"]]
-        assert titles == ["Song 3"]
-        # An entry that is no longer the one shown (deleted and submitted
-        # again) is left alone too.
-        assert (
-            client.post(
-                "/api/v1/admin/queue/clear",
-                json={
-                    "entries": [
-                        {
-                            "id": left.json()["items"][0]["id"],
-                            "created_at": "1999-01-01 00:00:00",
-                        }
-                    ]
-                },
-            ).json()["items"][0]["title"]
-            == "Song 3"
-        )
+        titles = sorted(i["title"] for i in left.json()["items"])
+        assert titles == ["Song 1", "Song 2", "Song 3"]
+
+
+def test_the_release_verifier_accepts_migration_13_on_a_queue(tmp_path, monkeypatch):
+    """Migration 13 (#183) adds only a fresh incarnation to each queue entry;
+    the stopped-state verifier the release runs accepts exactly that."""
+    import json
+
+    from scripts.verify_state_migration import main
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "library-snapshot.json").write_text(json.dumps({"tracks": []}))
+    store = Store(source)
+    store.save_download_settings({"enabled": True, "sources": ["freemp3cloud"]})
+    store.submit_catalogue(
+        [
+            {
+                "id": f"track-{n}",
+                "artist": "Artist",
+                "album_artist": "Artist",
+                "album": "Album",
+                "title": f"Song {n}",
+                "year": 2020,
+                "duration": 200,
+                "disc_number": 1,
+                "track_number": n,
+                "status": "missing",
+            }
+            for n in (1, 2)
+        ]
+    )
+    # The database as release 12 left it.
+    with store.connect() as conn:
+        conn.execute("DROP TRIGGER queue_incarnation")
+        conn.execute("DROP TRIGGER queue_revived")
+        conn.execute("ALTER TABLE queue DROP COLUMN incarnation")
+        conn.execute("DELETE FROM schema_migrations WHERE version=13")
+    expected = tmp_path / "expected.json"
+    expected.write_text(json.dumps({"tracks": 0, "album_ids": []}))
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "verify",
+            "--source",
+            str(source),
+            "--destination",
+            str(tmp_path / "copy"),
+            "--expected",
+            str(expected),
+        ],
+    )
+    main()
+    copied = Store(tmp_path / "copy").queue()["items"]
+    assert len(copied) == 2 and len({i["incarnation"] for i in copied}) == 2

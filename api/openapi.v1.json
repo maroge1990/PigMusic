@@ -3445,20 +3445,20 @@
       },
       "QueueEntry": {
         "properties": {
-          "created_at": {
-            "maxLength": 40,
-            "title": "Created At",
-            "type": "string"
-          },
           "id": {
             "maxLength": 200,
             "title": "Id",
+            "type": "string"
+          },
+          "incarnation": {
+            "maxLength": 64,
+            "title": "Incarnation",
             "type": "string"
           }
         },
         "required": [
           "id",
-          "created_at"
+          "incarnation"
         ],
         "title": "QueueEntry",
         "type": "object"

@@ -705,7 +705,7 @@ export function AdminTools({ route }: { route: Route }) {
       const before = queue;
       const entries = queue.items.map((i) => ({
         id: i.id,
-        created_at: i.created_at ?? "",
+        incarnation: i.incarnation ?? "",
       }));
       const body = JSON.stringify({ entries });
       const pending = defer(CLEAR_QUEUE, (keepalive) =>
@@ -728,7 +728,7 @@ export function AdminTools({ route }: { route: Route }) {
           setQueue(before);
         },
         "Downloads put back in the queue.",
-        pending.done,
+        pending.started,
       );
       pending.done.then(
         (sent) => {

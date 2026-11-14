@@ -13,7 +13,8 @@ type QueueItem = {
   error?: string;
   received_bytes?: number;
   total_bytes?: number;
-  created_at?: string;
+  /** Names this very entry for Cancel all (#183). */
+  incarnation?: string;
 };
 
 export type QueueAction = "retry" | "cancel";

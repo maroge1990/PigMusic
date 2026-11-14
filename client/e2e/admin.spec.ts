@@ -1120,10 +1120,7 @@ test("Cancel all spares a request submitted during its Undo time", async ({
   await page.clock.install();
   const shown = {
     ...queue,
-    items: queue.items.map((i) => ({
-      ...i,
-      created_at: "2026-11-14 01:00:00",
-    })),
+    items: queue.items.map((i) => ({ ...i, incarnation: `inc-${i.id}` })),
   };
   let current = shown;
   const bodies: unknown[] = [];
@@ -1152,14 +1149,14 @@ test("Cancel all spares a request submitted during its Undo time", async ({
         title: "Four",
         artist: "A",
         album: "X",
-        created_at: "2026-11-14 01:00:05",
+        incarnation: "inc-q4",
       },
     ],
   };
   await page.clock.runFor(11_000);
   await expect.poll(() => bodies.length).toBe(1);
   expect(bodies[0]).toEqual({
-    entries: shown.items.map((i) => ({ id: i.id, created_at: i.created_at })),
+    entries: shown.items.map((i) => ({ id: i.id, incarnation: i.incarnation })),
   });
   // Its Undo left once it was sent.
   await expect(

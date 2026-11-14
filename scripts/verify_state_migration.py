@@ -6,6 +6,7 @@ rows must remain identical except for edition anchors and validated additive dis
 
 import argparse
 import json
+import re
 import shutil
 import sqlite3
 from pathlib import Path
@@ -186,6 +187,7 @@ def main():
         10,
         11,
         12,
+        13,
     ], "Unexpected migration versions"
     assert all(
         isinstance(r[1], str) and r[1] for r in ledger
@@ -226,6 +228,21 @@ def main():
             row[2] is None for row in after["playlists"]
         ), "Unexpected playlist ownership"
         after["playlists"] = [row[:2] for row in after["playlists"]]
+    # Migration 13 gives each queue entry a random incarnation (#183): the
+    # only change to an entry, a fresh 32-hex token in a new last column.
+    if (
+        before.get("queue")
+        and after.get("queue")
+        and len(after["queue"][0]) == len(before["queue"][0]) + 1
+    ):
+        assert all(
+            isinstance(row[-1], str) and re.fullmatch(r"[0-9a-f]{32}", row[-1])
+            for row in after["queue"]
+        ), "Queue entries without an incarnation"
+        assert len({row[-1] for row in after["queue"]}) == len(
+            after["queue"]
+        ), "Queue incarnations repeat"
+        after["queue"] = [row[:-1] for row in after["queue"]]
     assert before == after, "Existing durable preferences, queue or membership changed"
     if args.bootstrap_owner_fixture:
         from server.auth import Auth

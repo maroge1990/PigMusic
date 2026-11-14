@@ -1098,7 +1098,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
 
     class QueueEntry(BaseModel):
         id: str = Field(max_length=200)
-        created_at: str = Field(max_length=40)
+        incarnation: str = Field(max_length=64)
 
     class QueueClear(BaseModel):
         # The entries shown when Cancel all was pressed (D-79, #183); without
@@ -1108,7 +1108,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     @app.post("/api/v1/admin/queue/clear")
     def clear_queue(finished: bool = False, body: QueueClear | None = None):
         entries = (
-            [(e.id, e.created_at) for e in body.entries]
+            [(e.id, e.incarnation) for e in body.entries]
             if body and body.entries is not None
             else None
         )
