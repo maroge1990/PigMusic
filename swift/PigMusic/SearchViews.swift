@@ -330,7 +330,7 @@ private struct FoundResultsView: View {
           }
         }
         if search.fromThisPhone {
-          Text("The server can't be reached, so this is music on this phone.")
+          Text("The server can't be reached, so this is music on this iPhone.")
             .font(PigType.footnote).foregroundStyle(.secondary)
         }
         if kind == .top || kind == .songs || kind == .albums, let state = search.online?.state,
