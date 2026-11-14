@@ -814,14 +814,6 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     class PlaylistName(BaseModel):
         name: str = Field(min_length=1, max_length=100)
 
-    class SongReference(BaseModel):
-        playlist_id: str | None = None
-        position: int | None = Field(default=None, ge=0)
-        saved_id: str | None = None
-        release_id: str | None = None
-        track_id: str | None = None
-        favourite: bool | None = None
-
     async def resolve_song(body):
         if body.saved_id:
             track, _ = saved_track(store, body.saved_id)

@@ -243,10 +243,6 @@ def catalogue_router(
     async def release_data(release_id):
         return await metadata("release/" + valid_id(release_id), inc=RELEASE_INC)
 
-    class CatalogueRequest(BaseModel):
-        track_ids: list[str] | None = Field(default=None, max_length=500)
-        quality_profile: str | None = None
-
     class AlbumQuality(BaseModel):
         profile: str | None = None
 

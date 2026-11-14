@@ -1455,9 +1455,6 @@ class Store:
                 (key, json.dumps(value)),
             )
 
-    def library_for(self, user_id):
-        return self.user_libraries.summary(user_id)
-
     def summary(self):
         with self.connect() as conn:
             playlist_count = conn.execute("SELECT COUNT(*) FROM playlists").fetchone()[
