@@ -189,3 +189,76 @@ def test_keep_playing_is_a_preference_on_by_default(tmp_path, monkeypatch):
         # An older app that doesn't know the setting leaves it as it was.
         http.put("/api/v1/preferences", json={"appearance": "light"})
         assert http.get("/api/v1/preferences").json()["keep_playing"] is False
+
+
+# --- #203: Rewind ---------------------------------------------------------
+
+
+def test_rewind_counts_this_weeks_listening_in_the_households_time_zone(
+    tmp_path, monkeypatch
+):
+    app, owner = protected(tmp_path, monkeypatch)
+    store = app.state.store
+    user, token = member(app, owner)
+    owned = [
+        track(1, id="a1", artist="Alpha", album="First"),
+        track(2, id="a2", artist="Alpha", album="First"),
+        track(3, id="b1", artist="Beta", album="Second"),
+        track(4, id="c1", artist="Gamma", album="Third"),
+    ]
+    station(app, monkeypatch, owned, [])
+    # Thursday 19 Nov 2026, noon in Melbourne; the week began Monday 16 Nov.
+    now = at(2026, 11, 19, 12, 0)
+    listen(store, user, "a1", at(2026, 11, 16, 0, 30), 200)
+    listen(store, user, "a1", at(2026, 11, 18, 9, 0), 200)
+    listen(store, user, "a2", at(2026, 11, 18, 10, 0), 100)
+    listen(store, user, "b1", at(2026, 11, 18, 11, 0), 160)
+    # A skip under 30 s isn't a listen.
+    listen(store, user, "c1", at(2026, 11, 18, 12, 0), 20)
+    # Sunday 23:30, last week in Melbourne (Sunday 12:30 UTC): not this week.
+    listen(store, user, "b1", at(2026, 11, 15, 23, 30), 200)
+    # Gamma played fully last month: not a new artist this week.
+    listen(store, user, "c1", at(2026, 10, 2, 12, 0), 200)
+    # Another person's listening is never counted.
+    listen(store, owner, "a1", at(2026, 11, 18, 9, 0), 999, event="owner")
+    monkeypatch.setattr("server.rewind.time.time", lambda: now)
+    with client(app, token) as http:
+        answer = http.get("/api/v1/rewind", params={"period": "week"})
+        assert answer.status_code == 200, answer.text
+        week = answer.json()
+    assert week["start"] == at(2026, 11, 16, 0, 0)
+    assert week["plays"] == 4
+    assert week["minutes"] == round((200 + 200 + 100 + 160) / 60)
+    assert [s["track"]["id"] for s in week["top_songs"]][:1] == ["a1"]
+    assert week["top_songs"][0]["plays"] == 2
+    assert [a["name"] for a in week["top_artists"]] == ["Alpha", "Beta"]
+    assert week["top_artists"][0]["plays"] == 3
+    assert week["top_albums"][0]["title"] == "First"
+    # Beta was first played last Sunday: not new this week; Alpha is.
+    assert week["new_artists"] == ["Alpha"]
+    with client(app, token) as http:
+        month = http.get("/api/v1/rewind", params={"period": "month"}).json()
+        assert month["plays"] == 5
+        assert (
+            http.get("/api/v1/rewind", params={"period": "decade"}).status_code == 422
+        )
+
+
+def test_rewind_names_the_mixes_that_worked(tmp_path, monkeypatch):
+    app, owner = protected(tmp_path, monkeypatch)
+    store = app.state.store
+    mixes = store.mixes
+    user, token = member(app, owner)
+    station(app, monkeypatch, [], [])
+    songs = [track(n) for n in range(3)]
+    for song in songs:
+        cached(mixes, song, now=time.time())
+    daily = mixes.stage(user, "daily", mixes.day(), "Daily blend", "Reason", songs)
+    mixes.publish(daily, songs, mixes.day())
+    now = int(time.time())
+    listen(store, user, f"mix:{daily}:0", now - 100)
+    listen(store, user, f"mix:{daily}:1", now - 50)
+    with client(app, token) as http:
+        year = http.get("/api/v1/rewind", params={"period": "year"}).json()
+    assert year["top_mixes"] == [{"title": "Daily blend", "plays": 2}]
+    assert year["top_songs"][0]["track"]["title"] in {"Song 0", "Song 1"}

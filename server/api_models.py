@@ -157,6 +157,45 @@ class MixList(BaseModel):
     radio: RadioCard | None = None
 
 
+class RewindSong(BaseModel):
+    track: TrackDTO
+    plays: int
+
+
+class RewindArtist(BaseModel):
+    name: str
+    plays: int
+    minutes: int
+
+
+class RewindAlbum(BaseModel):
+    title: str
+    artist: str
+    plays: int
+    cover_url: str | None = None
+
+
+class RewindMix(BaseModel):
+    title: str
+    plays: int
+
+
+class RewindDTO(BaseModel):
+    """A person's listening for the week, month or year so far (#203)."""
+
+    period: Literal["week", "month", "year"]
+    start: int
+    end: int
+    timezone: str
+    plays: int
+    minutes: int
+    top_songs: list[RewindSong]
+    top_artists: list[RewindArtist]
+    top_albums: list[RewindAlbum]
+    new_artists: list[str]
+    top_mixes: list[RewindMix]
+
+
 class RadioBatch(BaseModel):
     id: str
     title: str

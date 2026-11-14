@@ -4242,6 +4242,176 @@
         "title": "RevokedOthersDTO",
         "type": "object"
       },
+      "RewindAlbum": {
+        "properties": {
+          "artist": {
+            "title": "Artist",
+            "type": "string"
+          },
+          "cover_url": {
+            "nullable": true,
+            "title": "Cover Url",
+            "type": "string"
+          },
+          "plays": {
+            "title": "Plays",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "artist",
+          "plays"
+        ],
+        "title": "RewindAlbum",
+        "type": "object"
+      },
+      "RewindArtist": {
+        "properties": {
+          "minutes": {
+            "title": "Minutes",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "plays": {
+            "title": "Plays",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "plays",
+          "minutes"
+        ],
+        "title": "RewindArtist",
+        "type": "object"
+      },
+      "RewindDTO": {
+        "description": "A person's listening for the week, month or year so far (#203).",
+        "properties": {
+          "end": {
+            "title": "End",
+            "type": "integer"
+          },
+          "minutes": {
+            "title": "Minutes",
+            "type": "integer"
+          },
+          "new_artists": {
+            "items": {
+              "type": "string"
+            },
+            "title": "New Artists",
+            "type": "array"
+          },
+          "period": {
+            "enum": [
+              "week",
+              "month",
+              "year"
+            ],
+            "title": "Period",
+            "type": "string"
+          },
+          "plays": {
+            "title": "Plays",
+            "type": "integer"
+          },
+          "start": {
+            "title": "Start",
+            "type": "integer"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          },
+          "top_albums": {
+            "items": {
+              "$ref": "#/components/schemas/RewindAlbum"
+            },
+            "title": "Top Albums",
+            "type": "array"
+          },
+          "top_artists": {
+            "items": {
+              "$ref": "#/components/schemas/RewindArtist"
+            },
+            "title": "Top Artists",
+            "type": "array"
+          },
+          "top_mixes": {
+            "items": {
+              "$ref": "#/components/schemas/RewindMix"
+            },
+            "title": "Top Mixes",
+            "type": "array"
+          },
+          "top_songs": {
+            "items": {
+              "$ref": "#/components/schemas/RewindSong"
+            },
+            "title": "Top Songs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "period",
+          "start",
+          "end",
+          "timezone",
+          "plays",
+          "minutes",
+          "top_songs",
+          "top_artists",
+          "top_albums",
+          "new_artists",
+          "top_mixes"
+        ],
+        "title": "RewindDTO",
+        "type": "object"
+      },
+      "RewindMix": {
+        "properties": {
+          "plays": {
+            "title": "Plays",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "plays"
+        ],
+        "title": "RewindMix",
+        "type": "object"
+      },
+      "RewindSong": {
+        "properties": {
+          "plays": {
+            "title": "Plays",
+            "type": "integer"
+          },
+          "track": {
+            "$ref": "#/components/schemas/TrackDTO"
+          }
+        },
+        "required": [
+          "track",
+          "plays"
+        ],
+        "title": "RewindSong",
+        "type": "object"
+      },
       "SearchRef": {
         "properties": {
           "id": {
@@ -24256,6 +24426,139 @@
           }
         ],
         "summary": "Retry Request",
+        "tags": [
+          "personal-library"
+        ]
+      }
+    },
+    "/api/v1/rewind": {
+      "get": {
+        "operationId": "rewind_api_v1_rewind_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "default": "week",
+              "enum": [
+                "week",
+                "month",
+                "year"
+              ],
+              "title": "Period",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RewindDTO"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          }
+        },
+        "security": [
+          {
+            "deviceBearer": []
+          }
+        ],
+        "summary": "Rewind",
         "tags": [
           "personal-library"
         ]

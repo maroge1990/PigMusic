@@ -6,7 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from ..api_models import MixList, PlaylistDTO, RadioBatch
+from ..api_models import MixList, PlaylistDTO, RadioBatch, RewindDTO
 from .personal import playlist_dto
 
 
@@ -63,6 +63,16 @@ def mixes_router(mixes):
         if result["preparing"]:
             mixes.wake.set()
         return result
+
+    @router.get("/api/v1/rewind", response_model=RewindDTO, tags=["personal-library"])
+    async def rewind(
+        request: Request, period: Literal["week", "month", "year"] = Query("week")
+    ):
+        from ..rewind import rewind as recap
+
+        return await asyncio.to_thread(
+            recap, mixes.store, mixes, request.state.user["id"], period
+        )
 
     @router.post("/api/v1/radio/feedback", tags=["personal-library"])
     async def radio_feedback(body: RadioFeedback, request: Request):
