@@ -52,7 +52,8 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   when an MP3 320 or AAC 256 download finds nothing, a verified (clean) lossless original from Soulseek or Monochrome
   is converted down, never a suspect or multichannel one. Every download has a plain-words log (Details on the web,
   member's own or owner's queue; no peer names). Two Codex rounds; two highs and two mediums fixed and confirmed.
-  Not released yet.
+  Release `downloads-20261114-v1` (image `sha-4e87476`) passed the Unraid verify and preflight 14 Nov 17:41; it waits
+  for the apply step (D-94: Mark; D-97 covered only the previous release).
 - **Batch 7 'dead code' (#169, #170, #173 parts 1 and 3), pushed `c1d6b63`..`0b23b1c`:** unused vendor and server code
   removed (about 150 lines); `server.admin` documented in OPERATIONS.md and tested (D-93); one image save helper
   (`server/images.py`), per-key locks that are forgotten when idle (`server/keyed_locks.py`), one Fanart request
