@@ -5,39 +5,34 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 15 Nov 2026 (Melbourne), evening.*
+*Overwritten at the end of every session. 15 Nov 2026 (Melbourne), night: handover.*
 
-- **Live:** release `batch13-20261115-v1`, server `94faf4d` (D-102), applied 15 Nov, healthy (rollback container
-  `PigMusic-before-batch13-20261115-v1`, backup `pre-batch13-20261115-v1`): batch 13's web half.
-- **TestFlight 0.2.0 (27):** uploaded 15 Nov (batches 10b and 11). Build 28 (batch 13) uploaded 15 Nov;
-  **0.2.0 (29)** carries batches 13 and 14 and is staged on the Mac for Mark to upload.
-- **Device round on build 27 (#184):** area A (build 27 fixes) passed with follow-ups; area B (similar songs, Rewind)
-  passed on iPhone except tapping a Rewind song (#216) and web similar songs (#202, fixed in batch 13, not yet
-  live); area C (Watch) passed with follow-ups #217-#220 (steps 3-4 untestable: slow transfers, #219); **area D
-  (icons, larger text, Reduce Motion/Transparency, Increase Contrast, VoiceOver) not tested yet.** Results go into
-  docs/DESIGN.md when the round ends.
-- **Batch 13 'device round fixes' (#207 #209-#215 #202), pushed:** slower splash hand-off; one app-wide Undo bar above
-  the mini player; finished requests show in library with download/Watch options; favourite star optimistic and never
-  greyed by syncs (refusals roll back, unknown states re-read); Search Refresh removed; Remove from library as one
-  action with Undo; Downloads pages in three sections (Transfers, On your phone/watch, Settings; Mark's choice) with
-  swipe to cancel/remove and no descriptors; Home descriptors removed and "See all popular songs" (iPhone and web);
-  web asks for similar songs as the last song starts. Codex round 1 (a high, a medium), round 2 (two mediums) and
-  five confirmation rounds, the last approving.
-- **Batch 14 'Watch background transfers' (#219), pushed:** per-song Watch delivery timings in Diagnostics export;
-  audio goes without waiting for the Watch's manifest receipt (held in the Watch inbox until its manifest arrives);
-  on backgrounding the iPhone hands queued Watch copies to the background URLSession and schedules a background
-  refresh. Codex round 1 (a medium: hand-off after Pause) fixed and confirmed; round 2's medium (no resume after iOS
-  evicts the app) is #223. Needs Mark's device measurement.
-- **Next:** area D and the Watch delivery measurement on build 29; then #223, #217/#218/#220, #208 (Watch status wording), #215 (helper-text keep/remove list for Mark), Rewind
-  redesign Option A (#216, approved).
+- **Live:** release `rewind-20261115-v1`, server `cddad62` (D-102), applied 15 Nov, healthy (rollback container
+  `PigMusic-before-rewind-20261115-v1`, backup `pre-rewind-20261115-v1`). Carries batches 13 and 15's server/web.
+- **TestFlight:** 0.2.0 (28) uploaded 15 Nov (batch 13). Build 29 was never uploaded. **0.2.0 (30)** (batches 13, 14
+  and 15) is staged in `~/pigmusic-build` on the Mac for Mark to upload (`testflight.sh`, log in
+  `~/pigmusic-archives/upload.log`); clear the archive and `ArchiveIntermediates` afterwards.
+- **Device round (#184):** on build 27, areas A-C done (results on #184; follow-ups #208-#221). **Still to test on
+  build 30:** area D (icons in all appearances, larger text, Reduce Motion/Transparency, Increase Contrast,
+  VoiceOver); batch 13 on device (Undo bar, favourite star, requested → in library, Remove from library, Downloads
+  pages); Rewind (#216); the Watch delivery measurement (#219: send ~20 songs, close both apps 15 min, export
+  diagnostics, read its "Watch delivery" section). Results go into docs/DESIGN.md when the round ends.
+- **Pushed and awaiting Mark's check:** batch 13 'device round fixes' (#207 #209-#215 #202), batch 14 'Watch
+  background transfers' (#219; gap #223: no resume after iOS evicts the app), batch 15 'Rewind Option A' (#216).
+  Each passed its Codex rounds per D-59/D-71.
+- **Next, in order:** #223; then the Watch issues in Mark's order #217 (Send to Watch in the app's menu style, no
+  pop-ups; show Mark a layout first), #218 (delete the iPhone's Watch copy after delivery), #220 (phone Now Playing
+  on the Watch; design with Mark), #208 (Watch status only when action is needed; wording with Mark); #215 (give Mark
+  the keep/remove list of helper text, D-101); #221, #222 (findings).
 - **#188:** build 25's export: no transport failures while online (baseline 54 of 166), all HTTP/2; replies still
   take 1.5 s median (p90 3.1 s) on the path, not the server. Next: ask Mark whether HTTP/3 stays off, then suggest
   "Always use HTTPS".
 - **YouTube trial (#193, D-91):** ends ~21 Nov; then the numbers on #193 and #191, a hand sample, and Mark decides
   keep or remove (next free decision number: D-103).
 - **Retirement checks 28 Nov (#201)**, **#171** night-time `lifecycle_lock` holds, D-78 clean-up of old Unraid
-  containers and `releases/native-20261114-v1`: unchanged from 14 Nov.
-- **Ways of working:** area batches (D-50), Codex rounds per D-59 and D-71, Claude pushes and releases (D-99); D-58
+  containers (now also `PigMusic-before-batch13-20261115-v1` and `PigMusic-before-rewind-20261115-v1`) and
+  `releases/native-20261114-v1`: unchanged from 14 Nov.
+- **Ways of working:** area batches (D-50), Codex rounds per D-59 and D-71, Claude pushes and releases without waiting (D-99, D-102); D-58
   closing. The Mac is shared and near its disk floor (15 GB free): clear PigMusic's own archive and
   `ArchiveIntermediates` after an upload.
 
