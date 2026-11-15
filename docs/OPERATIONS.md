@@ -189,6 +189,23 @@ For temporary mix preparation, add `--mix-cache`. This verifies the real transfe
 
 yt-dlp is pinned in the image and used only by the YouTube instant-listen trial (#193, D-91); YouTube is never a download source. During the trial yt-dlp may update itself (D-95): after repeated refusals that a fresh address and a cache purge did not cure, at most every 6 hours, the server fetches yt-dlp's latest official release from GitHub and installs it only if its checksum matches the release's published `SHA2-256SUMS` and it is newer than what runs. It lives in appdata `youtube/update/` (with `verified.json`), is re-checked against its checksum before every use, and runs only in the isolated lookup worker; delete that folder to go back to the pinned version. `youtube/cache/` holds yt-dlp's player cache. The log says "yt-dlp updated itself to <version>". A YouTube session file left in appdata from D-60 is deleted at startup.
 
+## TestFlight
+
+`scripts/testflight.sh` archives the iPhone app (with its Watch app and share extension) and uploads it, run on the
+Mac's own git clone `~/pigmusic-release` over plain SSH: no keychain password. The archive is unsigned; the export
+signs it with Apple's cloud-managed distribution certificate through an Admin-role App Store Connect API key (an App
+Manager key fails with "Cloud signing permission error"). Settings live in `~/.pigmusic-testflight.env` on the Mac
+(chmod 600; names in `.env.example`); the key file stays in `~/.appstoreconnect/private_keys/` and never moves.
+
+```sh
+ssh mac 'cd ~/pigmusic-release && git pull --ff-only && sh scripts/testflight.sh'
+```
+
+It refuses on uncommitted changes or under 15 GB free, runs the PigKit tests, archives with the commit count as the
+build number, signs a local copy and stops unless the app and share extension keep their App Group and all three
+bundles carry the build number, then uploads and clears the archive and its intermediates. `--archive` stops after
+the check. Success ends with "build N uploaded"; App Store Connect processes it in 10–30 minutes.
+
 ## Native app installation (free Apple account)
 
 1. Open `swift/PigMusic.xcodeproj` and select scheme **PigMusic**, which embeds **PigMusicWatch**.
