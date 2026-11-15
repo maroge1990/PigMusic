@@ -96,6 +96,15 @@ extension FoundResults {
     case applePlaylists(ApplePlaylistAnswer)
     case library(LibrarySearchPage)
     case failure(String, any Error)
+    /// A failure or this phone's library standing in for the server. When
+    /// typing cancels the search, the results shown stay until the next
+    /// search answers (#224).
+    var standsIn: Bool {
+      switch self {
+      case .library, .failure: true
+      default: false
+      }
+    }
   }
 
   /// `force` (Refresh) asks again instead of reusing an answer.
@@ -177,7 +186,7 @@ extension FoundResults {
             answer.diagnostics(termLength: query.count)
               + (stamp == generation ? "" : " (a newer search is showing)"))
         }
-        guard stamp == generation else { continue }
+        guard stamp == generation, !(Task.isCancelled && delivery.standsIn) else { continue }
         accept(delivery, key: key, now: now)
         // Without the server, its slower lanes are not waited for (Codex).
         switch delivery {
@@ -212,7 +221,7 @@ extension FoundResults {
     do {
       delivery = .library(try await library.searchPage(query: query, offset: 0, limit: 100))
     } catch { delivery = .failure("results", error) }
-    guard stamp == generation else { return }
+    guard stamp == generation, !(Task.isCancelled && delivery.standsIn) else { return }
     accept(delivery, key: nil, now: Date())
   }
 

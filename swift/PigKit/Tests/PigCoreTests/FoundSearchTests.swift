@@ -289,3 +289,38 @@ private actor ChangingSource: FoundSearchSource {
   await search.search("Yellow")
   #expect(search.results?.songs.first?.serverState == "requested")
 }
+
+/// Answers "Yellow"; holds any other search until it is cancelled, then fails
+/// with `failure`, as URLSession or the task does.
+private struct TypedOverSource: FoundSearchSource {
+  let hold: Hold
+  let failure: any Error
+  func foundResults(query: String) async throws -> FoundResults {
+    if query == "Yellow" { return decode(serverJSON) }
+    await hold.forever()
+    throw failure
+  }
+  func onlineResults(query: String) async throws -> OnlineResults { decode(onlineJSON) }
+  func catalogueArtists(query: String, offset: Int) async throws -> CatalogueArtistPage {
+    decode(#"{"artists":[],"total":0,"offset":0,"next_offset":null}"#)
+  }
+}
+
+/// #224: typing cancels the running search before the next one starts; the
+/// results shown stay, with no error and no fallback to this phone's library.
+@MainActor @Test func typingOverARunningSearchKeepsTheResultsShown() async {
+  let failures: [any Error] = [URLError(.cancelled), CancellationError()]
+  for failure in failures {
+    for library in [nil, PhoneLibrary()] {
+      let search = FoundSearch(
+        source: TypedOverSource(hold: Hold(), failure: failure), library: library)
+      await search.search("Yellow")
+      let typing = Task { await search.search("Yel") }
+      while search.query != "Yel" { await Task.yield() }
+      typing.cancel()
+      await typing.value
+      #expect(search.error == nil && !search.fromThisPhone)
+      #expect(search.results?.songs.map(\.id) == ["yellow"])
+    }
+  }
+}
