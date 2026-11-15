@@ -12,6 +12,9 @@ struct WatchDownloadsView: View {
   @Environment(\.colorScheme) private var scheme
   let model: AppModel
   @State private var clearing = false
+  @State private var now = Date()
+  /// When the Watch app was first reported missing after activation settled.
+  @State private var missingSince: Date?
   var body: some View {
     List {
       if let watch = model.watch {
@@ -61,14 +64,16 @@ struct WatchDownloadsView: View {
           groups: DeviceGroup.build(delivered)
         ) { ids, origin in await watch.release(ids, origin: origin) }
         Section("Settings") {
-          // The connection row stays here until #208 changes it.
-          Text(connection(watch))
+          // Only when Mark must act (D-105).
+          if let attention = attention(watch, records: records) {
+            Text(attention.text)
+          }
           if watch.link?.error != nil
             || records.contains(where: { $0.state == "failed" && !onWatch($0, watch: watch) })
           {
             Button("Retry") { Task { await watch.retry() } }
           }
-          if let error = watch.message ?? watch.link?.error {
+          if let error = watch.message {
             StatusText(error, kind: .error)
           }
           Button("Remove all", role: .destructive) { clearing = true }
@@ -77,6 +82,7 @@ struct WatchDownloadsView: View {
       }
     }
     .pigCanvas().navigationTitle("Apple Watch").navigationBarTitleDisplayMode(.inline)
+    .task { await watchClock() }
     .toolbar {
       if let watch = model.watch {
         let records = watch.downloads?.records ?? []
@@ -94,13 +100,26 @@ struct WatchDownloadsView: View {
       }
     }
   }
-  private func connection(_ watch: WatchPhoneController) -> String {
-    let link = watch.link
-    return WatchConnectionStatus(
-      supported: watch.supported && link != nil, activated: link?.activated == true,
-      error: link?.error, paired: link?.paired == true, installed: link?.installed == true,
-      reachable: link?.reachable == true
-    ).text
+  private func attention(_ watch: WatchPhoneController, records: [DownloadRecord])
+    -> WatchAttention?
+  {
+    let waiting = records.filter { $0.state == "ready" && !onWatch($0, watch: watch) }.map(\.id)
+    return WatchAttention(
+      activated: watch.link?.activated == true, error: watch.link?.error,
+      missingSince: missingSince,
+      oldestWait: WatchAttention.oldestWait(waiting, log: watch.deliveryLog), now: now)
+  }
+  /// Re-reads the Watch's state every few seconds, so the 2- and 30-minute
+  /// thresholds take effect while the page stays open.
+  private func watchClock() async {
+    while !Task.isCancelled {
+      let link = model.watch?.link
+      now = Date()
+      missingSince = WatchAttention.missing(
+        since: missingSince, activated: link?.activated == true, paired: link?.paired == true,
+        installed: link?.installed == true, now: now)
+      do { try await Task.sleep(for: .seconds(5)) } catch { return }
+    }
   }
   private func onWatch(_ record: DownloadRecord, watch: WatchPhoneController) -> Bool {
     // A song whose iPhone copy went once the Watch confirmed it (#218).

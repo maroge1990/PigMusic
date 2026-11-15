@@ -137,38 +137,59 @@ extension CompanionManifest {
   }
 }
 
-/// What the phone knows about its Watch, in words, without guessing "not
-/// installed" before the connection has finished activating.
-public enum WatchConnectionStatus: Equatable, Sendable {
-  case unsupported, checking, failed(String), notPaired, notInstalled, nearby, away
+/// The one thing the iPhone's Watch Downloads page says, only when Mark must
+/// act (D-105): nothing while all is well or while a state is settling.
+public enum WatchAttention: Equatable, Sendable {
+  /// The connection failed outright; shown with Retry.
+  case unreachable
+  /// The Watch app has been missing for `missingGrace` since activation settled.
+  case notInstalled
+  /// Songs have waited `waitLimit` or more to reach the Watch.
+  case openToFinish
 
-  public init(
-    supported: Bool, activated: Bool, error: String?, paired: Bool, installed: Bool,
-    reachable: Bool
+  /// A TestFlight update reports the Watch app missing for a moment.
+  public static let missingGrace: TimeInterval = 2 * 60
+  public static let waitLimit: TimeInterval = 30 * 60
+
+  /// `missingSince`: when the Watch app was first reported not installed
+  /// after activation settled (see `missing(since:...)`); `oldestWait`: when
+  /// the longest-waiting song started waiting for the Watch.
+  public init?(
+    activated: Bool, error: String?, missingSince: Date?, oldestWait: Date?, now: Date
   ) {
-    if !supported {
-      self = .unsupported
-    } else if !activated {
-      self = error.map { .failed($0) } ?? .checking
-    } else if !paired {
-      self = .notPaired
-    } else if !installed {
+    if error != nil {
+      self = .unreachable
+    } else if activated, let missingSince, now.timeIntervalSince(missingSince) >= Self.missingGrace
+    {
       self = .notInstalled
+    } else if let oldestWait, now.timeIntervalSince(oldestWait) >= Self.waitLimit {
+      self = .openToFinish
     } else {
-      self = reachable ? .nearby : .away
+      return nil
     }
+  }
+
+  /// When the Watch app started being reported missing, carried from
+  /// `previous`: nil until activation settled with a Watch paired, and again
+  /// as soon as the app is reported installed.
+  public static func missing(
+    since previous: Date?, activated: Bool, paired: Bool, installed: Bool, now: Date
+  ) -> Date? {
+    guard activated, paired, !installed else { return nil }
+    return previous ?? now
+  }
+
+  /// When the longest-waiting of `waiting` (songs ready on the iPhone and
+  /// not yet on the Watch) started waiting: its copy's readiness, else its send.
+  public static func oldestWait(_ waiting: some Sequence<String>, log: WatchDeliveryLog) -> Date? {
+    waiting.compactMap { id in log.entries[id].map { $0.ready ?? $0.sent } }.min()
   }
 
   public var text: String {
     switch self {
-    case .unsupported: "This iPhone can't connect to Apple Watch."
-    case .checking: "Checking the Watch connection…"
-    case .failed(let error): "Couldn't connect to Apple Watch: \(error)"
-    case .notPaired: "No Apple Watch is paired with this iPhone."
-    case .notInstalled:
-      "PigMusic isn't on your Watch yet. Install it from the Watch app on this iPhone, then open it once."
-    case .nearby: "Watch connected"
-    case .away: "Watch not nearby · transfers continue when it is"
+    case .unreachable: "Can't reach your Watch"
+    case .notInstalled: "PigMusic isn't on your Watch"
+    case .openToFinish: "Open PigMusic on your Watch to finish"
     }
   }
 }

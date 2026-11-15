@@ -107,25 +107,63 @@ struct WatchPlanningTests {
     #expect(!removed.keepsPlaying(["a", "b"], replacing: old))
     #expect(removed.keepsPlaying([], replacing: old))
   }
-  @Test func connectionStatusNeverGuessesNotInstalledBeforeActivation() {
-    func status(
-      _ activated: Bool, error: String? = nil, paired: Bool = false, installed: Bool = false,
-      reachable: Bool = false
-    ) -> WatchConnectionStatus {
-      .init(
-        supported: true, activated: activated, error: error, paired: paired, installed: installed,
-        reachable: reachable)
+  /// D-105 (#208): the Watch Downloads page says nothing unless Mark must act.
+  @Test func theWatchPageSpeaksOnlyWhenMarkMustAct() {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    func attention(
+      activated: Bool = true, error: String? = nil, missing: TimeInterval? = nil,
+      waited: TimeInterval? = nil
+    ) -> WatchAttention? {
+      WatchAttention(
+        activated: activated, error: error, missingSince: missing.map { now - $0 },
+        oldestWait: waited.map { now - $0 }, now: now)
     }
-    #expect(status(false) == .checking)
-    #expect(status(false, error: "denied") == .failed("denied"))
-    #expect(status(true) == .notPaired)
-    #expect(status(true, paired: true) == .notInstalled)
-    #expect(status(true, paired: true, installed: true) == .away)
-    #expect(status(true, paired: true, installed: true, reachable: true) == .nearby)
-    #expect(
-      WatchConnectionStatus(
-        supported: false, activated: true, error: nil, paired: true, installed: true,
-        reachable: true) == .unsupported)
+    // All well, or settling: nothing.
+    #expect(attention() == nil)
+    #expect(attention(activated: false) == nil)
+    #expect(attention(activated: false, missing: 600) == nil)
+    #expect(attention(missing: 119) == nil)
+    #expect(attention(waited: 29 * 60 + 59) == nil)
+    // Each message once its threshold passes.
+    #expect(attention(missing: 120) == .notInstalled)
+    #expect(attention(waited: 30 * 60) == .openToFinish)
+    #expect(attention(activated: false, error: "denied") == .unreachable)
+    // Precedence: unreachable, then not installed, then open to finish.
+    #expect(attention(error: "failed", missing: 600, waited: 3600) == .unreachable)
+    #expect(attention(missing: 600, waited: 3600) == .notInstalled)
+    #expect(attention(missing: 60, waited: 3600) == .openToFinish)
+    #expect(WatchAttention.unreachable.text == "Can't reach your Watch")
+    #expect(WatchAttention.notInstalled.text == "PigMusic isn't on your Watch")
+    #expect(WatchAttention.openToFinish.text == "Open PigMusic on your Watch to finish")
+  }
+  @Test func theWatchAppCountsAsMissingOnlyOnceActivationSettled() {
+    let start = Date(timeIntervalSince1970: 1_800_000_000)
+    func missing(
+      _ previous: Date?, activated: Bool = true, paired: Bool = true, installed: Bool = false,
+      at offset: TimeInterval = 0
+    ) -> Date? {
+      WatchAttention.missing(
+        since: previous, activated: activated, paired: paired, installed: installed,
+        now: start + offset)
+    }
+    #expect(missing(nil, activated: false) == nil)
+    #expect(missing(nil, paired: false) == nil)
+    #expect(missing(nil) == start)
+    // Kept while still missing, so the 2 minutes count from the first report.
+    #expect(missing(start, at: 90) == start)
+    // An update's moment of "not installed" ends: the clock starts again.
+    #expect(missing(start, installed: true, at: 90) == nil)
+    #expect(missing(start, activated: false, at: 90) == nil)
+  }
+  @Test func songsWaitFromTheirCopyBeingReady() {
+    let start = Date(timeIntervalSince1970: 1_800_000_000)
+    var log = WatchDeliveryLog()
+    log.sent(["a", "b"], at: start)
+    log.ready("a", at: start + 600)
+    #expect(WatchAttention.oldestWait(["a"], log: log) == start + 600)
+    #expect(WatchAttention.oldestWait(["a", "b"], log: log) == start)
+    #expect(WatchAttention.oldestWait(["unknown"], log: log) == nil)
+    #expect(WatchAttention.oldestWait([String](), log: log) == nil)
   }
   @Test func readinessCountsOnlyConfirmedSongs() {
     let summary = WatchReadinessSummary(
