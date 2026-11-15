@@ -324,3 +324,61 @@ private struct TypedOverSource: FoundSearchSource {
     }
   }
 }
+
+/// Codex on f5dd706: a search cancelled with no search after it (the page
+/// closed) stops loading and keeps the results shown.
+@MainActor @Test func aCancelledSearchWithNoneAfterItStopsLoading() async {
+  let search = FoundSearch(source: TypedOverSource(hold: Hold(), failure: URLError(.cancelled)))
+  await search.search("Yellow")
+  let typing = Task { await search.search("Yel") }
+  while !search.loading { await Task.yield() }
+  typing.cancel()
+  await typing.value
+  #expect(!search.loading && search.error == nil)
+  #expect(search.results?.songs.map(\.id) == ["yellow"])
+}
+
+/// Codex on f5dd706: a session that expires while the search is cancelled
+/// still signs out.
+@MainActor @Test func anExpiredSessionAnsweringACancelledSearchStillSignsOut() async {
+  var signedOut = 0
+  let search = FoundSearch(
+    source: TypedOverSource(hold: Hold(), failure: NativeFailure.authentication),
+    onAuthentication: { signedOut += 1 })
+  await search.search("Yellow")
+  let typing = Task { await search.search("Yel") }
+  while search.query != "Yel" { await Task.yield() }
+  typing.cancel()
+  await typing.value
+  #expect(signedOut == 1 && search.query.isEmpty && search.results == nil)
+}
+
+/// The demo's library: answers "first"; holds anything else until cancelled,
+/// then answers late or fails with the cancellation.
+private struct HeldLibrary: LibrarySearchSource {
+  let hold: Hold
+  let answersLate: Bool
+  func searchPage(query: String, offset: Int, limit: Int) async throws -> LibrarySearchPage {
+    if query != "first" {
+      await hold.forever()
+      guard answersLate else { throw CancellationError() }
+    }
+    return LibrarySearchPage(tracks: [Track(id: query, title: query, artist: "Artist")])
+  }
+}
+
+/// Codex on f5dd706: the demo's cancelled search stops loading, keeping the
+/// results shown, and a library answer that still arrives is shown.
+@MainActor @Test func theDemosCancelledSearchStopsLoadingAndKeepsALateAnswer() async {
+  for answersLate in [false, true] {
+    let search = FoundSearch(
+      source: nil, library: HeldLibrary(hold: Hold(), answersLate: answersLate))
+    await search.search("first")
+    let typing = Task { await search.search("second") }
+    while !search.loading { await Task.yield() }
+    typing.cancel()
+    await typing.value
+    #expect(!search.loading && search.error == nil)
+    #expect(search.results?.songs.map(\.id) == [answersLate ? "second" : "first"])
+  }
+}

@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OpenAPIRuntime
 import PigDomain
 import PigStore
 
@@ -96,14 +97,25 @@ extension FoundResults {
     case applePlaylists(ApplePlaylistAnswer)
     case library(LibrarySearchPage)
     case failure(String, any Error)
-    /// A failure or this phone's library standing in for the server. When
-    /// typing cancels the search, the results shown stay until the next
-    /// search answers (#224).
+    /// The cancellation itself, or this phone's library standing in for the
+    /// server. When typing cancels the search, the results shown stay until
+    /// the next search answers (#224); a real failure, such as an expired
+    /// session, still counts.
     var standsIn: Bool {
       switch self {
-      case .library, .failure: true
+      case .library: true
+      case .failure(_, let error): FoundSearch.cancellation(error)
       default: false
       }
+    }
+  }
+
+  nonisolated static func cancellation(_ error: any Error) -> Bool {
+    switch error {
+    case is CancellationError: true
+    case let error as URLError: error.code == .cancelled
+    case let error as ClientError: cancellation(error.underlyingError)
+    default: false
     }
   }
 
@@ -195,6 +207,8 @@ extension FoundResults {
         }
       }
     }
+    // Cancelled with nothing to show: the previous results stay, not loading.
+    if stamp == generation, Task.isCancelled { loading = false }
   }
 
   /// The server's library or request queue changed (#211). Its ranked
@@ -221,7 +235,11 @@ extension FoundResults {
     do {
       delivery = .library(try await library.searchPage(query: query, offset: 0, limit: 100))
     } catch { delivery = .failure("results", error) }
-    guard stamp == generation, !(Task.isCancelled && delivery.standsIn) else { return }
+    guard stamp == generation else { return }
+    if case .failure(_, let error) = delivery, Task.isCancelled, Self.cancellation(error) {
+      loading = false
+      return
+    }
     accept(delivery, key: nil, now: Date())
   }
 
