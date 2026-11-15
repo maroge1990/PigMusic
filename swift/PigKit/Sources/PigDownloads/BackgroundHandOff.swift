@@ -41,6 +41,9 @@ public enum BackgroundHandOff {
           continue
         }
         let request = try await source.copyRequest(trackId: record.id, quality: record.quality)
+        // A Pause, the foreground or another account may have come while the
+        // requests were out (Codex round 1): nothing is enqueued after that.
+        guard !isCancelled(), !Task.isCancelled else { throw CancellationError() }
         try await enqueue(record, copy, request)
         outcome.handed.append(record.id)
       } catch {

@@ -502,7 +502,7 @@ import UIKit
     }
     defer { endHandOff(expired: false) }
     guard
-      let outcome = await downloads.handOffToBackground(isCancelled: { [weak self] in
+      let outcome = await downloads.handOffToBackground(isCancelled: { @MainActor [weak self] in
         guard let self else { return true }
         return foreground || handOffExpired || !account.isCurrent(stamp)
       })

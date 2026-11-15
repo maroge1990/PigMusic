@@ -24,6 +24,31 @@ private actor ServerCopies: DeviceCopySource {
   }
 }
 
+/// Holds every request until the test opens it, as a slow network would.
+private actor HeldCopies: DeviceCopySource {
+  let inner: ServerCopies
+  var gate: CheckedContinuation<Void, Never>?
+  var asked = 0
+  init(_ inner: ServerCopies) { self.inner = inner }
+  func open() {
+    gate?.resume()
+    gate = nil
+  }
+  var waiting: Bool { gate != nil }
+  func deviceCopy(trackId: String, quality: String, create: Bool) async throws -> DeviceCopy {
+    asked += 1
+    await withCheckedContinuation { gate = $0 }
+    return try await inner.deviceCopy(trackId: trackId, quality: quality, create: create)
+  }
+  func copyRequest(trackId: String, quality: String) async throws -> URLRequest {
+    try await inner.copyRequest(trackId: trackId, quality: quality)
+  }
+}
+@MainActor private final class Switch {
+  var on = false
+  var handed: [String] = []
+}
+
 /// #219: Watch copies were prepared only by the foreground worker, so a
 /// locked phone stopped sending songs to the Watch.
 @MainActor struct BackgroundHandOffTests {
@@ -58,6 +83,29 @@ private actor ServerCopies: DeviceCopySource {
     #expect(!outcome.stopped)
     // The paused song and those already moving are never asked for.
     #expect(await source.calls == ["create a", "create b"])
+  }
+
+  /// Codex round 1 on batch 14: cancellation was checked only before each
+  /// request, so a Pause, the foreground or an account change while one was
+  /// out still started a background download when it came back.
+  @Test func nothingIsEnqueuedWhenCancelledWhileARequestIsOut() async throws {
+    let source = HeldCopies(ServerCopies(["a": "ready", "b": "ready"]))
+    let cancelled = Switch()
+    let records = [try record("a"), try record("b")]
+    let pass = Task { @MainActor in
+      await BackgroundHandOff.run(
+        records, source: source, limit: 10, isCancelled: { cancelled.on }
+      ) { record, _, _ in cancelled.handed.append(record.id) }
+    }
+    while await !source.waiting { await Task.yield() }
+    cancelled.on = true  // The person's Pause, say, while "a" is being asked for.
+    await source.open()
+    let outcome = await pass.value
+    #expect(cancelled.handed.isEmpty)
+    #expect(outcome.handed.isEmpty)
+    #expect(outcome.waiting == ["a", "b"])
+    #expect(outcome.stopped)
+    #expect(await source.asked == 1)
   }
 
   @Test func aFailureOrTheLimitLeavesTheRestQueued() async throws {

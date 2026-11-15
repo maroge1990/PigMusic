@@ -57,21 +57,37 @@ import PigDomain
     /// download while the app is suspended, instead of waiting for the
     /// foreground worker. Nil when there is nothing to do this way (no
     /// background session, the person's Pause, or preparation running).
-    public func handOffToBackground(limit: Int = 64, isCancelled: () -> Bool) async
-      -> BackgroundHandOff.Outcome?
-    {
-      guard let background, background.ready, !userPaused, !preparationAllowed, worker == nil
+    /// The pass belongs to the controller like the worker: a Pause, a
+    /// removal, the foreground or a reconcile cancels it and awaits it.
+    public func handOffToBackground(
+      limit: Int = 64, isCancelled: @escaping @MainActor () -> Bool
+    ) async -> BackgroundHandOff.Outcome? {
+      guard let background, background.ready, !userPaused, !preparationAllowed, worker == nil,
+        handOff == nil
       else { return nil }
-      let records = await archive.snapshot()
-      let outcome = await BackgroundHandOff.run(
-        records, source: source, limit: min(limit, max(0, 128 - background.activeCount)),
-        isCancelled: { isCancelled() || preparationAllowed }
-      ) { record, copy, request in
-        try await background.enqueue(record: record, manifest: copy, request: request)
+      let stamp = generation
+      let source = source
+      let archive = archive
+      let pass = Task { [weak self] () -> BackgroundHandOff.Outcome in
+        let records = await archive.snapshot()
+        return await BackgroundHandOff.run(
+          records, source: source, limit: min(limit, max(0, 128 - background.activeCount)),
+          isCancelled: {
+            guard let self else { return true }
+            return isCancelled() || self.preparationAllowed || self.userPaused
+              || self.generation != stamp
+          }
+        ) { record, copy, request in
+          try await background.enqueue(record: record, manifest: copy, request: request)
+        }
       }
+      handOff = pass
+      let outcome = await pass.value
+      if handOff == pass { handOff = nil }
       await reload()
       return outcome
     }
+    @ObservationIgnored private var handOff: Task<BackgroundHandOff.Outcome, Never>?
     public func setCellular(_ enabled: Bool) async {
       await interrupt()
       allowsCellular = enabled
@@ -280,6 +296,12 @@ import PigDomain
   }
   private func stopWorker() async {
     generation += 1
+    #if os(iOS)
+      let passing = handOff
+      passing?.cancel()
+      await passing?.value
+      if handOff == passing { handOff = nil }
+    #endif
     let previous = worker
     previous?.cancel()
     let preparing = ahead
