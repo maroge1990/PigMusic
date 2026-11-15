@@ -86,6 +86,14 @@ const report = (period: string) => {
             plays: 2,
             cover_url: null,
             id: null,
+            musicbrainz_release_id: "rel-unknown",
+          },
+          {
+            title: "Lost Album",
+            artist: "Nobody Known",
+            plays: 1,
+            cover_url: null,
+            id: null,
             musicbrainz_release_id: null,
           },
         ],
@@ -117,6 +125,17 @@ async function setUp(page: Page) {
             title: "Desire, I Want to Turn Into You",
             artist: "Caroline Polachek",
             artist_id: "mb-caroline",
+            tracks: [],
+          },
+        }),
+      // A release credited to no known artist (empty artist_id).
+      "/v1/catalogue/releases/rel-unknown": (route) =>
+        route.fulfill({
+          json: {
+            id: "rel-unknown",
+            title: "Unknown Album",
+            artist: "Nobody Known",
+            artist_id: "",
             tracks: [],
           },
         }),
@@ -294,9 +313,23 @@ test("artist and album rows open the right pages", async ({ page }) => {
     "href",
     "#/library/album/album-1",
   );
-  await expect(rows.nth(2).locator("a, button")).toHaveCount(0);
+  await expect(rows.nth(3).locator("a, button")).toHaveCount(0);
   await rows.nth(1).locator("button").click();
   await expect(page).toHaveURL(
     /#\/search\/artist\/mb-caroline\?name=Caroline\+Polachek&release=rel-desire$/,
   );
+});
+
+// #216 (Codex round 1): a release with no artist identity still opens.
+test("a catalogue album with no known artist opens Search", async ({
+  page,
+}) => {
+  await setUp(page);
+  await page.goto("/#/home/rewind");
+  await page.getByRole("button", { name: "Albums" }).click();
+  await page.locator(".rewind-ranked > li").nth(2).getByRole("button").click();
+  await expect(page).toHaveURL(
+    /#\/search\?q=Unknown%20Album%20Nobody%20Known$/,
+  );
+  await expect(page.getByText("can't be opened")).toHaveCount(0);
 });

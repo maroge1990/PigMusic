@@ -214,14 +214,21 @@ export function Rewind({ period }: { period: RewindPeriod }) {
         .filter((entry) => entry.track.available !== false)
         .map((entry) => fromServerTrack(entry.track)),
     );
-  // A catalogue release opens on its artist's catalogue page.
+  // A catalogue release opens on its artist's catalogue page. A release
+  // credited to no known artist has no such page (the web has none for a
+  // release alone), so Search finds the album by name instead.
   async function openRelease(album: RewindAlbum, releaseId: string) {
     setOpening("");
     try {
       const release = await api<{ artist_id?: string; artist?: string }>(
         "/v1/catalogue/releases/" + releaseId,
       );
-      if (!release.artist_id) throw new Error("This album can't be opened.");
+      if (!release.artist_id) {
+        location.hash =
+          "/search?q=" +
+          encodeURIComponent(`${album.title} ${album.artist}`.trim());
+        return;
+      }
       location.hash = discoverUrl(
         { id: release.artist_id, name: release.artist || album.artist },
         releaseId,
