@@ -16,6 +16,8 @@ from ..media import public_settings, save_settings
 from ..portraits import portrait_target
 from ..artist_backgrounds import background_target
 from ..artist_logos import logo_target
+from ..library import identifier
+from ..warmer import LIBRARY_COVERS
 
 
 def catalogue_router(
@@ -339,6 +341,9 @@ def catalogue_router(
                 pass
         return covers
 
+    def number(value):
+        return value if isinstance(value, (int, float)) else 0
+
     def warm_due(artist_ids):
         """When `warm_artist(id, full=True)` would next ask a provider for
         anything, read from its caches in one query (#145): {catalogue id:
@@ -401,9 +406,6 @@ def catalogue_router(
         files = present(store.cover_dir)
         logo_files = present(store.cover_dir / "logos") if fanart else {}
 
-        def number(value):
-            return value if isinstance(value, (int, float)) else 0
-
         due = {}
         for artist_id, mine in keys.items():
             # MusicBrainz answers renew RENEW before their day ends.
@@ -438,7 +440,67 @@ def catalogue_router(
                     miss = ("missing-" if name == "logo" else "") + mine[name].stem
                     when = min(when, number(documents.get(miss, {}).get("retry_after")))
             due[artist_id] = (when, retry)
+        # The covers the worker would fetch after warm_artist, from the same
+        # cached answers: one missing, whose remembered miss has lapsed,
+        # makes the artist due (Codex round 1 on #145).
+        wanted = {}
+        for artist_id, mine in keys.items():
+            for kind, item_id in artist_covers(mine, documents)[:LIBRARY_COVERS]:
+                target = identifier("catalogue-artwork:" + kind + ":" + item_id)
+                if target + ".jpg" in files:
+                    continue
+                try:
+                    key = "catalogue-artwork:" + kind + ":" + mbid(item_id)
+                except (ValueError, TypeError, AttributeError):
+                    continue  # Fails before any request, however often asked.
+                misses = [key]
+                if fanart:
+                    misses.append("missing-artwork:fanart:" + kind + ":" + item_id)
+                wanted.setdefault(artist_id, []).append(misses)
+        missed = store.read_documents(
+            [key for covers in wanted.values() for misses in covers for key in misses]
+        )
+        for artist_id, covers in wanted.items():
+            when, retry = due[artist_id]
+            for misses in covers:
+                # Either source whose miss has lapsed is asked again.
+                when = min(
+                    when,
+                    *(number(missed.get(k, {}).get("retry_after")) for k in misses),
+                )
+            due[artist_id] = (when, retry)
         return due
+
+    def artist_covers(mine, documents):
+        """warm_artist's covers from its cached answers: up to five popular
+        songs' releases, then up to 24 release groups."""
+        now = time.time()
+        covers = []
+        popular = next(
+            (
+                documents[name]
+                for name in (mine.get("popular"), mine.get("popular-songs"))
+                if name
+                and documents.get(name)
+                and number(documents[name].get("retry_after")) - RENEW > now
+            ),
+            None,
+        )
+        try:
+            covers += [
+                ("release", s["release_id"])
+                for s in popular["data"].get("songs", [])[:5]
+            ]
+        except (KeyError, TypeError, AttributeError):
+            pass
+        try:
+            data = documents[mine["release-groups"]]["data"]
+            covers += [
+                ("release-group", r["id"]) for r in data.get("release-groups", [])[:24]
+            ]
+        except (KeyError, TypeError, AttributeError):
+            pass
+        return covers
 
     async def library_identity(artist_id):
         """Catalogue identity for a library artist, or None when ambiguous."""

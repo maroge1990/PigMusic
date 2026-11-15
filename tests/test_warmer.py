@@ -158,19 +158,13 @@ def test_warming_renews_catalogue_answers_before_they_expire(tmp_path):
     assert json.loads(json.dumps(store.read_document(key)))["data"] == {"n": 2}
 
 
-def test_library_artists_are_prepared_again_only_when_changed_or_due(
-    tmp_path, monkeypatch
-):
-    """#145: every 6 h the warmer prepared every library artist again (live
-    passes of 63-118 s), each with document reads, file checks and its covers'
-    checks, although nothing had changed and its caches were fresh. Now a
-    later pass does nothing for such an artist; a changed entry or a cache
-    due for renewal still prepares it."""
+def warming_app(tmp_path, monkeypatch, artists=3, answer=None):
+    """The app's own warmer, routes and caches over a mocked provider; each
+    run_pass() returns its document reads, requests and artists prepared."""
     import io
 
     from PIL import Image
 
-    from server import warmer as warmer_module
     from server.app import create_app
     from server.media import save_settings
 
@@ -183,7 +177,7 @@ def test_library_artists_are_prepared_again_only_when_changed_or_due(
             "album": f"Album {i}",
             "relative_path": f"a{i}.mp3",
         }
-        for i in range(3)
+        for i in range(artists)
     ]
     (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": tracks}))
     monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(tmp_path / "nas"))
@@ -214,6 +208,8 @@ def test_library_artists_are_prepared_again_only_when_changed_or_due(
             # A portrait; no backdrop or logo, so those misses wait a day.
             thumb = "https://assets.fanart.tv/fanart/music/a/artistthumb/a.jpg"
             return httpx.Response(200, json={"artistthumb": [{"url": thumb}]})
+        if answer and (response := answer(request)):
+            return response
         if "listenbrainz" in host:
             return httpx.Response(200, json=[])
         return httpx.Response(200, json={"release-groups": [], "releases": []})
@@ -243,6 +239,21 @@ def test_library_artists_are_prepared_again_only_when_changed_or_due(
                 warming.reset(warming_token)
         return list(reads), list(requests), warmer.state["artists_prepared"]
 
+    return store, ids, now, run_pass
+
+
+def test_library_artists_are_prepared_again_only_when_changed_or_due(
+    tmp_path, monkeypatch
+):
+    """#145: every 6 h the warmer prepared every library artist again (live
+    passes of 63-118 s), each with document reads, file checks and its covers'
+    checks, although nothing had changed and its caches were fresh. Now a
+    later pass does nothing for such an artist; a changed entry or a cache
+    due for renewal still prepares it."""
+    from server import warmer as warmer_module
+
+    store, ids, now, run_pass = warming_app(tmp_path, monkeypatch)
+
     async def scenario():
         start = now[0]
         reads, fetched, prepared = await run_pass()
@@ -265,6 +276,40 @@ def test_library_artists_are_prepared_again_only_when_changed_or_due(
         reads, fetched, prepared = await run_pass()
         assert prepared == 7
         assert len([url for url in fetched if "/release-group/" in url]) == 3
+
+    asyncio.run(scenario())
+
+
+def test_a_library_cover_that_failed_is_tried_again_once_its_miss_lapses(
+    tmp_path, monkeypatch
+):
+    """#145, Codex round 1: with an artist's answers and portrait cached, a
+    cover download that failed (a miss remembered for 5 minutes) was not
+    tried again until the answers renewed (~20 h); before, 6 h on."""
+    from server import warmer as warmer_module
+
+    group = "99999999-1111-4111-8111-111111111111"
+
+    def answer(request):
+        if "deezer" in request.url.host or "coverartarchive" in request.url.host:
+            return httpx.Response(503)
+        if request.url.path.endswith("/release-group/"):
+            return httpx.Response(200, json={"release-groups": [{"id": group}]})
+        return None
+
+    store, ids, now, run_pass = warming_app(tmp_path, monkeypatch, 1, answer)
+
+    def archive(fetched):
+        return [url for url in fetched if "coverartarchive" in url]
+
+    async def scenario():
+        start = now[0]
+        _, fetched, prepared = await run_pass()
+        assert prepared == 1 and archive(fetched)
+        # Its miss lapsed long ago; the artist's answers are still fresh.
+        now[0] = start + warmer_module.ARTIST_REUSE + 1
+        _, fetched, prepared = await run_pass()
+        assert prepared == 2 and archive(fetched)
 
     asyncio.run(scenario())
 
