@@ -255,6 +255,8 @@ private struct Offline: Error {}
       let edit = OfflineMutation(action: "favourite", track: song, favourite: value)
       try await store.enqueueMutation(edit)
       edits.append(edit)
+      // The app caches each tap as the star shows it.
+      try await store.cache(value, key: EditOutbox.favouriteCacheKey(song.id))
     }
     let server = Server()
     var applied = false
@@ -276,6 +278,9 @@ private struct Offline: Error {}
     }
     #expect(try await store.pendingMutations().isEmpty)
     #expect(states[song.id] == nil)  // Unknown, not an unsaved guess.
+    // Nor does the phone's cache bring the unsaved tap back on a later load.
+    #expect(
+      try await store.cached(EditOutbox.favouriteCacheKey(song.id), as: Bool.self) == nil)
     // The server's answer, read again, is what shows.
     let reread = states.revision(song.id)
     states.answer(song.id, false, since: reread)

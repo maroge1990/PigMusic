@@ -848,7 +848,7 @@ enum PlayOrigin: Hashable {
   /// A song's favourite state: a waiting edit or the cached answer at once,
   /// then the server's when it can be reached.
   func loadFavourite(_ track: Track) async {
-    let key = "favourite:" + track.id
+    let key = EditOutbox.favouriteCacheKey(track.id)
     // Every answer belongs to this account: a sign-out while reading drops it (#101).
     let stamp = account.generation
     let store = self.store
@@ -860,8 +860,11 @@ enum PlayOrigin: Hashable {
     }
     // A change made while this reads wins over what the read finds.
     let revision = favourites.revision(track.id)
-    if favourites[track.id] == nil {
-      let cached = (try? await store?.cached(key, as: Bool.self)) ?? false
+    // Only a cached answer is shown before the server's; with none (never
+    // read, or dropped after a refusal) the state stays unknown (#212).
+    if favourites[track.id] == nil,
+      let cached = (try? await store?.cached(key, as: Bool.self)) ?? nil
+    {
       guard account.isCurrent(stamp) else { return }
       if favourites[track.id] == nil { favourites.answer(track.id, cached, since: revision) }
     }
@@ -890,7 +893,7 @@ enum PlayOrigin: Hashable {
       if outcome == .refused { throw MutationRejection.rejected }
       let confirmed = outcome == .confirmed
       // A newer tap meanwhile is what the star shows and what is kept.
-      try? await store?.cache(favourites[track.id] ?? tap.value, key: "favourite:" + track.id)
+      try? await store?.cache(favourites[track.id] ?? tap.value, key: EditOutbox.favouriteCacheKey(track.id))
       confirmations += 1
       return (tap.value, confirmed)
     } catch {
@@ -910,7 +913,7 @@ enum PlayOrigin: Hashable {
     for item in refused {
       favourites.refusal(item)
       if let value = item.value {
-        Task { try? await store?.cache(value, key: "favourite:" + item.trackId) }
+        Task { try? await store?.cache(value, key: EditOutbox.favouriteCacheKey(item.trackId)) }
       } else if let track = item.track {
         let revision = favourites.revision(item.trackId)
         Task { [weak self] in
@@ -918,7 +921,7 @@ enum PlayOrigin: Hashable {
             let confirmed = try? await readCatalogue({ try await $0.favourite(track) }),
             account.isCurrent(stamp), favourites.answer(track.id, confirmed, since: revision)
           else { return }
-          try? await store?.cache(confirmed, key: "favourite:" + track.id)
+          try? await store?.cache(confirmed, key: EditOutbox.favouriteCacheKey(track.id))
         }
       }
     }

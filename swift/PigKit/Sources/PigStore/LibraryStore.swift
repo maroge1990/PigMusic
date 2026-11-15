@@ -121,6 +121,12 @@ public actor LibraryStore {
     }
   }
 
+  public func removeCached(_ key: String) throws {
+    try database.write { db in
+      try db.execute(sql: "DELETE FROM metadata WHERE key=?", arguments: ["cache:" + key])
+    }
+  }
+
   /// Reads, changes and saves one cached value in a single transaction, so
   /// two changes to it can't overwrite each other (#206).
   public func updateCached<T: Codable & Sendable>(

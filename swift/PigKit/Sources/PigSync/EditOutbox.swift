@@ -44,6 +44,11 @@ import PigStore
     }?.mutation.favourite
   }
 
+  /// Where this phone caches a song's favourite state.
+  public nonisolated static func favouriteCacheKey(_ trackId: String) -> String {
+    "favourite:" + trackId
+  }
+
   /// Favourite edits the server refused, on any send, also one made long
   /// after the tap (Codex round 2 on #212): each leaves the outbox, so later
   /// taps on its song aren't held behind it, and its song shows the newest
@@ -65,6 +70,11 @@ import PigStore
     // A refused edit never says what the server holds: only a newer tap
     // still waiting is shown; without one the state is read again
     // (Codex confirmation on #212).
+    // An unknown state leaves no cached guess behind either: a later load
+    // reads the server, and offline the star stays unknown.
+    for id in songs where favourite(id, in: remaining) == nil {
+      try await store.removeCached(favouriteCacheKey(id))
+    }
     return songs.map { id in
       RefusedFavourite(
         trackId: id, value: favourite(id, in: remaining),
