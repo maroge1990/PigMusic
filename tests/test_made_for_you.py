@@ -260,7 +260,10 @@ def test_rewind_names_the_mixes_that_worked(tmp_path, monkeypatch):
     listen(store, user, f"mix:{daily}:1", now - 50)
     with client(app, token) as http:
         year = http.get("/api/v1/rewind", params={"period": "year"}).json()
-    assert year["top_mixes"] == [{"title": "Daily blend", "plays": 2}]
+    # The edition and its kind, for the mix's cover (#216).
+    assert year["top_mixes"] == [
+        {"title": "Daily blend", "plays": 2, "id": daily, "kind": "daily"}
+    ]
     assert year["top_songs"][0]["track"]["title"] in {"Song 0", "Song 1"}
 
 
@@ -328,7 +331,9 @@ def test_rewind_keeps_a_year_of_listening_after_old_mixes_are_deleted(
             conn.execute("DELETE FROM mix_editions WHERE id=?", (daily,))
         year = http.get("/api/v1/rewind", params={"period": "year"}).json()
     assert year["top_artists"][0]["name"] == "Kept Artist"
-    assert year["top_mixes"] == [{"title": "Old blend", "plays": 1}]
+    assert year["top_mixes"] == [
+        {"title": "Old blend", "plays": 1, "id": None, "kind": None}
+    ]
     song = year["top_songs"][0]["track"]
     assert song["title"] == "Song 0" and song["available"] is False
 
@@ -381,3 +386,154 @@ def test_rewind_never_offers_a_mix_song_playback_would_refuse(tmp_path, monkeypa
         assert http.post(f"/api/v1/playback/mix:{daily}:0/url").status_code == 404
         year = http.get("/api/v1/rewind", params={"period": "year"}).json()
     assert year["top_songs"][0]["track"]["available"] is False
+
+
+# --- #216: Rewind's days, pages and covers ---------------------------------
+
+
+def test_rewind_counts_each_local_day_up_to_today_across_a_clock_change(
+    tmp_path, monkeypatch
+):
+    app, owner = protected(tmp_path, monkeypatch)
+    store = app.state.store
+    user, token = member(app, owner)
+    owned = [
+        track(1, id="a1", duration=240),
+        track(2, id="b1", duration=120),
+    ]
+    station(app, monkeypatch, owned, [])
+    # The apps report each listen once, at 30 s: it counts as the song.
+    # Melbourne's clocks go forward at 2 am on Sunday 4 Oct 2026: that day
+    # has 23 hours. Tuesday 6 Oct; the week began Monday 5 Oct.
+    now = at(2026, 10, 6, 15, 0)
+    # Last month: not in October.
+    listen(store, user, "a1", at(2026, 9, 30, 9, 0), 30)
+    listen(store, user, "a1", at(2026, 10, 1, 9, 0), 30)
+    listen(store, user, "b1", at(2026, 10, 3, 23, 30), 30)
+    listen(store, user, "a1", at(2026, 10, 4, 1, 30), 30)
+    listen(store, user, "a1", at(2026, 10, 4, 3, 30), 30)
+    listen(store, user, "b1", at(2026, 10, 4, 23, 59), 30)
+    # Half past midnight on Monday: Monday, though 24 hours after Sunday's
+    # midnight is not yet.
+    listen(store, user, "a1", at(2026, 10, 5, 0, 30), 30)
+    # Reported a moment ahead of the server's clock: still today.
+    listen(store, user, "b1", now + 120, 30)
+    monkeypatch.setattr("server.rewind.time.time", lambda: now)
+    with client(app, token) as http:
+        week = http.get("/api/v1/rewind", params={"period": "week"}).json()
+        month = http.get("/api/v1/rewind", params={"period": "month"}).json()
+    midnights = [at(2026, 10, n, 0, 0) for n in range(1, 7)]
+    assert midnights[4] - midnights[3] == 23 * 3600
+    # October so far: the 1st to today, and nothing after now.
+    assert [d["start"] for d in month["days"]] == midnights
+    assert [d["plays"] for d in month["days"]] == [1, 0, 1, 3, 1, 1]
+    assert [d["minutes"] for d in month["days"]] == [4, 0, 2, 10, 4, 2]
+    assert sum(d["plays"] for d in month["days"]) == month["plays"]
+    assert [d["start"] for d in week["days"]] == midnights[4:]
+    assert [(d["plays"], d["minutes"]) for d in week["days"]] == [(1, 4), (1, 2)]
+
+
+def test_rewind_days_stop_at_today(tmp_path, monkeypatch):
+    app, owner = protected(tmp_path, monkeypatch)
+    user, token = member(app, owner)
+    station(app, monkeypatch, [], [])
+    # Thursday 19 Nov 2026: Monday to Thursday, no later days.
+    now = at(2026, 11, 19, 12, 0)
+    monkeypatch.setattr("server.rewind.time.time", lambda: now)
+    with client(app, token) as http:
+        week = http.get("/api/v1/rewind", params={"period": "week"}).json()
+        year = http.get("/api/v1/rewind", params={"period": "year"}).json()
+    assert [d["start"] for d in week["days"]] == [
+        at(2026, 11, n, 0, 0) for n in range(16, 20)
+    ]
+    assert all(d["plays"] == 0 and d["minutes"] == 0 for d in week["days"])
+    # 1 Jan to 19 Nov 2026.
+    assert len(year["days"]) == 323
+    assert year["days"][0]["start"] == at(2026, 1, 1, 0, 0)
+    assert year["days"][-1]["start"] == at(2026, 11, 19, 0, 0)
+
+
+def test_rewind_links_artists_and_albums_to_their_library_or_catalogue_pages(
+    tmp_path, monkeypatch
+):
+    from server.rewind import cover
+
+    app, owner = protected(tmp_path, monkeypatch)
+    store = app.state.store
+    mixes = store.mixes
+    user, token = member(app, owner)
+    artist_mbid = "0383dadf-2a4e-4d10-a46a-e9e041da8eb3"
+    release = "f5093c06-23e3-404f-aeaa-40f72885ee3a"
+    owned = [
+        track(1, id="a1", artist="Alpha", album="First", album_artist="Alpha"),
+        track(2, id="a2", artist="Alpha", album="First", album_artist="Alpha"),
+        track(3, id="a3", artist="Alpha", album="Second", album_artist="Alpha"),
+    ]
+    for song, (album_id, art) in zip(
+        owned,
+        [("album-first", "first"), ("album-first", "first"), ("album-2", "second")],
+    ):
+        song.update(album_id=album_id, cover_url=f"/api/v1/artwork/{art}.jpg")
+    monkeypatch.setattr(
+        store.user_libraries,
+        "projection",
+        lambda person: {
+            "tracks": owned,
+            "artists": [{"id": "artist-alpha", "name": "Alpha"}],
+            "albums": [
+                {"id": "album-first", "title": "First", "artist": "Alpha"},
+                {
+                    "id": "album-2",
+                    "title": "Second",
+                    "artist": "Alpha",
+                    "musicbrainz_release_id": "second-release",
+                },
+            ],
+        },
+    )
+    store.write_document(
+        "library-artist:artist-alpha", {"id": artist_mbid, "name": "Alpha"}
+    )
+    found = [
+        track(
+            9,
+            artist="Beta",
+            album="Third",
+            album_artist="Beta",
+            musicbrainz_release_id=release,
+        )
+    ]
+    cached(mixes, found[0], now=time.time())
+    daily = mixes.stage(user, "daily", mixes.day(), "Daily blend", "Reason", found)
+    mixes.publish(daily, found, mixes.day())
+    now = int(time.time())
+    # Alpha was heard before this year; Beta is new.
+    listen(store, user, "a1", at(2025, 6, 1, 12, 0))
+    for n, song in enumerate(["a1", "a2", "a1", "a3"]):
+        listen(store, user, song, now - 1000 + n)
+    listen(store, user, f"mix:{daily}:0", now - 100)
+    with client(app, token) as http:
+        year = http.get("/api/v1/rewind", params={"period": "year"}).json()
+    alpha, beta = year["top_artists"]
+    assert alpha == {
+        "name": "Alpha",
+        "plays": 4,
+        "minutes": round(4 * 200 / 60),
+        "id": "artist-alpha",
+        "musicbrainz_artist_id": artist_mbid,
+        "new": False,
+        # The most played album's cover, not the last one heard.
+        "cover_url": cover(owned[0]),
+    }
+    assert beta["id"] is None and beta["musicbrainz_artist_id"] is None
+    assert beta["new"] is True
+    assert beta["cover_url"] == f"/api/v1/catalogue/artwork/release/{release}"
+    assert year["new_artists"] == ["Beta"]
+    albums = {a["title"]: a for a in year["top_albums"]}
+    assert albums["First"]["id"] == "album-first"
+    assert albums["First"]["musicbrainz_release_id"] is None
+    assert albums["Second"]["id"] == "album-2"
+    assert albums["Second"]["musicbrainz_release_id"] == "second-release"
+    # Not in the library: the catalogue release page only.
+    assert albums["Third"]["id"] is None
+    assert albums["Third"]["musicbrainz_release_id"] == release

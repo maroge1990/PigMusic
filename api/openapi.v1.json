@@ -4253,6 +4253,16 @@
             "title": "Cover Url",
             "type": "string"
           },
+          "id": {
+            "nullable": true,
+            "title": "Id",
+            "type": "string"
+          },
+          "musicbrainz_release_id": {
+            "nullable": true,
+            "title": "Musicbrainz Release Id",
+            "type": "string"
+          },
           "plays": {
             "title": "Plays",
             "type": "integer"
@@ -4272,13 +4282,33 @@
       },
       "RewindArtist": {
         "properties": {
+          "cover_url": {
+            "nullable": true,
+            "title": "Cover Url",
+            "type": "string"
+          },
+          "id": {
+            "nullable": true,
+            "title": "Id",
+            "type": "string"
+          },
           "minutes": {
             "title": "Minutes",
             "type": "integer"
           },
+          "musicbrainz_artist_id": {
+            "nullable": true,
+            "title": "Musicbrainz Artist Id",
+            "type": "string"
+          },
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "new": {
+            "default": false,
+            "title": "New",
+            "type": "boolean"
           },
           "plays": {
             "title": "Plays",
@@ -4296,6 +4326,13 @@
       "RewindDTO": {
         "description": "A person's listening for the week, month or year so far (#203).",
         "properties": {
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/RewindDay"
+            },
+            "title": "Days",
+            "type": "array"
+          },
           "end": {
             "title": "End",
             "type": "integer"
@@ -4377,8 +4414,42 @@
         "title": "RewindDTO",
         "type": "object"
       },
+      "RewindDay": {
+        "description": "One local calendar day of the period, counted as the totals are.",
+        "properties": {
+          "minutes": {
+            "title": "Minutes",
+            "type": "integer"
+          },
+          "plays": {
+            "title": "Plays",
+            "type": "integer"
+          },
+          "start": {
+            "title": "Start",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start",
+          "minutes",
+          "plays"
+        ],
+        "title": "RewindDay",
+        "type": "object"
+      },
       "RewindMix": {
         "properties": {
+          "id": {
+            "nullable": true,
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "nullable": true,
+            "title": "Kind",
+            "type": "string"
+          },
           "plays": {
             "title": "Plays",
             "type": "integer"

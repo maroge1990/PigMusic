@@ -166,6 +166,14 @@ class RewindArtist(BaseModel):
     name: str
     plays: int
     minutes: int
+    # The library artist page (`ArtistDTO.id`) when the artist is in the
+    # person's library; else the catalogue page by MusicBrainz id, if known.
+    id: str | None = None
+    musicbrainz_artist_id: str | None = None
+    # First played this period (as `new_artists`).
+    new: bool = False
+    # The cover of the artist's most played album this period.
+    cover_url: str | None = None
 
 
 class RewindAlbum(BaseModel):
@@ -173,10 +181,25 @@ class RewindAlbum(BaseModel):
     artist: str
     plays: int
     cover_url: str | None = None
+    # The library album page (`AlbumDTO.id`) when the album is in the
+    # person's library; else the catalogue release page, if known.
+    id: str | None = None
+    musicbrainz_release_id: str | None = None
 
 
 class RewindMix(BaseModel):
     title: str
+    plays: int
+    # The most played edition still kept, and its mix kind (`MixDTO.kind`).
+    id: str | None = None
+    kind: str | None = None
+
+
+class RewindDay(BaseModel):
+    """One local calendar day of the period, counted as the totals are."""
+
+    start: int  # epoch seconds of the day's local midnight
+    minutes: int
     plays: int
 
 
@@ -194,6 +217,8 @@ class RewindDTO(BaseModel):
     top_albums: list[RewindAlbum]
     new_artists: list[str]
     top_mixes: list[RewindMix]
+    # Each day from `start` up to and including today, in `timezone`.
+    days: list[RewindDay] = Field(default_factory=list)
 
 
 class RadioBatch(BaseModel):
