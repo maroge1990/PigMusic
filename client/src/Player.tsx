@@ -218,6 +218,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setError("");
     setPosition(0);
     setDuration(s.duration || 0);
+    // Like iPhone: as the last song starts, similar songs join Up next, so the
+    // queue plays on as it does between songs instead of asking only once the
+    // music has stopped (#202).
+    if (
+      continuesWithSimilar(
+        queue.current,
+        cursor.current,
+        1,
+        repeat,
+        keepPlaying(),
+      )
+    )
+      void continueWithSimilar();
     try {
       const found = await resolve(s);
       if (request !== serial.current) return;

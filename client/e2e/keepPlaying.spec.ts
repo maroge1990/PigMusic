@@ -37,7 +37,6 @@ async function playToLastSong(page: Page) {
   await expect(mini).toContainText("Von dutch");
   await mini.getByRole("button", { name: "Next song" }).click();
   await expect(mini).toContainText("360");
-  await expect(mini.getByRole("button", { name: "Next song" })).toBeDisabled();
   return mini;
 }
 
@@ -104,6 +103,42 @@ test("an ended album continues with similar songs, listed under Similar songs", 
     true,
     true,
   ]);
+});
+
+// #202 follow-up: the web asked only once the music had stopped, so a slow
+// answer left silence. Like iPhone, the last song's start fetches them ahead.
+test("similar songs join Up next as the last song starts, so the album plays on", async ({
+  page,
+}) => {
+  const asked: unknown[] = [];
+  await albumPlayer(page, {
+    "/v1/radio/continuation": (route) => {
+      asked.push(route.request().postDataJSON());
+      return route.fulfill({
+        json: {
+          id: "similar",
+          title: "Similar songs",
+          preparing: false,
+          tracks: asked.length === 1 ? [similar("lib-9", "Similar one")] : [],
+        },
+      });
+    },
+  });
+  const mini = await playToLastSong(page);
+  // Before the last song ends: asked once, and Next goes on to them.
+  await expect
+    .poll(() => asked)
+    .toEqual([{ seeds: ["t1", "t2"], exclude: ["t1", "t2"] }]);
+  await expect(mini.getByRole("button", { name: "Next song" })).toBeEnabled();
+  await finishSong(page);
+  await expect(mini).toContainText("Similar one");
+  // The last similar song in turn fetches the next ones ahead.
+  await expect
+    .poll(() => asked[1])
+    .toEqual({
+      seeds: ["t1", "t2", "lib-9"],
+      exclude: ["t1", "t2", "lib-9"],
+    });
 });
 
 test("with keep playing off, an ended album stops", async ({ page }) => {
