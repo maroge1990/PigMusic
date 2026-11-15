@@ -1,4 +1,7 @@
 import gc
+import os
+import shutil
+import tempfile
 
 import pytest
 
@@ -7,6 +10,13 @@ from server.popularity import Popularity
 
 
 def pytest_configure(config):
+    # server.app builds its app at import, so each xdist worker creates the
+    # database in PIG_MUSIC_DATA while collecting. Sharing one folder, four
+    # workers raced to create it ("database is locked" at collection, #189).
+    # Give every process its own, before collection imports the app.
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    config.pig_music_data = tempfile.mkdtemp(prefix=f"pig-music-data-{worker}-")
+    os.environ["PIG_MUSIC_DATA"] = config.pig_music_data
     config.addinivalue_line(
         "markers", "real_rate_limits: keep the production provider request spacing"
     )
@@ -16,6 +26,10 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "deezer_art: asks Deezer for artwork (through the test's transport)"
     )
+
+
+def pytest_unconfigure(config):
+    shutil.rmtree(getattr(config, "pig_music_data", ""), ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
