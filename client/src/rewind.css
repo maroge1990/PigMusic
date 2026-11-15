@@ -1,38 +1,242 @@
-/* Rewind (#203): the period's totals, then ranked lists of songs, artists,
- * new names and mixes. */
-.rewind-totals {
+/* Rewind (#203, #216): a dark figure card (the same in both appearances,
+ * from the media roles), chips for one ranked list at a time, and the Home
+ * card with this week's minutes and a bar per day. */
+.rewind-card,
+.rewind-hero {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-24);
-  margin: var(--space-16) 0 0;
+  color: var(--media-text);
+  background: var(--media-solid-panel);
+  border: 1px solid var(--media-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--elevation-card);
 }
-.rewind-totals dt {
-  color: var(--secondary);
-  font-size: var(--type-footnote);
+.rewind-card {
+  flex-direction: column;
+  gap: var(--space-16);
+  margin: var(--space-16) 0 var(--space-8);
+  padding: var(--space-16);
+  text-decoration: none;
 }
-.rewind-totals dd {
-  margin: 0;
-  font-size: var(--type-title);
-  font-weight: 650;
+.rewind-card:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
 }
-.rewind-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.rewind-list li {
+.rewind-card-top,
+.rewind-card-middle {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-12);
-  min-height: 2.75rem;
-  padding: var(--space-8) 0;
-  border-bottom: 1px solid var(--border);
 }
-.rewind-list li > span {
+.rewind-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-weight: 650;
+}
+.rewind-card-title svg {
+  color: var(--media-accent);
+}
+.rewind-card-period {
+  color: var(--media-secondary);
+  font-size: var(--type-footnote);
+}
+.rewind-figure {
   display: grid;
+  gap: var(--space-4);
   min-width: 0;
 }
-.rewind-list small {
+.rewind-figure strong {
+  font-size: var(--type-display);
+  font-weight: 650;
+  line-height: 1;
+}
+.rewind-figure span {
+  color: var(--media-secondary);
+  font-size: var(--type-footnote);
+}
+.rewind-card-covers {
+  display: flex;
+  flex-shrink: 0;
+}
+.rewind-card-covers .cover {
+  width: 3.5rem;
+  border: 2px solid var(--media-solid-panel);
+}
+.rewind-card-covers .cover + .cover {
+  margin-left: calc(-1 * var(--space-16));
+}
+.rewind-bars {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: var(--space-8);
+}
+.rewind-bar {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-4);
+}
+.rewind-bar-track {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  max-width: 2rem;
+  height: 3rem;
+  border-radius: var(--radius-compact);
+  background: var(--media-raised);
+  overflow: hidden;
+}
+.rewind-bar.future .rewind-bar-track {
+  background: transparent;
+  border: 1px dashed var(--media-border);
+}
+.rewind-bar-fill {
+  width: 100%;
+  background: var(--media-accent);
+}
+.rewind-bar-day {
+  color: var(--media-secondary);
+  font-size: var(--type-caption);
+}
+
+/* The Rewind page. */
+.rewind-hero {
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-16);
+  margin: var(--space-8) 0 var(--space-16);
+  padding: var(--space-24) var(--space-16);
+}
+.rewind-mixes {
+  display: flex;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rewind-mixes li {
+  width: 3.5rem;
+}
+.rewind-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin-bottom: var(--space-8);
+}
+.rewind-page .rewind-chips button {
+  min-height: 2.75rem;
+  padding: var(--space-8) var(--space-16);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-capsule);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+}
+.rewind-chips button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--selected-fill);
+  color: var(--text-accent);
+}
+.rewind-ranked {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rewind-ranked li {
+  border-bottom: 1px solid var(--border);
+}
+.rewind-row {
+  display: grid;
+  grid-template-columns: 1.75rem 3rem minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-12);
+  width: 100%;
+  min-height: 3.5rem;
+  padding: var(--space-8) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-compact);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  text-decoration: none;
+}
+button.rewind-row,
+a.rewind-row {
+  cursor: pointer;
+}
+@media (hover: hover) {
+  button.rewind-row:not(:disabled):hover,
+  a.rewind-row:hover {
+    background: var(--raised);
+  }
+}
+.rewind-row:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.rewind-row .cover-initials {
+  font-size: var(--type-subhead);
+}
+.rewind-rank {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  text-align: center;
   color: var(--secondary);
+}
+.rewind-rank.top {
+  color: var(--text-accent);
+}
+.rewind-row-text {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.rewind-row-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+.rewind-row-title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rewind-row small {
+  color: var(--secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rewind-new {
+  flex-shrink: 0;
+  padding: 0 var(--space-8);
+  border-radius: var(--radius-capsule);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--type-caption);
+  font-weight: 650;
+}
+.rewind-share {
+  display: block;
+  height: 4px;
+  border-radius: var(--radius-capsule);
+  background: var(--raised);
+  overflow: hidden;
+}
+.rewind-share > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+@media (max-width: 480px) {
+  .rewind-figure strong {
+    font-size: var(--type-title);
+  }
+  .rewind-mixes li,
+  .rewind-card-covers .cover {
+    width: 2.75rem;
+  }
 }

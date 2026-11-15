@@ -8,7 +8,7 @@ import { withLibrary, type Song } from "./songs";
 import { warmArtist, whenIdle } from "./prefetch";
 import { Mixes } from "./Mixes";
 import { InlineError, Loading } from "./EmptyState";
-import { Rewind, rewindPeriod } from "./Rewind";
+import { Rewind, RewindCard, rewindPeriod } from "./Rewind";
 import type { Route } from "./routes";
 
 function songRows(items: Item[]): Song[] {
@@ -233,6 +233,7 @@ export function Home({ route }: { route: Route }) {
   return (
     <main className="personal-main home-page">
       <PageHeader title="Home" />
+      <RewindCard />
       <Mixes />
       <RecentlyAdded />
       <HomeSection kind="recommended" />

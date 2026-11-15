@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
-import { Play } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { History } from "lucide-react";
 import { api } from "./api";
 import { Cover } from "./Cover";
 import { formatCount } from "./format";
-import { InlineError, Loading } from "./EmptyState";
-import { PageHeader, SectionHeader } from "./PageHeader";
+import { Empty, InlineError, Loading } from "./EmptyState";
+import { MixArtwork, mixCoverKind } from "./Mixes";
+import { discoverUrl } from "./navigation";
+import { PageHeader } from "./PageHeader";
 import { usePlayer } from "./Player";
 import { fromServerTrack } from "./songs";
 import type { Track } from "./types";
@@ -13,6 +15,24 @@ import "./rewind.css";
 export type RewindPeriod = "week" | "month" | "year";
 export const rewindPeriods: RewindPeriod[] = ["week", "month", "year"];
 
+type RewindSong = { track: Track; plays: number };
+type RewindArtist = {
+  name: string;
+  plays: number;
+  minutes: number;
+  id?: string | null;
+  musicbrainz_artist_id?: string | null;
+  new?: boolean;
+  cover_url?: string | null;
+};
+type RewindAlbum = {
+  title: string;
+  artist: string;
+  plays: number;
+  cover_url?: string | null;
+  id?: string | null;
+  musicbrainz_release_id?: string | null;
+};
 type RewindReport = {
   period: RewindPeriod;
   start: number;
@@ -20,23 +40,31 @@ type RewindReport = {
   timezone: string;
   plays: number;
   minutes: number;
-  top_songs: { track: Track; plays: number }[];
-  top_artists: { name: string; plays: number; minutes: number }[];
-  top_albums: {
-    title: string;
-    artist: string;
-    plays: number;
-    cover_url: string | null;
-  }[];
+  top_songs: RewindSong[];
+  top_artists: RewindArtist[];
+  top_albums: RewindAlbum[];
   new_artists: string[];
-  top_mixes: { title: string; plays: number }[];
+  top_mixes: {
+    title: string;
+    plays: number;
+    id?: string | null;
+    kind?: string | null;
+  }[];
+  days?: { start: number; minutes: number; plays: number }[];
 };
 
+type ListKind = "songs" | "artists" | "albums";
+const listKinds: [ListKind, string][] = [
+  ["songs", "Songs"],
+  ["artists", "Artists"],
+  ["albums", "Albums"],
+];
 const labels: Record<RewindPeriod, string> = {
   week: "Week",
   month: "Month",
   year: "Year",
 };
+const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
 const count = (n: number, one: string, many = one + "s") =>
   `${formatCount(n)} ${n === 1 ? one : many}`;
 
@@ -47,9 +75,7 @@ export function rewindPeriod(value: string | null): RewindPeriod {
     : "week";
 }
 
-/** A person's listening for the week, month or year so far (#203). */
-export function Rewind({ period }: { period: RewindPeriod }) {
-  const player = usePlayer();
+function useRewind(period: RewindPeriod) {
   const [report, setReport] = useState<RewindReport | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -67,16 +93,150 @@ export function Rewind({ period }: { period: RewindPeriod }) {
       });
     return () => controller.abort();
   }, [period]);
-  // A song that can no longer play is listed but left out of the queue.
-  const playable = (report?.top_songs ?? [])
-    .filter((entry) => entry.track.available !== false)
-    .map((entry) => fromServerTrack(entry.track));
+  return { report, error };
+}
+
+/** The big figure: minutes, then "minutes · N plays". */
+function Figure({ report }: { report: RewindReport }) {
+  return (
+    <div className="rewind-figure">
+      <strong className="pig-amount">{formatCount(report.minutes)}</strong>
+      <span className="pig-amount">
+        {report.minutes === 1 ? "minute" : "minutes"} ·{" "}
+        {count(report.plays, "play")}
+      </span>
+    </div>
+  );
+}
+
+/** Home: this week at a glance, opening Rewind. Hidden until a play. */
+export function RewindCard() {
+  const { report } = useRewind("week");
+  if (!report?.plays) return null;
+  const days = report.days ?? [];
+  const busiest = Math.max(1, ...days.map((d) => d.minutes));
+  return (
+    <a className="rewind-card" href="#/home/rewind">
+      <span className="rewind-card-top">
+        <span className="rewind-card-title">
+          <History size={18} aria-hidden="true" />
+          Rewind
+        </span>
+        <span className="rewind-card-period">This week</span>
+      </span>
+      <span className="rewind-card-middle">
+        <Figure report={report} />
+        <span className="rewind-card-covers" aria-hidden="true">
+          {report.top_songs.slice(0, 3).map(({ track }, i) => (
+            <Cover
+              key={track.id + i}
+              title={track.title}
+              src={track.cover_url}
+              sizes="56px"
+            />
+          ))}
+        </span>
+      </span>
+      <span className="rewind-bars" aria-hidden="true">
+        {DAY_LETTERS.map((letter, i) => {
+          const day = days[i];
+          return (
+            <span
+              className={day ? "rewind-bar" : "rewind-bar future"}
+              key={i}
+              data-minutes={day?.minutes}
+            >
+              <span className="rewind-bar-track">
+                {day && (
+                  <span
+                    className="rewind-bar-fill"
+                    style={{ height: `${(day.minutes / busiest) * 100}%` }}
+                  />
+                )}
+              </span>
+              <span className="rewind-bar-day">{letter}</span>
+            </span>
+          );
+        })}
+      </span>
+    </a>
+  );
+}
+
+/** One ranked row: rank, cover, name, a bar against number 1, a line. */
+function Row({
+  rank,
+  cover,
+  title,
+  detail,
+  share,
+  badge,
+}: {
+  rank: number;
+  cover: ReactNode;
+  title: string;
+  detail: string;
+  share: number;
+  badge?: boolean;
+}) {
+  return (
+    <>
+      <span className={rank <= 3 ? "rewind-rank top" : "rewind-rank"}>
+        {rank}
+      </span>
+      {cover}
+      <span className="rewind-row-text">
+        <span className="rewind-row-title">
+          <strong>{title}</strong>
+          {badge && <span className="rewind-new">New</span>}
+        </span>
+        <span className="rewind-share" aria-hidden="true">
+          <span style={{ width: `${Math.max(4, share * 100)}%` }} />
+        </span>
+        <small className="pig-amount">{detail}</small>
+      </span>
+    </>
+  );
+}
+
+/** A person's listening for the week, month or year so far (#203, #216). */
+export function Rewind({ period }: { period: RewindPeriod }) {
+  const player = usePlayer();
+  const { report, error } = useRewind(period);
+  // The chosen list stays while the page is open, across periods.
+  const [list, setList] = useState<ListKind>("songs");
+  const [opening, setOpening] = useState("");
+  // Song n plays n, then the songs ranked after it that can still play.
+  const playFrom = (index: number) =>
+    player.play(
+      (report?.top_songs ?? [])
+        .slice(index)
+        .filter((entry) => entry.track.available !== false)
+        .map((entry) => fromServerTrack(entry.track)),
+    );
+  // A catalogue release opens on its artist's catalogue page.
+  async function openRelease(album: RewindAlbum, releaseId: string) {
+    setOpening("");
+    try {
+      const release = await api<{ artist_id?: string; artist?: string }>(
+        "/v1/catalogue/releases/" + releaseId,
+      );
+      if (!release.artist_id) throw new Error("This album can't be opened.");
+      location.hash = discoverUrl(
+        { id: release.artist_id, name: release.artist || album.artist },
+        releaseId,
+        "search",
+      );
+    } catch (e) {
+      setOpening((e as Error).message);
+    }
+  }
+  const songs = report?.top_songs.slice(0, 10) ?? [];
+  const artists = report?.top_artists.slice(0, 10) ?? [];
+  const albums = report?.top_albums.slice(0, 10) ?? [];
   return (
     <main className="personal-main rewind-page">
-      <PageHeader
-        title="Your Rewind"
-        subtitle={`Your listening this ${period} so far.`}
-      />
+      <PageHeader title="Rewind" />
       <nav className="personal-tabs segmented" aria-label="Rewind period">
         {rewindPeriods.map((p) => (
           <a
@@ -93,114 +253,148 @@ export function Rewind({ period }: { period: RewindPeriod }) {
       ) : !report ? (
         <Loading>Loading your Rewind…</Loading>
       ) : !report.plays ? (
-        <p role="status">Nothing played yet this {period}.</p>
+        <Empty title="Nothing played yet" />
       ) : (
         <>
-          <dl className="rewind-totals">
-            <div>
-              <dt>Minutes listened</dt>
-              <dd className="pig-amount">{formatCount(report.minutes)}</dd>
-            </div>
-            <div>
-              <dt>Listens</dt>
-              <dd className="pig-amount">{formatCount(report.plays)}</dd>
-            </div>
-          </dl>
-          {report.top_songs.length > 0 && (
-            <section className="home-section">
-              <SectionHeader
-                title="Top songs"
-                actions={
-                  <button
-                    type="button"
-                    className="primary-button"
-                    disabled={!playable.length}
-                    onClick={() => player.play(playable)}
-                  >
-                    <Play size={16} fill="currentColor" aria-hidden="true" />
-                    Play your top songs
-                  </button>
-                }
-              />
-              <ol className="rewind-list">
-                {report.top_songs.map(({ track, plays }, i) => (
-                  <li key={track.id + i}>
-                    <span>
-                      <strong>{track.title}</strong>
-                      <small>
-                        {track.artist}
-                        {track.available === false && " · No longer available"}
-                      </small>
+          <section className="rewind-hero" aria-label="Totals">
+            <Figure report={report} />
+            {report.top_mixes.length > 0 && (
+              <ul className="rewind-mixes" aria-label="Top mixes">
+                {report.top_mixes.slice(0, 3).map((mix, i) => (
+                  <li key={(mix.id || mix.title) + i} title={mix.title}>
+                    <MixArtwork
+                      kind={mixCoverKind(mix.kind)}
+                      title={mix.title}
+                    />
+                    <span className="sr-only">
+                      {mix.title}, {count(mix.plays, "play")}
                     </span>
-                    <small className="pig-amount">{count(plays, "play")}</small>
-                  </li>
-                ))}
-              </ol>
-            </section>
-          )}
-          {report.top_artists.length > 0 && (
-            <section className="home-section">
-              <SectionHeader title="Top artists" />
-              <ol className="rewind-list">
-                {report.top_artists.map((artist) => (
-                  <li key={artist.name}>
-                    <strong>{artist.name}</strong>
-                    <small className="pig-amount">
-                      {count(artist.plays, "play")} ·{" "}
-                      {count(artist.minutes, "minute")}
-                    </small>
-                  </li>
-                ))}
-              </ol>
-            </section>
-          )}
-          {report.top_albums.length > 0 && (
-            <section className="home-section">
-              <SectionHeader title="Top albums" />
-              <div className="home-grid">
-                {report.top_albums.map((album) => (
-                  <div
-                    className="album-card"
-                    key={album.title + "\u0000" + album.artist}
-                  >
-                    <Cover title={album.title} src={album.cover_url} />
-                    <strong>{album.title}</strong>
-                    <span className="card-caption">{album.artist}</span>
-                    <small className="pig-amount">
-                      {count(album.plays, "play")}
-                    </small>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-          {report.new_artists.length > 0 && (
-            <section className="home-section">
-              <SectionHeader title="New to you" />
-              <ul className="rewind-list">
-                {report.new_artists.map((name) => (
-                  <li key={name}>
-                    <strong>{name}</strong>
                   </li>
                 ))}
               </ul>
-            </section>
+            )}
+          </section>
+          <div className="rewind-chips" role="group" aria-label="Show">
+            {listKinds.map(([kind, label]) => (
+              <button
+                type="button"
+                key={kind}
+                aria-pressed={list === kind}
+                onClick={() => setList(kind)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {opening && <InlineError>{opening}</InlineError>}
+          {!{ songs, artists, albums }[list].length && (
+            <Empty title="Nothing played yet" />
           )}
-          {report.top_mixes.length > 0 && (
-            <section className="home-section">
-              <SectionHeader title="Mixes you played most" />
-              <ol className="rewind-list">
-                {report.top_mixes.map((mix) => (
-                  <li key={mix.title}>
-                    <strong>{mix.title}</strong>
-                    <small className="pig-amount">
-                      {count(mix.plays, "play")}
-                    </small>
+          <ol className="rewind-ranked" aria-label={"Top " + list}>
+            {list === "songs" &&
+              songs.map(({ track, plays }, i) => (
+                <li key={track.id + i}>
+                  <button
+                    type="button"
+                    className="rewind-row"
+                    disabled={track.available === false}
+                    onClick={() => playFrom(i)}
+                  >
+                    <Row
+                      rank={i + 1}
+                      cover={
+                        <Cover
+                          title={track.title}
+                          src={track.cover_url}
+                          sizes="48px"
+                        />
+                      }
+                      title={track.title}
+                      detail={`${track.artist} · ${count(plays, "play")}`}
+                      share={plays / (songs[0].plays || 1)}
+                    />
+                  </button>
+                </li>
+              ))}
+            {list === "artists" &&
+              artists.map((artist, i) => {
+                const row = (
+                  <Row
+                    rank={i + 1}
+                    cover={
+                      <Cover
+                        title={artist.name}
+                        src={artist.cover_url}
+                        artist
+                      />
+                    }
+                    title={artist.name}
+                    detail={count(artist.minutes, "min", "min")}
+                    share={artist.minutes / (artists[0].minutes || 1)}
+                    badge={artist.new}
+                  />
+                );
+                const href = artist.id
+                  ? "#/library/artist/" + encodeURIComponent(artist.id)
+                  : artist.musicbrainz_artist_id
+                    ? "#" +
+                      discoverUrl(
+                        {
+                          id: artist.musicbrainz_artist_id,
+                          name: artist.name,
+                        },
+                        undefined,
+                        "search",
+                      )
+                    : "";
+                return (
+                  <li key={artist.name + i}>
+                    {href ? (
+                      <a className="rewind-row" href={href}>
+                        {row}
+                      </a>
+                    ) : (
+                      <div className="rewind-row">{row}</div>
+                    )}
                   </li>
-                ))}
-              </ol>
-            </section>
-          )}
+                );
+              })}
+            {list === "albums" &&
+              albums.map((album, i) => {
+                const row = (
+                  <Row
+                    rank={i + 1}
+                    cover={<Cover title={album.title} src={album.cover_url} />}
+                    title={album.title}
+                    detail={`${album.artist} · ${count(album.plays, "play")}`}
+                    share={album.plays / (albums[0].plays || 1)}
+                  />
+                );
+                const releaseId = album.musicbrainz_release_id;
+                return (
+                  <li key={album.title + "\u0000" + album.artist + i}>
+                    {album.id ? (
+                      <a
+                        className="rewind-row"
+                        href={"#/library/album/" + encodeURIComponent(album.id)}
+                      >
+                        {row}
+                      </a>
+                    ) : releaseId ? (
+                      <button
+                        type="button"
+                        className="rewind-row"
+                        onClick={() => void openRelease(album, releaseId)}
+                      >
+                        {row}
+                      </button>
+                    ) : (
+                      <div className="rewind-row">{row}</div>
+                    )}
+                  </li>
+                );
+              })}
+          </ol>
         </>
       )}
     </main>

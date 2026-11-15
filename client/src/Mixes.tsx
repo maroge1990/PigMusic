@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Ellipsis,
-  History,
   EyeOff,
   ListMusic,
   Play,
@@ -57,8 +56,14 @@ function decadeLabel(title = "") {
   return match[1] === "19" ? `${match[2]}0s` : `${match[1]}${match[2]}0s`;
 }
 
+/** The cover kind for a mix kind; anything else (a saved copy's
+ * `saved:…`, an unknown or missing kind) takes the daily cover. */
+export function mixCoverKind(kind?: string | null) {
+  return kind && KINDS.has(kind) ? kind : "daily";
+}
+
 /** Cover family: one geometric motif per kind of mix. */
-function MixArtwork({ kind, title }: { kind: string; title?: string }) {
+export function MixArtwork({ kind, title }: { kind: string; title?: string }) {
   const palette = KINDS.has(kind) ? kind : "daily";
   const background = `var(--mix-${palette}-background)`;
   const ink = `var(--mix-${palette}-foreground)`;
@@ -439,15 +444,7 @@ export function Mixes() {
   }, [revision]);
   return (
     <section className="home-section" aria-label="Your mixes">
-      <SectionHeader
-        title="Your mixes"
-        actions={
-          <a className="small-button" href="#/home/rewind">
-            <History size={16} aria-hidden="true" />
-            Your Rewind
-          </a>
-        }
-      />
+      <SectionHeader title="Your mixes" />
       {feed?.mixes.length || feed?.radio ? (
         <div className="mix-row">
           {feed.radio && (

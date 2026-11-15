@@ -1,42 +1,106 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { album, mockApi } from "./mock";
 
-const report = (period: string) => ({
-  period,
-  start: 1762700000,
-  end: 1763200000,
-  timezone: "Australia/Melbourne",
-  plays: period === "week" ? 45 : 0,
-  minutes: period === "week" ? 1234 : 0,
-  top_songs:
-    period === "week"
-      ? [
-          { track: album.tracks[1], plays: 9 },
-          { track: { ...album.tracks[0], available: false }, plays: 7 },
-          { track: album.tracks[0], plays: 5 },
-        ]
-      : [],
-  top_artists:
-    period === "week" ? [{ name: "Charli xcx", plays: 21, minutes: 63 }] : [],
-  top_albums:
-    period === "week"
-      ? [
+// Ten top songs "Song 1" … "Song 10"; Song 7 can no longer play.
+const songs = Array.from({ length: 10 }, (_, i) => ({
+  track: {
+    ...album.tracks[0],
+    id: "t" + (i + 1),
+    title: "Song " + (i + 1),
+    cover_url: album.cover_url,
+    ...(i === 6 ? { available: false } : {}),
+  },
+  plays: 20 - i,
+}));
+
+// The week so far: Monday to Wednesday, Tuesday the busiest.
+const day = (n: number, minutes: number) => ({
+  start: 1762700000 + n * 86400,
+  minutes,
+  plays: minutes ? 3 : 0,
+});
+
+const report = (period: string) => {
+  const empty = period === "month";
+  return {
+    period,
+    start: 1762700000,
+    end: 1763200000,
+    timezone: "Australia/Melbourne",
+    plays: empty ? 0 : 45,
+    minutes: empty ? 0 : period === "year" ? 5678 : 1234,
+    top_songs: empty ? [] : songs,
+    top_artists: empty
+      ? []
+      : [
+          {
+            name: "Charli xcx",
+            plays: 21,
+            minutes: 63,
+            id: "artist-1",
+            musicbrainz_artist_id: "mb-charli",
+            new: false,
+            cover_url: album.cover_url,
+          },
+          {
+            name: "Caroline Polachek",
+            plays: 9,
+            minutes: 30,
+            id: null,
+            musicbrainz_artist_id: "mb-caroline",
+            new: true,
+            cover_url: null,
+          },
+          {
+            name: "Nobody Known",
+            plays: 2,
+            minutes: 6,
+            id: null,
+            musicbrainz_artist_id: null,
+            new: false,
+            cover_url: null,
+          },
+        ],
+    top_albums: empty
+      ? []
+      : [
           {
             title: "Brat",
             artist: "Charli xcx",
             plays: 21,
             cover_url: album.cover_url,
+            id: "album-1",
+            musicbrainz_release_id: "rel-brat",
           },
-        ]
-      : [],
-  new_artists: period === "week" ? ["Caroline Polachek"] : [],
-  top_mixes: period === "week" ? [{ title: "Daily Mix 1", plays: 4 }] : [],
-});
+          {
+            title: "Desire, I Want to Turn Into You",
+            artist: "Caroline Polachek",
+            plays: 9,
+            cover_url: null,
+            id: null,
+            musicbrainz_release_id: "rel-desire",
+          },
+          {
+            title: "Unknown Album",
+            artist: "Nobody Known",
+            plays: 2,
+            cover_url: null,
+            id: null,
+            musicbrainz_release_id: null,
+          },
+        ],
+    new_artists: empty ? [] : ["Caroline Polachek"],
+    top_mixes: empty
+      ? []
+      : [
+          { title: "Radio", plays: 6, id: "m1", kind: "radio" },
+          { title: "Saved mix", plays: 4, id: "m2", kind: "saved:abc" },
+        ],
+    days: empty ? [] : [day(0, 40), day(1, 80), day(2, 20)],
+  };
+};
 
-// #203: Rewind shows a person's listening and plays their top songs.
-test("Rewind shows the week, plays the top songs and switches period", async ({
-  page,
-}) => {
+async function setUp(page: Page) {
   const periods: string[] = [];
   await mockApi(page, {
     answers: {
@@ -46,6 +110,16 @@ test("Rewind shows the week, plays the top songs and switches period", async ({
         periods.push(period);
         return route.fulfill({ json: report(period) });
       },
+      "/v1/catalogue/releases/rel-desire": (route) =>
+        route.fulfill({
+          json: {
+            id: "rel-desire",
+            title: "Desire, I Want to Turn Into You",
+            artist: "Caroline Polachek",
+            artist_id: "mb-caroline",
+            tracks: [],
+          },
+        }),
     },
   });
   await page.route("**/api/v1/playback/*/url", (route) =>
@@ -59,23 +133,133 @@ test("Rewind shows the week, plays the top songs and switches period", async ({
   await page.addInitScript(() => {
     HTMLMediaElement.prototype.play = () => Promise.resolve();
   });
-  await page.goto("/#/home");
-  await page.getByRole("link", { name: "Your Rewind" }).click();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "Your Rewind",
-  );
-  const totals = page.locator(".rewind-totals");
-  await expect(totals).toContainText("Minutes listened1,234");
-  await expect(totals).toContainText("Listens45");
-  await expect(page.getByText("Caroline Polachek")).toBeVisible();
-  await expect(page.getByText("Daily Mix 1")).toBeVisible();
-  await expect(page.getByText("21 plays · 63 minutes")).toBeVisible();
-  await expect(page.getByText("No longer available")).toBeVisible();
-  expect(periods).toEqual(["week"]);
+  return periods;
+}
 
-  await page.getByRole("button", { name: "Play your top songs" }).click();
-  await expect(page.locator(".mini-player")).toContainText("360");
-  // The song that can no longer play is left out of the queue.
+// #216: the Home card shows this week and opens Rewind.
+test("the Home card shows the week's minutes, plays and days", async ({
+  page,
+}) => {
+  await setUp(page);
+  await page.goto("/#/home");
+  const card = page.locator("a.rewind-card");
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("Rewind");
+  await expect(card).toContainText("This week");
+  await expect(card.locator(".rewind-figure strong")).toHaveText("1,234");
+  await expect(card).toContainText("minutes · 45 plays");
+  await expect(card.locator(".rewind-card-covers .cover")).toHaveCount(3);
+  // Seven bars, Monday first; days still to come are empty.
+  const bars = card.locator(".rewind-bar");
+  await expect(bars).toHaveCount(7);
+  await expect(card.locator(".rewind-bar.future")).toHaveCount(4);
+  await expect(card.locator(".rewind-bar-day")).toHaveText([
+    "M",
+    "T",
+    "W",
+    "T",
+    "F",
+    "S",
+    "S",
+  ]);
+  // Heights are relative to the busiest day (Tuesday, 80 minutes).
+  const heights = await card
+    .locator(".rewind-bar-fill")
+    .evaluateAll((els) => els.map((el) => (el as HTMLElement).style.height));
+  expect(heights).toEqual(["50%", "100%", "25%"]);
+  // The old Mixes button is gone.
+  await expect(page.getByRole("link", { name: "Your Rewind" })).toHaveCount(0);
+
+  await card.click();
+  await expect(page).toHaveURL(/#\/home\/rewind$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Rewind");
+});
+
+test("the Home card is hidden while the week has no plays", async ({
+  page,
+}) => {
+  await mockApi(page, {
+    answers: {
+      "/v1/rewind": (route) => route.fulfill({ json: report("month") }),
+    },
+  });
+  await page.goto("/#/home");
+  await expect(page.getByRole("heading", { name: "Your mixes" })).toBeVisible();
+  await expect(page.locator(".rewind-card")).toHaveCount(0);
+});
+
+// #216: one list at a time; the chip stays across periods.
+test("Rewind switches period and list", async ({ page }) => {
+  const periods = await setUp(page);
+  await page.goto("/#/home/rewind");
+  await expect(page.locator(".rewind-hero .rewind-figure strong")).toHaveText(
+    "1,234",
+  );
+  await expect(page.locator(".rewind-hero")).toContainText(
+    "minutes · 45 plays",
+  );
+  // The top mixes use the mix cover palette; an unknown kind takes daily.
+  const fills = await page
+    .locator(".rewind-mixes svg > rect")
+    .evaluateAll((els) => els.map((el) => el.getAttribute("fill")));
+  expect(fills).toEqual([
+    "var(--mix-radio-background)",
+    "var(--mix-daily-background)",
+  ]);
+  // The old sections are gone.
+  await expect(page.getByText("New to you")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Play your top songs" }),
+  ).toHaveCount(0);
+
+  const list = page.locator(".rewind-ranked > li");
+  await expect(list).toHaveCount(10);
+  await expect(list.first()).toContainText("Song 1");
+  await expect(list.first()).toContainText("Charli xcx · 20 plays");
+  await expect(list.first().locator(".rewind-rank.top")).toHaveText("1");
+  await expect(list.nth(3).locator(".rewind-rank.top")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Artists" }).click();
+  await expect(page.getByRole("button", { name: "Artists" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(list).toHaveCount(3);
+  await expect(list.first()).toContainText("63 min");
+  await expect(list.first().locator(".artist-cover")).toHaveCount(1);
+
+  await page.getByRole("link", { name: "Month" }).click();
+  await expect.poll(() => periods).toEqual(["week", "month"]);
+  await expect(
+    page.getByRole("heading", { name: "Nothing played yet" }),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Month" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+
+  await page.getByRole("link", { name: "Year" }).click();
+  await expect(page.locator(".rewind-hero .rewind-figure strong")).toHaveText(
+    "5,678",
+  );
+  // Still on Artists.
+  await expect(page.getByRole("button", { name: "Artists" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(list.first()).toContainText("Charli xcx");
+});
+
+// #216: song 5 plays 5, 6, 8, 9, 10; the song that can't play is skipped.
+test("tapping a song plays it and the songs ranked after it", async ({
+  page,
+}) => {
+  await setUp(page);
+  await page.goto("/#/home/rewind");
+  const rows = page.locator(".rewind-ranked > li");
+  await expect(rows.nth(6).locator("button")).toBeDisabled();
+  await rows.nth(4).locator("button").click();
+  await expect(page.locator(".mini-player")).toContainText("Song 5");
   await expect
     .poll(async () =>
       page.evaluate(() =>
@@ -84,13 +268,35 @@ test("Rewind shows the week, plays the top songs and switches period", async ({
         )?.songs.map((s: { title: string }) => s.title),
       ),
     )
-    .toEqual(["360", "Von dutch"]);
+    .toEqual(["Song 5", "Song 6", "Song 8", "Song 9", "Song 10"]);
+});
 
-  await page.getByRole("link", { name: "Month" }).click();
-  await expect.poll(() => periods).toEqual(["week", "month"]);
-  await expect(page.getByText("Nothing played yet this month.")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Month" })).toHaveAttribute(
-    "aria-current",
-    "page",
+// #216: library page first, then the catalogue, else not a link.
+test("artist and album rows open the right pages", async ({ page }) => {
+  await setUp(page);
+  await page.goto("/#/home/rewind");
+  await page.getByRole("button", { name: "Artists" }).click();
+  const rows = page.locator(".rewind-ranked > li");
+  await expect(rows.nth(0).locator("a")).toHaveAttribute(
+    "href",
+    "#/library/artist/artist-1",
+  );
+  await expect(rows.nth(1).locator("a")).toHaveAttribute(
+    "href",
+    "#/search/artist/mb-caroline?name=Caroline+Polachek",
+  );
+  await expect(rows.nth(1).locator(".rewind-new")).toHaveText("New");
+  await expect(page.locator(".rewind-new")).toHaveCount(1);
+  await expect(rows.nth(2).locator("a, button")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Albums" }).click();
+  await expect(rows.nth(0).locator("a")).toHaveAttribute(
+    "href",
+    "#/library/album/album-1",
+  );
+  await expect(rows.nth(2).locator("a, button")).toHaveCount(0);
+  await rows.nth(1).locator("button").click();
+  await expect(page).toHaveURL(
+    /#\/search\/artist\/mb-caroline\?name=Caroline\+Polachek&release=rel-desire$/,
   );
 });
