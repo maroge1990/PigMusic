@@ -1,6 +1,12 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { album, artist, mockApi } from "./mock";
 
+declare global {
+  interface Window {
+    coverLooks: { asked: number[]; failed: number[] };
+  }
+}
+
 const photo = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512"><rect width="512" height="512" fill="#888"/></svg>`;
 
 /** Runs the paused clock in 2 s steps until `count()` reaches `want`, at
@@ -26,6 +32,35 @@ test("#175: a missing cover looks again five times over twelve minutes, then onl
   page,
 }) => {
   await page.clock.install();
+  // The page's (fake) time when each look's image appears and when it fails.
+  await page.addInitScript(() => {
+    const looks = { asked: [] as number[], failed: [] as number[] };
+    window.coverLooks = looks;
+    const look = (node: unknown) =>
+      node instanceof HTMLImageElement && node.src.includes("/artwork/late")
+        ? Number(new URL(node.src).searchParams.get("r"))
+        : null;
+    new MutationObserver((changes) => {
+      for (const change of changes)
+        for (const node of [change.target, ...change.addedNodes]) {
+          const r = look(node);
+          if (r !== null) looks.asked[r] ??= Date.now();
+        }
+    }).observe(document, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["src"],
+    });
+    document.addEventListener(
+      "error",
+      (event) => {
+        const r = look(event.target);
+        if (r !== null) looks.failed[r] ??= Date.now();
+      },
+      true,
+    );
+  });
   let exists = false;
   const asked: string[] = [];
   const cover = (route: Route) => {
@@ -55,11 +90,19 @@ test("#175: a missing cover looks again five times over twelve minutes, then onl
   await page.clock.pauseAt(Date.now() + 1_000);
 
   // The server fetches a missing cover in the background: bounded looks.
+  // Each wait is read on the page's own clock, from the 404 the look follows
+  // to the next look's image; the test's real-time ticking in between would
+  // count a slow runner's network round trips too (#189).
   const looks = [2_000, 6_000, 30_000, 120_000, 600_000];
   for (const [i, wait] of looks.entries()) {
-    const spent = await runUntil(page, () => asked.length, i + 2);
-    expect(spent, `look ${i + 1}`).toBeGreaterThanOrEqual(wait);
-    expect(spent, `look ${i + 1}`).toBeLessThanOrEqual(wait + 4_000);
+    await runUntil(page, () => asked.length, i + 2);
+    const waited = await page.evaluate(
+      (look) =>
+        window.coverLooks.asked[look] - window.coverLooks.failed[look - 1],
+      i + 1,
+    );
+    expect(waited, `look ${i + 1}`).toBeGreaterThanOrEqual(wait);
+    expect(waited, `look ${i + 1}`).toBeLessThanOrEqual(wait + 4_000);
   }
   expect(asked).toEqual(["0", "1", "2", "3", "4", "5"]);
 
