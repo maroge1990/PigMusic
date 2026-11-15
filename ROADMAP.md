@@ -7,10 +7,10 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 *Overwritten at the end of every session. 15 Nov 2026 (Melbourne), evening.*
 
-- **Live:** release `madeforyou-20261115-v1`, server `d9c0df8` (D-99), applied 15 Nov, healthy. Batch 13 is
-  iPhone/Watch/web only; its web half (#202 fix, D-101 copy) goes live with the next release.
-- **TestFlight 0.2.0 (27):** uploaded 15 Nov (batches 10b and 11). **0.2.0 (28)** carries batch 13; staged on the Mac
-  for Mark to upload.
+- **Live:** release `batch13-20261115-v1`, server `94faf4d` (D-102), applied 15 Nov, healthy (rollback container
+  `PigMusic-before-batch13-20261115-v1`, backup `pre-batch13-20261115-v1`): batch 13's web half.
+- **TestFlight 0.2.0 (27):** uploaded 15 Nov (batches 10b and 11). Build 28 (batch 13) was never uploaded;
+  **0.2.0 (29)** carries batches 13 and 14 and is staged on the Mac for Mark to upload.
 - **Device round on build 27 (#184):** area A (build 27 fixes) passed with follow-ups; area B (similar songs, Rewind)
   passed on iPhone except tapping a Rewind song (#216) and web similar songs (#202, fixed in batch 13, not yet
   live); area C (Watch) passed with follow-ups #217-#220 (steps 3-4 untestable: slow transfers, #219); **area D
@@ -23,8 +23,12 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   swipe to cancel/remove and no descriptors; Home descriptors removed and "See all popular songs" (iPhone and web);
   web asks for similar songs as the last song starts. Codex round 1 (a high, a medium), round 2 (two mediums) and
   five confirmation rounds, the last approving.
-- **Next:** area D on build 28; batch 14 = Watch background transfers (#219, Mark's pick, measure time and battery
-  first), then #217/#218/#220, #208 (Watch status wording), #215 (helper-text keep/remove list for Mark), Rewind
+- **Batch 14 'Watch background transfers' (#219), pushed:** per-song Watch delivery timings in Diagnostics export;
+  audio goes without waiting for the Watch's manifest receipt (held in the Watch inbox until its manifest arrives);
+  on backgrounding the iPhone hands queued Watch copies to the background URLSession and schedules a background
+  refresh. Codex round 1 (a medium: hand-off after Pause) fixed and confirmed; round 2's medium (no resume after iOS
+  evicts the app) is #223. Needs Mark's device measurement.
+- **Next:** area D and the Watch delivery measurement on build 29; then #223, #217/#218/#220, #208 (Watch status wording), #215 (helper-text keep/remove list for Mark), Rewind
   redesign Option A (#216, approved).
 - **#188:** build 25's export: no transport failures while online (baseline 54 of 166), all HTTP/2; replies still
   take 1.5 s median (p90 3.1 s) on the path, not the server. Next: ask Mark whether HTTP/3 stays off, then suggest
