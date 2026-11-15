@@ -932,15 +932,26 @@ enum PlayOrigin: Hashable {
   /// offline. A read that fails leaves it for the next successful refresh.
   func readUnresolvedFavourites(generation stamp: Int) async {
     let store = self.store
-    for track in favourites.unresolved {
-      guard account.isCurrent(stamp) else { return }
-      let revision = favourites.revision(track.id)
-      guard let confirmed = try? await readCatalogue({ try await $0.favourite(track) }),
-        account.isCurrent(stamp), favourites.answer(track.id, confirmed, since: revision)
-      else { continue }
-      try? await store?.cache(confirmed, key: EditOutbox.favouriteCacheKey(track.id))
+    let answers = await favouriteRecovery.run(
+      states: { [unowned self] in favourites },
+      answer: { [unowned self] id, value, revision in
+        account.isCurrent(stamp) && favourites.answer(id, value, since: revision)
+      },
+      editWaiting: { [unowned self] id in EditOutbox.favourite(id, in: pendingEdits) != nil },
+      read: { [weak self] track in
+        guard let self, account.isCurrent(stamp) else { return nil }
+        return try? await readCatalogue({ try await $0.favourite(track) })
+      })
+    // Cached only while still what the star shows: a tap since then wins.
+    for answer in answers where account.isCurrent(stamp)
+      && favourites[answer.track.id] == answer.value
+    {
+      try? await store?.cache(answer.value, key: EditOutbox.favouriteCacheKey(answer.track.id))
     }
   }
+  /// One recovery read loop at a time (Codex on #212).
+  @ObservationIgnored private let favouriteRecovery = FavouriteRecovery()
+
   @discardableResult func saveEdit(_ mutation: OfflineMutation) async throws -> Bool {
     try await saveEditOutcome(mutation) == .confirmed
   }

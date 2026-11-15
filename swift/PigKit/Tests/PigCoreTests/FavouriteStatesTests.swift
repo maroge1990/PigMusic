@@ -98,3 +98,54 @@ import Testing
   states.clear()
   #expect(states.unresolved.isEmpty)
 }
+
+private actor ReadLatch {
+  var open = false
+  var waiting = false
+  func wait() async {
+    waiting = true
+    while !open { await Task.yield() }
+  }
+  func release() { open = true }
+}
+
+/// Codex on #212: a recovery read waiting on one song must not read, or
+/// overwrite, another song resolved and tapped meanwhile; and only one
+/// recovery runs at a time.
+@MainActor @Test func recoverySkipsASongResolvedAndTappedMeanwhile() async {
+  var states = FavouriteStates()
+  let a = Track(id: "a", title: "A", artist: "X")
+  let b = Track(id: "b", title: "B", artist: "X")
+  states.wanted(a)
+  states.wanted(b)
+  var queued: Set<String> = []
+  var reads: [String] = []
+  let latch = ReadLatch()
+  let recovery = FavouriteRecovery()
+  let run = Task { @MainActor in
+    await recovery.run(
+      states: { states },
+      answer: { states.answer($0, $1, since: $2) },
+      editWaiting: { queued.contains($0) },
+      read: { track in
+        reads.append(track.id)
+        if track.id == "a" { await latch.wait() }
+        return false
+      })
+  }
+  while !(await latch.waiting) { await Task.yield() }
+  // Meanwhile B is read elsewhere, then tapped; its edit waits.
+  states.answer("b", false, since: states.revision("b"))
+  _ = states.tap("b")
+  queued.insert("b")
+  // A second recovery doesn't start while the first runs.
+  let second = await recovery.run(
+    states: { states }, answer: { states.answer($0, $1, since: $2) },
+    editWaiting: { _ in false }, read: { _ in true })
+  #expect(second.isEmpty)
+  await latch.release()
+  let answered = await run.value
+  #expect(reads == ["a"])
+  #expect(answered.map(\.track.id) == ["a"])
+  #expect(states["a"] == false && states["b"] == true)
+}

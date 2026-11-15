@@ -95,3 +95,40 @@ public struct RefusedFavourite: Equatable, Sendable {
     self.track = track
   }
 }
+
+/// Reads again the favourites left unknown (Codex on #212), one recovery at
+/// a time. Each song is checked just before its read: still unknown, and no
+/// favourite edit of the person's waiting for it; an answer that arrives
+/// after such an edit, or after any change to the song, is ignored.
+@available(macOS 14, *)
+@MainActor public final class FavouriteRecovery {
+  public struct Answer: Sendable, Equatable {
+    public let track: Track
+    public let value: Bool
+  }
+  private var running = false
+  public init() {}
+  /// The answers kept, for caching; empty when a recovery was already running.
+  public func run(
+    states: () -> FavouriteStates,
+    answer: (_ id: String, _ value: Bool, _ revision: Int) -> Bool,
+    editWaiting: (String) -> Bool,
+    read: (Track) async -> Bool?
+  ) async -> [Answer] {
+    guard !running else { return [] }
+    running = true
+    defer { running = false }
+    var tried: Set<String> = []
+    var kept: [Answer] = []
+    while let track = states().unresolved.first(where: { !tried.contains($0.id) }) {
+      tried.insert(track.id)
+      guard !editWaiting(track.id) else { continue }
+      let revision = states().revision(track.id)
+      guard let value = await read(track), !editWaiting(track.id),
+        answer(track.id, value, revision)
+      else { continue }
+      kept.append(Answer(track: track, value: value))
+    }
+    return kept
+  }
+}
