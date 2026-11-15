@@ -5,22 +5,24 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 16 Nov 2026 (Melbourne), morning.*
+*Overwritten at the end of every session. 16 Nov 2026 (Melbourne), late morning.*
 
-- **Live:** release `scrim-20261116-v2`, server `d87fed8`, healthy (rollback container `PigMusic-before-scrim-20261116-v2`).
-  **TestFlight:** 0.2.0 (970) from `d87fed8`, uploaded 16 Nov 09:04 by `scripts/testflight.sh` (cloud signing, build
-  = commit count; 960 went up by hand earlier the same morning).
-- **Built and waiting only for Mark's device round:** batches 13–17 (#202, #203, #206–#221, #223), plus older
-  device checks (#116, #117, #123, #124, #149, #157–#163, #168, #176, #178, #180, #183). The round's 19 steps are on
-  [#184](https://github.com/maroge1990/PigMusic/issues/184).
-- **Batch 17 (16 Nov):** #186 brand check covers vendored files, #187 opaque scrim under Reduce Transparency, #189
-  four CI flakes, #128 failed removals reported. Closed after checks. #125 has no cause left on current code: it waits
-  for a repro on build 970.
+- **Live:** release `warm-20261116-v1`, server `629079a`, healthy (rollback container `PigMusic-before-warm-20261116-v1`).
+  **TestFlight:** 0.2.0 (979) from `629079a`, uploaded 16 Nov 10:11 by `scripts/testflight.sh` (cloud signing, build
+  = commit count).
+- **Built and waiting only for Mark's device round:** batches 13–18 (#126, #127, #202, #203, #206–#221, #223), plus
+  older device checks (#112, #116, #117, #123, #124, #149, #157–#163, #168, #176, #178, #180, #183). The round's 22
+  steps are on [#184](https://github.com/maroge1990/PigMusic/issues/184).
+- **Batch 18 (16 Nov):** server #144 (rebuild artwork checks from one listing: 155 → 85 ms locally) and #145 (library
+  artists warmed again only when changed or due), both live and open for their live checks; iPhone #224 (cancelled
+  search keeps its results) closed; CI #189 (suite gets 3 GB, peak 1.7 GB measured) closed. Each Codex finding was
+  fixed and confirmed. #126 and #127 turned out to be built on 5 Nov; they wait for the device round.
+- **Batch 17 (16 Nov):** #128, #186, #187, #189 flakes; closed. #125 waits for a repro on a current build.
 - **Live log check (16 Nov):** #136, #137, #166, #167, #171, #172 confirmed and closed. Still open: #130 and #142 (not
-  exercised: need two requesters / a connected device), #185 (needs a full day), #144 (no clear speed-up), #145 (the
-  6-hourly artist re-warm half isn't done).
-- **Decisions:** D-106 (the Download pop-up menu stays, despite iOS's unnamed inner button). Next: D-108.
-- **Mac:** new home-network address (in `~/.ssh/config` on the Windows side); about 15 GB free.
+  exercised), #185 (needs a full day).
+- **Decisions:** D-106 (the Download pop-up menu stays), D-107 (database keeps its safest saving mode; #143 closed).
+  Next: D-108.
+- **Mac:** new home-network address (in `~/.ssh/config` on the Windows side); about 16 GB free.
 
 ## Now
 
@@ -29,15 +31,12 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 3. **Retirement, 28 Nov** (#201): remove what batches 4, 6 and 8 replaced once #191's pass marks are met (taps that
    play ≥ 90%; first sound median ≤ 1.5 s, p90 ≤ 3 s; mix downloads ≥ 80%; placeholders ≤ 2%).
 4. **Live checks that close with use:** #130 (two requesters at once), #142 (a device connected), #185 (a full day),
-   #188 (Mark's diagnostics export after the round; HTTP/3 off since 13 Nov), #16/#17/#20/#22/#23/#54/#63 (#95).
+   #188 (Mark's diagnostics export after the round; HTTP/3 off since 13 Nov), #144/#145 (the warmer and rebuilds after batch 18), #16/#17/#20/#22/#23/#54/#63 (#95).
 
-## Next: small builds, one batch each
+## Next
 
-| Batch | Issues | Platform |
-| --- | --- | --- |
-| Server efficiency left over | #144 rebuild cost, #145 artist re-warm | server |
-| iPhone small features | #126 shorter Popular songs rows, #127 pause one download, #224 search flash, #112 Watch logo | iPhone, Watch |
-| CI | #189 xdist workers dying in the 1 GB container | ops |
+No build work is queued: the next batch comes from Mark's device round. Small findings left: #225 (test workers'
+memory growth).
 
 ## Later
 
