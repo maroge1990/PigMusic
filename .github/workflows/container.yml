@@ -61,16 +61,37 @@ jobs:
             --only-binary :all: --disable-pip-version-check --root-user-action=ignore \
             --target /opt/pig-test -r /tmp/requirements-test.lock.txt
           sudo chmod -R a+rX "$RUNNER_TEMP/pig-testlibs"
+      # Four workers plus their tmpfs files peak at about 1.6 GB (measured 16 Nov,
+      # anon 1.24 GB + tmpfs 0.39 GB; -n 2 still needs 1.15 GB). Under the old 1 GB
+      # cap the suite lived on the 1 GB of swap Docker adds by default, and once
+      # the kernel killed workers instead (#189). The cap is 3 GB with no swap, so
+      # growth fails the same way every time; the 1 GB production limit is held by
+      # the scale gates below. The last line reports the peak and any OOM kill.
       - name: Backend regression suite in isolated container
+        id: suite
         run: |
-          docker run --rm --network none --memory=1g --user 99:100 \
+          set -o pipefail
+          docker run --rm --network none --memory=3g --memory-swap=3g --user 99:100 \
             --tmpfs /tmp:rw,uid=99,gid=100 --tmpfs /data:rw,uid=99,gid=100 \
             -e PYTHONDONTWRITEBYTECODE=1 -e PIG_MUSIC_PRELOAD=false -e PIG_MUSIC_EMBEDDED_ENGINE=false \
             -v "$RUNNER_TEMP/pig-testlibs:/opt/pig-test:ro" -e PYTHONPATH=/opt/pig-test \
             -v "$GITHUB_WORKSPACE/tests:/tests:ro" \
-            -v "$GITHUB_WORKSPACE:/source:ro" -e PIG_MUSIC_SOURCE=/source --entrypoint python \
-            pig-music:candidate -m pytest /tests -q -p no:cacheprovider --basetemp=/tmp/pig-tests \
-            -n 4 -m "not loop_timing"
+            -v "$GITHUB_WORKSPACE:/source:ro" -e PIG_MUSIC_SOURCE=/source --entrypoint sh \
+            pig-music:candidate -c '
+              python -m pytest /tests -q -p no:cacheprovider --basetemp=/tmp/pig-tests \
+                -n 4 -m "not loop_timing"
+              rc=$?
+              cg=/sys/fs/cgroup
+              peak=$(cat $cg/memory.peak 2>/dev/null); peak=${peak:+$((peak / 1048576))}
+              kills=$(sed -n "s/^oom_kill //p" $cg/memory.events 2>/dev/null)
+              files=$(du -scm /tmp /data 2>/dev/null | tail -n 1 | cut -f 1)
+              echo "suite-memory: exit=$rc peak_mib=${peak:-?} oom_kills=${kills:-?} tmpfs_mib=${files:-?} limit_mib=3072"
+              exit $rc' | tee suite.txt
+      - name: Report the suite memory
+        if: always() && steps.suite.outcome != 'skipped'
+        run: |
+          line=$(grep '^suite-memory:' suite.txt || echo 'suite-memory: no report (container killed?)')
+          printf '### Backend suite memory\n\n`%s`\n' "$line" >> "$GITHUB_STEP_SUMMARY"
       - name: Event-loop timing gates (reported, not blocking)
         # Stall limits of 0.2-0.5 s trip at random on shared runners (GC pauses,
         # noisy neighbours). They stay strict locally and on the Unraid verify;
