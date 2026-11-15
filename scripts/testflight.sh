@@ -43,6 +43,14 @@ xcodebuild -quiet -project swift/PigMusic.xcodeproj -scheme PigMusic -configurat
   -destination "generic/platform=iOS" -archivePath "$ARCHIVE" -skipPackagePluginValidation \
   DEVELOPMENT_TEAM="$PIGMUSIC_TEAM_ID" CURRENT_PROJECT_VERSION="$BUILD" CODE_SIGNING_ALLOWED=NO archive
 
+# An unsigned archive carries no entitlements, and the export signs with only what the archived binaries ask for:
+# stamp each bundle with a local (ad hoc) signature holding its entitlements, innermost first, so the App Group
+# survives. The export replaces these signatures with the cloud distribution one.
+APPS="$ARCHIVE/Products/Applications/PigMusic.app"
+codesign -f -s - "$APPS/Watch/PigMusicWatch.app"
+codesign -f -s - --entitlements swift/PigMusicShare/PigMusicShare.entitlements "$APPS/PlugIns/PigMusicShare.appex"
+codesign -f -s - --entitlements swift/PigMusic/PigMusic.entitlements "$APPS"
+
 echo "== sign a local copy and check it"
 # shellcheck disable=SC2086
 xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportOptionsPlist "$OUT/ExportCheck.plist" \

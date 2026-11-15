@@ -192,7 +192,8 @@ yt-dlp is pinned in the image and used only by the YouTube instant-listen trial 
 ## TestFlight
 
 `scripts/testflight.sh` archives the iPhone app (with its Watch app and share extension) and uploads it, run on the
-Mac's own git clone `~/pigmusic-release` over plain SSH: no keychain password. The archive is unsigned; the export
+Mac's own git clone `~/pigmusic-release` over plain SSH: no keychain password. The archive is unsigned, then each
+bundle gets a local ad hoc signature holding its entitlements (without it the App Group is lost); the export
 signs it with Apple's cloud-managed distribution certificate through an Admin-role App Store Connect API key (an App
 Manager key fails with "Cloud signing permission error"). Settings live in `~/.pigmusic-testflight.env` on the Mac
 (chmod 600; names in `.env.example`); the key file stays in `~/.appstoreconnect/private_keys/` and never moves.
