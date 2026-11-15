@@ -58,14 +58,19 @@ test("#150: every non-hero page has the same title block", async ({ page }) => {
     expect(look.inPageHeader, path).toBe(true);
     looks[path] = look;
   }
-  const { size, ...first } = looks["/#/home"] as { size: string };
+  type Look = { size: string; subtitle: string | null };
+  // Home has no subtitle (D-101): subtitles are compared where there is one.
+  const { size, subtitle: _, ...first } = looks["/#/home"] as Look;
+  const subtitles = new Set<string | null>();
   for (const [path, look] of Object.entries(looks)) {
-    const { size: own, ...rest } = look as { size: string };
+    const { size: own, subtitle, ...rest } = look as Look;
+    if (subtitle) subtitles.add(subtitle);
     expect(rest, path).toEqual(first);
     // On phones a cover page's title steps down one size to fit beside it.
     if (!path.includes("album") || test.info().project.name === "desktop")
       expect(own, path).toBe(size);
   }
+  expect(subtitles.size).toBe(1);
   await expect(page.locator(".page-heading")).toHaveCount(0);
 });
 

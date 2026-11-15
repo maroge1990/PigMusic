@@ -35,9 +35,26 @@ test("Home order, with no song recommendations", async ({ page }) => {
             ],
           },
         }),
-      "/v1/home/recommended": (route) => route.fulfill({ json: feed("") }),
+      "/v1/home/recommended": (route) =>
+        route.fulfill({
+          json: {
+            ...feed(""),
+            source: "Similar to artists in your library",
+            artists: [
+              {
+                ...item("ar1", "Artist one"),
+                reason: "Because you saved Artist two",
+              },
+            ],
+          },
+        }),
       "/v1/home/popular": (route) =>
-        route.fulfill({ json: feed("Popular in Australia") }),
+        route.fulfill({
+          json: {
+            ...feed("Popular in Australia"),
+            source: "Apple Music · Australia",
+          },
+        }),
     },
   });
   await page.goto("/#/home");
@@ -63,6 +80,17 @@ test("Home order, with no song recommendations", async ({ page }) => {
     "Albums",
     "Songs",
   ]);
+  // D-101: no descriptors; only the chart names its source.
+  await expect(recommended).toContainText("Artist one");
+  await expect(popular).toContainText("Apple Music · Australia");
+  const main = page.locator(".home-page");
+  for (const text of [
+    "Find your next favourite.",
+    "Familiar favourites. Something new. Made for today.",
+    "Similar to artists in your library",
+    "Because you saved Artist two",
+  ])
+    await expect(main).not.toContainText(text);
 });
 
 for (const appearance of ["light", "dark"]) {

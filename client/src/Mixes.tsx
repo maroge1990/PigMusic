@@ -441,7 +441,6 @@ export function Mixes() {
     <section className="home-section" aria-label="Your mixes">
       <SectionHeader
         title="Your mixes"
-        subtitle="Familiar favourites. Something new. Made for today."
         actions={
           <a className="small-button" href="#/home/rewind">
             <History size={16} aria-hidden="true" />

@@ -31,7 +31,6 @@ type Item = {
   artist_id: string;
   release_id?: string;
   album?: string;
-  reason?: string;
   kind: string;
 };
 type Feed = {
@@ -111,11 +110,9 @@ function HomeSection({ kind }: { kind: "popular" | "recommended" }) {
     kind === "popular"
       ? feed?.title || "Popular in Australia"
       : "Recommended for you";
+  // Only the chart names its source; recommendations need no caption (D-101).
   const caption =
-    feed?.source ||
-    (kind === "popular"
-      ? "Apple Music · Australia"
-      : "Similar to artists in your library");
+    kind === "popular" ? feed?.source || "Apple Music · Australia" : undefined;
   const empty = feed
     ? emptyMessages[kind + ":" + (feed.state || "")] ||
       (feed.unavailable || kind === "recommended"
@@ -176,7 +173,6 @@ function HomeSection({ kind }: { kind: "popular" | "recommended" }) {
                   <span className="card-caption">
                     {collection !== "artists" && item.artist}
                   </span>
-                  {item.reason && <small>{item.reason}</small>}
                 </button>
               ))}
             </div>
@@ -236,7 +232,7 @@ export function Home({ route }: { route: Route }) {
     return <Rewind period={rewindPeriod(route.params.get("period"))} />;
   return (
     <main className="personal-main home-page">
-      <PageHeader title="Home" subtitle="Find your next favourite." />
+      <PageHeader title="Home" />
       <Mixes />
       <RecentlyAdded />
       <HomeSection kind="recommended" />
