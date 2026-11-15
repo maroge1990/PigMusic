@@ -175,8 +175,13 @@ class Catalogue:
         finally:
             self.waiters[priority] -= 1
 
+    @staticmethod
+    def key(path, **params):
+        """The cache document of an answer (the warmer reads it, #145)."""
+        return "catalogue:" + path + repr(sorted(params.items()))
+
     async def get(self, client, path, **params):
-        key = "catalogue:" + path + repr(sorted(params.items()))
+        key = self.key(path, **params)
         # SQLite can wait on another writer, so the cache is used off the loop.
         cached = await asyncio.to_thread(self.store.read_document, key)
         if cached and still_fresh(time.time() - cached["time"], LIFETIME):
@@ -212,7 +217,7 @@ class Catalogue:
 
     async def cached(self, path, **params):
         """A fresh cached answer, or None; never a request."""
-        key = "catalogue:" + path + repr(sorted(params.items()))
+        key = self.key(path, **params)
         cached = await asyncio.to_thread(self.store.read_document, key)
         if cached and still_fresh(time.time() - cached["time"], LIFETIME):
             return cached["data"]

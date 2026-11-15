@@ -60,18 +60,26 @@ class Popularity:
 
         self.completing[artist_id] = asyncio.create_task(complete())
 
+    def keys(self, artist_id, token=None):
+        """The full and songs-only answers' cache documents, or None without
+        a ListenBrainz token (the warmer reads them, #145)."""
+        token = token or settings(self.store).get("listenbrainz_token")
+        if not token:
+            return None
+        full_key = (
+            "popularity:v5:"
+            + hashlib.sha256(token.encode()).hexdigest()[:12]
+            + ":"
+            + mbid(artist_id)
+        )
+        return full_key, full_key + ":songs"
+
     async def get(self, client, artist_id, include_albums=True, complete=False):
         token = settings(self.store).get("listenbrainz_token")
         if not token:
             return {"enabled": False, "songs": [], "albums": []}
         artist_id = mbid(artist_id)
-        full_key = (
-            "popularity:v5:"
-            + hashlib.sha256(token.encode()).hexdigest()[:12]
-            + ":"
-            + artist_id
-        )
-        songs_key = full_key + ":songs"
+        full_key, songs_key = self.keys(artist_id, token)
         key = full_key if include_albums else songs_key
 
         def usable(cached):

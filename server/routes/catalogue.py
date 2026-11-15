@@ -1,6 +1,7 @@
 """Artist artwork aliases, owner acquisition, quality and media settings routes."""
 
 import asyncio
+import os
 import time
 from pathlib import Path
 import httpx
@@ -9,7 +10,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from ..artist_identity import Ambiguous, resolve_artist
 from ..releases import release_query
-from ..catalogue import RELEASE_INC, mbid
+from ..catalogue import LIFETIME, RELEASE_INC, RENEW, mbid
 from ..artwork import quoted
 from ..media import public_settings, save_settings
 from ..portraits import portrait_target
@@ -338,6 +339,107 @@ def catalogue_router(
                 pass
         return covers
 
+    def warm_due(artist_ids):
+        """When `warm_artist(id, full=True)` would next ask a provider for
+        anything, read from its caches in one query (#145): {catalogue id:
+        (epoch, retry)}. The epoch is the earliest cache to be renewed (0:
+        now). `retry` marks an artist with no cached portrait or cover, whose
+        lookup leaves no expiry to wait for: the warmer tries it again on its
+        old cadence. Each check mirrors one step of warm_artist; change them
+        together."""
+        config = public_settings(store)
+        tag = image_config() if config["portraits"] else None
+        fanart = config["portraits"] and config["fanart_configured"]
+        keys = {}
+        for artist_id in artist_ids:
+            mine = {
+                "release-groups": music_catalogue.key(
+                    "release-group/",
+                    query=release_query(artist_id, "album"),
+                    limit=100,
+                    offset=0,
+                ),
+            }
+            popular = popularity.keys(artist_id)
+            if popular:
+                mine["popular"], mine["popular-songs"] = popular
+            if config["portraits"]:
+                mine["image"] = "catalogue-artist-image:" + artist_id + ":" + tag
+            if fanart:
+                mine["background"] = background_target(store, artist_id)
+                if logos is not None:
+                    mine["logo"] = logo_target(store, artist_id)
+            keys[artist_id] = mine
+        documents = store.read_documents(
+            [
+                value
+                for mine in keys.values()
+                for name, value in mine.items()
+                if isinstance(value, str)
+            ]
+            + [
+                ("missing-" if name == "logo" else "") + value.stem
+                for mine in keys.values()
+                for name, value in mine.items()
+                if name in {"background", "logo"}
+            ]
+        )
+
+        def present(directory):
+            # One listing for every artist's file checks: {name: is_file()}
+            # for each name that exists().
+            try:
+                with os.scandir(directory) as entries:
+                    return {
+                        e.name: e.is_file()
+                        for e in entries
+                        if e.is_file() or e.is_dir()
+                    }
+            except OSError:
+                return {}
+
+        files = present(store.cover_dir)
+        logo_files = present(store.cover_dir / "logos") if fanart else {}
+
+        def number(value):
+            return value if isinstance(value, (int, float)) else 0
+
+        due = {}
+        for artist_id, mine in keys.items():
+            # MusicBrainz answers renew RENEW before their day ends.
+            cached = documents.get(mine["release-groups"])
+            when = number((cached or {}).get("time")) + LIFETIME - RENEW
+            if not cached:
+                when = 0
+            if "popular" in mine:
+                # Popularity reuses either answer until RENEW before it lapses.
+                when = min(
+                    when,
+                    max(
+                        (
+                            number(documents[name].get("retry_after")) - RENEW
+                            for name in (mine["popular"], mine["popular-songs"])
+                            if documents.get(name)
+                        ),
+                        default=0,
+                    ),
+                )
+            retry = False
+            if "image" in mine:
+                image = documents.get(mine["image"], {}).get("file", "")
+                retry = (
+                    not image
+                    or not isinstance(image, str)
+                    or not files.get(Path(image).name)
+                )
+            for name, held in (("background", files), ("logo", logo_files)):
+                if name in mine and mine[name].name not in held:
+                    # A remembered miss holds until its retry time.
+                    miss = ("missing-" if name == "logo" else "") + mine[name].stem
+                    when = min(when, number(documents.get(miss, {}).get("retry_after")))
+            due[artist_id] = (when, retry)
+        return due
+
     async def library_identity(artist_id):
         """Catalogue identity for a library artist, or None when ambiguous."""
         try:
@@ -347,4 +449,5 @@ def catalogue_router(
 
     router.warm_artist = warm_artist
     router.library_identity = library_identity
+    router.warm_due = warm_due
     return router, library_artist_catalogue, valid_id, release_data

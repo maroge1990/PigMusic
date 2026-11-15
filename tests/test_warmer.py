@@ -158,6 +158,150 @@ def test_warming_renews_catalogue_answers_before_they_expire(tmp_path):
     assert json.loads(json.dumps(store.read_document(key)))["data"] == {"n": 2}
 
 
+def test_library_artists_are_prepared_again_only_when_changed_or_due(
+    tmp_path, monkeypatch
+):
+    """#145: every 6 h the warmer prepared every library artist again (live
+    passes of 63-118 s), each with document reads, file checks and its covers'
+    checks, although nothing had changed and its caches were fresh. Now a
+    later pass does nothing for such an artist; a changed entry or a cache
+    due for renewal still prepares it."""
+    import io
+
+    from PIL import Image
+
+    from server import warmer as warmer_module
+    from server.app import create_app
+    from server.media import save_settings
+
+    tracks = [
+        {
+            "id": f"t{i}",
+            "title": f"Song {i}",
+            "artist": f"Artist {i}",
+            "album_artist": f"Artist {i}",
+            "album": f"Album {i}",
+            "relative_path": f"a{i}.mp3",
+        }
+        for i in range(3)
+    ]
+    (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": tracks}))
+    monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(tmp_path / "nas"))
+    app = create_app(tmp_path)
+    store = app.state.store
+    save_settings(store, True, True, fanart_key="f" * 20, listenbrainz_token="l" * 20)
+    ids = {}
+    for index, artist in enumerate(store.library["artists"]):
+        ids[artist["id"]] = f"{index + 1:08d}-1111-4111-8111-111111111111"
+        store.write_document(
+            "library-artist:" + artist["id"],
+            {"id": ids[artist["id"]], "name": artist["name"]},
+        )
+    image = io.BytesIO()
+    Image.new("RGB", (32, 32), (200, 20, 20)).save(image, "JPEG")
+    requests = []
+
+    def handler(request):
+        requests.append(str(request.url))
+        host = request.url.host
+        if host.startswith("assets.") or host.startswith("images."):
+            return httpx.Response(
+                200, content=image.getvalue(), headers={"content-type": "image/jpeg"}
+            )
+        if "artistgrid" in host:
+            return httpx.Response(200, text="name,slug\n")
+        if "fanart" in host:
+            # A portrait; no backdrop or logo, so those misses wait a day.
+            thumb = "https://assets.fanart.tv/fanart/music/a/artistthumb/a.jpg"
+            return httpx.Response(200, json={"artistthumb": [{"url": thumb}]})
+        if "listenbrainz" in host:
+            return httpx.Response(200, json=[])
+        return httpx.Response(200, json={"release-groups": [], "releases": []})
+
+    now = [2_000_000_000.0]
+    monkeypatch.setattr(time, "time", lambda: now[0])
+    warmer = app.state.mixes.warm_covers.__self__
+    warmer.home = Home({})
+    reads = []
+    real_read = store.read_document
+    monkeypatch.setattr(
+        store, "read_document", lambda name: reads.append(name) or real_read(name)
+    )
+
+    async def run_pass():
+        reads.clear()
+        requests.clear()
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+            app.state.http = c
+            warming_token = warming.set(True)
+            try:
+                await warmer.run_pass()
+                worker = asyncio.create_task(warmer.work())
+                await warmer.queue.join()
+                worker.cancel()
+            finally:
+                warming.reset(warming_token)
+        return list(reads), list(requests), warmer.state["artists_prepared"]
+
+    async def scenario():
+        start = now[0]
+        reads, fetched, prepared = await run_pass()
+        assert prepared == 3 and fetched
+        # 6 h on, nothing changed and every cache fresh: no work at all.
+        now[0] = start + warmer_module.ARTIST_REUSE + 1
+        assert await run_pass() == ([], [], 3)
+        # One artist's library entry changes: only it is prepared again.
+        changed = store.library["artists"][0]
+        changed["track_count"] += 1
+        now[0] = start + 2 * warmer_module.ARTIST_REUSE + 2
+        reads, fetched, prepared = await run_pass()
+        assert prepared == 4
+        others = [i for library_id, i in ids.items() if library_id != changed["id"]]
+        assert any(ids[changed["id"]] in name for name in reads)
+        assert not any(i in name for i in others for name in reads + fetched)
+        # 21 h on, the catalogue answers fall within RENEW of their day:
+        # every artist is prepared again and renews them.
+        now[0] = start + 21 * 3600
+        reads, fetched, prepared = await run_pass()
+        assert prepared == 7
+        assert len([url for url in fetched if "/release-group/" in url]) == 3
+
+    asyncio.run(scenario())
+
+
+def test_an_artist_without_cached_artwork_is_still_tried_every_6_hours(
+    tmp_path, monkeypatch
+):
+    """#145: a portrait or cover lookup that found nothing leaves no expiry to
+    wait for, so such an artist keeps the old 6-hourly retry."""
+    from server import warmer as module
+
+    w, calls, _ = warmer(tmp_path)
+    w.store.library = {
+        "artists": [
+            {"id": "lib-a", "name": "A", "compilation_only": False},
+            {"id": "lib-b", "name": "B", "compilation_only": False},
+        ]
+    }
+    w.library_identity = lambda library_id: asyncio.sleep(
+        0, {"lib-a": A, "lib-b": B}[library_id]
+    )
+    far = 2_000_000_000.0 + 10 * 86400
+    w.warm_due = lambda ids: {A: (far, True), B: (far, False)}
+    now = [2_000_000_000.0]
+    monkeypatch.setattr(module.time, "time", lambda: now[0])
+
+    async def run():
+        await w.run_pass()
+        await drain(w)
+        now[0] += module.ARTIST_REUSE + 1
+        await w.run_pass()
+        await drain(w)
+
+    asyncio.run(run())
+    assert calls == [(A, True), (B, True), (A, True)]
+
+
 def test_home_albums_get_their_recommended_edition_prepared_once(tmp_path):
     w, _, covers = warmer(tmp_path)
     albums = []

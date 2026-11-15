@@ -33,6 +33,16 @@ URGENT_BATCHES = 3
 SEARCH, HOME, LIBRARY = 0, 1, 2
 
 
+def entry(artist):
+    """A library artist's entry without its artwork, which a fetched portrait
+    changes without changing what the warmer prepares."""
+    return {
+        k: v
+        for k, v in artist.items()
+        if k not in {"cover_url", "fallback_cover_url", "artwork_metadata"}
+    }
+
+
 class Warmer:
     def __init__(self, store, home, client):
         self.store = store
@@ -41,6 +51,10 @@ class Warmer:
         # Wired once the catalogue routes exist.
         self.warm_artist = None
         self.library_identity = None
+        # When each library artist's caches next need renewing (#145).
+        self.warm_due = None
+        # Each library artist's entry as last prepared, by library ID.
+        self.entries = {}
         self.cover = None
         # Prepares a release group's editions and recommended edition; returns
         # that edition's ID.
@@ -259,6 +273,7 @@ class Warmer:
         ]
         # Known identities in one read, not one connection per artist (#96).
         known = await asyncio.to_thread(cached_identities, self.store, artists)
+        waiting = []
         for artist in artists:
             identity = known.get(artist["id"])
             identity = (
@@ -266,8 +281,46 @@ class Warmer:
                 if identity
                 else await self.library_identity(artist["id"])
             )
-            if identity:
-                self.submit(identity, full=True, priority=LIBRARY)
+            try:
+                identity = mbid(identity) if identity else None
+            except (ValueError, TypeError, AttributeError):
+                identity = None
+            if identity and not self.prepared(identity):
+                waiting.append((artist, identity))
+        current = {artist["id"] for artist in artists}
+        self.entries = {k: v for k, v in self.entries.items() if k in current}
+        # An artist prepared before is prepared again only when its library
+        # entry changed or one of its caches is due for renewal: every 6 h,
+        # each cost reads, stats and its covers' checks (#145).
+        unchanged = [
+            identity
+            for artist, identity in waiting
+            if self.entries.get(artist["id"]) == entry(artist) and identity in self.done
+        ]
+        due = {}
+        if self.warm_due and unchanged:
+            try:
+                due = await asyncio.to_thread(self.warm_due, unchanged)
+            except Exception:
+                # Unknown: prepare them all, as before #145.
+                log.exception("Reading the library artists' cache expiry failed")
+        now = time.time()
+        for artist, identity in waiting:
+            if identity in due:
+                when, retry = due[identity]
+                if retry:
+                    when = min(when, self.done.get(identity, (0,))[0] + ARTIST_REUSE)
+                if when > now:
+                    continue
+            if self.submit(identity, full=True, priority=LIBRARY):
+                self.entries[artist["id"]] = entry(artist)
+
+    def prepared(self, artist_id):
+        """Whether `submit` would turn a library artist away as recent."""
+        prepared = self.done.get(artist_id)
+        return bool(
+            prepared and prepared[1] and time.time() - prepared[0] < ARTIST_REUSE
+        )
 
     def queue_feed(self, feed):
         covers = [("release-group", a["id"]) for a in feed.get("albums", [])] + [

@@ -1189,6 +1189,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     app.include_router(catalogue_routes)
     warmer.warm_artist = catalogue_routes.warm_artist
     warmer.library_identity = catalogue_routes.library_identity
+    warmer.warm_due = catalogue_routes.warm_due
 
     def show_new_portraits():
         if portraits_waiting(store):
