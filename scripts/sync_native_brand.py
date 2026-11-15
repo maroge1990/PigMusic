@@ -151,21 +151,32 @@ def sync(source):
     )
 
 
+def check(root=ROOT):
+    """Fail on drift in any vendored file, native or shared (#186)."""
+    native = json.loads((root / "docs/native-brand-assets.json").read_text())
+    expected = [(name, entry["sha256"]) for name, entry in native["assets"].items()]
+    # The shared receipt's files (tokens, web stylesheets, web icons) are copied
+    # outside the native manifest, so verify them from the receipt itself.
+    shared = json.loads((root / "docs/brand-asset-provenance.json").read_text())
+    for entry in shared["assets"]:
+        expected.append((entry["copiedTo"], entry["sha256"]))
+    for name, sha256 in expected:
+        path = root / name
+        if (
+            not path.is_file()
+            or hashlib.sha256(path.read_bytes()).hexdigest() != sha256
+        ):
+            raise SystemExit("Approved brand asset drift: " + name)
+    print(f"Verified {len(dict(expected))} approved brand files")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     if args.check:
-        manifest = json.loads((ROOT / "docs/native-brand-assets.json").read_text())
-        for name, entry in manifest["assets"].items():
-            path = ROOT / name
-            if (
-                not path.is_file()
-                or hashlib.sha256(path.read_bytes()).hexdigest() != entry["sha256"]
-            ):
-                raise SystemExit("Approved brand asset drift: " + name)
-        print(f"Verified {len(manifest['assets'])} approved brand files")
+        check()
     elif args.source:
         sync(args.source.resolve())
     else:

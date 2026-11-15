@@ -112,3 +112,44 @@ def test_web_default_theme_colour_matches_the_manifest():
     assert manifest["theme_color"].upper() == manifest["background_color"].upper()
     assert manifest["theme_color"].upper() == canvas
     assert f'<meta name="theme-color" content="{canvas}" />' in html
+
+
+def _vendored_copy(tmp_path):
+    """A disposable copy of the brand script, its two receipts and their files."""
+    root = tmp_path / "checkout"
+    names = ["scripts/sync_native_brand.py", "docs/native-brand-assets.json"]
+    names.append("docs/brand-asset-provenance.json")
+    native = json.loads((SOURCE / "docs/native-brand-assets.json").read_text())
+    shared = json.loads((SOURCE / "docs/brand-asset-provenance.json").read_text())
+    names += list(native["assets"]) + [a["copiedTo"] for a in shared["assets"]]
+    for name in names:
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_bytes((SOURCE / name).read_bytes())
+    return root
+
+
+def _brand_check(root):
+    return subprocess.run(
+        [sys.executable, str(root / "scripts/sync_native_brand.py"), "--check"],
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "drift",
+    [
+        lambda path: path.write_text(path.read_text() + "\n.drift {}\n"),
+        lambda path: path.unlink(),
+    ],
+    ids=["modified", "deleted"],
+)
+def test_brand_check_covers_the_vendored_stylesheets(tmp_path, drift):
+    # #186: --check read only the native manifest, so the shared receipt's
+    # stylesheets could drift unnoticed.
+    root = _vendored_copy(tmp_path)
+    assert _brand_check(root).returncode == 0
+    drift(root / "client/src/brand/pig-glass.css")
+    result = _brand_check(root)
+    assert result.returncode != 0
+    assert "client/src/brand/pig-glass.css" in result.stderr
