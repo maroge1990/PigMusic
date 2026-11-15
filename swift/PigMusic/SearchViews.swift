@@ -49,11 +49,6 @@ struct SearchView: View {
       } catch { return }
       await search(force: false)
     }
-    .toolbar {
-      Button("Refresh", systemImage: "arrow.clockwise") {
-        Task { await search(force: true) }
-      }.disabled(SearchText.clean(query).isEmpty)
-    }
   }
   private func search(force: Bool) async {
     await model.foundSearch?.search(query, force: force)
