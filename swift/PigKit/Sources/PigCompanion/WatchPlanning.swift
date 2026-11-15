@@ -1,4 +1,5 @@
 import Foundation
+import PigDomain
 
 /// What following the playlists sent to the Watch means after a sync: which
 /// songs leave, which are sent, and the subscriptions and exclusions to keep.
@@ -90,6 +91,38 @@ public struct WatchPlaylistPlan: Equatable, Sendable {
       }
     }
     return plan
+  }
+}
+
+extension WatchPlaylistPlan {
+  /// Releases and sends what the plan says, stopping as soon as `isCurrent`
+  /// fails after any wait (Codex round 2 on #209): a Remove all or removal
+  /// made meanwhile must not be undone by a stale plan. True when it ran to
+  /// the end, so the caller may save the plan's subscriptions and exclusions.
+  @MainActor public func apply(
+    isCurrent: () -> Bool,
+    release: (_ ids: [String], _ origin: DownloadOrigin) async -> Void,
+    lookup: (String) async -> Track?,
+    enqueue: (_ tracks: [Track], _ origin: DownloadOrigin) async -> Void
+  ) async -> Bool {
+    for change in self.release {
+      guard isCurrent() else { return false }
+      await release(
+        change.songIds, DownloadOrigin(playlistId: change.playlistId, playlistName: change.name))
+    }
+    for change in send {
+      var tracks: [Track] = []
+      for songId in change.songIds {
+        guard isCurrent() else { return false }
+        if let track = await lookup(songId) { tracks.append(track) }
+      }
+      guard isCurrent() else { return false }
+      if !tracks.isEmpty {
+        await enqueue(
+          tracks, DownloadOrigin(playlistId: change.playlistId, playlistName: change.name))
+      }
+    }
+    return isCurrent()
   }
 }
 

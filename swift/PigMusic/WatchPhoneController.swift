@@ -302,7 +302,11 @@ import SwiftUI
       return message.map(StatusMessage.error)
     }
   }
+  /// Rises with every removal the person makes, so a playlist reconciliation
+  /// already running doesn't undo it.
+  @ObservationIgnored private var removals = 0
   func remove(_ id: String) async {
+    removals += 1
     // Removed from the Watch: followed playlists must not send it back.
     for playlist in downloads?.records.first(where: { $0.id == id })?.effectiveOrigins
       .compactMap(\.playlistId) ?? []
@@ -315,12 +319,14 @@ import SwiftUI
   /// Removes everything sent to the Watch and stops following its playlists
   /// (#209): the next manifest leaves the Watch empty.
   func removeAll() async {
+    removals += 1
     for id in Array(subscriptions.keys) { unsubscribe(id) }
     await downloads?.clear()
     await publish()
   }
   /// Removes an album's or playlist's claim; songs another one needs stay.
   func release(_ ids: [String], origin: DownloadOrigin) async {
+    removals += 1
     await downloads?.release(ids: ids, origin: origin)
     // Removing a whole playlist from the Watch stops following it; removing
     // some of its songs keeps following it without them.
@@ -403,22 +409,17 @@ import SwiftUI
     let plan = WatchPlaylistPlan.make(
       subscriptions: subscriptions, exclusions: exclusions, sent: sent, playlists: listed,
       onDevice: Set(downloads.records.map(\.id)))
-    for change in plan.release {
-      await downloads.release(
-        ids: change.songIds,
-        origin: DownloadOrigin(playlistId: change.playlistId, playlistName: change.name))
-    }
-    for change in plan.send {
-      var tracks: [Track] = []
-      for songId in change.songIds {
-        if let track = try? await store.track(id: songId) { tracks.append(track) }
-      }
-      if !tracks.isEmpty {
-        try? await downloads.enqueue(
-          tracks, quality: "aac",
-          origin: DownloadOrigin(playlistId: change.playlistId, playlistName: change.name))
-      }
-    }
+    // A removal made while the plan runs (Remove all, say) stops it, and its
+    // subscriptions are not saved over what the removal left (Codex).
+    let started = removals
+    let finished = await plan.apply(
+      isCurrent: { [weak self] in self?.removals == started },
+      release: { ids, origin in await downloads.release(ids: ids, origin: origin) },
+      lookup: { try? await store.track(id: $0) },
+      enqueue: { tracks, origin in
+        try? await downloads.enqueue(tracks, quality: "aac", origin: origin)
+      })
+    guard finished else { return }
     if plan.subscriptions != subscriptions {
       subscriptions = plan.subscriptions
       saveSubscriptions()

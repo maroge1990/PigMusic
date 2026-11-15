@@ -135,3 +135,48 @@ struct WatchPlanningTests {
     #expect(WatchReadinessSummary(ready: 1, waiting: 0, failed: 0, seconds: 59, bytes: 1).complete)
   }
 }
+
+private actor Latch {
+  var open = false
+  var waiting = false
+  func wait() async {
+    waiting = true
+    while !open { await Task.yield() }
+  }
+  func release() { open = true }
+}
+
+/// Codex round 2 on batch 13 (#209): Remove all while a playlist
+/// reconciliation is suspended reading a song must not be undone by it.
+@MainActor @Test func aReconciliationOvertakenByRemoveAllRestoresNothing() async {
+  let plan = WatchPlaylistPlan.make(
+    subscriptions: ["p": "Run"], exclusions: [:], sent: [:],
+    playlists: ["p": .init(name: "Run", songIds: ["a"])], onDevice: [])
+  #expect(plan.send == [.init(playlistId: "p", name: "Run", songIds: ["a"])])
+  let latch = Latch()
+  var generation = 0
+  var enqueued: [[String]] = []
+  let run = Task { @MainActor in
+    let started = generation
+    return await plan.apply(
+      isCurrent: { generation == started },
+      release: { _, _ in },
+      lookup: { id in
+        await latch.wait()
+        return Track(id: id, title: id, artist: "A")
+      },
+      enqueue: { tracks, _ in enqueued.append(tracks.map(\.id)) })
+  }
+  while !(await latch.waiting) { await Task.yield() }
+  generation += 1  // Remove all.
+  await latch.release()
+  let finished = await run.value
+  #expect(!finished)  // The caller keeps its subscriptions as Remove all left them.
+  #expect(enqueued.isEmpty)
+  // Undisturbed, the plan is applied.
+  let done = await plan.apply(
+    isCurrent: { true }, release: { _, _ in },
+    lookup: { Track(id: $0, title: $0, artist: "A") },
+    enqueue: { tracks, _ in enqueued.append(tracks.map(\.id)) })
+  #expect(done && enqueued == [["a"]])
+}
