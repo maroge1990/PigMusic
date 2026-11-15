@@ -29,9 +29,32 @@ public struct FavouriteStates: Sendable {
     invalidate(id)
     values[id] = value
   }
+  /// Whether the star can be tapped: only an unknown state stops it. A
+  /// library sync or another save is no reason to grey it (#212).
+  public func canTap(_ id: String) -> Bool { values[id] != nil }
+  /// A person's tap, shown at once (#212): flips the state before anything
+  /// is saved and returns the change to save, or nil while it is unknown.
+  public mutating func tap(_ id: String) -> FavouriteTap? {
+    guard let current = values[id] else { return nil }
+    change(id, !current)
+    return FavouriteTap(id: id, value: !current, revision: revision(id))
+  }
+  /// The save of `tap` was refused: its old state comes back, unless a newer
+  /// tap, change or clear has come since.
+  public mutating func refused(_ tap: FavouriteTap) {
+    guard revision(tap.id) == tap.revision else { return }
+    change(tap.id, !tap.value)
+  }
   public mutating func clear() {
     values = [:]
     revisions = [:]
     epoch += 1
   }
+}
+
+/// One tap on the favourite star, for putting it back if its save is refused.
+public struct FavouriteTap: Sendable, Equatable {
+  public let id: String
+  public let value: Bool
+  fileprivate let revision: Int
 }

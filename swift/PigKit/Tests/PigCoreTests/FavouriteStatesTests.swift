@@ -29,3 +29,46 @@ import Testing
   #expect(!stale)
   #expect(states["song"] == nil)
 }
+
+// #212: a tap shows the new state before the server answers, and only a
+// refused save puts the old one back.
+@Test func aTapShowsTheNewStateAtOnceAndARefusalRevertsIt() {
+  var states = FavouriteStates()
+  let unknown = states.tap("song")
+  #expect(unknown == nil)  // Unknown: nothing to flip yet.
+  states.answer("song", false, since: states.revision("song"))
+  #expect(states.canTap("song"))
+  let read = states.revision("song")
+  let tap = states.tap("song")
+  #expect(tap?.value == true)
+  #expect(states["song"] == true)  // Before any save or server answer.
+  // A read that started before the tap doesn't undo it.
+  let stale = states.answer("song", false, since: read)
+  #expect(!stale)
+  #expect(states["song"] == true)
+  states.refused(tap!)
+  #expect(states["song"] == false)
+}
+
+@Test func aRefusalAfterANewerTapKeepsTheNewerState() {
+  var states = FavouriteStates()
+  states.answer("song", false, since: states.revision("song"))
+  let first = states.tap("song")!
+  let second = states.tap("song")!
+  #expect(second.value == false)
+  states.refused(first)
+  #expect(states["song"] == false)  // The second tap's state, not reverted.
+  states.refused(second)
+  #expect(states["song"] == true)  // Back to what the first tap showed.
+}
+
+/// The star depends only on whether its state is known: a library sync,
+/// which made the star grey before (#212), is no input.
+@Test func theStarStaysTappableWhateverElseIsRunning() {
+  var states = FavouriteStates()
+  #expect(!states.canTap("song"))
+  states.answer("song", true, since: states.revision("song"))
+  #expect(states.canTap("song"))
+  states.invalidate("song")  // A save under way.
+  #expect(states.canTap("song"))
+}

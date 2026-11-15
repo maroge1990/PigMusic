@@ -26,8 +26,8 @@ struct SongActionsView: View {
               favourite ? "Remove from favourites" : "Add to favourites",
               systemImage: favourite ? "star.slash" : "star"
             ) {
-              Task { await changeFavourite(!favourite) }
-            }.disabled(loading || !model.canMutate)
+              Task { await changeFavourite() }
+            }
           } else {
             Button("Load favourite status") { Task { await loadFavourite() } }.disabled(loading)
           }
@@ -101,16 +101,14 @@ struct SongActionsView: View {
     defer { loading = false }
     await model.loadFavourite(track)
   }
-  private func changeFavourite(_ value: Bool) async {
-    guard !loading else { return }
-    loading = true
+  /// The button changes at once (#212); the message follows the save.
+  private func changeFavourite() async {
     message = nil
-    defer { loading = false }
     do {
-      let confirmed = try await model.setFavourite(track, value)
+      guard let saved = try await model.tapFavourite(track) else { return }
       message = .info(
-        confirmed
-          ? (value ? "Added to favourites." : "Removed from favourites.")
+        saved.confirmed
+          ? (saved.value ? "Added to favourites." : "Removed from favourites.")
           : "Favourite saved on this iPhone; it will be sent when you're online.")
     } catch is CancellationError {} catch { message = .error(error.userMessage) }
   }
@@ -288,10 +286,10 @@ struct RequestsView: View {
 }
 
 /// The playing song's favourite star: filled when it is a favourite (#100).
+/// A tap changes it at once, and a library sync never greys it (#212).
 struct FavouriteStar: View {
   let model: AppModel
   let track: Track
-  @State private var saving = false
   @State private var failed = false
   private var favourite: Bool { model.favourites[track.id] ?? false }
   var body: some View {
@@ -301,17 +299,14 @@ struct FavouriteStar: View {
     ) {
       Task { await toggle() }
     }
-    .disabled(saving || !model.canMutate || model.favourites[track.id] == nil)
+    .disabled(!model.favourites.canTap(track.id))
     .task(id: track.id) { await model.loadFavourite(track) }
     .alert("Favourite not saved", isPresented: $failed) {
       Button("OK", role: .cancel) {}
     }
   }
   private func toggle() async {
-    guard !saving, let current = model.favourites[track.id] else { return }
-    saving = true
-    defer { saving = false }
-    do { _ = try await model.setFavourite(track, !current) } catch is CancellationError {} catch {
+    do { try await model.tapFavourite(track) } catch is CancellationError {} catch {
       failed = true
     }
   }

@@ -856,18 +856,28 @@ enum PlayOrigin: Hashable {
     else { return }
     try? await store?.cache(confirmed, key: key)
   }
-  /// Whether the server confirmed the change; false when it waits on this phone.
-  func setFavourite(_ track: Track, _ value: Bool) async throws -> Bool {
+  /// Flips a song's favourite at once (#212) and saves it through the edit
+  /// outbox; a refused save puts the old state back. The new state, and
+  /// whether the server confirmed it (false when it waits on this phone);
+  /// nil while the state is unknown.
+  @discardableResult func tapFavourite(_ track: Track) async throws -> (
+    value: Bool, confirmed: Bool
+  )? {
     let stamp = account.generation
     let store = self.store
-    favourites.invalidate(track.id)
-    let confirmed = try await saveEdit(
-      OfflineMutation(action: "favourite", track: track, favourite: value))
-    try account.check(stamp)
-    favourites.change(track.id, value)
-    try? await store?.cache(value, key: "favourite:" + track.id)
-    confirmations += 1
-    return confirmed
+    guard let tap = favourites.tap(track.id) else { return nil }
+    do {
+      let confirmed = try await saveEdit(
+        OfflineMutation(action: "favourite", track: track, favourite: tap.value))
+      try account.check(stamp)
+      // A newer tap meanwhile is what the star shows and what is kept.
+      try? await store?.cache(favourites[track.id] ?? tap.value, key: "favourite:" + track.id)
+      confirmations += 1
+      return (tap.value, confirmed)
+    } catch {
+      favourites.refused(tap)
+      throw error
+    }
   }
   @discardableResult func saveEdit(_ mutation: OfflineMutation) async throws -> Bool {
     guard let store, person != nil else { throw NativeFailure.authentication }
