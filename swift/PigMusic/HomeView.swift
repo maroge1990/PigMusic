@@ -13,13 +13,10 @@ struct HomeView: View {
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 28) {
-        Text("Find your next favourite.").font(PigType.subhead).foregroundStyle(.secondary)
-          .padding(.horizontal)
         let mixes = model.homeContent[.mixes]?.mixes ?? []
         let radio = model.homeContent[.mixes]?.radio
         if !mixes.isEmpty || radio != nil {
-          Shelf(title: "Your mixes", caption: "Familiar favourites. Something new. Made for today.")
-          {
+          Shelf(title: "Your mixes") {
             if let radio {
               Button {
                 Task { await model.startRadio() }
@@ -144,14 +141,13 @@ struct HomeView: View {
     let heading = feed?.title ?? title
     VStack(alignment: .leading, spacing: 18) {
       if let feed, !feed.artists.isEmpty {
-        Shelf(title: heading, caption: feed.source.isEmpty ? nil : feed.source) {
+        Shelf(title: heading) {
           ForEach(feed.artists) { item in
             NavigationLink {
               CatalogueArtistView(model: model, artistId: item.id, name: item.name)
             } label: {
               CollectionCard(
-                model: model, source: .artist(item.id), title: item.name,
-                caption: item.reason, circle: true
+                model: model, source: .artist(item.id), title: item.name, circle: true
               ).frame(width: 140)
             }.buttonStyle(.plain)
           }
@@ -187,7 +183,7 @@ struct HomeView: View {
           }
           // The chart holds up to 100 songs (#55); the rest are a tap away.
           if all.count > tracks.count {
-            NavigationLink("See all \(all.count) songs") {
+            NavigationLink("See all popular songs") {
               ChartSongsView(model: model, title: heading, tracks: all)
             }.padding(.vertical, 8)
           }

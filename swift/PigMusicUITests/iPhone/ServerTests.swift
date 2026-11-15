@@ -41,7 +41,8 @@ final class ServerTests: XCTestCase {
       app.secureTextFields["Password"].typeText(password)
       app.buttons["Sign in"].tap()
     }
-    expect(app.staticTexts["Find your next favourite."], timeout: 60)
+    // Signed in: the tab bar's Home tab shows (the Home subtitle is gone, #215).
+    expect(app.tabBars.buttons["Home"], timeout: 60)
   }
 
   /// iOS offers to save the password over whatever screen is showing, up to
