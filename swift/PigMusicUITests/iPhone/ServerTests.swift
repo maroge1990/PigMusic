@@ -73,12 +73,12 @@ final class ServerTests: XCTestCase {
     expect(app.buttons["Play Last Exit by The Test Pilots"])
     tap(app.buttons["Download"])
     tap(app.buttons["Send to Apple Watch"])
-    let alert = app.alerts["Apple Watch"]
-    expect(alert)
-    XCTAssertTrue(
-      alert.staticTexts.matching(
-        NSPredicate(format: "label BEGINSWITH 'Sending 3 songs to Apple Watch.'")
-      ).firstMatch.exists, alert.debugDescription)
-    tap(alert.buttons["OK"])
+    // D-103: sending shows no pop-up and no text, only a brief checkmark.
+    XCTAssertFalse(app.alerts["Apple Watch"].waitForExistence(timeout: 5), app.debugDescription)
+    XCTAssertFalse(
+      app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Apple Watch'")).firstMatch
+        .exists, app.debugDescription)
+    XCTAssertFalse(app.staticTexts["Connect and refresh your phone library first."].exists)
+    expect(app.buttons["Download"])
   }
 }

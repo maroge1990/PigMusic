@@ -117,18 +117,42 @@ final class DemoLibraryTests: XCTestCase {
     launch()
     app.buttons["Sunrise, The Orchard"].tap()
     expect(app.staticTexts["IN YOUR LIBRARY"])
+    checkDownloadMenu()
+  }
+
+  /// D-103: an artist page has the same Download menu, Send to Apple Watch
+  /// included, instead of a separate Watch button.
+  func testTheArtistPageHasTheDownloadMenu() {
+    launch()
+    app.tabBars.buttons["Library"].tap()
+    app.buttons["The Orchard"].tap()
+    expect(app.staticTexts["IN YOUR LIBRARY"])
+    expect(app.buttons["Play"])
+    XCTAssertFalse(
+      app.buttons.matching(NSPredicate(format: "label ENDSWITH 'to Apple Watch'")).firstMatch
+        .exists)
+    checkDownloadMenu()
+  }
+
+  /// One VoiceOver stop named "Download" that opens the menu (#97, D-103).
+  private func checkDownloadMenu(file: StaticString = #filePath, line: UInt = #line) {
     let download = app.buttons["Download"]
-    expect(download)
-    XCTAssertEqual(app.buttons.matching(identifier: "Download").count, 1)
+    expect(download, file: file, line: line)
+    XCTAssertEqual(
+      app.buttons.matching(identifier: "Download").count, 1, file: file, line: line)
     let place = download.frame
     let unnamed = app.buttons.allElementsBoundByIndex.filter {
       $0.label.isEmpty && $0.frame.intersects(place)
     }
     if !unnamed.isEmpty { print(app.debugDescription) }
-    XCTAssertEqual(unnamed.count, 0, "an unnamed button sits on the Download menu")
-    // It still opens the menu.
+    XCTAssertEqual(
+      unnamed.count, 0, "an unnamed button sits on the Download menu", file: file, line: line)
+    // Enabled once the page's songs have loaded.
+    let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: download)
+    wait(for: [enabled], timeout: 10)
+    // It still opens the menu, with the device choices first.
     download.tap()
-    expect(app.buttons["Download originals"])
+    expect(app.buttons["Download smaller copies"], file: file, line: line)
   }
 
   func testSearchFindsALibrarySong() {

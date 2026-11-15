@@ -361,49 +361,72 @@ struct AlbumView: View {
   }
 }
 
-/// Device and Watch download choices behind one round button.
+/// Device and Watch download choices behind one round button (D-103).
 struct DownloadMenu: View {
   let model: AppModel
   let tracks: [Track]
   /// A playlist's downloads are grouped under it on the device.
   var origin: DownloadOrigin = .direct
-  /// Songs not in your library yet; offered first, as a server request.
+  /// Songs not in your library yet; offered last, as a server request.
   var missingCount = 0
   var addMissing: (() async -> Void)?
-  @State private var watchResult: String?
-  @State private var choosing = false
+  /// Rises with each send to the Watch; the button shows a checkmark briefly.
+  @State private var sends = 0
+  @State private var sent = false
+  @State private var watchError: String?
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   var body: some View {
-    // A plain button showing the choices (#97): a Menu wraps its label in a
-    // second, unnamed button, so VoiceOver found "Download" twice over.
-    RoundIcon(label: "Download", systemImage: "arrow.down") { choosing = true }
-      // An empty playlist can still be sent: the Watch follows it as songs are added.
-      .disabled(tracks.isEmpty && origin.playlistId == nil)
-      .confirmationDialog("Download", isPresented: $choosing) {
-        if missingCount > 0, let addMissing, model.canMutate {
-          Button("Add \(missingCount) missing song\(missingCount == 1 ? "" : "s") to server") {
-            Task { await addMissing() }
-          }
-        }
-        Button("Download originals") {
+    HStack(spacing: 10) {
+      Menu {
+        Button("Download", systemImage: "arrow.down.circle") {
           Task { await model.download(tracks, origin: origin) }
         }
-        Button("Download smaller AAC copies") {
+        Button("Download smaller copies", systemImage: "arrow.down.circle.dotted") {
           Task { await model.download(tracks, quality: "aac", origin: origin) }
         }
         if model.watch?.supported == true {
-          Button("Send to Apple Watch") {
-            Task { watchResult = await model.watch?.enqueue(tracks, origin: origin)?.text }
+          Button("Send to Apple Watch", systemImage: "applewatch") {
+            Task { await sendToWatch() }
           }
         }
+        if missingCount > 0, let addMissing, model.canMutate {
+          Button(
+            "Add \(missingCount) missing song\(missingCount == 1 ? "" : "s") to server",
+            systemImage: "plus"
+          ) {
+            Task { await addMissing() }
+          }
+        }
+      } label: {
+        RoundIconLabel(systemImage: sent ? "checkmark" : "arrow.down")
       }
-      .alert(
-        "Apple Watch",
-        isPresented: Binding(get: { watchResult != nil }, set: { if !$0 { watchResult = nil } })
-      ) {
-        Button("OK") { watchResult = nil }
-      } message: {
-        Text(watchResult ?? "")
+      .buttonStyle(.plain)
+      // One VoiceOver stop named "Download" (#97): a Menu wraps its label in a
+      // second, unnamed button, merged into this one here.
+      .accessibilityElement(children: .combine)
+      .accessibilityLabel("Download")
+      .accessibilityAddTraits(.isButton)
+      // An empty playlist can still be sent: the Watch follows it as songs are added.
+      .disabled(tracks.isEmpty && origin.playlistId == nil)
+      .task(id: sends) {
+        guard sends > 0 else { return }
+        try? await Task.sleep(for: .seconds(1.5))
+        guard !Task.isCancelled else { return }
+        withAnimation(reduceMotion ? nil : .default) { sent = false }
       }
+      if let watchError { StatusText(watchError, kind: .error) }
+    }
+  }
+  private func sendToWatch() async {
+    watchError = nil
+    switch await model.watch?.enqueue(tracks, origin: origin) {
+    case .sent:
+      withAnimation(reduceMotion ? nil : .default) { sent = true }
+      sends += 1
+      model.confirmations += 1
+    case .failed(let reason): watchError = reason
+    case .superseded, nil: break
+    }
   }
 }
 

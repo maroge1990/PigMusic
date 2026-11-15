@@ -237,7 +237,32 @@ def test_a_refused_or_failed_watch_send_is_an_error():
     watch = sources()["WatchPhoneController.swift"]
     send = watch.split("func enqueue(", 1)[1].split("  func remove(", 1)[0]
     assert send.lstrip().startswith(
-        "_ tracks: [Track], origin: DownloadOrigin = .direct) async\n    -> StatusMessage?"
+        "_ tracks: [Track], origin: DownloadOrigin = .direct) async\n    -> SendOutcome"
     )
-    assert send.count("return message.map(StatusMessage.error)") == 5
+    # D-103 (#217): the five refusals and failures stay errors.
+    assert send.count("return .failed(") == 5
     assert "StatusMessage.info)" not in sources()["PersonalActionsViews.swift"]
+
+
+def test_sending_to_the_watch_shows_no_pop_up_or_text():
+    """D-103 (#217): Send to Apple Watch lives in the Download menu on album,
+    playlist and artist pages; a send shows a brief checkmark, never an alert
+    or a sentence, and songs not in the library are simply not sent."""
+    watch = sources()["WatchPhoneController.swift"]
+    send = watch.split("func enqueue(", 1)[1].split("  func remove(", 1)[0]
+    for gone in (
+        "Sending ",
+        "Only songs in your library",
+        "will follow on your Watch",
+        "isn't on your Watch yet",
+        ".info(",
+    ):
+        assert gone not in send, gone
+    library = sources()["LibraryViews.swift"]
+    menu = library.split("struct DownloadMenu: View {", 1)[1].split("\nstruct ", 1)[0]
+    assert "Menu {" in menu
+    assert ".alert(" not in menu and ".confirmationDialog(" not in menu
+    assert 'sent ? "checkmark" : "arrow.down"' in menu
+    artist = sources()["SearchViews.swift"]
+    assert "DownloadMenu(model: model, tracks: songs)" in artist
+    assert "sendToWatch" not in artist

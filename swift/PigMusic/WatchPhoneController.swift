@@ -286,27 +286,34 @@ import UIKit
     await publish()
   }
   var supported: Bool { link?.supported == true }
-  /// Returns what happened, for the screen where Send to Apple Watch was tapped.
-  /// Its outcome as a status line: a refusal or failure is an error (Codex on #159).
+  /// Whether Send to Apple Watch went ahead (D-103: the button only shows a
+  /// checkmark); a refusal or failure carries its reason (Codex on #159).
+  enum SendOutcome: Equatable {
+    case sent
+    case failed(String)
+    /// The account changed meanwhile: nothing to show.
+    case superseded
+  }
   @discardableResult func enqueue(_ tracks: [Track], origin: DownloadOrigin = .direct) async
-    -> StatusMessage?
+    -> SendOutcome
   {
     guard supported else {
-      message = "Watch downloads are managed by its paired iPhone."
-      return message.map(StatusMessage.error)
+      let reason = "Watch downloads are managed by its paired iPhone."
+      message = reason
+      return .failed(reason)
     }
     guard verified, let downloads else {
-      message = "Connect and refresh your phone library first."
-      return message.map(StatusMessage.error)
+      let reason = "Connect and refresh your phone library first."
+      message = reason
+      return .failed(reason)
     }
     if let id = origin.playlistId {
       subscribe(id, name: origin.playlistName)
       exclude([], from: id, sending: Set(tracks.map(\.id)))
+      // An empty playlist is followed: songs added later are sent automatically.
       if tracks.isEmpty {
         await publish()
-        return .info(
-          "\(origin.playlistName ?? "This playlist") will follow on your Watch: songs you add are sent automatically."
-        )
+        return .sent
       }
     }
     guard
@@ -314,8 +321,9 @@ import UIKit
         + Set(tracks.map(\.id)).subtracting(Set(downloads.records.map(\.id))).count
         <= 1000
     else {
-      message = "Choose up to 1,000 songs for your Watch library."
-      return message.map(StatusMessage.error)
+      let reason = "Choose up to 1,000 songs for your Watch library."
+      message = reason
+      return .failed(reason)
     }
     let stamp = account.generation
     do {
@@ -323,29 +331,21 @@ import UIKit
       for id in Set(tracks.map(\.id)) {
         if let track = try await model?.store?.track(id: id) { personal.append(track) }
       }
-      guard account.isCurrent(stamp) else { return nil }
+      guard account.isCurrent(stamp) else { return .superseded }
       guard !personal.isEmpty else {
-        message = "Add these songs to your library before downloading them to Watch."
-        return message.map(StatusMessage.error)
+        let reason = "Add these songs to your library before downloading them to Watch."
+        message = reason
+        return .failed(reason)
       }
+      // Songs not in your library are simply not sent (D-103).
       let known = Set(downloads.records.map(\.id))
       try await downloads.enqueue(personal, quality: "aac", origin: origin)
       noteDelivery { $0.sent(personal.map(\.id).filter { !known.contains($0) }) }
-      var result =
-        "Sending \(personal.count) song\(personal.count == 1 ? "" : "s") to Apple Watch. Follow progress in Downloads › Apple Watch."
-      if personal.count < Set(tracks.map(\.id)).count {
-        message =
-          "Only songs in your library can be sent to Watch. Add or request the remaining songs first."
-        result += " " + (message ?? "")
-      }
-      if link?.activated == true, link?.installed == false {
-        result += " PigMusic isn't on your Watch yet: install it from the Watch app on this iPhone."
-      }
       await publish()
-      return .info(result)
+      return .sent
     } catch {
       message = error.userMessage
-      return message.map(StatusMessage.error)
+      return .failed(error.userMessage)
     }
   }
   /// Rises with every removal the person makes, so a playlist reconciliation

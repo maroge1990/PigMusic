@@ -91,7 +91,15 @@ struct SongActionsView: View {
               Task { await model.download([track]) }
             }
             Button("Send to Apple Watch", systemImage: "applewatch") {
-              Task { message = await model.watch?.enqueue([track]) }
+              // D-103: a success tap, no text; a failure says why.
+              Task {
+                message = nil
+                switch await model.watch?.enqueue([track]) {
+                case .sent: model.confirmations += 1
+                case .failed(let reason): message = .error(reason)
+                case .superseded, nil: break
+                }
+              }
             }
             Button("Download smaller AAC copy") {
               Task { await model.download([track], quality: "aac") }

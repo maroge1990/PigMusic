@@ -163,11 +163,7 @@ struct SavedArtistView: View {
           RoundIcon(label: "Shuffle", systemImage: "shuffle") {
             model.play(songs.shuffled())
           }.disabled(songs.isEmpty)
-          if model.watch?.supported == true {
-            RoundIcon(label: "Send \(artist.name) to Apple Watch", systemImage: "applewatch") {
-              Task { await sendToWatch() }
-            }.disabled(albums.isEmpty)
-          }
+          DownloadMenu(model: model, tracks: songs)
           Spacer()
         }
         LazyVGrid(columns: cardColumns, spacing: 18) {
@@ -235,11 +231,6 @@ struct SavedArtistView: View {
       }
     }
     exploring = identity != nil
-  }
-  private func sendToWatch() async {
-    var tracks: [Track] = []
-    for album in albums { tracks += await model.albumTracks(album) }
-    identityMessage = await model.watch?.enqueue(tracks)?.text
   }
   private func loadSongs() async {
     var tracks: [Track] = []
