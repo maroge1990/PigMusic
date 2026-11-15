@@ -41,13 +41,13 @@ extension PigMusicApp {
       // UI tests measure the splash: --hold-splash keeps it on screen.
       if ProcessInfo.processInfo.arguments.contains("--hold-splash") { return }
     #endif
-    withAnimation(.easeInOut(duration: 0.4)) { starting = false }
+    withAnimation(.easeInOut(duration: 0.9)) { starting = false }
   }
-  /// The pig grows a little as it fades into the app (#207); a plain fade
-  /// with Reduce Motion.
+  /// The pig grows a little as it fades slowly into the app (#207); a plain
+  /// fade with Reduce Motion. The 0.9 s ease comes from finishStarting().
   fileprivate var splashExit: AnyTransition {
     UIAccessibility.isReduceMotionEnabled
-      ? .opacity : .opacity.combined(with: .scale(scale: 1.08))
+      ? .opacity : .opacity.combined(with: .scale(scale: 1.05))
   }
 }
 
