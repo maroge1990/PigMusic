@@ -111,8 +111,7 @@ final class DemoLibraryTests: XCTestCase {
     expect(app.buttons["Play Open Road by The Orchard"])
   }
 
-  /// #97: the album page's Download menu is one VoiceOver stop named
-  /// "Download", not that plus an unnamed button in the same place.
+  /// The album page's Download menu is named "Download" and opens its choices.
   func testTheDownloadMenuIsOneNamedButton() {
     launch()
     app.buttons["Sunrise, The Orchard"].tap()
@@ -134,19 +133,13 @@ final class DemoLibraryTests: XCTestCase {
     checkDownloadMenu()
   }
 
-  /// One VoiceOver stop named "Download" that opens the menu (#97, D-103).
+  /// One button named "Download" that opens the menu (D-103, D-106).
   private func checkDownloadMenu(file: StaticString = #filePath, line: UInt = #line) {
     let download = app.buttons["Download"]
     expect(download, file: file, line: line)
     XCTAssertEqual(
       app.buttons.matching(identifier: "Download").count, 1, file: file, line: line)
-    let place = download.frame
-    let unnamed = app.buttons.allElementsBoundByIndex.filter {
-      $0.label.isEmpty && $0.frame.intersects(place)
-    }
-    if !unnamed.isEmpty { print(app.debugDescription) }
-    XCTAssertEqual(
-      unnamed.count, 0, "an unnamed button sits on the Download menu", file: file, line: line)
+    // iOS gives a Menu an unnamed inner button; Mark keeps the pop-up menu anyway (D-106).
     // Enabled once the page's songs have loaded.
     let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: download)
     wait(for: [enabled], timeout: 10)
