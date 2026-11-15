@@ -138,6 +138,44 @@ public actor DownloadArchive {
     }
     try persist()
   }
+  /// Applies the Watch's confirmation to the Watch's copies (#218, see
+  /// `WatchHandOver`): files of songs it holds are deleted, their records
+  /// kept; songs it lost go back to the queue. The records are saved before
+  /// any file goes, so a failed save deletes nothing; a file left behind is
+  /// cleaned up with the folder's other leftovers at the next launch.
+  @discardableResult
+  public func settleHandOver(listed: [String: String], ready: [String: String], applied: Bool)
+    throws -> WatchHandOver.Plan
+  {
+    let plan = WatchHandOver.plan(records: records, listed: listed, ready: ready, applied: applied)
+    guard !plan.isEmpty else { return plan }
+    let previous = records
+    var leaving: [String] = []
+    for index in records.indices {
+      let record = records[index]
+      if plan.deliver[record.id] == record.checksum, !record.delivered,
+        let name = record.fileName
+      {
+        let ext = name.split(separator: ".").last.map(String.init) ?? ""
+        if name == safeName(record.id, quality: record.quality, extension: ext) {
+          leaving.append(name)
+        }
+        records[index].fileName = nil
+      } else if plan.refetch[record.id] == record.checksum, record.delivered {
+        var fresh = DownloadRecord(track: record.track, quality: record.quality)
+        fresh.origins = record.origins
+        records[index] = fresh
+      }
+    }
+    do { try persist() } catch {
+      records = previous
+      throw error
+    }
+    for name in leaving {
+      try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+    }
+    return plan
+  }
   public func localFile(_ track: Track) -> URL? {
     guard let record = records.first(where: { $0.id == track.id }) else { return nil }
     return localFile(track, record: record)

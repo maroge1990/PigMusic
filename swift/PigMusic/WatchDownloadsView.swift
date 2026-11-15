@@ -103,7 +103,9 @@ struct WatchDownloadsView: View {
     ).text
   }
   private func onWatch(_ record: DownloadRecord, watch: WatchPhoneController) -> Bool {
-    record.checksum != nil && watch.receipt?.ready[record.id] == record.checksum
+    // A song whose iPhone copy went once the Watch confirmed it (#218).
+    record.delivered
+      || (record.checksum != nil && watch.receipt?.ready[record.id] == record.checksum)
   }
   @ViewBuilder private func mark(_ record: DownloadRecord, watch: WatchPhoneController)
     -> some View

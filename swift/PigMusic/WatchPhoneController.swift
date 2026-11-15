@@ -136,6 +136,7 @@ import UIKit
             confirmedAt = Date()
             saveReceipt()
             downloads?.budgetBytes = confirmed.budgetBytes
+            await handOver(manifest, confirmed)
             await publish()
           }
         } else if let command = try? JSONDecoder().decode(CompanionCommand.self, from: data) {
@@ -623,8 +624,10 @@ import UIKit
     } else {
       // One indexed lookup for every ready song, not a search per song.
       files = await downloads.archive.localFiles(ready.map(\.track))
+      // A song the Watch holds stays listed without the iPhone's copy (#218);
+      // with no file, its audio is never sent again.
       for record in ready {
-        if let checksum = record.checksum, files[record.id] != nil {
+        if let checksum = record.checksum, files[record.id] != nil || record.delivered {
           songs.append(CompanionSong(track: record.track, checksum: checksum, bytes: record.total))
         }
       }
@@ -774,6 +777,39 @@ import UIKit
         link?.transfer(file, metadata: data)
         sent.mark("audio:" + identity)
         noteDelivery { $0.handed(song.id) }
+      }
+    }
+  }
+  /// The iPhone's copy of a song goes once the Watch confirms holding it, and
+  /// a song the Watch later loses is fetched from the server again (#218).
+  /// Only a confirmation of the applied library version counts.
+  private func handOver(_ manifest: CompanionManifest, _ confirmed: CompanionReceipt) async {
+    guard confirmed.manifestApplied, confirmed.context == context, let downloads else { return }
+    let stamp = account.generation
+    // Audio the Watch holds needs no transfer still on its way, and its file
+    // is about to go.
+    let held = Set(confirmed.ready.map { "\($0.key):\($0.value)" })
+    link?.cancelTransfers { data in
+      guard let envelope = try? JSONDecoder().decode(CompanionEnvelope.self, from: data),
+        envelope.kind == "audio", let file = envelope.file
+      else { return false }
+      return held.contains("\(file.songId):\(file.checksum)")
+    }
+    let listed = Dictionary(
+      manifest.songs.map { ($0.id, $0.checksum) }, uniquingKeysWith: { first, _ in first })
+    let plan = await downloads.settleHandOver(
+      listed: listed, ready: confirmed.ready, applied: confirmed.manifestApplied)
+    guard account.isCurrent(stamp), !plan.isEmpty else { return }
+    readyCache = nil
+    DiagnosticsLog.shared.record(
+      "watch",
+      "Watch holds \(plan.deliver.count) more songs; their iPhone copies were deleted"
+        + (plan.refetch.isEmpty ? "" : "; \(plan.refetch.count) lost songs fetched again"))
+    if !plan.refetch.isEmpty {
+      // A lost song's delivery starts again.
+      noteDelivery { log in
+        log.retain(Set(downloads.records.map(\.id)).subtracting(plan.refetch.keys))
+        log.sent(plan.refetch.keys)
       }
     }
   }

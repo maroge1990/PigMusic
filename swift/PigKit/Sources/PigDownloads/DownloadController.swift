@@ -148,6 +148,20 @@ import PigDomain
     for id in leaving { progress[id] = nil }
     resume(automatic: true)
   }
+  /// The Watch's confirmation, for the Watch's copies only (#218): see
+  /// `DownloadArchive.settleHandOver`. Songs the Watch lost are queued again.
+  @discardableResult
+  public func settleHandOver(listed: [String: String], ready: [String: String], applied: Bool)
+    async -> WatchHandOver.Plan
+  {
+    guard
+      let plan = try? await archive.settleHandOver(listed: listed, ready: ready, applied: applied),
+      !plan.isEmpty
+    else { return WatchHandOver.Plan() }
+    await reload()
+    if !plan.refetch.isEmpty { resume(automatic: true) }
+    return plan
+  }
   public func clearFinished(ids: Set<String>? = nil) async {
     try? await archive.clearFinished(ids: ids)
     await reload()
