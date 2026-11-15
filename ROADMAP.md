@@ -5,36 +5,29 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 15 Nov 2026 (Melbourne), night: handover.*
+*Overwritten at the end of every session. 15 Nov 2026 (Melbourne), late: paused by Mark mid-batch.*
 
-- **Live:** release `rewind-20261115-v1`, server `cddad62` (D-102), applied 15 Nov, healthy (rollback container
-  `PigMusic-before-rewind-20261115-v1`, backup `pre-rewind-20261115-v1`). Carries batches 13 and 15's server/web.
-- **TestFlight:** 0.2.0 (28) uploaded 15 Nov (batch 13). Build 29 was never uploaded. **0.2.0 (30)** (batches 13, 14
-  and 15) is staged in `~/pigmusic-build` on the Mac for Mark to upload (`testflight.sh`, log in
-  `~/pigmusic-archives/upload.log`); clear the archive and `ArchiveIntermediates` afterwards.
-- **Device round (#184):** on build 27, areas A-C done (results on #184; follow-ups #208-#221). **Still to test on
-  build 30:** area D (icons in all appearances, larger text, Reduce Motion/Transparency, Increase Contrast,
-  VoiceOver); batch 13 on device (Undo bar, favourite star, requested → in library, Remove from library, Downloads
-  pages); Rewind (#216); the Watch delivery measurement (#219: send ~20 songs, close both apps 15 min, export
-  diagnostics, read its "Watch delivery" section). Results go into docs/DESIGN.md when the round ends.
-- **Pushed and awaiting Mark's check:** batch 13 'device round fixes' (#207 #209-#215 #202), batch 14 'Watch
-  background transfers' (#219; gap #223: no resume after iOS evicts the app), batch 15 'Rewind Option A' (#216).
-  Each passed its Codex rounds per D-59/D-71.
-- **Next, in order:** #223; then the Watch issues in Mark's order #217 (Send to Watch in the app's menu style, no
-  pop-ups; show Mark a layout first), #218 (delete the iPhone's Watch copy after delivery), #220 (phone Now Playing
-  on the Watch; design with Mark), #208 (Watch status only when action is needed; wording with Mark); #215 (give Mark
-  the keep/remove list of helper text, D-101); #221, #222 (findings).
-- **#188:** build 25's export: no transport failures while online (baseline 54 of 166), all HTTP/2; replies still
-  take 1.5 s median (p90 3.1 s) on the path, not the server. Next: ask Mark whether HTTP/3 stays off, then suggest
-  "Always use HTTPS".
-- **YouTube trial (#193, D-91):** ends ~21 Nov; then the numbers on #193 and #191, a hand sample, and Mark decides
-  keep or remove (next free decision number: D-103).
-- **Retirement checks 28 Nov (#201)**, **#171** night-time `lifecycle_lock` holds, D-78 clean-up of old Unraid
-  containers (now also `PigMusic-before-batch13-20261115-v1` and `PigMusic-before-rewind-20261115-v1`) and
-  `releases/native-20261114-v1`: unchanged from 14 Nov.
-- **Ways of working:** area batches (D-50), Codex rounds per D-59 and D-71, Claude pushes and releases without waiting (D-99, D-102); D-58
-  closing. The Mac is shared and near its disk floor (15 GB free): clear PigMusic's own archive and
-  `ArchiveIntermediates` after an upload.
+- **Live:** release `rewind-20261115-v1`, server `cddad62`, unchanged. **TestFlight:** 0.2.0 (30) uploaded 15 Nov
+  15:30; its archive and `ArchiveIntermediates` are cleared on the Mac.
+- **Batch 16 'Watch delivery and words', committed on branch `claude/pigmusic-delivery-handover-0028ea`, NOT
+  pushed:** #223 background restore for Watch copies, #217 Send to Apple Watch in the Download menu (D-103), #215
+  helper text removed (Mark's list on #215), #218 delete the iPhone's Watch copy once delivered, #220 the iPhone's song
+  on the Watch (D-104), #221 receipts read only against their manifest, #208 Watch messages only when Mark must act
+  (D-105), #222 PigKit timing tests on a test clock; plus `scripts/testflight.sh`. Python suite (1068), Black,
+  OpenAPI and brand checks pass; on the Mac PigKit (377 + 53), iOS build-for-testing and the Watch build pass. Codex
+  round 1: one medium (Now Playing after a Watch reinstall), fixed in 22ac8a1; round 2 approved and confirmed the fix
+  (D-59/D-71 done).
+- **To resume:** the simulator tap-through tests (`python3 scripts/simulator_ui_tests.py` on the Mac with
+  `PATH=/opt/homebrew/bin:$PATH`, else ffmpeg is missing) never completed: the Mac went offline. They check #217's
+  single "Download" button for VoiceOver. Then push (`git push origin HEAD:main`), CI, and the first upload with the
+  new script (`ssh mac 'cd ~/pigmusic-release && git pull --ff-only && sh scripts/testflight.sh'`; a dry run earlier
+  stopped at a flaky timing test that #222 fixes). No server release needed (native and scripts only).
+- **TestFlight now uses cloud signing:** `scripts/testflight.sh` on the Mac's clone `~/pigmusic-release`, settings in
+  `~/.pigmusic-testflight.env`, Admin API key; build number = commit count. Never run against Mark's own checkout.
+- **Watch row risk to check on device (#220):** tapping the iPhone row may open the Watch's own paused queue in
+  Apple's Now Playing instead of the iPhone's.
+- **Device round (#184) on hold** at Mark's request; areas D, batch 13, Rewind (#216) and #219 still to test, now on
+  the batch 16 build. Next decision number: D-106 (YouTube keep/remove ~21 Nov, #193). Retirement checks 28 Nov (#201).
 
 ## Now: finish the audit and reach parity
 
