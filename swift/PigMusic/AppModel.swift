@@ -1435,8 +1435,10 @@ enum PlayOrigin: Hashable {
     }
     var watchMark: DeviceCopyMark?
     if let record = watch?.downloads?.records.first(where: { $0.id == trackId }) {
+      // A delivered song's iPhone copy is gone because the Watch has it (#218).
       let onWatch =
-        record.checksum != nil && watch?.receipt?.ready[trackId] == record.checksum
+        record.delivered
+        || (record.checksum != nil && watch?.receipt?.ready[trackId] == record.checksum)
       watchMark = onWatch ? .ready : record.state == "failed" ? .failed : .pending
     } else if watch?.receipt?.ready[trackId] != nil {
       watchMark = .ready
@@ -1456,7 +1458,8 @@ enum PlayOrigin: Hashable {
   var watchActiveDownloads: Int {
     let receipt = watch?.receipt
     return watch?.downloads?.records.count {
-      $0.state != "failed" && ($0.checksum == nil || receipt?.ready[$0.id] != $0.checksum)
+      $0.state != "failed" && !$0.delivered
+        && ($0.checksum == nil || receipt?.ready[$0.id] != $0.checksum)
     } ?? 0
   }
   /// The Downloads tab badge: the three sections' active counts combined.
