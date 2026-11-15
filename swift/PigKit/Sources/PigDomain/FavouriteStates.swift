@@ -10,7 +10,16 @@ public struct FavouriteStates: Sendable {
   /// Rises on every clear (sign-out), so a read started before it never
   /// counts after it, even for a song with no revision yet (#101).
   private var epoch = 0
+  /// Songs shown with an unknown state, waiting for a server read to answer;
+  /// retried after each successful refresh (Codex on #212).
+  private var waiting: [String: Track] = [:]
   public init() {}
+  /// Unknown states to read again, in song id order.
+  public var unresolved: [Track] { waiting.keys.sorted().compactMap { waiting[$0] } }
+  /// A song's star is shown: while its state is unknown it waits for a read.
+  public mutating func wanted(_ track: Track) {
+    if values[track.id] == nil { waiting[track.id] = track }
+  }
   public subscript(id: String) -> Bool? { values[id] }
   /// Taken when a read starts; hand it back with the answer.
   public func revision(_ id: String) -> Int { epoch << 32 | revisions[id, default: 0] }
@@ -20,6 +29,7 @@ public struct FavouriteStates: Sendable {
   {
     guard self.revision(id) == revision else { return false }
     values[id] = value
+    waiting[id] = nil
     return true
   }
   /// A change is being saved: reads already started no longer count.
@@ -28,6 +38,7 @@ public struct FavouriteStates: Sendable {
   public mutating func change(_ id: String, _ value: Bool) {
     invalidate(id)
     values[id] = value
+    waiting[id] = nil
   }
   /// Whether the star can be tapped: only an unknown state stops it. A
   /// library sync or another save is no reason to grey it (#212).
@@ -53,11 +64,13 @@ public struct FavouriteStates: Sendable {
     } else {
       invalidate(refused.trackId)
       values[refused.trackId] = nil
+      if let track = refused.track { waiting[track.id] = track }
     }
   }
   public mutating func clear() {
     values = [:]
     revisions = [:]
+    waiting = [:]
     epoch += 1
   }
 }

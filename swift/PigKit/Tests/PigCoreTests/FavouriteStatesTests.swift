@@ -72,3 +72,29 @@ import Testing
   states.invalidate("song")  // A save under way.
   #expect(states.canTap("song"))
 }
+
+/// Codex on #212: a song whose state is unknown (refused and its server
+/// read failed, or never cached and opened offline) stays listed for a retry
+/// until a read answers, so a later successful sync makes the star known.
+@Test func anUnknownStateIsRetriedUntilAReadAnswers() {
+  var states = FavouriteStates()
+  let song = Track(id: "song", title: "Song", artist: "A")
+  states.answer(song.id, false, since: states.revision(song.id))
+  states.refusal(RefusedFavourite(trackId: song.id, value: nil, track: song))
+  #expect(states[song.id] == nil)
+  // The recovery read fails: nothing answers, and the song waits for a retry.
+  #expect(states.unresolved == [song])
+  // A successful refresh retries it; the server's answer is shown.
+  let retry = states.revision(song.id)
+  states.answer(song.id, false, since: retry)
+  #expect(states[song.id] == false)
+  #expect(states.unresolved.isEmpty)
+  // A song first opened offline, never cached, waits the same way.
+  let other = Track(id: "other", title: "Other", artist: "A")
+  states.wanted(other)
+  #expect(states.unresolved == [other])
+  states.wanted(song)  // Known already: nothing to retry.
+  #expect(states.unresolved == [other])
+  states.clear()
+  #expect(states.unresolved.isEmpty)
+}

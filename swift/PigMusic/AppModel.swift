@@ -592,6 +592,10 @@ enum PlayOrigin: Hashable {
       message =
         invalid ? "Playback stopped because the server changed or removed cached music." : nil
       syncFailed = false
+      // Favourites left unknown by a failed read are read again (Codex on #212).
+      if !favourites.unresolved.isEmpty {
+        Task { [weak self] in await self?.readUnresolvedFavourites(generation: stamp) }
+      }
     } catch NativeFailure.authentication {
       guard account.isCurrent(stamp) else { return }
       revoked(generation: stamp)
@@ -858,6 +862,8 @@ enum PlayOrigin: Hashable {
       favourites.change(track.id, value)
       return
     }
+    // Until a read answers, the song waits for a retry (Codex on #212).
+    favourites.wanted(track)
     // A change made while this reads wins over what the read finds.
     let revision = favourites.revision(track.id)
     // Only a cached answer is shown before the server's; with none (never
@@ -914,18 +920,26 @@ enum PlayOrigin: Hashable {
       favourites.refusal(item)
       if let value = item.value {
         Task { try? await store?.cache(value, key: EditOutbox.favouriteCacheKey(item.trackId)) }
-      } else if let track = item.track {
-        let revision = favourites.revision(item.trackId)
-        Task { [weak self] in
-          guard let self,
-            let confirmed = try? await readCatalogue({ try await $0.favourite(track) }),
-            account.isCurrent(stamp), favourites.answer(track.id, confirmed, since: revision)
-          else { return }
-          try? await store?.cache(confirmed, key: EditOutbox.favouriteCacheKey(track.id))
-        }
       }
     }
     favouriteRefusals += 1
+    // An unknown state is read again now, and after every successful refresh
+    // until a read answers.
+    Task { [weak self] in await self?.readUnresolvedFavourites(generation: stamp) }
+  }
+  /// Reads the favourite of every song shown with an unknown state (Codex on
+  /// #212): after a refusal whose read failed, or a song first opened
+  /// offline. A read that fails leaves it for the next successful refresh.
+  func readUnresolvedFavourites(generation stamp: Int) async {
+    let store = self.store
+    for track in favourites.unresolved {
+      guard account.isCurrent(stamp) else { return }
+      let revision = favourites.revision(track.id)
+      guard let confirmed = try? await readCatalogue({ try await $0.favourite(track) }),
+        account.isCurrent(stamp), favourites.answer(track.id, confirmed, since: revision)
+      else { continue }
+      try? await store?.cache(confirmed, key: EditOutbox.favouriteCacheKey(track.id))
+    }
   }
   @discardableResult func saveEdit(_ mutation: OfflineMutation) async throws -> Bool {
     try await saveEditOutcome(mutation) == .confirmed
