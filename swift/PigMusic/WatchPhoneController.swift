@@ -834,6 +834,62 @@ import UIKit
       await self?.publish()
     }
   }
+  /// What was last queued for the Watch's home, and the send waiting out
+  /// its debounce (D-104).
+  @ObservationIgnored private var nowPlayingSent: String?
+  @ObservationIgnored private var nowPlayingPending: String?
+  @ObservationIgnored private var nowPlayingSend: Task<Void, Never>?
+  /// Tells the Watch what plays here, for its home (D-104): only when the
+  /// song, play/pause or the cover's presence changes, a second after the
+  /// last change, so progress ticks and start-up flicker send nothing.
+  func sendNowPlaying(_ track: Track?, playing: Bool, cover: UIImage?) {
+    let key = track.map { "\($0.id)|\(playing)|\(cover != nil)" } ?? "stopped"
+    guard link?.available == true else { return }
+    // Already waiting to go: the debounce is not restarted by every tick.
+    guard key != nowPlayingPending else { return }
+    nowPlayingSend?.cancel()
+    nowPlayingPending = nil
+    guard key != nowPlayingSent else { return }
+    nowPlayingPending = key
+    nowPlayingSend = Task { [weak self] in
+      try? await Task.sleep(for: .seconds(1))
+      guard !Task.isCancelled, let self else { return }
+      nowPlayingPending = nil
+      let state =
+        track.map {
+          PhoneNowPlaying(
+            title: $0.title, artist: $0.artist, playing: playing,
+            cover: cover.flatMap(Self.watchCover))
+        } ?? .stopped()
+      guard let data = try? JSONEncoder().encode(state),
+        link?.sendLatest(data, replacing: { PhoneNowPlaying.decode($0) != nil }) == true
+      else { return }
+      nowPlayingSent = key
+    }
+  }
+  /// A small square JPEG of the cover, or nil when it can't be kept small.
+  private static func watchCover(_ image: UIImage) -> Data? {
+    let side = CGFloat(PhoneNowPlaying.coverPixels)
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    let scale = max(side / max(image.size.width, 1), side / max(image.size.height, 1))
+    let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+    let square = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format)
+      .image { _ in
+        image.draw(
+          in: CGRect(
+            x: (side - size.width) / 2, y: (side - size.height) / 2, width: size.width,
+            height: size.height))
+      }
+    for quality in [0.7, 0.4] {
+      if let data = square.jpegData(compressionQuality: quality),
+        data.count <= PhoneNowPlaying.maximumCoverBytes
+      {
+        return data
+      }
+    }
+    return nil
+  }
   /// Asks the Watch for its lifecycle log; it answers when it can.
   func requestWatchDiagnostics() {
     if let data = try? JSONEncoder().encode(CompanionDiagnostics()) { link?.message(data) }
@@ -896,9 +952,6 @@ import UIKit
           }
           await remove(id)
         }
-      case "playPause": model.player.toggle()
-      case "next": model.player.skip()
-      case "previous": model.player.previous()
       case "sync": await publish(force: true)
       default: return CompanionReply(message: "Unsupported Watch command.")
       }

@@ -27,6 +27,9 @@ import PigSync
   @ObservationIgnored var onSkip: (@MainActor (Track, Double) -> Void)?
   /// Playback reached the end of the queue without repeat.
   @ObservationIgnored var onQueueEnd: (@MainActor () -> Void)?
+  /// What plays, for the Watch's home (D-104): the song, whether it plays and
+  /// its cover, on every Now Playing update; no song once playback stops.
+  @ObservationIgnored var onNowPlaying: (@MainActor (Track?, Bool, UIImage?) -> Void)?
   @ObservationIgnored private var listenOccurrence: UUID?
   @ObservationIgnored private var listenSeconds: Double = 0
   @ObservationIgnored private var listenReported = false
@@ -979,6 +982,7 @@ import PigSync
     error = nil
     MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     releaseSession()
+    onNowPlaying?(nil, false, nil)
   }
   private func refreshArtwork() {
     guard let occurrence = queue.current, artworkOccurrence != occurrence.id else { return }
@@ -1010,6 +1014,7 @@ import PigSync
     ]
     if let currentArtwork { information[MPMediaItemPropertyArtwork] = currentArtwork }
     MPNowPlayingInfoCenter.default().nowPlayingInfo = information
+    onNowPlaying?(song, playing, currentArtwork?.image(at: CGSize(width: 96, height: 96)))
   }
 }
 

@@ -63,14 +63,16 @@ private struct WatchReadiness: View {
   }
 }
 
-/// Like Apple Music and Spotify on the Watch: what is playing first, then the
-/// library by playlist, artist and album, with phone tools and storage last.
+/// Like Apple Music and Spotify on the Watch: what is playing first (here or on
+/// the iPhone), then the library by playlist, artist and album, with storage
+/// and sync last.
 private struct WatchLibraryView: View {
   @Environment(\.colorScheme) private var scheme
   @Bindable var model: WatchModel
   var body: some View {
     NavigationStack {
       List {
+        WatchPhoneNowPlayingRow(model: model)
         WatchNowPlayingRow(model: model)
         if !model.manifest.songs.isEmpty { WatchReadiness(model: model) }
         if model.manifest.songs.isEmpty {
@@ -131,17 +133,6 @@ private struct WatchLibraryView: View {
           }
         }
         Section("More") {
-          NavigationLink("Phone remote") {
-            List {
-              Button("Previous", systemImage: "backward.fill") {
-                Task { await model.send("previous") }
-              }
-              Button("Play or pause", systemImage: "playpause.fill") {
-                Task { await model.send("playPause") }
-              }
-              Button("Next", systemImage: "forward.fill") { Task { await model.send("next") } }
-            }.pigBrandedCanvas().navigationTitle("Phone remote")
-          }
           NavigationLink("Storage & sync") {
             List {
               Text("\(model.receipt?.ready.count ?? 0) songs downloaded").pigFigures()
@@ -233,6 +224,40 @@ private struct WatchArtist: View {
         }
       }
     }.pigBrandedCanvas().navigationTitle(artist.name)
+  }
+}
+/// What the iPhone plays while the Watch plays nothing (D-104). Apple's Now
+/// Playing controls the iPhone's audio directly, with no PigMusic message.
+private struct WatchPhoneNowPlayingRow: View {
+  let model: WatchModel
+  var body: some View {
+    if let state = model.phoneNowPlaying, let title = state.title,
+      PhoneNowPlaying.showsRow(state, watchPlaying: model.playback.wantsPlayback, now: Date())
+    {
+      let artist = state.artist ?? ""
+      NavigationLink {
+        NowPlayingView()
+      } label: {
+        HStack(spacing: 8) {
+          Group {
+            if let cover = model.phoneCover {
+              Image(uiImage: cover).resizable().scaledToFill()
+            } else {
+              Image(systemName: "music.note").foregroundStyle(.secondary)
+            }
+          }
+          .frame(width: 36, height: 36).clipShape(RoundedRectangle(cornerRadius: 6))
+          VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.headline).lineLimit(1)
+            Text(artist).font(PigType.caption).foregroundStyle(.secondary).lineLimit(1)
+            Label("iPhone", systemImage: "iphone").font(.caption2).foregroundStyle(.secondary)
+          }.frame(maxWidth: .infinity, alignment: .leading)
+        }
+      }
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel("Now playing on iPhone, \(title), \(artist)")
+      .accessibilityAddTraits(.isButton)
+    }
   }
 }
 private struct WatchNowPlayingRow: View {

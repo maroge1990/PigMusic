@@ -105,6 +105,20 @@ import WatchConnectivity
     else { return }
     session.transferUserInfo(["payload": data])
   }
+  /// Latest wins (D-104): queued user info that `replaces` matches is
+  /// cancelled before `data` is queued. The application context is left alone,
+  /// since it carries the library context. False when nothing was queued.
+  @discardableResult func sendLatest(_ data: Data, replacing replaces: (Data) -> Bool) -> Bool {
+    guard let session, session.activationState == .activated else { return false }
+    #if os(iOS)
+      guard session.isPaired, session.isWatchAppInstalled else { return false }
+    #endif
+    for transfer in session.outstandingUserInfoTransfers {
+      if let payload = transfer.userInfo["payload"] as? Data, replaces(payload) { transfer.cancel() }
+    }
+    session.transferUserInfo(["payload": data])
+    return true
+  }
   func request(_ data: Data) async throws -> Data {
     guard let session, session.isReachable else { throw CompanionFailure.stale }
     return try await withCheckedThrowingContinuation { continuation in

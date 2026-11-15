@@ -43,3 +43,22 @@ def test_the_controls_artist_line_is_secondary_and_labels_are_plain():
     artist = re.search(r"\.track\.artist\)[^\n]*(?:\n\s*\.[^\n]*)*", watch).group(0)
     assert ".secondary" in artist
     assert '"Play / pause"' not in watch
+
+
+def test_the_watch_shows_the_iphone_song_instead_of_a_phone_remote():
+    """D-104 (#220): three blind "Phone remote" buttons needed both apps
+    reachable. The Watch's home shows the iPhone's song instead, and Apple's
+    Now Playing controls the iPhone's audio; the phone no longer takes
+    playback commands from the Watch."""
+    watch = WATCH.read_text()
+    model = (ROOT / "swift/PigMusicWatch/WatchModel.swift").read_text()
+    phone = (PHONE / "WatchPhoneController.swift").read_text()
+    assert '"Phone remote"' not in watch
+    for command in ('"playPause"', '"next"', '"previous"'):
+        assert command not in watch and command not in model and command not in phone
+    row = watch[watch.index("struct WatchPhoneNowPlayingRow") :]
+    row = row[: row.index("\nprivate struct")]
+    assert "PhoneNowPlaying.showsRow(" in row and "NowPlayingView()" in row
+    assert '"Now playing on iPhone, ' in row and 'systemImage: "iphone"' in row
+    assert "PhoneNowPlaying.decode(data)" in model
+    assert "sendNowPlaying(" in (PHONE / "AppModel.swift").read_text()

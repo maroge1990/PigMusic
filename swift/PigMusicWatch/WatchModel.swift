@@ -7,6 +7,7 @@ import Observation
 import PigCompanion
 import PigDomain
 import PigPlayback
+import UIKit
 
 @MainActor @Observable final class WatchModel {
   var manifest = CompanionManifest(context: CompanionContext(revision: 0, account: nil), songs: [])
@@ -32,6 +33,19 @@ import PigPlayback
     manifest.songs.filter { receipt?.ready[$0.id] == $0.checksum }
   }
   var playback = QueuePlaybackSnapshot()
+  /// What the iPhone plays, for the home's iPhone row (D-104). Kept across
+  /// launches: the phone sends it only when the song or play/pause changes.
+  var phoneNowPlaying: PhoneNowPlaying? =
+    UserDefaults.standard.data(forKey: "watch.phone-now-playing").flatMap(PhoneNowPlaying.decode)
+  {
+    didSet {
+      phoneCover = phoneNowPlaying?.cover.flatMap(UIImage.init(data:))
+      UserDefaults.standard.set(
+        phoneNowPlaying.flatMap { try? JSONEncoder().encode($0) }, forKey: "watch.phone-now-playing")
+    }
+  }
+  /// The iPhone song's cover, decoded once.
+  private(set) var phoneCover: UIImage?
   /// Contexts announced so far, noted before any await (APP1).
   @ObservationIgnored private var contextFence = CompanionContextFence()
   var repeatMode: PlaybackRepeat =
@@ -180,6 +194,7 @@ import PigPlayback
   }
   @ObservationIgnored private var sentCrashNotice = false
   init() {
+    phoneCover = phoneNowPlaying?.cover.flatMap(UIImage.init(data:))
     let info = Bundle.main.infoDictionary
     DiagnosticsLog.shared.launched(
       "Watch",
@@ -213,6 +228,10 @@ import PigPlayback
         await self?.flushListens()
       }
       link?.onMessage = { [weak self] data in
+        if let state = PhoneNowPlaying.decode(data) {
+          if let self, state.supersedes(self.phoneNowPlaying) { self.phoneNowPlaying = state }
+          return
+        }
         if let request = CompanionDiagnostics.decode(data), request.text == nil {
           self?.sendDiagnostics()
           return
@@ -485,8 +504,6 @@ import PigPlayback
           message = value.message
         }
       } catch { message = error.localizedDescription }
-    } else if ["playPause", "next", "previous"].contains(action) {
-      message = "Phone remote controls require a reachable phone."
     } else {
       link?.message(data)
       message = "Request queued for your phone."

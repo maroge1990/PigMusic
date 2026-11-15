@@ -121,6 +121,10 @@ enum PlayOrigin: Hashable {
   init(defaults: UserDefaults = .standard) {
     self.defaults = defaults
     watch = WatchPhoneController(model: self, defaults: defaults)
+    // The Watch's home shows what plays here (D-104).
+    player.onNowPlaying = { [weak self] track, playing, cover in
+      self?.watch?.sendNowPlaying(track, playing: playing, cover: cover)
+    }
   }
 
   func restore() async {
