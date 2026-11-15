@@ -1,6 +1,12 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { album, mockApi } from "./mock";
 
+declare global {
+  interface Window {
+    sheetAnimations: string[];
+  }
+}
+
 test("Now Playing keeps keyboard focus inside and returns it on close", async ({
   page,
 }, info) => {
@@ -389,6 +395,17 @@ test("signing out clears the player and its saved queue", async ({ page }) => {
 test("#182: closing Now Playing by hand plays its exit; Reduce Motion closes at once", async ({
   page,
 }) => {
+  // The sheet's animations as they start: reading the computed style after
+  // the close missed a 0.2 s exit that had already ended on a slow runner
+  // (#189).
+  await page.addInitScript(() => {
+    window.sheetAnimations = [];
+    document.addEventListener("animationstart", (event) => {
+      if ((event.target as Element).matches(".now-playing"))
+        window.sheetAnimations.push(event.animationName);
+    });
+  });
+  const started = () => page.evaluate(() => window.sheetAnimations.slice());
   await mockApi(page);
   await page.goto(`/#/library/album/${album.id}`);
   await page.getByText("Von dutch").first().click();
@@ -396,18 +413,18 @@ test("#182: closing Now Playing by hand plays its exit; Reduce Motion closes at 
   const dialog = page.getByRole("dialog", { name: "Now playing" });
   await open.click();
   await expect(dialog).toBeVisible();
+  await page.evaluate(() => (window.sheetAnimations = []));
   await page.getByRole("button", { name: "Close now playing" }).click();
-  await expect(dialog).toHaveClass(/is-leaving/);
-  expect(
-    await dialog.evaluate((el) => getComputedStyle(el).animationName),
-  ).toBe("sheet-out");
   await expect(dialog).toBeHidden();
+  expect(await started()).toContain("sheet-out");
 
   await page.emulateMedia({ reducedMotion: "reduce" });
   await open.click();
   await expect(dialog).toBeVisible();
+  await page.evaluate(() => (window.sheetAnimations = []));
   await page.getByRole("button", { name: "Close now playing" }).click();
   await expect(dialog).toBeHidden({ timeout: 100 });
+  expect(await started()).not.toContain("sheet-out");
 });
 
 test("#182: buttons answer on pointer-down; a song row lights instead of shrinking", async ({
