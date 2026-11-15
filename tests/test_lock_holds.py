@@ -496,6 +496,87 @@ def test_a_rebuild_reads_the_snapshot_once_and_artists_in_one_query(
     assert len(store.library["artists"]) == 5
 
 
+def test_a_rebuild_checks_artwork_from_one_listing_not_per_album(tmp_path, monkeypatch):
+    """#144: after f55e007 a rebuild still took 1.25-1.5 s live. On a
+    4,300-song fixture it opened 216 connections and made ~6,700 stat calls:
+    two stats per album cover, and per portrait resolves, stats and a
+    connection of its own. Artwork is now answered from one listing of the
+    cover folder and two queries, whatever the library's size."""
+    import io
+
+    from PIL import Image
+
+    from server.cover_store import CoverStore
+    from server.library import identifier
+    from server.portraits import portrait_target
+    from server.store import Store
+
+    def jpeg(i):
+        buffer = io.BytesIO()
+        Image.new("RGB", (16, 16), (i * 9 % 256, 40, i * 5 % 256)).save(buffer, "JPEG")
+        return buffer.getvalue()
+
+    (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": []}))
+    store = Store(tmp_path)
+    shas = [store.covers.save(jpeg(i)) for i in range(20)]
+    tracks = [
+        {
+            "id": str(i),
+            "title": f"Song {i}",
+            "artist": f"Artist {i}",
+            "album_artist": f"Artist {i}",
+            "album": f"Album {i}",
+            "relative_path": f"a{i}.mp3",
+            # Every fourth album has no cover of its own.
+            **({"cover_sha": shas[i]} if i % 4 else {}),
+        }
+        for i in range(20)
+    ]
+    (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": tracks}))
+    for i in range(0, 20, 2):
+        portrait_target(store, f"Artist {i}").write_bytes(jpeg(100 + i))
+    store.refresh_library()
+    ids = {a["title"]: a["id"] for a in store.library["albums"]}
+    for i in range(0, 20, 8):
+        name = identifier("catalogue-cover", ids[f"Album {i}"]) + ".jpg"
+        (store.cover_dir / name).write_bytes(jpeg(200 + i))
+    store.refresh_library()  # registers the portraits and catalogue covers
+    expected = json.dumps(store.library, sort_keys=True)
+    revision = store.library_revision
+
+    paths, documents, connections = [], [], []
+    real_path = CoverStore.path
+    monkeypatch.setattr(
+        CoverStore, "path", lambda self, sha: paths.append(sha) or real_path(self, sha)
+    )
+    real_read = store.read_document
+    monkeypatch.setattr(
+        store, "read_document", lambda name: documents.append(name) or real_read(name)
+    )
+    real_connect = store.connect
+    monkeypatch.setattr(
+        store, "connect", lambda: connections.append(1) or real_connect()
+    )
+    store.refresh_library()
+    assert paths == []
+    assert [n for n in documents if n.startswith("image-public:")] == []
+    # The snapshot, removals, anchors, two artwork queries, artist identities,
+    # the anchors' save and the inbox: none per album or artist.
+    assert len(connections) <= 9, len(connections)
+    # The same library, so the same revision.
+    assert json.dumps(store.library, sort_keys=True) == expected
+    assert store.library_revision == revision
+    artists = {a["name"]: a for a in store.library["artists"]}
+    assert artists["Artist 2"]["cover_url"].startswith("/api/v1/covers/")
+    assert artists["Artist 2"]["cover_url"] != artists["Artist 2"]["fallback_cover_url"]
+    assert artists["Artist 1"]["cover_url"].endswith("?portraits=1")
+    albums = {a["title"]: a for a in store.library["albums"]}
+    assert albums["Album 8"]["cover_url"].startswith("/api/v1/covers/")
+    assert albums["Album 4"]["cover_url"] == (
+        "/api/v1/library-artwork/albums/" + ids["Album 4"]
+    )
+
+
 def test_a_hold_that_ends_in_an_error_names_where_it_failed(tmp_path, caplog):
     """#166: live export holds of up to 9 s read only 'current 0.01 s, rest
     9.1 s': the publication raised after its first step, and the warning

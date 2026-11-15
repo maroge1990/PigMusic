@@ -66,9 +66,31 @@ class CoverStore:
         self.metadata(sha)
         return sha
 
-    def presentation(self, sha):
-        """Read only cached metadata; projection refresh never decodes images."""
-        if not self.path(sha):
+    def listing(self):
+        """Names of the regular (not symlinked) files in the directory, from one
+        directory read: a rebuild checks these instead of two stats per cover
+        (#144). Like `path`, a symlink never counts."""
+        try:
+            with os.scandir(self.directory) as entries:
+                return {
+                    entry.name
+                    for entry in entries
+                    if entry.is_file(follow_symlinks=False)
+                }
+        except OSError:
+            return set()
+
+    def listed(self, sha, names):
+        """`path(sha)` answered from a `listing()`: the file name, or None."""
+        if not isinstance(sha, str) or not HASH.fullmatch(sha):
+            return None
+        name = sha + ".jpg"
+        return name if name in names else None
+
+    def presentation(self, sha, names=None):
+        """Read only cached metadata; projection refresh never decodes images.
+        `names`, a `listing()`, stands in for the file check."""
+        if not (self.path(sha) if names is None else self.listed(sha, names)):
             return None
         cached = self.presentation_cache.get(sha)
         if cached:
