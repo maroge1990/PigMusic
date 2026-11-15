@@ -10,9 +10,23 @@ struct HomeView: View {
   /// The mix whose songs a long press asked to see (#56).
   @State private var openedMix: String?
   @State private var mixNotice: String?
+  /// This week's Rewind for the card at the top (#216); nil hides it.
+  @State private var week: Rewind?
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 28) {
+        // Rewind (#216): this week at a glance, hidden until something played.
+        if let week, week.plays > 0 {
+          NavigationLink {
+            RewindView(model: model)
+          } label: {
+            RewindCard(model: model, rewind: week).environment(\.colorScheme, .dark)
+          }
+          .buttonStyle(.plain).padding(.horizontal)
+          .accessibilityLabel(
+            "Rewind. This week: \(RewindFigures.minutes(week.minutes)), "
+              + RewindFigures.plays(week.plays))
+        }
         let mixes = model.homeContent[.mixes]?.mixes ?? []
         let radio = model.homeContent[.mixes]?.radio
         if !mixes.isEmpty || radio != nil {
@@ -67,16 +81,6 @@ struct HomeView: View {
             }
           }.padding(.horizontal)
         }
-        NavigationLink {
-          RewindView(model: model)
-        } label: {
-          CollectionRow(
-            "Your Rewind", subtitle: "Your listening this week, month and year"
-          ) {
-            Image(systemName: "clock.arrow.circlepath").font(.title2)
-              .frame(width: 44, height: 44).accessibilityHidden(true)
-          }
-        }.buttonStyle(.plain).padding(.horizontal)
         if let recent = model.homeContent[.recent]?.albums, !recent.isEmpty {
           Shelf(title: "Recently added") {
             ForEach(recent) { album in
@@ -110,10 +114,19 @@ struct HomeView: View {
       Text(mixNotice ?? "")
     }
     .task(id: model.artworkNamespace) { await model.refreshHome() }
+    .task(id: model.artworkNamespace) { await loadWeek() }
     .refreshable {
       await model.refresh()
       await model.refreshHome(force: true)
+      await loadWeek()
     }
+  }
+
+  /// Offline or failing, the card is simply not shown.
+  private func loadWeek() async {
+    do {
+      week = try await model.readCatalogue { try await $0.rewind(period: "week") }
+    } catch is CancellationError {} catch { week = nil }
   }
 
   @ViewBuilder private func mixOptions(_ mix: PersonalMix) -> some View {
@@ -455,94 +468,250 @@ extension AppModel {
   }
 }
 
-/// Rewind (#203): the person's listening for the week, month or year so far,
-/// with "Play your top songs".
+/// Rewind's figures in words: "1 minute", "1,204 minutes", "3 plays".
+enum RewindFigures {
+  static func minutes(_ count: Int) -> String {
+    count == 1 ? "1 minute" : "\(count.formatted()) minutes"
+  }
+  static func plays(_ count: Int) -> String {
+    count == 1 ? "1 play" : "\(count.formatted()) plays"
+  }
+  /// "minutes · 12 plays" under the big figure.
+  static func under(minutes: Int, plays: Int) -> String {
+    (minutes == 1 ? "minute" : "minutes") + " · " + Self.plays(plays)
+  }
+  /// The cover Rewind's address names, as the app loads artwork.
+  static func source(_ url: String?) -> AppModel.ArtworkSource? {
+    switch RewindCover(url) {
+    case .stored(let sha): return .stored(sha)
+    case .release(let id): return .release(id)
+    case nil: return nil
+    }
+  }
+}
+
+/// Rewind's dark figure card (#216): the brand's dark canvas in both
+/// appearances (the caller sets the dark colour scheme), the minutes big and
+/// "minutes · N plays" under them, with anything trailing on the right.
+struct RewindFigureCard<Header: View, Trailing: View, Footer: View>: View {
+  let rewind: Rewind
+  @ViewBuilder var header: Header
+  @ViewBuilder var trailing: Trailing
+  @ViewBuilder var footer: Footer
+  @Environment(\.colorScheme) private var scheme
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      header
+      HStack(alignment: .center, spacing: 12) {
+        VStack(alignment: .leading, spacing: 2) {
+          Text(rewind.minutes.formatted()).font(PigType.display.weight(.bold)).pigFigures()
+            .foregroundStyle(PigBrand.text(scheme)).lineLimit(1).minimumScaleFactor(0.6)
+          Text(RewindFigures.under(minutes: rewind.minutes, plays: rewind.plays))
+            .font(PigType.footnote).pigFigures().foregroundStyle(PigBrand.secondary(scheme))
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+          RewindFigures.minutes(rewind.minutes) + ", " + RewindFigures.plays(rewind.plays))
+        Spacer(minLength: 0)
+        trailing
+      }
+      footer
+    }
+    .padding(PigSpacing.page)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(
+      PigBrand.canvas(scheme), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+  }
+}
+
+/// The Home card (#216): this week's minutes and plays, the top three song
+/// covers and a bar for each day, Monday to Sunday.
+struct RewindCard: View {
+  let model: AppModel
+  let rewind: Rewind
+  @ScaledMetric(relativeTo: .body) private var cover: CGFloat = 44
+  @Environment(\.colorScheme) private var scheme
+  var body: some View {
+    RewindFigureCard(rewind: rewind) {
+      HStack {
+        Label {
+          Text("Rewind").font(PigType.subhead.weight(.semibold))
+            .foregroundStyle(PigBrand.text(scheme))
+        } icon: {
+          Image(systemName: "arrow.counterclockwise").foregroundStyle(PigBrand.accent(scheme))
+        }
+        Spacer()
+        Text("This week").font(PigType.footnote).foregroundStyle(PigBrand.secondary(scheme))
+      }
+    } trailing: {
+      HStack(spacing: -cover / 3) {
+        ForEach(Array(rewind.topSongs.prefix(3).enumerated()), id: \.offset) { index, song in
+          Artwork(
+            model: model, source: song.track.artworkSource, title: song.track.title, width: 128
+          )
+          .frame(width: cover, height: cover)
+          .overlay(
+            RoundedRectangle(cornerRadius: PigRadius.artwork, style: .continuous)
+              .strokeBorder(PigBrand.canvas(scheme), lineWidth: 2)
+          )
+          .zIndex(Double(3 - index))
+        }
+      }.accessibilityHidden(true)
+    } footer: {
+      RewindWeekBars(bars: rewind.weekBars, minutes: rewind.minutes)
+    }
+  }
+}
+
+/// Seven day bars, Monday to Sunday, relative to the busiest day; days still
+/// to come stay empty. VoiceOver reads them as one: "This week: N minutes".
+struct RewindWeekBars: View {
+  let bars: [RewindBar]
+  let minutes: Int
+  @ScaledMetric(relativeTo: .caption) private var tall: CGFloat = 40
+  @Environment(\.colorScheme) private var scheme
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @State private var shown = false
+  var body: some View {
+    HStack(alignment: .bottom, spacing: 8) {
+      ForEach(Array(bars.enumerated()), id: \.offset) { _, bar in
+        VStack(spacing: 4) {
+          ZStack(alignment: .bottom) {
+            Capsule().fill(PigBrand.raised(scheme))
+            if bar.height > 0 {
+              Capsule().fill(PigBrand.accent(scheme))
+                .frame(height: tall * bar.height * (shown || reduceMotion ? 1 : 0))
+            }
+          }.frame(height: tall)
+          Text(bar.letter).font(PigType.caption)
+            .foregroundStyle(
+              PigBrand.secondary(scheme).opacity(bar.minutes == nil ? 0.5 : 1))
+        }.frame(maxWidth: .infinity)
+      }
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("This week: " + RewindFigures.minutes(minutes))
+    .onAppear {
+      guard !shown else { return }
+      if reduceMotion {
+        shown = true
+      } else {
+        withAnimation(.easeOut(duration: 0.5)) { shown = true }
+      }
+    }
+  }
+}
+
+/// Rewind (#203, #216): the week, month or year so far in one dark figure
+/// card and one ranked top-ten list of songs, artists or albums.
 struct RewindView: View {
   let model: AppModel
+  enum Ranking: String, CaseIterable {
+    case songs = "Songs", artists = "Artists", albums = "Albums"
+  }
   @State private var period = "week"
-  @State private var rewind: Rewind?
+  @State private var ranking = Ranking.songs
+  /// Each period's answer, kept while the page is open.
+  @State private var answers: [String: Rewind] = [:]
   @State private var error: String?
   @State private var loading = false
   private static let periods = [("week", "Week"), ("month", "Month"), ("year", "Year")]
   var body: some View {
-    List {
-      Picker("Period", selection: $period) {
-        ForEach(Self.periods, id: \.0) { Text($0.1).tag($0.0) }
-      }.pickerStyle(.segmented).listRowBackground(Color.clear)
-      if let error { StatusText(error, kind: .error) }
-      if loading && rewind == nil { ProgressView("Loading your Rewind…") }
-      if let rewind {
-        if rewind.plays == 0 {
-          StatusText("Nothing played yet this \(period).")
-        } else {
-          content(rewind)
+    ScrollView {
+      VStack(alignment: .leading, spacing: PigSpacing.page) {
+        Picker("Period", selection: $period) {
+          ForEach(Self.periods, id: \.0) { Text($0.1).tag($0.0) }
+        }.pickerStyle(.segmented)
+        if let error { StatusText(error, kind: .error) }
+        if let rewind = answers[period] {
+          if rewind.plays == 0 {
+            PigQuietState("Nothing played yet")
+          } else {
+            content(rewind)
+          }
+        } else if loading {
+          ProgressView("Loading your Rewind…").frame(maxWidth: .infinity).padding(.vertical, 32)
         }
-      }
+      }.padding(.horizontal).padding(.vertical, 8)
     }
     .pigCanvas().navigationTitle("Rewind").navigationBarTitleDisplayMode(.inline)
     .task(id: period) { await load() }
     .refreshable { await load() }
   }
   @ViewBuilder private func content(_ rewind: Rewind) -> some View {
-    Section {
-      HStack(spacing: 24) {
-        figure("\(rewind.minutes)", rewind.minutes == 1 ? "minute" : "minutes")
-        figure("\(rewind.plays)", rewind.plays == 1 ? "listen" : "listens")
-      }
-      if !rewind.playable.isEmpty {
-        Button("Play your top songs", systemImage: "play.fill") {
-          model.play(rewind.playable)
-        }.pigPrimaryAction()
-      }
-    }
-    Section("Top songs") {
-      ForEach(rewind.topSongs) { song in
-        CollectionRow(
-          song.track.title,
-          subtitle: song.track.artist + " · " + plays(song.plays)
-            + (song.available ? "" : " · No longer available")
-        ) {
-          ArtworkThumb(model: model, source: song.track.artworkSource, title: song.track.title)
-        }.accessibilityElement(children: .combine)
+    RewindFigureCard(rewind: rewind) {
+      EmptyView()
+    } trailing: {
+      RewindMixCovers(mixes: Array(rewind.topMixes.prefix(3)))
+    } footer: {
+      EmptyView()
+    }.environment(\.colorScheme, .dark)
+    HStack(spacing: 8) {
+      ForEach(Ranking.allCases, id: \.self) { kind in
+        Button(kind.rawValue) { ranking = kind }
+          .buttonStyle(ChipStyle(selected: ranking == kind))
+          .accessibilityAddTraits(ranking == kind ? .isSelected : [])
       }
     }
-    Section("Top artists") {
-      ForEach(rewind.topArtists) { artist in
-        LabeledContent(artist.name, value: plays(artist.plays) + " · \(artist.minutes) min")
-      }
-    }
-    Section("Top albums") {
-      ForEach(rewind.topAlbums) { album in
-        CollectionRow(album.title, subtitle: album.artist + " · " + plays(album.plays)) {
-          ArtworkThumb(model: model, source: cover(album.coverUrl), title: album.title)
-        }.accessibilityElement(children: .combine)
-      }
-    }
-    if !rewind.newArtists.isEmpty {
-      Section("New to you") {
-        ForEach(rewind.newArtists, id: \.self) { Text($0) }
-      }
-    }
-    if !rewind.topMixes.isEmpty {
-      Section("Mixes you played most") {
-        ForEach(rewind.topMixes) { mix in
-          LabeledContent(mix.title, value: plays(mix.plays))
-        }
+    VStack(spacing: 12) {
+      switch ranking {
+      case .songs: songs(rewind)
+      case .artists: artists(rewind)
+      case .albums: albums(rewind)
       }
     }
   }
-  private func figure(_ value: String, _ unit: String) -> some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text(value).font(.largeTitle.weight(.bold)).monospacedDigit()
-      Text(unit).font(PigType.caption).foregroundStyle(.secondary)
-    }.accessibilityElement(children: .combine)
+  @ViewBuilder private func songs(_ rewind: Rewind) -> some View {
+    let top = Array(rewind.topSongs.prefix(10))
+    let sizes = RewindBar.heights(top.map(\.plays))
+    ForEach(Array(top.enumerated()), id: \.offset) { index, song in
+      let queue = rewind.queue(from: index)
+      let row = RewindRankRow(
+        model: model, rank: index + 1, source: song.track.artworkSource, title: song.track.title,
+        subtitle: song.track.artist + " · " + RewindFigures.plays(song.plays), size: sizes[index],
+        unavailable: queue == nil)
+      if let queue {
+        Button { model.play(queue) } label: { row }.buttonStyle(.plain)
+          .accessibilityHint("Plays this song, then the ones after it")
+      } else {
+        row
+      }
+    }
   }
-  private func plays(_ count: Int) -> String { count == 1 ? "1 listen" : "\(count) listens" }
-  /// Rewind's album covers are the server's release artwork addresses.
-  private func cover(_ url: String?) -> AppModel.ArtworkSource? {
-    let prefix = "/api/v1/catalogue/artwork/release/"
-    guard let url, url.hasPrefix(prefix) else { return nil }
-    return .release(String(url.dropFirst(prefix.count)))
+  @ViewBuilder private func artists(_ rewind: Rewind) -> some View {
+    let top = Array(rewind.topArtists.prefix(10))
+    let sizes = RewindBar.heights(top.map(\.minutes))
+    ForEach(Array(top.enumerated()), id: \.offset) { index, artist in
+      let row = RewindRankRow(
+        model: model, rank: index + 1, source: RewindFigures.source(artist.coverUrl),
+        title: artist.name, subtitle: "\(artist.minutes.formatted()) min", size: sizes[index],
+        circle: true, new: artist.new)
+      linked(row, artist.link, title: artist.name)
+    }
+  }
+  @ViewBuilder private func albums(_ rewind: Rewind) -> some View {
+    let top = Array(rewind.topAlbums.prefix(10))
+    let sizes = RewindBar.heights(top.map(\.plays))
+    ForEach(Array(top.enumerated()), id: \.offset) { index, album in
+      let row = RewindRankRow(
+        model: model, rank: index + 1, source: RewindFigures.source(album.coverUrl),
+        title: album.title, subtitle: album.artist + " · " + RewindFigures.plays(album.plays),
+        size: sizes[index])
+      linked(row, album.link, title: album.title)
+    }
+  }
+  @ViewBuilder private func linked(_ row: RewindRankRow, _ link: RewindLink?, title: String)
+    -> some View
+  {
+    if let link {
+      NavigationLink {
+        RewindLinkView(model: model, link: link, title: title)
+      } label: {
+        row
+      }.buttonStyle(.plain)
+    } else {
+      row
+    }
   }
   private func load() async {
     loading = true
@@ -551,7 +720,124 @@ struct RewindView: View {
     let asked = period
     do {
       let answer = try await model.readCatalogue { try await $0.rewind(period: asked) }
-      if asked == period { rewind = answer }
+      answers[asked] = answer
     } catch is CancellationError {} catch { self.error = error.userMessage }
+  }
+}
+
+/// The top three mixes of the period as small mix covers, in each mix's palette.
+struct RewindMixCovers: View {
+  let mixes: [RewindMix]
+  @ScaledMetric(relativeTo: .body) private var size: CGFloat = 40
+  var body: some View {
+    if !mixes.isEmpty {
+      HStack(spacing: 6) {
+        ForEach(Array(mixes.enumerated()), id: \.offset) { _, mix in
+          MixArtwork(kind: mix.coverKind, title: mix.title).frame(width: size, height: size)
+        }
+      }
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel("Most played mixes: " + mixes.map(\.title).joined(separator: ", "))
+    }
+  }
+}
+
+/// One ranked row: the rank (the top three in the accent), the cover (round
+/// for artists), the title, a bar sized against number 1 and the figure.
+struct RewindRankRow: View {
+  let model: AppModel
+  let rank: Int
+  let source: AppModel.ArtworkSource?
+  let title: String
+  let subtitle: String
+  /// 0...1 against number 1.
+  let size: Double
+  var circle = false
+  var new = false
+  /// A song that can no longer play: shown dimmed.
+  var unavailable = false
+  @ScaledMetric(relativeTo: .subheadline) private var rankWidth: CGFloat = 22
+  @Environment(\.colorScheme) private var scheme
+  var spoken: String {
+    "Number \(rank), \(title)\(new ? ", new" : ""), \(subtitle)"
+      + (unavailable ? ", no longer available" : "")
+  }
+  var body: some View {
+    HStack(spacing: 12) {
+      Text("\(rank)").font(PigType.subhead.weight(.bold)).pigFigures()
+        .foregroundStyle(rank <= 3 ? PigBrand.textAccent(scheme) : PigBrand.secondary(scheme))
+        .frame(minWidth: rankWidth, alignment: .trailing)
+      ArtworkThumb(model: model, source: source, title: title, circle: circle)
+      VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 6) {
+          Text(title).foregroundStyle(PigBrand.text(scheme)).lineLimit(1)
+          if new {
+            Text("New").font(PigType.caption.weight(.semibold))
+              .foregroundStyle(PigBrand.textAccent(scheme))
+              .padding(.horizontal, 6).padding(.vertical, 1)
+              .background(PigBrand.accent(scheme).opacity(0.14), in: Capsule())
+          }
+        }
+        Capsule().fill(PigBrand.accent(scheme).opacity(0.6))
+          .frame(height: 4)
+          .scaleEffect(x: max(size, 0.02), y: 1, anchor: .leading)
+        Text(subtitle).font(PigType.footnote).pigFigures().foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
+      Spacer(minLength: 0)
+    }
+    .opacity(unavailable ? 0.45 : 1)
+    .contentShape(Rectangle())
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(spoken)
+  }
+}
+
+/// A Rewind album or artist's page (#216): the library page when the server
+/// matched one and it is still here, else the catalogue page, else a quiet note.
+struct RewindLinkView: View {
+  let model: AppModel
+  let link: RewindLink
+  let title: String
+  @State private var album: Album?
+  @State private var artist: Artist?
+  @State private var searched = false
+  var body: some View {
+    switch link {
+    case .release(let id):
+      CatalogueReleaseView(model: model, releaseId: id, title: title)
+    case .catalogueArtist(let id):
+      CatalogueArtistView(model: model, artistId: id, name: title)
+    case .libraryAlbum(let id, let release):
+      if let album {
+        AlbumView(model: model, album: album)
+      } else if searched, let release {
+        CatalogueReleaseView(model: model, releaseId: release, title: title)
+      } else if searched {
+        PigQuietState(title, line: "This album isn't in your library any more.")
+          .frame(maxHeight: .infinity).pigCanvas()
+      } else {
+        PigLoading("Opening \(title)…").pigCanvas()
+          .task {
+            album = try? await model.store?.album(id: id)
+            searched = true
+          }
+      }
+    case .libraryArtist(let id, let musicbrainz):
+      if let artist {
+        SavedArtistView(model: model, artist: artist)
+      } else if searched, let musicbrainz {
+        CatalogueArtistView(model: model, artistId: musicbrainz, name: title)
+      } else if searched {
+        PigQuietState(title, line: "This artist isn't in your library any more.")
+          .frame(maxHeight: .infinity).pigCanvas()
+      } else {
+        PigLoading("Opening \(title)…").pigCanvas()
+          .task {
+            artist = await model.savedArtist(id: id, name: title)
+            searched = true
+          }
+      }
+    }
   }
 }
