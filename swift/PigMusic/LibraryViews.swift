@@ -109,6 +109,13 @@ struct LibraryView: View {
     @State private var debugAlbum: Album?
     @State private var debugArtist: Artist?
   #endif
+  /// Songs, less those removed from the library and waiting for their Undo (#214).
+  private var shownSongs: [Track] {
+    guard model.undo.pending(prefix: AppModel.undoKey(removeFromLibrary: "")) else {
+      return model.songs
+    }
+    return model.songs.filter { !model.undo.hides(AppModel.undoKey(removeFromLibrary: $0.id)) }
+  }
   @ViewBuilder private var content: some View {
     switch tab {
     case .artists:
@@ -139,8 +146,9 @@ struct LibraryView: View {
     case .songs:
       sort(.tracks, selected: model.songSort)
       LazyVStack(spacing: 0) {
-        ForEach(Array(model.songs.enumerated()), id: \.element.id) { index, track in
-          SongRow(model: model, track: track) { model.play(model.songs, at: index) }
+        let songs = shownSongs
+        ForEach(Array(songs.enumerated()), id: \.element.id) { index, track in
+          SongRow(model: model, track: track) { model.play(songs, at: index) }
           RowSeparator()
         }
       }

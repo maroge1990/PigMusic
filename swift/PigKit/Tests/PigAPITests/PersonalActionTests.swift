@@ -111,3 +111,43 @@ struct PersonalActionTests {
     #expect(release.songs[0].track.serverState == "household_available")
   }
 }
+
+/// Answers each path with its own JSON, recording what was sent.
+private actor RoutedTransport: ClientTransport {
+  let answers: [String: String]
+  var sent: [(String, Data)] = []
+  init(_ answers: [String: String]) { self.answers = answers }
+  func send(_ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String) async throws
+    -> (HTTPResponse, HTTPBody?)
+  {
+    var data = Data()
+    if let body { for try await chunk in body { data.append(contentsOf: chunk) } }
+    let path = request.path ?? ""
+    sent.append((path, data))
+    var response = HTTPResponse(status: .ok)
+    response.headerFields[.contentType] = "application/json"
+    return (response, HTTPBody(answers.first { path.hasSuffix($0.key) }?.value ?? "{}"))
+  }
+}
+
+/// #214: Remove from library is one action: the server's file rules still
+/// apply, but the person sees no preview and confirms nothing.
+@Test func removeFromLibraryConfirmsTheServersPreviewWithoutShowingIt() async throws {
+  let token = String(repeating: "c", count: 64)
+  let transport = RoutedTransport([
+    "/library/removal-preview":
+      #"{"delete_count":0,"keep_count":1,"confirmation":"\#(token)","#
+      + #""items":[{"track_id":"song","delete_file":false,"kept_for":["Someone"]}]}"#,
+    "/library/remove": #"{"id":"op","removed":1,"deleted":0,"kept":1,"undo_until":0}"#,
+  ])
+  let origin = URL(string: "https://fixture.invalid")!
+  let service = NativeService(
+    server: origin, client: Client(serverURL: origin, transport: transport), vault: ActionTokens())
+  let removed = try await service.removeFromLibrary(ids: ["song"])
+  #expect(removed == 1)
+  let sent = await transport.sent
+  #expect(sent.map(\.0) == ["/api/v1/library/removal-preview", "/api/v1/library/remove"])
+  let body = try #require(JSONSerialization.jsonObject(with: sent[1].1) as? [String: Any])
+  #expect(body["confirmation"] as? String == token)
+  #expect(body["track_ids"] as? [String] == ["song"])
+}

@@ -96,7 +96,11 @@ struct SongActionsView: View {
             Button("Download smaller AAC copy") {
               Task { await model.download([track], quality: "aac") }
             }
-            NavigationLink("Remove music") { RemovalView(model: model, tracks: [track]) }
+            // At once, with Undo (D-79, #214).
+            Button("Remove from library", systemImage: "minus.circle", role: .destructive) {
+              model.removeFromLibraryLater(track)
+              dismiss()
+            }
           }
         } footer: {
           Text(

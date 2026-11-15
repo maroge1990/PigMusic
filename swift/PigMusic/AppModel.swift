@@ -1595,6 +1595,35 @@ enum PlayOrigin: Hashable {
   static func undoKey(mix: String, song: String) -> String { "mix-song:" + mix + ":" + song }
   static func undoKey(download id: String) -> String { "download:" + id }
   static func undoKey(watchTransfer id: String) -> String { "watch-transfer:" + id }
+  static func undoKey(removeFromLibrary id: String) -> String { "library-remove:" + id }
+  /// Removes a song from this person's library and from this iPhone and the
+  /// Watch, at once with Undo (D-79, #214): no preview, no confirmation.
+  /// Nothing is sent until the Undo runs out; the devices' copies go only
+  /// once the server has removed it.
+  func removeFromLibraryLater(_ track: Track) {
+    let stamp = account.generation
+    let id = track.id
+    undo.schedule(
+      Self.undoKey(removeFromLibrary: id), label: "Removed " + track.title + " from your library"
+    ) { [weak self] in
+      // Only for the account that removed it.
+      guard let self, account.isCurrent(stamp) else { return false }
+      do {
+        _ = try await performPersonal { try await $0.removeFromLibrary(ids: [id]) }
+      } catch {
+        if account.isCurrent(stamp) { message = error.userMessage }
+        return false
+      }
+      guard account.isCurrent(stamp) else { return false }
+      if downloads?.records.contains(where: { $0.id == id }) == true {
+        await downloads?.remove(id: id)
+      }
+      if let watch, watch.downloads?.records.contains(where: { $0.id == id }) == true {
+        await watch.remove(id)
+      }
+      return true
+    }
+  }
   /// Hides a mix song once its Undo has run out (#183).
   func hideLater(_ track: Track, from mix: PersonalMix) {
     let key = Self.undoKey(mix: mix.id, song: track.id)

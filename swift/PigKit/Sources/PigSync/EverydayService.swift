@@ -314,6 +314,14 @@ extension NativeService {
     default: throw NativeFailure.unavailable("Removal was not confirmed. Refresh your library.")
     }
   }
+  /// Removes songs from the person's library in one step (#214): the
+  /// server's preview is asked only for its confirmation token, never shown.
+  /// The server keeps its file rules (a file another member has stays; one
+  /// nobody has moves to Recovery). Returns how many songs left the library.
+  public func removeFromLibrary(ids: [String]) async throws -> Int {
+    let preview = try await removalPreview(ids: ids)
+    return try await removeMusic(ids: ids, confirmation: preview.confirmation).removed
+  }
   public func undoRemoval(id: String) async throws {
     switch try await client.undo_removal_api_v1_library_removals__operation_id__undo_post(
       .init(path: .init(operation_id: id)))
