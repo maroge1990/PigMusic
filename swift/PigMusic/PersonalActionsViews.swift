@@ -330,6 +330,8 @@ struct FavouriteStar: View {
     }
     .disabled(!model.favourites.canTap(track.id))
     .task(id: track.id) { await model.loadFavourite(track) }
+    // Also a refusal that comes on a later send (Codex round 2).
+    .onChange(of: model.favouriteRefusals) { failed = true }
     .alert("Favourite not saved", isPresented: $failed) {
       Button("OK", role: .cancel) {}
     }

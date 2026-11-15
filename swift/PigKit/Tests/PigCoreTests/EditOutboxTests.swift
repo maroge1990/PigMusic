@@ -195,4 +195,48 @@ private struct Offline: Error {}
     // An edit the person discarded is refused too: nothing confirmed it.
     #expect(EditOutbox.outcome(of: "gone", confirmed: false, pending: later) == .refused)
   }
+
+  /// Codex round 2 on batch 13 (#212): a favourite tapped offline and refused
+  /// on a later send leaves the outbox, its song shows the state before it
+  /// (or a newer tap still waiting), and the next tap is sent.
+  @Test func aDeferredFavouriteRefusalIsSettledAndLaterTapsAreSent() async throws {
+    let (store, root) = try makeStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let other = Track(id: "other", title: "Other", artist: "Artist")
+    let tap = OfflineMutation(action: "favourite", track: song, favourite: true)
+    let first = OfflineMutation(action: "favourite", track: other, favourite: true)
+    let newer = OfflineMutation(action: "favourite", track: other, favourite: false)
+    for edit in [tap, first, newer] { try await store.enqueueMutation(edit) }
+    let server = Server()
+    var applied = false
+    // Offline: everything waits.
+    server.answers = [tap.id: Offline()]
+    _ = try await EditOutbox.send(store: store, isCurrent: { true }, applied: &applied) {
+      try server.apply($0)
+    }
+    #expect(try await store.pendingMutations().count == 3)
+    // Later the server refuses two; the newer tap waits behind its song's.
+    server.answers = [tap.id: MutationRejection.rejected, first.id: MutationRejection.rejected]
+    _ = try await EditOutbox.send(store: store, isCurrent: { true }, applied: &applied) {
+      try server.apply($0)
+    }
+    let settled = try await EditOutbox.settleRefusedFavourites(store: store)
+    #expect(
+      settled == [
+        RefusedFavourite(trackId: song.id, value: false),
+        RefusedFavourite(trackId: other.id, value: false),
+      ])
+    #expect(try await store.pendingMutations().map(\.id) == [newer.id])
+    // The next tap on the refused song, and the waiting one, are sent.
+    let again = OfflineMutation(action: "favourite", track: song, favourite: true)
+    try await store.enqueueMutation(again)
+    server.answers = [:]
+    server.seen = []
+    _ = try await EditOutbox.send(store: store, isCurrent: { true }, applied: &applied) {
+      try server.apply($0)
+    }
+    #expect(server.seen == [newer.id, again.id])
+    #expect(try await store.pendingMutations().isEmpty)
+    #expect(try await EditOutbox.settleRefusedFavourites(store: store).isEmpty)
+  }
 }

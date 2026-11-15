@@ -44,6 +44,34 @@ import PigStore
     }?.mutation.favourite
   }
 
+  /// Favourite edits the server refused, on any send, also one made long
+  /// after the tap (Codex round 2 on #212): each leaves the outbox, so later
+  /// taps on its song aren't held behind it, and its song shows the newest
+  /// favourite still waiting, or else the state before the refused tap. One
+  /// answer per song, in the order the refused edits were made.
+  public static func settleRefusedFavourites(store: LibraryStore) async throws
+    -> [RefusedFavourite]
+  {
+    let refused = try await store.pendingMutations().filter {
+      $0.mutation.action == "favourite" && $0.state != "queued"
+    }
+    guard !refused.isEmpty else { return [] }
+    for item in refused { try await store.acknowledgeMutation(item.id) }
+    let remaining = try await store.pendingMutations()
+    var songs: [String] = []
+    for id in refused.compactMap(\.mutation.track?.id) where !songs.contains(id) {
+      songs.append(id)
+    }
+    return songs.compactMap { id in
+      // Without a newer tap, the state before the song's last refused one.
+      guard
+        let refusedValue = refused.last(where: { $0.mutation.track?.id == id })?.mutation
+          .favourite
+      else { return nil }
+      return RefusedFavourite(trackId: id, value: favourite(id, in: remaining) ?? !refusedValue)
+    }
+  }
+
   /// What an edit changes, for keeping dependent edits in order.
   public nonisolated static func scope(_ mutation: OfflineMutation) -> String {
     if let playlist = mutation.playlistId { return "playlist:" + playlist }
@@ -96,5 +124,15 @@ import PigStore
       }
     }
     return .sent
+  }
+}
+
+/// A song whose favourite edit the server refused, and the state to show.
+public struct RefusedFavourite: Equatable, Sendable {
+  public let trackId: String
+  public let value: Bool
+  public init(trackId: String, value: Bool) {
+    self.trackId = trackId
+    self.value = value
   }
 }

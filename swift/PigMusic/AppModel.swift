@@ -885,15 +885,9 @@ enum PlayOrigin: Hashable {
     do {
       let outcome = try await saveEditOutcome(mutation)
       try account.check(stamp)
-      if outcome == .refused {
-        // The server refused it: the star goes back, and the refused edit
-        // leaves the outbox so later taps aren't held behind it (Codex).
-        try? await store?.acknowledgeMutation(mutation.id)
-        if account.isCurrent(stamp), let store {
-          pendingEdits = (try? await store.pendingMutations()) ?? pendingEdits
-        }
-        throw MutationRejection.rejected
-      }
+      // Refused: flushEdits has already put the star back and taken the
+      // edit out of the outbox (Codex rounds 1 and 2).
+      if outcome == .refused { throw MutationRejection.rejected }
       let confirmed = outcome == .confirmed
       // A newer tap meanwhile is what the star shows and what is kept.
       try? await store?.cache(favourites[track.id] ?? tap.value, key: "favourite:" + track.id)
@@ -904,6 +898,18 @@ enum PlayOrigin: Hashable {
       favourites.refused(tap)
       throw error
     }
+  }
+  /// Rises when the server refuses a favourite: the star says it wasn't saved.
+  var favouriteRefusals = 0
+  /// Shows each refused favourite's song as it is now, and caches that
+  /// (Codex round 2 on #212).
+  private func favouritesRefused(_ refused: [RefusedFavourite]) {
+    let store = self.store
+    for item in refused {
+      favourites.change(item.trackId, item.value)
+      Task { try? await store?.cache(item.value, key: "favourite:" + item.trackId) }
+    }
+    favouriteRefusals += 1
   }
   @discardableResult func saveEdit(_ mutation: OfflineMutation) async throws -> Bool {
     try await saveEditOutcome(mutation) == .confirmed
@@ -953,6 +959,9 @@ enum PlayOrigin: Hashable {
         revoked(generation: stamp)
         return applied
       }
+      // Any favourite the server refused, tapped now or long ago, goes back.
+      let refused = try await EditOutbox.settleRefusedFavourites(store: store)
+      if account.isCurrent(stamp), !refused.isEmpty { favouritesRefused(refused) }
       if account.isCurrent(stamp) { pendingEdits = try await store.pendingMutations() }
     } catch { if account.isCurrent(stamp) { message = error.userMessage } }
     return applied
