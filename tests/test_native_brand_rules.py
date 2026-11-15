@@ -31,7 +31,9 @@ def test_the_splash_ends_when_the_saved_library_is_shown():
     restore = restore[: restore.index("\n  func ")]
     # Launch is over once the saved library is attached, before the refresh,
     # and on every other way out of restore (sign-in form, demo, failure).
-    attached = restore.index("try await attach(connection.person")
+    # The saved account is attached by the shared restoration (#223).
+    assert "try await attach(connection.person" in model
+    attached = restore.index("await restoreAccount()")
     assert attached < restore.index("launched = true", attached)
     assert restore.index("launched = true", attached) < restore.index("await refresh()")
     assert re.search(r"defer \{[^}]*launched = true", restore)
