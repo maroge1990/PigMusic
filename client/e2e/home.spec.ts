@@ -331,8 +331,9 @@ test("Popular songs show ten, then all on request", async ({ page }) => {
   await page.goto("/#/home");
   const list = page.locator(".home-songs");
   await expect(list.locator(".song-row")).toHaveCount(10);
-  await list.getByRole("button", { name: "Show all 12 songs" }).click();
+  await list.getByRole("button", { name: "See all popular songs" }).click();
   await expect(list.locator(".song-row")).toHaveCount(12);
+  await expect(list.getByRole("button", { name: "Show fewer" })).toBeVisible();
 });
 
 // #182: the shelf's edges fade only while there is more to scroll that way.

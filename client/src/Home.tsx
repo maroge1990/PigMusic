@@ -145,7 +145,7 @@ function HomeSection({ kind }: { kind: "popular" | "recommended" }) {
               ))}
               {songs.length > 10 && (
                 <button type="button" onClick={() => setAllSongs(!allSongs)}>
-                  {allSongs ? "Show fewer" : `Show all ${songs.length} songs`}
+                  {allSongs ? "Show fewer" : "See all popular songs"}
                 </button>
               )}
             </div>
