@@ -109,7 +109,6 @@ private struct DownloadList: View {
         Button("Remove all device downloads", role: .destructive) { clearing = true }
       }
     }
-    .undoBar(model.undo)
     .toolbar {
       Button("Clear") { Task { await downloads.clearFinished() } }
         .accessibilityLabel("Clear finished")

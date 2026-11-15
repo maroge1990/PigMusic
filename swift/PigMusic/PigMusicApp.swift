@@ -189,6 +189,7 @@ struct LibraryShell: View {
     tabs
       .sheet(isPresented: $showPlayer) {
         NowPlayingView(model: model) { artistRoute = $0 }
+          .undoBar(model, inSheet: true)
       }
       .sheet(isPresented: $showAccount) {
         NavigationStack {
@@ -269,14 +270,6 @@ struct LibraryShell: View {
       .navigationDestination(item: destination == selection ? $artistRoute : .constant(nil)) {
         ArtistRouteView(model: model, route: $0)
       }
-      // Older systems: the player docks directly above the tab bar inside each
-      // tab, so it never covers the tabs or the end of a list.
-      .safeAreaInset(edge: .bottom, spacing: 0) {
-        if !accessoryAvailable && playing {
-          MiniPlayer(model: model) { showPlayer = true }
-            .pigFloatingControls().padding(.horizontal, 12).padding(.bottom, 6)
-        }
-      }
       .toolbar {
         if destination != .search {
           // The avatar draws its own circle; iOS 26's shared glass capsule would sit behind it.
@@ -287,6 +280,16 @@ struct LibraryShell: View {
             ToolbarItem(placement: .topBarTrailing) { accountButton }
           }
         }
+      }
+    }
+    // One Undo bar for every page of every tab (#210), above the mini player.
+    .undoBar(model)
+    // Older systems: the player docks directly above the tab bar inside each
+    // tab, so it never covers the tabs or the end of a list.
+    .safeAreaInset(edge: .bottom, spacing: 0) {
+      if !accessoryAvailable && playing {
+        MiniPlayer(model: model) { showPlayer = true }
+          .pigFloatingControls().padding(.horizontal, 12).padding(.bottom, 6)
       }
     }
   }

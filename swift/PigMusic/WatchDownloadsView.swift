@@ -99,7 +99,6 @@ struct WatchDownloadsView: View {
       }
     }
     .pigCanvas().navigationTitle("Apple Watch").navigationBarTitleDisplayMode(.inline)
-    .undoBar(model.undo)
     .toolbar {
       if let watch = model.watch {
         let records = watch.downloads?.records ?? []

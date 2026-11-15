@@ -259,7 +259,6 @@ struct PlaylistView: View {
         }.listRowSeparator(.hidden).listRowBackground(Color.clear)
       }
     }.listStyle(.plain).pigCanvas().navigationTitle(playlist.name).navigationBarTitleDisplayMode(.inline)
-      .undoBar(model.undo)
       .toolbar {
         if playlist.favourites != true { EditButton() }
         Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }.disabled(

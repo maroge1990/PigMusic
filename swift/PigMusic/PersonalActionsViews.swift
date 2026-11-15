@@ -106,11 +106,12 @@ struct SongActionsView: View {
         if loading { ProgressView() }
         if let message { Section { StatusText(message) } }
       }.pigCanvas().navigationTitle("Song actions").navigationBarTitleDisplayMode(.inline)
-        .undoBar(model.undo)
         .toolbar { Button("Done") { dismiss() }.disabled(loading) }
         .task { await loadFavourite() }
         .task(id: model.libraryRevision) { held = await model.inLibrary(opened.actionTrack.id) }
-    }.interactiveDismissDisabled(model.mutationActive)
+    }
+    .undoBar(model, inSheet: true)
+    .interactiveDismissDisabled(model.mutationActive)
   }
   private func loadFavourite() async {
     guard !loading else { return }
@@ -204,7 +205,6 @@ struct RequestsView: View {
           .buttonStyle(.pigSecondary)
       }
     }.pigCanvas().navigationTitle("Music requests").navigationBarTitleDisplayMode(.inline)
-      .undoBar(model.undo)
       .toolbar {
         Button("Refresh", systemImage: "arrow.clockwise") { Task { await load(reset: true) } }
           .disabled(loading)

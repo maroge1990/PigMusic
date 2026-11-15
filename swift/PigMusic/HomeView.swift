@@ -282,7 +282,6 @@ struct MixDetailView: View {
         }
       }
     }.listStyle(.plain).pigCanvas().navigationTitle(mix.title).navigationBarTitleDisplayMode(.inline)
-      .undoBar(model.undo)
       .toolbar {
         ToolbarItem(placement: .topBarTrailing) {
           Menu {

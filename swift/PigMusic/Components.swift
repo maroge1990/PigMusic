@@ -755,41 +755,62 @@ struct StatusMessage: Equatable {
 }
 
 /// The latest action waiting for its Undo (D-79, #183): what happened and an
-/// Undo button, above the bottom of the screen. VoiceOver hears it appear.
+/// Undo button, on a solid brand surface so it is seen at once (#210).
+/// VoiceOver hears each action once, wherever its bar first shows.
 struct UndoBar: View {
-  let queue: UndoQueue
+  let model: AppModel
   @Environment(\.colorScheme) private var scheme
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   var body: some View {
-    if let item = queue.items.last {
+    if let item = model.undo.items.last {
       HStack(spacing: 12) {
-        Text(item.label).font(PigType.footnote).lineLimit(2)
-          .foregroundStyle(PigBrand.text(scheme))
+        Text(item.label).font(PigType.footnote.weight(.medium)).lineLimit(2)
+          .foregroundStyle(PigBrand.onAccent(scheme))
         Spacer(minLength: 0)
-        Button("Undo") { queue.undo(item.id) }
-          .font(PigType.footnote.weight(.semibold))
-          .foregroundStyle(PigBrand.textAccent(scheme))
+        Button("Undo") { model.undo.undo(item.id) }
+          .font(PigType.footnote.weight(.bold))
+          .foregroundStyle(PigBrand.onAccent(scheme))
           .frame(minHeight: 44)
           .accessibilityHint("Puts back " + item.label.lowercased())
       }
       .padding(.horizontal, 16).padding(.vertical, 4)
-      .background(PigBrand.raised(scheme), in: RoundedRectangle(cornerRadius: 14))
-      .overlay(RoundedRectangle(cornerRadius: 14).stroke(PigBrand.controlBorder(scheme)))
+      .background(PigBrand.accent(scheme), in: RoundedRectangle(cornerRadius: 14))
+      .shadow(color: .black.opacity(0.2), radius: 10, y: 3)
       .padding(.horizontal, 16).padding(.bottom, 8)
       .id(item.id)
-      .transition(.move(edge: .bottom).combined(with: .opacity))
-      .onAppear {
-        AccessibilityNotification.Announcement(item.label + ". Undo is available.").post()
-      }
+      .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+      .onAppear { model.announceUndo(item) }
     }
   }
 }
 
+/// One Undo bar for the whole app (#210): the tabs carry it just above the
+/// mini player and tab bar, and a sheet carries it just above its own bottom
+/// while it is open. When the last sheet closes the tabs' bar slides up into
+/// place over 0.3 s (a fade with Reduce Motion); the action's 10 s run on.
+private struct UndoBarHost: ViewModifier {
+  let model: AppModel
+  let inSheet: Bool
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  private var shown: Bool { inSheet || model.undoSheets == 0 }
+  func body(content: Content) -> some View {
+    content
+      .safeAreaInset(edge: .bottom, spacing: 0) {
+        Group { if shown { UndoBar(model: model) } }
+          .animation(
+            reduceMotion ? .easeInOut(duration: 0.3) : .smooth(duration: 0.3),
+            value: shown ? model.undo.items.last?.id : nil)
+      }
+      .onAppear { if inSheet { model.undoSheets += 1 } }
+      .onDisappear { if inSheet { model.undoSheets = max(0, model.undoSheets - 1) } }
+  }
+}
+
 extension View {
-  /// Shows the Undo bar for waiting actions at the bottom of this screen.
-  func undoBar(_ queue: UndoQueue) -> some View {
-    safeAreaInset(edge: .bottom) {
-      UndoBar(queue: queue).animation(.easeOut(duration: 0.2), value: queue.items.last?.id)
-    }
+  /// Shows the app's Undo bar at the bottom of this view: once on the tabs,
+  /// and on each sheet (`inSheet`), which hides the tabs' bar while open.
+  func undoBar(_ model: AppModel, inSheet: Bool = false) -> some View {
+    modifier(UndoBarHost(model: model, inSheet: inSheet))
   }
 }
 
