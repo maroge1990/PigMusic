@@ -222,10 +222,9 @@ private struct Offline: Error {}
     }
     let settled = try await EditOutbox.settleRefusedFavourites(store: store)
     #expect(
-      settled == [
-        RefusedFavourite(trackId: song.id, value: false),
-        RefusedFavourite(trackId: other.id, value: false),
-      ])
+      settled.map(\.trackId) == [song.id, other.id]
+        // No tap left to show for song: it is read from the server again.
+        && settled.map(\.value) == [nil, false])
     #expect(try await store.pendingMutations().map(\.id) == [newer.id])
     // The next tap on the refused song, and the waiting one, are sent.
     let again = OfflineMutation(action: "favourite", track: song, favourite: true)
@@ -238,5 +237,48 @@ private struct Offline: Error {}
     #expect(server.seen == [newer.id, again.id])
     #expect(try await store.pendingMutations().isEmpty)
     #expect(try await EditOutbox.settleRefusedFavourites(store: store).isEmpty)
+  }
+
+  /// Codex confirmation on #212: refusals on successive sends must never
+  /// show a value that neither the server nor a waiting tap holds. With no
+  /// tap left, the song's state is unknown until the server is read again.
+  @Test(arguments: [[true, false], [true, false, true]])
+  func successiveRefusalsNeverInventAState(taps values: [Bool]) async throws {
+    let (store, root) = try makeStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    var states = FavouriteStates()
+    states.answer(song.id, false, since: states.revision(song.id))  // Confirmed false.
+    var edits: [OfflineMutation] = []
+    for value in values {
+      let tap = states.tap(song.id)
+      #expect(tap?.value == value)
+      let edit = OfflineMutation(action: "favourite", track: song, favourite: value)
+      try await store.enqueueMutation(edit)
+      edits.append(edit)
+    }
+    let server = Server()
+    var applied = false
+    // Each send refuses the first tap still waiting; the rest wait behind it.
+    for (index, edit) in edits.enumerated() {
+      server.answers = [edit.id: MutationRejection.rejected]
+      _ = try await EditOutbox.send(store: store, isCurrent: { true }, applied: &applied) {
+        try server.apply($0)
+      }
+      let settled = try await EditOutbox.settleRefusedFavourites(store: store)
+      #expect(settled.count == 1 && settled.first?.trackId == song.id)
+      if index < edits.count - 1 {
+        // The newest tap still waiting is what shows.
+        #expect(settled.first?.value == values.last)
+      } else {
+        #expect(settled.first?.value == nil)
+      }
+      states.refusal(settled[0])
+    }
+    #expect(try await store.pendingMutations().isEmpty)
+    #expect(states[song.id] == nil)  // Unknown, not an unsaved guess.
+    // The server's answer, read again, is what shows.
+    let reread = states.revision(song.id)
+    states.answer(song.id, false, since: reread)
+    #expect(states[song.id] == false)
   }
 }

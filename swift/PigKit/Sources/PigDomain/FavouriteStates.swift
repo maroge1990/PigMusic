@@ -45,6 +45,16 @@ public struct FavouriteStates: Sendable {
     guard revision(tap.id) == tap.revision else { return }
     change(tap.id, !tap.value)
   }
+  /// A refused save settled (#212): the newest tap still waiting, or none,
+  /// and then the state is unknown until the server is read again.
+  public mutating func refusal(_ refused: RefusedFavourite) {
+    if let value = refused.value {
+      change(refused.trackId, value)
+    } else {
+      invalidate(refused.trackId)
+      values[refused.trackId] = nil
+    }
+  }
   public mutating func clear() {
     values = [:]
     revisions = [:]
@@ -57,4 +67,18 @@ public struct FavouriteTap: Sendable, Equatable {
   public let id: String
   public let value: Bool
   fileprivate let revision: Int
+}
+
+/// A song whose favourite edit the server refused, and the state to show:
+/// the newest tap still waiting, or nil when the server must be read again.
+public struct RefusedFavourite: Equatable, Sendable {
+  public let trackId: String
+  public let value: Bool?
+  /// The song as the refused edit carried it, for reading its state again.
+  public let track: Track?
+  public init(trackId: String, value: Bool?, track: Track? = nil) {
+    self.trackId = trackId
+    self.value = value
+    self.track = track
+  }
 }

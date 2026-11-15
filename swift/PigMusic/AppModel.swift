@@ -901,13 +901,26 @@ enum PlayOrigin: Hashable {
   }
   /// Rises when the server refuses a favourite: the star says it wasn't saved.
   var favouriteRefusals = 0
-  /// Shows each refused favourite's song as it is now, and caches that
-  /// (Codex round 2 on #212).
+  /// Shows each refused favourite's song as it is now (Codex round 2 and
+  /// confirmation on #212): the newest tap still waiting, or else the
+  /// server's state, read again and cached; never a guess.
   private func favouritesRefused(_ refused: [RefusedFavourite]) {
     let store = self.store
+    let stamp = account.generation
     for item in refused {
-      favourites.change(item.trackId, item.value)
-      Task { try? await store?.cache(item.value, key: "favourite:" + item.trackId) }
+      favourites.refusal(item)
+      if let value = item.value {
+        Task { try? await store?.cache(value, key: "favourite:" + item.trackId) }
+      } else if let track = item.track {
+        let revision = favourites.revision(item.trackId)
+        Task { [weak self] in
+          guard let self,
+            let confirmed = try? await readCatalogue({ try await $0.favourite(track) }),
+            account.isCurrent(stamp), favourites.answer(track.id, confirmed, since: revision)
+          else { return }
+          try? await store?.cache(confirmed, key: "favourite:" + track.id)
+        }
+      }
     }
     favouriteRefusals += 1
   }
