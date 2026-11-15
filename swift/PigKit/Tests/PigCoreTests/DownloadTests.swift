@@ -640,3 +640,10 @@ private final class Raised: @unchecked Sendable {
   #expect(VolumeSpace.choose(important: nil, plain: nil) == nil)
   #expect(try VolumeSpace.available(at: FileManager.default.temporaryDirectory) ?? 0 > 0)
 }
+
+/// #209: the Downloads hub says how many songs each place holds.
+@Test func theDownloadsHubCountsSongsInEachPlace() {
+  #expect(DownloadPlace.server.summary(songs: 0) == "0 songs on your server")
+  #expect(DownloadPlace.phone.summary(songs: 1) == "1 song on your phone")
+  #expect(DownloadPlace.watch.summary(songs: 2) == "2 songs on your watch")
+}

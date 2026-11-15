@@ -160,7 +160,9 @@ struct SongActionsView: View {
 }
 
 /// Server requests, one per album request (a lone song alone), unfinished
-/// first. Opening a request shows its songs with their source and quality.
+/// first, under Transfers as on the iPhone and Watch pages (#209): swipe a
+/// song to cancel it with Undo; no explanatory text (D-101). Opening a
+/// request shows its songs with their source and quality.
 struct RequestsView: View {
   let model: AppModel
   @State private var groups: [RequestGroup] = []
@@ -174,51 +176,61 @@ struct RequestsView: View {
   var body: some View {
     List {
       if !enabled {
-        Text("Server downloads are disabled. Requests can wait until downloads are enabled.").font(
-          PigType.footnote)
+        StatusText("Server downloads are disabled.", kind: .error)
       }
-      if loading && !loaded { ProgressView("Loading requests…") }
       if let error { StatusText(error, kind: .error) }
       if let notice { StatusText(notice) }
-      if loaded && groups.isEmpty { StatusText("No music requests") }
-      ForEach(groups) { group in
-        DisclosureGroup {
-          ForEach(
-            group.items.filter { !model.undo.hides(AppModel.undoKey(cancelRequest: $0.id)) }
-          ) { item in songRow(item) }
-          let failed = group.items.filter { ["failed", "cancelled"].contains($0.status) }
-          if failed.count > 1 {
-            Button("Retry \(failed.count) songs") { Task { await retry(failed) } }
-              .disabled(loading || !model.canMutate)
-          }
-        } label: {
-          VStack(alignment: .leading, spacing: 4) {
-            CollectionRow(group.title, subtitle: group.artist + " · " + group.summary) {
-              ArtworkThumb(
-                model: model, source: group.releaseId.map { .release($0) }, title: group.title)
+      if loaded && groups.isEmpty { Text("No music requests").foregroundStyle(.secondary) }
+      if !groups.isEmpty {
+        Section("Transfers") {
+          ForEach(groups) { group in
+            DisclosureGroup {
+              ForEach(
+                group.items.filter { !model.undo.hides(AppModel.undoKey(cancelRequest: $0.id)) }
+              ) { item in
+                songRow(item)
+                  .swipeActions {
+                    if Self.cancellable.contains(item.status) {
+                      Button("Cancel", role: .destructive) { cancel(item) }
+                    }
+                  }
+              }
+              let failed = group.items.filter { ["failed", "cancelled"].contains($0.status) }
+              if failed.count > 1 {
+                Button("Retry \(failed.count) songs") { Task { await retry(failed) } }
+                  .disabled(loading || !model.canMutate)
+              }
+            } label: {
+              VStack(alignment: .leading, spacing: 4) {
+                CollectionRow(group.title, subtitle: group.artist + " · " + group.summary) {
+                  ArtworkThumb(
+                    model: model, source: group.releaseId.map { .release($0) }, title: group.title)
+                }
+                if group.state != "done" {
+                  ProgressView(value: min(1, max(0, group.progress)))
+                }
+              }
+              .accessibilityElement(children: .combine)
             }
-            if group.state != "done" {
-              ProgressView(value: min(1, max(0, group.progress)))
-            }
           }
-          .accessibilityElement(children: .combine)
+          if next != nil {
+            Button("Show more requests") { Task { await load(reset: false) } }.disabled(loading)
+              .buttonStyle(.pigSecondary)
+          }
         }
       }
-      if next != nil {
-        Button("Show more requests") { Task { await load(reset: false) } }.disabled(loading)
-          .buttonStyle(.pigSecondary)
-      }
-    }.pigCanvas().navigationTitle("Music requests").navigationBarTitleDisplayMode(.inline)
+    }.pigCanvas().navigationTitle("Server").navigationBarTitleDisplayMode(.inline)
       .toolbar {
-        Button("Refresh", systemImage: "arrow.clockwise") { Task { await load(reset: true) } }
-          .disabled(loading)
-        Button("Clear") { Task { await clear() } }.accessibilityLabel("Clear finished")
+        Button("Clear finished") { Task { await clear() } }
           .disabled(loading || !model.canMutate)
       }
       .task { await load(reset: true) }
       // Live: the server's request queue changed.
       .onChange(of: model.requestsRevision) { Task { await load(reset: true) } }
   }
+  private static let cancellable: Set<String> = [
+    "waiting_for_sources", "searching", "downloading", "validating",
+  ]
   private func songRow(_ item: RequestGroupItem) -> some View {
     VStack(alignment: .leading, spacing: 4) {
       Text(item.title)
@@ -237,10 +249,6 @@ struct RequestsView: View {
       }
       if ["failed", "cancelled"].contains(item.status) {
         Button("Retry request") { Task { await retry([item]) } }
-          .disabled(loading || !model.canMutate)
-      }
-      if ["waiting_for_sources", "searching", "downloading", "validating"].contains(item.status) {
-        Button("Cancel my request", role: .destructive) { cancel(item) }
           .disabled(loading || !model.canMutate)
       }
     }

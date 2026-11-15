@@ -13,15 +13,17 @@ struct DownloadsView: View {
         // Only between sign-in and the library opening, a moment at most.
         ProgressView("Opening your downloads…").frame(maxWidth: .infinity, maxHeight: .infinity)
       }
-    }.pigCanvas().navigationTitle("On this device").navigationBarTitleDisplayMode(.inline)
+    }.pigCanvas().navigationTitle("iPhone").navigationBarTitleDisplayMode(.inline)
   }
 }
+/// Transfers, then what is on this iPhone, then its settings: the same
+/// sections as the Server and Watch pages, with no explanatory text (#209,
+/// D-101).
 private struct DownloadList: View {
   let model: AppModel
   @Bindable var downloads: DownloadController
   @State private var budget = 5
   @State private var clearing = false
-  @State private var removing: DeviceGroup?
   var body: some View {
     // A cancel waiting for its Undo has left the list already (#183).
     let transfers = downloads.records.filter {
@@ -31,59 +33,27 @@ private struct DownloadList: View {
     let groups = DeviceGroup.build(downloads.records.filter { $0.state == "ready" })
     List {
       if downloads.records.isEmpty {
-        PigQuietState(
-          "No downloads yet",
-          line: "Songs, albums and playlists you download to this iPhone appear here."
-        ).listRowBackground(Color.clear)
+        Text("No downloads yet").foregroundStyle(.secondary)
       }
       if !transfers.isEmpty {
         Section("Transfers") {
           ForEach(transfers) { record in
             TransferRow(model: model, downloads: downloads, record: record)
           }
-        }
-      }
-      if !groups.isEmpty {
-        Section("On this device") {
-          ForEach(groups) { group in
-            DisclosureGroup {
-              ForEach(Array(group.records.enumerated()), id: \.element.id) { index, record in
-                HStack(spacing: 10) {
-                  Button {
-                    model.play(group.records.map(\.track), at: index)
-                  } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                      Text(record.track.title).lineLimit(1)
-                      Text(record.track.artist).font(PigType.footnote).foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                  }.buttonStyle(.plain)
-                  RemoveButton(label: "Remove \(record.track.title) from this device") {
-                    Task { await downloads.release(ids: [record.id], origin: group.origin) }
-                  }
-                }
-              }
-            } label: {
-              CollectionRow(group.title, subtitle: group.caption) {
-                ArtworkThumb(model: model, source: group.artwork, title: group.title)
-              } trailing: {
-                RemoveButton(label: "Remove \(group.title) from this device") { removing = group }
-              }
+          if transfers.contains(where: { $0.state != "ready" }) {
+            if downloads.running || downloads.records.contains(where: { $0.state == "downloading" }) {
+              Button("Pause downloads") { Task { await downloads.pause() } }
+            } else {
+              Button("Resume downloads") { downloads.resume() }
             }
           }
         }
       }
-      Section("Storage") {
-        Text(
-          "\(ByteCountFormatter.string(fromByteCount:downloads.records.filter{$0.state == "ready"}.reduce(0){$0+$1.total},countStyle:.file)) downloaded"
-        ).pigFigures()
-        Picker("Download budget", selection: $budget) {
-          ForEach([1, 2, 5, 10, 20, 50], id: \.self) { Text("\($0) GB").tag($0) }
-        }
-        .onChange(of: budget) { _, value in
-          downloads.budgetBytes = Int64(value) * 1024 * 1024 * 1024
-          model.saveDownloadBudget(downloads.budgetBytes)
-        }
+      DeviceGroupsSection(
+        model: model, title: "On your phone", device: "iPhone", groups: groups,
+        play: { group, index in model.play(group.records.map(\.track), at: index) }
+      ) { ids, origin in await downloads.release(ids: ids, origin: origin) }
+      Section("Settings") {
         if downloads.usesBackgroundTransfers {
           Toggle(
             "Allow cellular downloads",
@@ -91,49 +61,95 @@ private struct DownloadList: View {
               get: { downloads.allowsCellular },
               set: { value in Task { await downloads.setCellular(value) } }))
         }
-        Text(
-          (downloads.allowsCellular
-            ? "Downloads can use Wi-Fi and cellular (not while Low Data Mode is on). "
-            : "Downloads use Wi-Fi. ")
-            + "Originals are the default; AAC copies use less storage. Use AAC for originals your device cannot decode. Scheduled file transfers continue in the background. Preparing new downloads and AAC copies resumes when the app opens. Access changes reconcile when you next connect."
-        ).font(PigType.footnote)
-        if downloads.running || downloads.records.contains(where: { $0.state == "downloading" }) {
-          Button("Pause downloads") { Task { await downloads.pause() } }
-        } else {
-          Button("Resume queued downloads") { downloads.resume() }
+        Picker("Download budget", selection: $budget) {
+          ForEach([1, 2, 5, 10, 20, 50], id: \.self) { Text("\($0) GB").tag($0) }
         }
-        if downloads.records.contains(where: \.isPaused) {
-          Text("Songs you paused one at a time stay paused until you resume them.")
-            .font(PigType.footnote).foregroundStyle(.secondary)
+        .onChange(of: budget) { _, value in
+          downloads.budgetBytes = Int64(value) * 1024 * 1024 * 1024
+          model.saveDownloadBudget(downloads.budgetBytes)
         }
-        Button("Remove all device downloads", role: .destructive) { clearing = true }
+        Button("Remove all", role: .destructive) { clearing = true }
+          .disabled(downloads.records.isEmpty)
       }
     }
     .toolbar {
-      Button("Clear") { Task { await downloads.clearFinished() } }
-        .accessibilityLabel("Clear finished")
+      Button("Clear finished") { Task { await downloads.clearFinished() } }
         .disabled(!transfers.contains { $0.state == "ready" })
     }
     .task {
       await downloads.reload()
       budget = Int(downloads.budgetBytes / (1024 * 1024 * 1024))
     }
-    .confirmationDialog(
-      "Remove all music downloaded to this device? Server music is retained.",
-      isPresented: $clearing
-    ) { Button("Remove device downloads", role: .destructive) { Task { await downloads.clear() } } }
-    .confirmationDialog(
-      removing.map { "Remove \($0.title) from this device?" } ?? "",
-      isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
-      titleVisibility: .visible
-    ) {
-      if let group = removing {
-        Button("Remove", role: .destructive) {
-          Task { await downloads.release(ids: group.records.map(\.id), origin: group.origin) }
+    .confirmationDialog("Remove all downloads from this iPhone?", isPresented: $clearing) {
+      Button("Remove all", role: .destructive) { Task { await downloads.clear() } }
+    }
+  }
+}
+
+/// "On your phone" and "On your watch" (#209): albums and playlists, laid
+/// out the same on both pages. Swipe a group or one of its songs to remove
+/// it, at once with Undo (D-79).
+struct DeviceGroupsSection: View {
+  let model: AppModel
+  let title: String
+  /// "iPhone" or "Apple Watch", for VoiceOver and the Undo label.
+  let device: String
+  let groups: [DeviceGroup]
+  /// Plays a group from one of its songs; nil where songs can't play here.
+  var play: ((DeviceGroup, Int) -> Void)?
+  let release: @MainActor ([String], DownloadOrigin) async -> Void
+  private func key(_ group: DeviceGroup, _ record: DownloadRecord? = nil) -> String {
+    "device-remove:" + device + ":" + group.id + (record.map { "/" + $0.id } ?? "")
+  }
+  var body: some View {
+    let shown = groups.filter { !model.undo.hides(key($0)) }
+    if !shown.isEmpty {
+      Section(title) {
+        ForEach(shown) { group in
+          DisclosureGroup {
+            let records = group.records.filter { !model.undo.hides(key(group, $0)) }
+            ForEach(Array(records.enumerated()), id: \.element.id) { index, record in
+              songRow(group, record, index: index)
+                .swipeActions {
+                  Button("Remove", role: .destructive) { remove(group, records: [record]) }
+                }
+            }
+          } label: {
+            CollectionRow(group.title, subtitle: group.caption) {
+              ArtworkThumb(model: model, source: group.artwork, title: group.title)
+            }
+          }
+          .swipeActions {
+            Button("Remove", role: .destructive) { remove(group, records: group.records) }
+          }
         }
       }
-    } message: {
-      Text("Songs also in another downloaded album or playlist stay on this device.")
+    }
+  }
+  @ViewBuilder private func songRow(_ group: DeviceGroup, _ record: DownloadRecord, index: Int)
+    -> some View
+  {
+    let label = VStack(alignment: .leading, spacing: 2) {
+      Text(record.track.title).lineLimit(1)
+      Text(record.track.artist).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
+    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+    if let play {
+      Button { play(group, index) } label: { label }.buttonStyle(.plain)
+    } else {
+      label
+    }
+  }
+  private func remove(_ group: DeviceGroup, records: [DownloadRecord]) {
+    let whole = records.count == group.records.count
+    let id = whole ? key(group) : key(group, records[0])
+    let ids = records.map(\.id)
+    let origin = group.origin
+    let release = release
+    model.undo.schedule(
+      id, label: "Removed " + (whole ? group.title : records[0].track.title) + " from " + device
+    ) {
+      await release(ids, origin)
+      return true
     }
   }
 }
@@ -235,18 +251,6 @@ private struct TransferRow: View {
   }
 }
 
-struct RemoveButton: View {
-  let label: String
-  let action: () -> Void
-  var body: some View {
-    Button(action: action) {
-      Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary)
-        .frame(width: 32, height: 32).contentShape(Rectangle())
-    }
-    .buttonStyle(.borderless).accessibilityLabel(label)
-  }
-}
-
 /// Downloads grouped the way they were added: by album, or by playlist. A song
 /// added both ways appears in both groups.
 struct DeviceGroup: Identifiable {
@@ -302,20 +306,19 @@ struct DeviceGroup: Identifiable {
 }
 
 /// The Downloads tab: what you asked the server, this iPhone and Apple Watch
-/// to download. Each row's badge counts its queued and in-progress songs; the
-/// tab badge is their total.
+/// to download. Each row says how many songs it holds (#209) and its badge
+/// counts its queued and in-progress songs; the tab badge is their total.
 struct DownloadsHubView: View {
   let model: AppModel
   var body: some View {
     List {
-      row("Server", detail: "Music you asked the server to get", symbol: "server.rack",
-        active: model.serverActiveRequests) { RequestsView(model: model) }
-      row("iPhone", detail: phoneSummary, symbol: "iphone", active: model.phoneActiveDownloads) {
-        DownloadsView(model: model)
-      }
+      row("Server", detail: DownloadPlace.server.summary(songs: model.songCount),
+        symbol: "server.rack", active: model.serverActiveRequests) { RequestsView(model: model) }
+      row("iPhone", detail: DownloadPlace.phone.summary(songs: phoneSongs), symbol: "iphone",
+        active: model.phoneActiveDownloads) { DownloadsView(model: model) }
       if model.watch?.supported == true {
-        row("Apple Watch", detail: watchSummary, symbol: "applewatch",
-          active: model.watchActiveDownloads) { WatchDownloadsView(model: model) }
+        row("Apple Watch", detail: DownloadPlace.watch.summary(songs: watchSongs),
+          symbol: "applewatch", active: model.watchActiveDownloads) { WatchDownloadsView(model: model) }
       }
     }
     .navigationTitle("Downloads")
@@ -336,19 +339,13 @@ struct DownloadsHubView: View {
       Label {
         VStack(alignment: .leading) {
           Text(title)
-          Text(detail).font(PigType.footnote).foregroundStyle(.secondary)
+          Text(detail).font(PigType.footnote).foregroundStyle(.secondary).pigFigures()
         }
       } icon: {
         Image(systemName: symbol)
       }
     }.badge(active)
   }
-  private var phoneSummary: String {
-    let ready = model.downloads?.records.count { $0.state == "ready" } ?? 0
-    return "\(ready) songs ready offline"
-  }
-  private var watchSummary: String {
-    guard let receipt = model.watch?.receipt else { return "Transfers wait for your Watch" }
-    return "\(receipt.ready.count) songs on Watch"
-  }
+  private var phoneSongs: Int { model.downloads?.records.count { $0.state == "ready" } ?? 0 }
+  private var watchSongs: Int { model.watch?.receipt?.ready.count ?? 0 }
 }

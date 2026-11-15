@@ -116,3 +116,13 @@ public enum RequestStatus {
     }
   }
 }
+
+/// Where the Downloads tab's music is (#209): the server, this iPhone or the
+/// Watch, each summed up on the hub by how many songs it holds.
+public enum DownloadPlace: String, Sendable, CaseIterable {
+  case server, phone, watch
+  /// "1 song on your phone", "12 songs on your server".
+  public func summary(songs: Int) -> String {
+    "\(songs.formatted()) song\(songs == 1 ? "" : "s") on your \(rawValue)"
+  }
+}

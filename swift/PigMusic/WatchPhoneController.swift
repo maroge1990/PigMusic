@@ -312,6 +312,13 @@ import SwiftUI
     await downloads?.remove(id: id)
     await publish()
   }
+  /// Removes everything sent to the Watch and stops following its playlists
+  /// (#209): the next manifest leaves the Watch empty.
+  func removeAll() async {
+    for id in Array(subscriptions.keys) { unsubscribe(id) }
+    await downloads?.clear()
+    await publish()
+  }
   /// Removes an album's or playlist's claim; songs another one needs stay.
   func release(_ ids: [String], origin: DownloadOrigin) async {
     await downloads?.release(ids: ids, origin: origin)
