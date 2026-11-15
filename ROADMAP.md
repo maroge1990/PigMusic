@@ -5,31 +5,27 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 15 Nov 2026 (Melbourne), later.*
+*Overwritten at the end of every session. 15 Nov 2026 (Melbourne), evening.*
 
-- **Live:** release `madeforyou-20261115-v1`, server `d9c0df8` (D-99), applied 15 Nov, healthy (see batch 11).
-- **TestFlight 0.2.0 (25):** uploaded 14 Nov 20:55 (the first run failed silently at signing; the script now runs
-  with its output saved to `~/pigmusic-archives/upload.log` on the Mac).
-- **Batch 10 (#184), Mark's device round on build 25, in progress:** area 1 (iPhone Undo, haptics, hairlines) passed
-  except song requests (#206); area 2 (Watch: playlist update, Watch Remove, headphones out) **not tested yet**;
-  area 3 passed (offline search #177; diagnostics #188) except the cover tint, too faint to see (D-100: 45%); area 4
-  (icon appearances, larger text, Reduce Motion/Transparency, Increase Contrast, VoiceOver) sent to Mark, no
-  result yet. Splash pig dropped at launch (#207). Results go into docs/DESIGN.md when the round ends.
-- **Batch 10b 'device fixes' (#199, #206, #207), pushed `83c8718`..`5e0ff7d`:** tint at 45%; splash pig centred on the whole
-  screen with a smoother hand-off; "Clear" in three toolbars; song requests act at once with Undo, show Requested
-  and wait in a per-account request outbox (one song per request; a busy server keeps them, a refusal or a song
-  excluded by the household drops them with a notice); Cancel my request with Undo. Codex round 1 (a high: 5xx
-  dropped queued requests; a medium: Requested stuck after cancel) and round 2 (a medium: skipped songs marked
-  Requested) and two confirmation findings (the notice cleared by a refresh) were fixed with tests; the last
-  confirmation approved. Build 26 was not uploaded: Mark chose one TestFlight after batch 11 (build 27).
-- **Batch 11 'Made for you' (#202, #203), pushed `8d52a1f`..`4cc75d9`:** similar songs when a queue ends (server
-  `/radio/continuation`, keep_playing preference merged so older apps can't reset it; web and iPhone, "Similar songs"
-  in Up next; iPhone fetches ahead and plays on) and Rewind (server `/rewind`, web `#/home/rewind`, iPhone Home ›
-  Your Rewind). Migration 14 `listen_details` keeps what each listen was, so a year survives mix clean-up; a listen
-  counts as the song's length (the apps report once at 30 s). Codex round 1 (a high and two mediums), round 2 (a
-  medium) and the confirmation approved. **Live** as `madeforyou-20261115-v1` (server `d9c0df8`, migration 14;
-  rollback: container `PigMusic-before-madeforyou-20261115-v1`, backup `pre-madeforyou-20261115-v1`; an older image
-  needs that backup). iPhone half in TestFlight 0.2.0 (27) with batch 10b.
+- **Live:** release `madeforyou-20261115-v1`, server `d9c0df8` (D-99), applied 15 Nov, healthy. Batch 13 is
+  iPhone/Watch/web only; its web half (#202 fix, D-101 copy) goes live with the next release.
+- **TestFlight 0.2.0 (27):** uploaded 15 Nov (batches 10b and 11). **0.2.0 (28)** carries batch 13; staged on the Mac
+  for Mark to upload.
+- **Device round on build 27 (#184):** area A (build 27 fixes) passed with follow-ups; area B (similar songs, Rewind)
+  passed on iPhone except tapping a Rewind song (#216) and web similar songs (#202, fixed in batch 13, not yet
+  live); area C (Watch) passed with follow-ups #217-#220 (steps 3-4 untestable: slow transfers, #219); **area D
+  (icons, larger text, Reduce Motion/Transparency, Increase Contrast, VoiceOver) not tested yet.** Results go into
+  docs/DESIGN.md when the round ends.
+- **Batch 13 'device round fixes' (#207 #209-#215 #202), pushed:** slower splash hand-off; one app-wide Undo bar above
+  the mini player; finished requests show in library with download/Watch options; favourite star optimistic and never
+  greyed by syncs (refusals roll back, unknown states re-read); Search Refresh removed; Remove from library as one
+  action with Undo; Downloads pages in three sections (Transfers, On your phone/watch, Settings; Mark's choice) with
+  swipe to cancel/remove and no descriptors; Home descriptors removed and "See all popular songs" (iPhone and web);
+  web asks for similar songs as the last song starts. Codex round 1 (a high, a medium), round 2 (two mediums) and
+  five confirmation rounds, the last approving.
+- **Next:** area D on build 28; batch 14 = Watch background transfers (#219, Mark's pick, measure time and battery
+  first), then #217/#218/#220, #208 (Watch status wording), #215 (helper-text keep/remove list for Mark), Rewind
+  redesign Option A (#216, approved).
 - **#188:** build 25's export: no transport failures while online (baseline 54 of 166), all HTTP/2; replies still
   take 1.5 s median (p90 3.1 s) on the path, not the server. Next: ask Mark whether HTTP/3 stays off, then suggest
   "Always use HTTPS".
