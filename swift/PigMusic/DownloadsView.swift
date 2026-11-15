@@ -70,6 +70,10 @@ private struct DownloadList: View {
           downloads.budgetBytes = Int64(value) * 1024 * 1024 * 1024
           model.saveDownloadBudget(downloads.budgetBytes)
         }
+        // A removal that failed shows here, where it was started (#128).
+        if let message = model.message {
+          StatusText(message)
+        }
         Button("Remove all", role: .destructive) { clearing = true }
           .disabled(downloads.records.isEmpty)
       }

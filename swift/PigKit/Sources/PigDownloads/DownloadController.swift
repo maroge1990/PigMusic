@@ -100,6 +100,7 @@ import PigDomain
   public let archive: DownloadArchive
   @ObservationIgnored private let source: any DeviceCopySource
   @ObservationIgnored private let onFailure: @MainActor (any Error) -> Void
+  @ObservationIgnored private let diagnostics: DiagnosticsLog
   @ObservationIgnored private var worker: Task<Void, Never>?
   /// Copies asked for ahead of their turn; it stops with the worker.
   @ObservationIgnored private var ahead: Task<Void, Never>?
@@ -109,11 +110,13 @@ import PigDomain
   @ObservationIgnored public private(set) var preparationAllowed = true
   public init(
     archive: DownloadArchive, source: any DeviceCopySource,
-    onFailure: @escaping @MainActor (any Error) -> Void = { _ in }
+    onFailure: @escaping @MainActor (any Error) -> Void = { _ in },
+    diagnostics: DiagnosticsLog = .shared
   ) {
     self.archive = archive
     self.source = source
     self.onFailure = onFailure
+    self.diagnostics = diagnostics
   }
   /// The Watch poll reloads every 2 s; an unchanged list is not assigned, so
   /// the Downloads rows aren't redrawn for nothing (#97).
@@ -135,7 +138,7 @@ import PigDomain
       records.filter { ids.contains($0.id) && $0.effectiveOrigins.allSatisfy { $0.same(origin) } }
         .map(\.id))
     guard !leaving.isEmpty else {
-      try? await archive.release(ids: ids, origin: origin)
+      await releaseReportingFailure(ids: ids, origin: origin)
       await reload()
       return
     }
@@ -143,10 +146,21 @@ import PigDomain
     #if os(iOS)
       await background?.reconcile(Set(records.map(\.id)).subtracting(leaving))
     #endif
-    try? await archive.release(ids: ids, origin: origin)
+    await releaseReportingFailure(ids: ids, origin: origin)
     await reload()
     for id in leaving { progress[id] = nil }
     resume(automatic: true)
+  }
+  /// A removal that didn't happen is recorded and shown where it was started
+  /// (#128); the songs would otherwise stay on the device without a word.
+  private func releaseReportingFailure(ids: [String], origin: DownloadOrigin) async {
+    do {
+      _ = try await archive.release(ids: ids, origin: origin)
+    } catch {
+      diagnostics.record(
+        "downloads", "removing \(ids.count) song(s) failed: \(error.localizedDescription)")
+      onFailure(OfflineFailure.removal)
+    }
   }
   /// The Watch's confirmation, for the Watch's copies only (#218): see
   /// `DownloadArchive.settleHandOver`. Songs the Watch lost are queued again.

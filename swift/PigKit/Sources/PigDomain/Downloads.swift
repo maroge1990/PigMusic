@@ -75,6 +75,8 @@ public struct DownloadRecord: Codable, Sendable, Identifiable, Equatable {
 }
 public enum OfflineFailure: Error, LocalizedError, Sendable {
   case authentication, integrity, quota, unsafeResponse, cancelled
+  /// Removing an album's or playlist's songs from the device failed (#128).
+  case removal
   public var errorDescription: String? {
     switch self {
     case .authentication: "The device session expired. Sign in again."
@@ -82,6 +84,7 @@ public enum OfflineFailure: Error, LocalizedError, Sendable {
     case .quota: "The device download budget is full. Remove downloads or increase the budget."
     case .unsafeResponse: "The server did not return a safe audio download."
     case .cancelled: "Download cancelled."
+    case .removal: "Couldn't remove these downloads."
     }
   }
 }

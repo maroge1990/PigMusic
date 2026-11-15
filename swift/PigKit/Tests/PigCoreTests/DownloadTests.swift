@@ -95,6 +95,9 @@ private actor Flag {
   var value = false
   func set() { value = true }
 }
+@MainActor private final class Failures {
+  var messages: [String] = []
+}
 @Suite struct DownloadTests {
   func track() throws -> Track {
     try LibraryCodec.decoder().decode(
@@ -147,6 +150,33 @@ private actor Flag {
     #expect(calls.prefix(poll).contains("create two"))
     #expect(calls.prefix(poll).contains("create three"))
     #expect(await archive.snapshot().allSatisfy { $0.state == "ready" })
+  }
+  /// #128: removing an album's or playlist's songs dropped the archive's
+  /// error (`try?`): when the list couldn't be saved, the songs stayed on the
+  /// device and neither the person nor the diagnostics heard of it.
+  @MainActor @Test func aFailedRemovalIsShownAndRecorded() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let archive = try archive(root.appendingPathComponent("Downloads"))
+    try await archive.enqueue([try track()], quality: "original")
+    let log = DiagnosticsLog(directory: root.appendingPathComponent("Diagnostics"))
+    let failures = Failures()
+    let controller = DownloadController(
+      archive: archive, source: AheadSource(ready: try copy(), preparing: try copy()),
+      onFailure: { failures.messages.append($0.localizedDescription) }, diagnostics: log)
+    await controller.pause()
+    await controller.reload()
+    // The list can't be saved: a folder stands where it is written.
+    let list = root.appendingPathComponent("Downloads/downloads.json")
+    try FileManager.default.removeItem(at: list)
+    try FileManager.default.createDirectory(
+      at: list.appendingPathComponent("blocked"), withIntermediateDirectories: true)
+    await controller.release(ids: ["song"], origin: .direct)
+    #expect(failures.messages == [OfflineFailure.removal.localizedDescription])
+    #expect(log.text().contains("[downloads] removing 1 song(s) failed"))
+    // A claim on songs no longer listed here takes the shorter path; it reports too.
+    await controller.release(ids: ["gone"], origin: .direct)
+    #expect(failures.messages.count == 2)
   }
   /// #97: the Watch poll reloads the download list every 2 s; assigning an
   /// unchanged list told every Downloads row to redraw.
