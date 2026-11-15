@@ -51,7 +51,7 @@ private struct DownloadList: View {
       }
       DeviceGroupsSection(
         model: model, title: "On your phone", device: "iPhone", groups: groups,
-        play: { group, index in model.play(group.records.map(\.track), at: index) }
+        play: { tracks, index in model.play(tracks, at: index) }
       ) { ids, origin in await downloads.release(ids: ids, origin: origin) }
       Section("Settings") {
         if downloads.usesBackgroundTransfers {
@@ -95,11 +95,16 @@ struct DeviceGroupsSection: View {
   /// "iPhone" or "Apple Watch", for VoiceOver and the Undo label.
   let device: String
   let groups: [DeviceGroup]
-  /// Plays a group from one of its songs; nil where songs can't play here.
-  var play: ((DeviceGroup, Int) -> Void)?
+  /// Plays the group's shown songs from one of them; nil where songs can't
+  /// play here.
+  var play: (([Track], Int) -> Void)?
   let release: @MainActor ([String], DownloadOrigin) async -> Void
-  private func key(_ group: DeviceGroup, _ record: DownloadRecord? = nil) -> String {
-    "device-remove:" + device + ":" + group.id + (record.map { "/" + $0.id } ?? "")
+  /// A record's id is its song's id.
+  private func key(_ group: DeviceGroup, songId: String? = nil) -> String {
+    "device-remove:" + device + ":" + group.id + (songId.map { "/" + $0 } ?? "")
+  }
+  private func key(_ group: DeviceGroup, _ record: DownloadRecord) -> String {
+    key(group, songId: record.id)
   }
   var body: some View {
     let shown = groups.filter { !model.undo.hides(key($0)) }
@@ -108,8 +113,8 @@ struct DeviceGroupsSection: View {
         ForEach(shown) { group in
           DisclosureGroup {
             let records = group.records.filter { !model.undo.hides(key(group, $0)) }
-            ForEach(Array(records.enumerated()), id: \.element.id) { index, record in
-              songRow(group, record, index: index)
+            ForEach(records) { record in
+              songRow(group, record)
                 .swipeActions {
                   Button("Remove", role: .destructive) { remove(group, records: [record]) }
                 }
@@ -126,15 +131,23 @@ struct DeviceGroupsSection: View {
       }
     }
   }
-  @ViewBuilder private func songRow(_ group: DeviceGroup, _ record: DownloadRecord, index: Int)
-    -> some View
-  {
+  @ViewBuilder private func songRow(_ group: DeviceGroup, _ record: DownloadRecord) -> some View {
     let label = VStack(alignment: .leading, spacing: 2) {
       Text(record.track.title).lineLimit(1)
       Text(record.track.artist).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
     }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
     if let play {
-      Button { play(group, index) } label: { label }.buttonStyle(.plain)
+      Button {
+        // By id, from the songs shown: one hidden for its Undo never shifts it.
+        if let picked = PlaySelection(
+          group.records.map(\.track), hiding: { model.undo.hides(key(group, songId: $0.id)) },
+          tapped: record.id)
+        {
+          play(picked.tracks, picked.index)
+        }
+      } label: {
+        label
+      }.buttonStyle(.plain)
     } else {
       label
     }

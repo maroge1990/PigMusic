@@ -126,3 +126,18 @@ public enum DownloadPlace: String, Sendable, CaseIterable {
     "\(songs.formatted()) song\(songs == 1 ? "" : "s") on your \(rawValue)"
   }
 }
+
+/// What a tap on a song row plays (Codex on #209): the songs shown, less
+/// those hidden while their removal waits for its Undo, from the one tapped.
+/// Resolved by id, so a hidden song before it never shifts the index.
+public struct PlaySelection: Sendable, Equatable {
+  public let tracks: [Track]
+  public let index: Int
+  /// nil when the tapped song is itself hidden.
+  public init?(_ tracks: [Track], hiding hidden: (Track) -> Bool, tapped id: String) {
+    let shown = tracks.filter { !hidden($0) }
+    guard let index = shown.firstIndex(where: { $0.id == id }) else { return nil }
+    self.tracks = shown
+    self.index = index
+  }
+}

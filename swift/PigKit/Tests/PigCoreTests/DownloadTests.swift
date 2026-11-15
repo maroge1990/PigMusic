@@ -647,3 +647,13 @@ private final class Raised: @unchecked Sendable {
   #expect(DownloadPlace.phone.summary(songs: 1) == "1 song on your phone")
   #expect(DownloadPlace.watch.summary(songs: 2) == "2 songs on your watch")
 }
+
+/// Codex round 1 on batch 13 (#209): with a song removed and waiting for its
+/// Undo, tapping the next one plays it, not the hidden one before it.
+@Test func aTapDuringAnUndoPlaysTheSongTapped() {
+  let songs = ["a", "b", "c"].map { Track(id: $0, title: $0, artist: "A") }
+  let picked = PlaySelection(songs, hiding: { $0.id == "a" }, tapped: "b")
+  #expect(picked?.tracks.map(\.id) == ["b", "c"])
+  #expect(picked.map { $0.tracks[$0.index].id } == "b")
+  #expect(PlaySelection(songs, hiding: { $0.id == "a" }, tapped: "a") == nil)
+}
