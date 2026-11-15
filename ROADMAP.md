@@ -9,7 +9,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 - **Live:** release `batch13-20261115-v1`, server `94faf4d` (D-102), applied 15 Nov, healthy (rollback container
   `PigMusic-before-batch13-20261115-v1`, backup `pre-batch13-20261115-v1`): batch 13's web half.
-- **TestFlight 0.2.0 (27):** uploaded 15 Nov (batches 10b and 11). Build 28 (batch 13) was never uploaded;
+- **TestFlight 0.2.0 (27):** uploaded 15 Nov (batches 10b and 11). Build 28 (batch 13) uploaded 15 Nov;
   **0.2.0 (29)** carries batches 13 and 14 and is staged on the Mac for Mark to upload.
 - **Device round on build 27 (#184):** area A (build 27 fixes) passed with follow-ups; area B (similar songs, Rewind)
   passed on iPhone except tapping a Rewind song (#216) and web similar songs (#202, fixed in batch 13, not yet
