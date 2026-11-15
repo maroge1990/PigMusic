@@ -69,9 +69,7 @@ private struct SearchStartView: View {
     List {
       ShazamSection(model: model)
       if model.recentSearches.picks.isEmpty {
-        PigQuietState(
-          "Find music", line: "Songs, albums, artists and playlists, wherever they are."
-        ).listRowBackground(Color.clear)
+        PigQuietState("Find music").listRowBackground(Color.clear)
       } else {
         recent
       }
@@ -796,9 +794,6 @@ private struct AppleImportSheet: View {
           } else {
             if let choice {
               Text("\(choice.onServer) on the server, \(choice.toDownload) to download")
-            } else {
-              Text("Which songs are on the server isn't known yet.")
-                .foregroundStyle(.secondary)
             }
             if capped {
               Text(
@@ -926,8 +921,6 @@ private struct ShazamListenView: View {
           VStack(spacing: 16) {
             ProgressView().controlSize(.large)
             Text("Listening…").font(.headline)
-            Text("Hold your iPhone near the music.").font(PigType.footnote)
-              .foregroundStyle(.secondary)
           }
           .frame(maxWidth: .infinity, maxHeight: .infinity)
           .accessibilityElement(children: .combine)

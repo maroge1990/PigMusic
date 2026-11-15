@@ -110,10 +110,6 @@ struct SongActionsView: View {
               dismiss()
             }
           }
-        } footer: {
-          Text(
-            "Favourites do not download music. Requests are sent to your server and are separate from downloads to this device."
-          )
         }
         if loading { ProgressView() }
         if let message { Section { StatusText(message) } }

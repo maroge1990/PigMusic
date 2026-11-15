@@ -28,10 +28,12 @@ def test_the_watch_uses_the_phones_transport_glyphs():
     assert "backward.end.fill" not in watch and "forward.end.fill" not in watch
 
 
-def test_the_watch_describes_crossfade_as_the_phone_does():
-    """The phone: a three-second crossfade between unrelated songs."""
+def test_the_watch_crossfade_switch_has_no_explanation():
+    """#163 gave the Watch the phone's crossfade wording; D-101 (#215) then
+    removed the explanation and kept the switch."""
     watch = WATCH.read_text()
-    assert "three-second crossfade between unrelated songs" in watch
+    assert 'Toggle("Crossfade"' in watch
+    assert "three-second crossfade" not in watch
     assert "over 3 seconds" not in watch
 
 

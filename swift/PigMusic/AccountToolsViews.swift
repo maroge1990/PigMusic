@@ -18,12 +18,8 @@ struct PreferencesView: View {
         Text("Light").tag("light")
         Text("Dark").tag("dark")
       }
-      Section {
+      Section("Playback") {
         Toggle("Keep playing similar songs", isOn: $preferences.keepPlaying)
-      } header: {
-        Text("Playback")
-      } footer: {
-        Text("When an album, playlist or search ends, similar songs carry on.")
       }
       if let message { StatusText(message) }
     }.pigCanvas().navigationTitle("Preferences").navigationBarTitleDisplayMode(.inline).task {
@@ -190,9 +186,6 @@ struct QualityView: View {
           Text("Inherit default").tag("inherit")
           ForEach(quality.options) { option in Text(option.label).tag(option.value) }
         }
-        Text(
-          "Shared files keep the highest requested quality. This preference affects server acquisition, not the size of downloads to this device."
-        ).font(PigType.footnote)
         Button("Save preference") {
           Task {
             loading = true
@@ -299,8 +292,7 @@ struct DiagnosticsView: View {
     }
     .onChange(of: model.watch?.watchDiagnostics?.sentAt) { export = makeExport() }
   }
-  static let serverUpdate =
-    "This server is older than the app. Household songs in playlists and live request progress need a server update."
+  static let serverUpdate = "Update the server to use everything"
   private func makeExport() -> URL? {
     var parts = [
       "PigMusic diagnostics · \(Date().formatted(.iso8601))",

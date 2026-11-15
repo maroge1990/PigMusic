@@ -568,7 +568,7 @@ struct InlineQualityPicker: View {
         try await $0.saveQuality(scope: scope, id: id, preferred: value == "inherit" ? nil : value)
       }
       settings = try? await model.readCatalogue { try await $0.quality() }
-      message = .info("Saved. Shared files keep the highest quality anyone wants.")
+      message = .info("Saved")
     } catch { message = .error(error.userMessage) }
   }
 }

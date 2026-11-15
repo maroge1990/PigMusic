@@ -7,9 +7,6 @@ struct PendingEditsView: View {
   @State private var loading = false
   var body: some View {
     List {
-      Text(
-        "Changes are kept on this iPhone and sent in order. If a playlist changed meanwhile, sending stops until you review or discard that change."
-      ).font(PigType.footnote)
       Text("Discarding stops retries; it does not undo changes already saved on the server.").font(
         .footnote)
       Button("Send changes now") {

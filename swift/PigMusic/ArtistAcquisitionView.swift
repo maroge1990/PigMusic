@@ -40,9 +40,7 @@ struct ArtistAcquisitionView: View {
           .confirmationDialog("Request all selected releases?", isPresented: $confirm) {
             Button("Request catalogue") { Task { await save(request: true) } }
           } message: {
-            Text(
-              "This can create many server downloads. Files already available in the household are shared with your library."
-            )
+            Text("This can start many downloads")
           }
         Button("Cancel artist request and monitoring", role: .destructive) {
           Task { await cancel() }

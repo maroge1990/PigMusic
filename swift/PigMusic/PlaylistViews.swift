@@ -24,8 +24,6 @@ struct PlaylistToolsView: View {
             || !model.canMutate)
       }
       Section("Apple Music XML") {
-        Text("Import personal playlists and matching metadata. This does not download songs.").font(
-          PigType.footnote)
         Button("Choose XML export") { selecting = true }.disabled(loading)
         if let imported {
           Text(
@@ -76,9 +74,7 @@ struct PlaylistToolsView: View {
           importSelection = selection
           selectedPlaylists = Set(selection.playlists.map(\.id))
           preview = nil
-          message = .info(
-            "Review the selected export before importing. Existing imported playlists are updated; unrelated playlists are retained."
-          )
+          message = nil
         } catch { message = .error(error.userMessage) }
       }
   }

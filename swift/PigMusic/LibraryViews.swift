@@ -43,7 +43,7 @@ struct LibraryView: View {
         Button("Try again") { Task { await model.refresh() } }.pigPrimaryAction()
       }
     } else {
-      PigQuietState("Your library is empty", line: "Find songs and albums to add.") {
+      PigQuietState("Your library is empty", line: nil) {
         Button("Find music") { model.openSearch() }.pigPrimaryAction()
       }
     }

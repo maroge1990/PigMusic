@@ -108,14 +108,11 @@ struct SignInView: View {
           Image("PigLockup").resizable().scaledToFit().frame(maxWidth: 280).frame(height: 100)
             .frame(maxWidth: .infinity)
             .accessibilityHidden(true)
-          Text("Your music, wherever you are.").font(PigType.headline)
         }
         Section("PigMusic address") {
           TextField("https://music.example.com", text: $model.server)
             .textContentType(.URL).keyboardType(.URL).textInputAutocapitalization(.never)
             .autocorrectionDisabled()
-          Text("Use the address from your invitation, or ask the person who set up PigMusic.")
-            .font(PigType.footnote)
         }
         Section("Your account") {
           TextField("Username", text: $username).textContentType(.username)
@@ -139,8 +136,7 @@ struct SignInView: View {
           TextField("Invitation link or code", text: $invitation).textInputAutocapitalization(
             .never
           ).autocorrectionDisabled()
-          Text("Use the password above for your new account; at least 12 characters.").font(
-            PigType.footnote)
+          Text("At least 12 characters").font(PigType.footnote)
           Button("Activate account") {
             Task {
               await model.join(invitation: invitation, password: password)

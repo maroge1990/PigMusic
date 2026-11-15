@@ -54,9 +54,7 @@ private struct WatchReadiness: View {
         .font(PigType.footnote)
       Text(summary.listening)
         .font(PigType.footnote).foregroundStyle(.secondary)
-      if !complete {
-        Text("Keep iPhone nearby").font(PigType.footnote).foregroundStyle(.secondary)
-      } else if let synced = model.lastSynced {
+      if complete, let synced = model.lastSynced {
         Text("Synced \(synced.formatted(.relative(presentation: .named)))")
           .font(PigType.footnote).foregroundStyle(.secondary)
       }
@@ -151,9 +149,6 @@ private struct WatchLibraryView: View {
                 ByteCountFormatter.string(
                   fromByteCount: model.receipt?.usedBytes ?? 0, countStyle: .file)
               ).pigFigures()
-              Text(
-                model.link?.reachable == true
-                  ? "Phone reachable" : "Phone unavailable · offline music still plays")
               Picker(
                 "Watch budget",
                 selection: Binding(
@@ -165,11 +160,6 @@ private struct WatchLibraryView: View {
               Button("Sync with phone") { Task { await model.send("sync") } }
               Button("Send diagnostics to iPhone") { model.sendDiagnostics() }
               Toggle("Crossfade", isOn: $model.crossfade)
-              // The phone's words (#163). The Watch plays from its own files,
-              // so albums are always gapless and there is no Seamless switch.
-              Text(
-                "Albums play gapless. Crossfade adds a three-second crossfade between unrelated songs. Changes apply to the next queue."
-              ).font(PigType.footnote)
               if let message = model.message ?? model.link?.error {
                 Text(message).font(PigType.footnote).foregroundStyle(PigBrand.secondary(scheme))
               }

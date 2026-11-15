@@ -91,8 +91,6 @@ private struct ShareCard: View {
           .foregroundStyle(.tint).accessibilityHidden(true)
         Text("Added to PigMusic's Shazamed list").font(.headline)
           .multilineTextAlignment(.center)
-        Text("Open PigMusic to see whether your server has it. Nothing downloads until you ask.")
-          .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
       case .notASong:
         message(
           "This isn't a song link",

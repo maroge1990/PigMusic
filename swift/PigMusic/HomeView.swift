@@ -38,8 +38,6 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 6) {
                   MixArtwork(kind: "radio").frame(width: 150, height: 150)
                   Text(radio.title).font(PigType.cardTitle).lineLimit(2)
-                  Label("Endless radio from your library", systemImage: "dot.radiowaves.left.and.right")
-                    .font(PigType.caption).foregroundStyle(.secondary).lineLimit(2)
                 }.frame(width: 150, alignment: .leading)
               }.buttonStyle(.plain)
             }
@@ -240,8 +238,7 @@ struct HomeView: View {
 }
 
 struct MixDetailView: View {
-  static let savedNotice =
-    "Playlist saved. Add songs to your library to keep their audio after this mix leaves rotation."
+  static let savedNotice = "Playlist saved"
   @Environment(\.dismiss) private var dismiss
   let model: AppModel
   let mix: PersonalMix
