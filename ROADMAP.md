@@ -19,13 +19,13 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 - **Live log check (16 Nov):** #136, #137, #166, #167, #171, #172 confirmed and closed. Still open: #130 and #142 (not
   exercised: need two requesters / a connected device), #185 (needs a full day), #144 (no clear speed-up), #145 (the
   6-hourly artist re-warm half isn't done).
-- **Decisions:** D-106 (the Download pop-up menu stays, despite iOS's unnamed inner button). Next: D-107.
+- **Decisions:** D-106 (the Download pop-up menu stays, despite iOS's unnamed inner button). Next: D-108.
 - **Mac:** new home-network address (in `~/.ssh/config` on the Windows side); about 15 GB free.
 
 ## Now
 
 1. **Mark's device round on build 970** (#184): the checklist on the issue. Its failures become the next batch.
-2. **YouTube trial ends ~21 Nov** (#193): keep or remove, Mark's decision (D-107).
+2. **YouTube trial ends ~21 Nov** (#193): keep or remove, Mark's decision (D-108).
 3. **Retirement, 28 Nov** (#201): remove what batches 4, 6 and 8 replaced once #191's pass marks are met (taps that
    play ≥ 90%; first sound median ≤ 1.5 s, p90 ≤ 3 s; mix downloads ≥ 80%; placeholders ≤ 2%).
 4. **Live checks that close with use:** #130 (two requesters at once), #142 (a device connected), #185 (a full day),
@@ -35,7 +35,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 | Batch | Issues | Platform |
 | --- | --- | --- |
-| Server efficiency left over | #144 rebuild cost, #145 artist re-warm, #143 (measured: not worth it alone; close or fold in) | server |
+| Server efficiency left over | #144 rebuild cost, #145 artist re-warm | server |
 | iPhone small features | #126 shorter Popular songs rows, #127 pause one download, #224 search flash, #112 Watch logo | iPhone, Watch |
 | CI | #189 xdist workers dying in the 1 GB container | ops |
 
