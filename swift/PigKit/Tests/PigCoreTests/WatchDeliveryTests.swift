@@ -42,6 +42,65 @@ struct WatchDeliveryTests {
     #expect(!plan.budgetFull)
   }
 
+  /// #219: audio waited for the Watch to confirm each manifest, a round trip
+  /// that needed both apps running. Now it goes at once: songs the Watch can
+  /// file on arrival all go; songs it must hold for their manifest, from the
+  /// published one or ahead of it, go a bounded number at a time.
+  @Test func audioGoesWithoutWaitingForTheWatchToConfirmItsManifest() {
+    let committed = (0..<30).map { song("c\($0)") }
+    let fresh = (0..<30).map { song("n\($0)") }
+    let later = [song("x"), song("y")]
+    // The Watch's last receipt is for an older manifest; it holds c0.
+    let receipt = CompanionReceipt(
+      context: CompanionContext(revision: 3, account: "a"), ready: ["c0": "c-c0"],
+      usedBytes: 10, budgetBytes: 10_000)
+    let plan = WatchDelivery.audio(
+      songs: committed + fresh, ahead: later, receipt: receipt,
+      committed: Set(committed.map(WatchDelivery.identity)), inFlight: ["n0:c-n0"],
+      hasFile: { _ in true }, due: { $0 != "audio:n1:c-n1" })
+    // Every committed song the Watch lacks goes, however many.
+    #expect(plan.send.filter { $0.id.hasPrefix("c") }.count == 29)
+    // n0 (in flight) and n1 (sent recently) may wait on the Watch already:
+    // 22 more fresh songs make the 24 it may hold, and none ahead fit.
+    #expect(plan.send.filter { $0.id.hasPrefix("n") }.map(\.id) == (2..<24).map { "n\($0)" })
+    #expect(plan.ahead.isEmpty)
+    #expect(!plan.budgetFull)
+    // Once the Watch confirmed the fresh songs too, those ahead go for the next version.
+    let confirmed = WatchDelivery.audio(
+      songs: committed + fresh, ahead: later, receipt: receipt,
+      committed: Set((committed + fresh).map(WatchDelivery.identity)), inFlight: [],
+      hasFile: { _ in true }, due: { _ in true })
+    #expect(confirmed.send.count == 59)
+    #expect(confirmed.ahead.map(\.id) == ["x", "y"])
+  }
+
+  @Test func heldSongsAreBoundedBySizeToo() {
+    let big = (0..<4).map { song("b\($0)", bytes: 100 * 1024 * 1024) }
+    let receipt = CompanionReceipt(
+      context: context, ready: [:], usedBytes: 0, budgetBytes: 8 * 1024 * 1024 * 1024)
+    let plan = WatchDelivery.audio(
+      songs: [], ahead: big, receipt: receipt, committed: [], inFlight: [],
+      hasFile: { _ in true }, due: { _ in true })
+    #expect(plan.ahead.map(\.id) == ["b0", "b1"])
+  }
+
+  @Test func unclaimedInboxFilesExpire() {
+    let inbox = URL(fileURLWithPath: "/tmp/inbox")
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let old = inbox.appendingPathComponent("old.transfer")
+    let fresh = inbox.appendingPathComponent("fresh.transfer")
+    let orphan = inbox.appendingPathComponent("orphan.json")
+    let files = [
+      old, inbox.appendingPathComponent("old.json"), fresh,
+      inbox.appendingPathComponent("fresh.json"), orphan,
+    ]
+    let created: (URL) -> Date? = { file in
+      file.lastPathComponent.hasPrefix("fresh") ? now - 3600 : now - 3 * 86400
+    }
+    let gone = CompanionInbox.expired(files, now: now, created: created)
+    #expect(Set(gone) == [old, inbox.appendingPathComponent("old.json"), orphan])
+  }
+
   @Test func oldManifestsGoUnlessATransferStillNeedsThem() {
     let folder = URL(fileURLWithPath: "/tmp/watch")
     func manifest(_ revision: Int) -> URL {

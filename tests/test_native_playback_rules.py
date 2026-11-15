@@ -63,6 +63,18 @@ def test_watch_copies_fit_the_watch_budget():
     assert "receipt?.budgetBytes ?? Self.watchDefaultBudget" in phone
 
 
+def test_watch_audio_does_not_wait_for_the_manifest_round_trip():
+    """#219: the phone sent audio only after the Watch confirmed the current
+    manifest, a round trip that needed both apps running."""
+    phone = (APP / "WatchPhoneController.swift").read_text()
+    publish = phone.split("private func publishOnce(", 1)[1].split(
+        "private func deferPublish(", 1
+    )[0]
+    assert "receipt.manifestApplied else { return }" not in publish
+    assert "ahead: ahead, receipt: known, committed: committed" in publish
+    assert "context: isAhead ? nextContext : context" in publish
+
+
 def test_forgetting_changed_sources_removes_them_before_any_suspension():
     """#76 (Codex round 1): releasing one source suspends the repository
     actor; a song leased meanwhile must not be released by the same pass."""

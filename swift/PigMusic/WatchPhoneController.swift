@@ -53,6 +53,17 @@ import SwiftUI
   /// The context last handed to WatchConnectivity, which keeps delivering it.
   @ObservationIgnored private var contextSent: CompanionContext?
   @ObservationIgnored private let deferredPublish = DeferredRun()
+  /// The Watch's last confirmation, kept through new library versions of the
+  /// same account: audio no longer waits for the current version's (#219).
+  @ObservationIgnored private var lastReceipt: CompanionReceipt?
+  /// Songs ("id:checksum") of the last manifest the Watch confirmed applying:
+  /// it files their audio on arrival. Any other song waits there for its
+  /// manifest, so fewer of those are sent at a time.
+  @ObservationIgnored private var committed: Set<String> = []
+  private func forgetConfirmations() {
+    lastReceipt = nil
+    committed = []
+  }
   /// When each song passed each step on its way to the Watch (#219).
   @ObservationIgnored private(set) var deliveryLog = WatchDeliveryLog()
   @ObservationIgnored private var deliveryLogURL: URL?
@@ -94,6 +105,7 @@ import SwiftUI
             sent.reset()
             published = nil
             receipt = nil
+            forgetConfirmations()
             advance(account: namespace)
             await publish(force: true)
           } else if let manifest = published,
@@ -107,12 +119,19 @@ import SwiftUI
               )
             }
             receipt = confirmed
-            confirmedAt = Date()
-            noteDelivery { log in
-              for id in confirmed.ready.keys {
-                log.arrived(id, at: confirmed.arrivals?[id] ?? Date())
+            // Until the Watch applies this manifest, its positions count the
+            // songs of the one before: only an applied receipt says which
+            // songs are there.
+            if confirmed.manifestApplied {
+              lastReceipt = confirmed
+              committed = Set(manifest.songs.map(WatchDelivery.identity))
+              noteDelivery { log in
+                for id in confirmed.ready.keys {
+                  log.arrived(id, at: confirmed.arrivals?[id] ?? Date())
+                }
               }
             }
+            confirmedAt = Date()
             saveReceipt()
             downloads?.budgetBytes = confirmed.budgetBytes
             await publish()
@@ -144,6 +163,7 @@ import SwiftUI
     verified = false
     published = nil
     receipt = nil
+    forgetConfirmations()
     // AAC copies download through a background session, so preparing music for
     // the Watch continues while the phone is locked.
     let identifier = BackgroundTransferHub.watchIdentifierPrefix + namespace
@@ -191,6 +211,10 @@ import SwiftUI
         saved.receipt.context == context
       {
         receipt = saved.receipt
+        if saved.receipt.manifestApplied {
+          lastReceipt = saved.receipt
+          committed = Set(old.songs.map(WatchDelivery.identity))
+        }
         confirmedAt = saved.at
         downloads?.budgetBytes = saved.receipt.budgetBytes
       }
@@ -235,6 +259,7 @@ import SwiftUI
     if context.account != namespace || context.revision < peerRevision {
       link?.cancelTransfers()
       sent.reset()
+      forgetConfirmations()
       advance(account: namespace)
       try? link?.publish(context)
     }
@@ -466,6 +491,7 @@ import SwiftUI
     verified = false
     namespace = nil
     receipt = nil
+    forgetConfirmations()
     confirmedAt = nil
     published = nil
     subscriptions = [:]
@@ -542,8 +568,12 @@ import SwiftUI
     // While a batch is still preparing, the Watch gets a new library version
     // at most every 45 seconds instead of one per finished song: each version
     // must be acknowledged before more audio is sent. Removals go at once.
+    // Songs ready meanwhile don't wait for it: their audio goes ahead (#219).
+    var ahead: [CompanionSong] = []
     if batchActive, growthOnly, !force, Date().timeIntervalSince(lastAdvance) < 45 {
       deferPublish(after: 45 - Date().timeIntervalSince(lastAdvance))
+      let listed = Set((published?.songs ?? []).map(WatchDelivery.identity))
+      ahead = songs.filter { !listed.contains(WatchDelivery.identity($0)) }
       songs = published?.songs ?? []
       collections = published?.collections ?? []
     }
@@ -569,6 +599,7 @@ import SwiftUI
       } else {
         link?.cancelTransfers()
         sent.reset()
+        forgetConfirmations()
       }
       advance(account: namespace)
       lastAdvance = Date()
@@ -623,21 +654,34 @@ import SwiftUI
         ?? [], current: manifestURL, revision: context.revision,
       retained: Set(outstanding.map(\.context.revision)))
     for file in stale { try? FileManager.default.removeItem(at: file) }
-    // Do not send audio until the Watch has applied this manifest and acknowledged its budget.
-    guard let receipt, receipt.context == context, receipt.manifestApplied else { return }
+    // Audio goes without waiting for the Watch to confirm this manifest
+    // (#219): it files what it can at once and keeps the rest until the
+    // manifest naming it arrives. The budget is the one it last reported; the
+    // Watch enforces its own on arrival.
+    var known =
+      lastReceipt
+      ?? CompanionReceipt(
+        context: context, ready: [:], usedBytes: 0, budgetBytes: Self.watchDefaultBudget,
+        manifestApplied: false)
+    known.budgetBytes = downloads.budgetBytes
     let audio = WatchDelivery.audio(
-      songs: songs, receipt: receipt,
+      songs: songs, ahead: ahead, receipt: known, committed: committed,
       inFlight: Set(outstanding.compactMap { $0.file.map { "\($0.songId):\($0.checksum)" } }),
       hasFile: { files[$0] != nil }, due: due)
     if audio.budgetFull {
       let full = "Watch storage budget is full. Remove Watch songs before adding more."
       if message != full { message = full }
     }
-    for song in audio.send {
+    // A song ahead of the published manifest names the next library version,
+    // which lists every ready song: the Watch holds it until that arrives.
+    let nextContext = CompanionContext(
+      revision: max(context.revision, peerRevision) + 1, account: namespace)
+    for (song, isAhead) in audio.send.map({ ($0, false) }) + audio.ahead.map({ ($0, true) }) {
       guard let file = files[song.id] else { continue }
       let identity = WatchDelivery.identity(song)
-      let ticket = CompanionFile(context: context, songId: song.id, checksum: song.checksum)
-      let envelope = CompanionEnvelope(kind: "audio", context: context, file: ticket)
+      let ticket = CompanionFile(
+        context: isAhead ? nextContext : context, songId: song.id, checksum: song.checksum)
+      let envelope = CompanionEnvelope(kind: "audio", context: ticket.context, file: ticket)
       if let data = try? JSONEncoder().encode(envelope) {
         link?.transfer(file, metadata: data)
         sent.mark("audio:" + identity)

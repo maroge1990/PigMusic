@@ -134,6 +134,19 @@ import WatchConnectivity
   }
   func recoverInbox() async {
     guard onFile != nil else { return }
+    // Audio no manifest claimed in two days goes (#219).
+    let entries =
+      (try? FileManager.default.contentsOfDirectory(
+        at: inbox, includingPropertiesForKeys: [.creationDateKey])) ?? []
+    let expired = CompanionInbox.expired(entries, now: Date()) {
+      try? $0.resourceValues(forKeys: [.creationDateKey]).creationDate
+    }
+    for file in expired where !delivering.contains(file.lastPathComponent) {
+      try? FileManager.default.removeItem(at: file)
+    }
+    if !expired.isEmpty {
+      DiagnosticsLog.shared.record("link", "\(expired.count) unclaimed inbox files removed")
+    }
     for envelope
       in (try? FileManager.default.contentsOfDirectory(at: inbox, includingPropertiesForKeys: nil))
       ?? [] where envelope.pathExtension == "json"
