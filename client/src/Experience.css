@@ -837,6 +837,10 @@
   .migration-footer {
     background: var(--raised);
   }
+  /* Without its blur the scrim must hide the page, not show it through (#187). */
+  .modal-backdrop {
+    background: color-mix(in srgb, var(--media-canvas) 94%, transparent);
+  }
 }
 @media (prefers-reduced-transparency: reduce) and (min-width: 601px) {
   .mini-player {

@@ -23,6 +23,8 @@ async function reduceTransparency(page: Page) {
 
 // Chromium prints color-mix() results as color(srgb r g b / alpha).
 const opaque = (color: string) => !/(,|\/)\s*0?\.\d+\)$/.test(color);
+const alpha = (color: string) =>
+  Number(/(?:,|\/)\s*([\d.]+)\)$/.exec(color)?.[1] ?? 1);
 
 async function playAndOpenMenu(page: Page) {
   await mockApi(page);
@@ -74,4 +76,38 @@ test("reduced transparency makes every frosted surface solid", async ({
     expect(backdrop).toBe("none");
     expect(opaque(background), background).toBe(true);
   }
+});
+
+test("reduced transparency makes the modal scrim near-opaque", async ({
+  page,
+}) => {
+  // #187: the scrim lost its blur but stayed ~73% black, so the page showed
+  // through unblurred.
+  const review = {
+    ...album,
+    tracks: [{ ...album.tracks[0], status: "review", selected: true }],
+  };
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/admin/migration": (route) =>
+        route.fulfill({
+          json: {
+            source_name: "Library.xml",
+            imported_at: "2026-10-21T00:00:00Z",
+            albums: [review],
+            stats: { tracks: 1, saved: 0, missing: 0, review: 1, selected: 1 },
+          },
+        }),
+    },
+  });
+  await reduceTransparency(page);
+  await page.goto("/#/admin/migration?imported=1");
+  await page.getByRole("button", { name: "Import now" }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Check these versions." }),
+  ).toBeVisible();
+  const { backdrop, background } = await style(page.locator(".modal-backdrop"));
+  expect(backdrop).toBe("none");
+  expect(alpha(background), background).toBeGreaterThanOrEqual(0.9);
 });
