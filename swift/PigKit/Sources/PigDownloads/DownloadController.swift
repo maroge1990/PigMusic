@@ -62,8 +62,10 @@ import PigDomain
     public func handOffToBackground(
       limit: Int = 64, isCancelled: @escaping @MainActor () -> Bool
     ) async -> BackgroundHandOff.Outcome? {
-      guard let background, background.ready, !userPaused, !preparationAllowed, worker == nil,
-        handOff == nil
+      guard let background else { return nil }
+      // A launch for a background refresh opened the session just now (#223).
+      await background.untilReady()
+      guard background.ready, !userPaused, !preparationAllowed, worker == nil, handOff == nil
       else { return nil }
       let stamp = generation
       let source = source
@@ -103,7 +105,8 @@ import PigDomain
   @ObservationIgnored private var ahead: Task<Void, Never>?
   @ObservationIgnored private var generation = 0
   @ObservationIgnored private var userPaused = false
-  @ObservationIgnored private var preparationAllowed = true
+  /// Whether the foreground worker may prepare copies; a new controller may.
+  @ObservationIgnored public private(set) var preparationAllowed = true
   public init(
     archive: DownloadArchive, source: any DeviceCopySource,
     onFailure: @escaping @MainActor (any Error) -> Void = { _ in }

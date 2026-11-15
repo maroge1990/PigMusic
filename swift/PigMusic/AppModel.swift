@@ -124,7 +124,8 @@ enum PlayOrigin: Hashable {
   }
 
   func restore() async {
-    guard !restoring, !busy, person == nil else { return }
+    // An account a background refresh restored still waits for its refresh.
+    guard !restoring, !busy, person == nil || refreshAfterRestore else { return }
     restoring = true
     busy = true
     defer {
@@ -138,25 +139,106 @@ enum PlayOrigin: Hashable {
         return
       }
     #endif
-    Task { await Self.parkedSessions.end() }
+    if person == nil {
+      Task { await Self.parkedSessions.end() }
+      switch await restoreAccount() {
+      case .attached: break
+      case .nothingSaved: return
+      case .noToken:
+        defaults.removeObject(forKey: "pig.connection")
+        return
+      case .failed(let error, _):
+        message = error.userMessage
+        return
+      }
+    }
+    refreshAfterRestore = false
+    // The saved library is on screen; the refresh fills it in behind.
+    launched = true
+    await refresh()
+    startLiveUpdates()
+  }
+  private enum RestoredAccount: Sendable {
+    /// Attached under this account generation.
+    case attached(generation: Int)
+    case nothingSaved
+    /// The saved account's token is gone.
+    case noToken(generation: Int)
+    /// `generation` is the one the restoration itself left.
+    case failed(any Error, generation: Int)
+  }
+  /// The launch's one restoration of the saved account, shared by the scene
+  /// and a background refresh, whichever asks first (#223). Only what the
+  /// phone saved: the library refresh and live updates are the scene's.
+  @ObservationIgnored private let restoration = SingleFlight<RestoredAccount>()
+  /// An account restored without the scene still waits for its first refresh.
+  @ObservationIgnored private var refreshAfterRestore = false
+  private func restoreAccount() async -> RestoredAccount {
+    await restoration.run { [weak self] in
+      await self?.attachSavedAccount() ?? .nothingSaved
+    }
+  }
+  private func attachSavedAccount() async -> RestoredAccount {
     guard let data = defaults.data(forKey: "pig.connection"),
       let connection = try? JSONDecoder().decode(Connection.self, from: data)
-    else { return }
+    else { return .nothingSaved }
+    var stamp = account.generation
     server = connection.server
     do {
       let vault = TokenVault(account: connection.server)
-      guard try await vault.read() != nil else {
-        defaults.removeObject(forKey: "pig.connection")
-        return
-      }
+      guard try await vault.read() != nil else { return .noToken(generation: stamp) }
+      try account.check(stamp)
       let service = try NativeService(
         server: connection.server, vault: vault, parked: Self.parkedSessions)
+      // attach() starts the account's generation before its first await.
+      stamp += 1
       try await attach(connection.person, service: service)
-      // The saved library is on screen; the refresh fills it in behind.
-      launched = true
-      await refresh()
-      startLiveUpdates()
-    } catch { message = error.userMessage }
+      try account.check(stamp)
+      refreshAfterRestore = true
+      return .attached(generation: stamp)
+    } catch { return .failed(error, generation: stamp) }
+  }
+  /// A background refresh for Watch copies (#223). iOS may launch the app for
+  /// it with no scene: the saved account is restored first, without a library
+  /// refresh or live updates, and the Watch's queued copies are checked
+  /// against the saved library and handed on. A restoration that cannot
+  /// finish now never signs out; another refresh is asked for instead.
+  func continueWatchInBackground() async {
+    #if DEBUG
+      if ProcessInfo.processInfo.arguments.contains("--demo") { return }
+    #endif
+    guard let watch else { return }
+    // A launch for the refresh alone has never been active: nothing may run
+    // as the foreground, which resumes it all at the first activation.
+    if foreground.suspended { watch.leaveForeground() }
+    let attached = person != nil && !restoration.isRunning ? account.generation : nil
+    var reason = ""
+    let result = await BackgroundRefresh.run(
+      attached: attached, fence: account,
+      inForeground: { !foreground.suspended },
+      restore: {
+        // A sign-in under way is not a saved account to restore.
+        guard restoration.isRunning || !busy else {
+          reason = "a sign-in is under way"
+          return .unavailable(generation: account.generation)
+        }
+        switch await restoreAccount() {
+        case .attached(let generation): return .attached(generation: generation)
+        case .nothingSaved: return .signedOut
+        case .noToken(let generation):
+          reason = "no device token"
+          return .unavailable(generation: generation)
+        case .failed(let error, let generation):
+          reason = error.localizedDescription
+          return .unavailable(generation: generation)
+        }
+      },
+      handOff: { await watch.continueInBackground() },
+      reschedule: { watch.scheduleRefresh() })
+    if result == .rescheduled {
+      DiagnosticsLog.shared.record(
+        "watch", "background refresh: account not restored (\(reason)), another refresh asked for")
+    }
   }
   func sceneActive(_ active: Bool, background: Bool = false) async {
     let change = foreground.change(active: active, background: background)
@@ -392,6 +474,9 @@ enum PlayOrigin: Hashable {
     try downloads?.enableBackground(
       identifier: backgroundIdentifier,
       directory: directory.appendingPathComponent("BackgroundTransfers"))
+    // Restored for a background refresh (#223): downloads are prepared only
+    // in the foreground (D-51), which resumes them at its first activation.
+    if foreground.suspended { await downloads?.suspendPreparation() }
     await downloads?.reload()
     try await watch?.configure(directory: directory, namespace: artworkNamespace)
     var restoredQueue = try? await database.cached("playback", as: PlaybackCheckpoint.self)

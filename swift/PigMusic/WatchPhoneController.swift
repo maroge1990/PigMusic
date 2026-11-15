@@ -183,6 +183,9 @@ import UIKit
     try downloads?.enableBackground(
       identifier: identifier,
       directory: directory.appendingPathComponent("WatchBackgroundTransfers"))
+    // Restored for a background refresh (#223): the new controller must not
+    // start preparing once its session is ready (D-51).
+    if !foreground { await downloads?.suspendPreparation() }
     // A copy finished in the background goes on to the Watch straight away.
     downloads?.onChange = { [weak self] in await self?.publish() }
     await downloads?.reload()
@@ -227,7 +230,7 @@ import UIKit
   /// link's state changes and every library sync publish on their own (#178).
   private func startPolling() {
     account.cancel("poll")
-    guard namespace != nil else { return }
+    guard foreground, namespace != nil else { return }
     let stamp = account.generation
     account.own("poll", Task { [weak self] in
       while !Task.isCancelled {
@@ -524,7 +527,7 @@ import UIKit
     UIApplication.shared.endBackgroundTask(handOffTask)
     handOffTask = .invalid
   }
-  private func scheduleRefresh() {
+  func scheduleRefresh() {
     let request = BGAppRefreshTaskRequest(identifier: Self.refreshIdentifier)
     request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
     do { try BGTaskScheduler.shared.submit(request) } catch {
@@ -532,13 +535,35 @@ import UIKit
         "watch", "background refresh not scheduled: \(error.localizedDescription)")
     }
   }
+  /// A launch for a background refresh alone, with no scene (#223): nothing
+  /// runs as the foreground until the scene's first activation resumes it.
+  func leaveForeground() {
+    foreground = false
+    noteDelivery { $0.phone(foreground: false) }
+    account.cancel("poll")
+  }
   /// A background refresh: hand over what the server has prepared since, and
-  /// schedule another while songs still wait. Only while this run of the app
-  /// left the foreground signed in; a launch for the refresh alone waits for
-  /// the foreground.
+  /// schedule another while songs still wait. A launch for the refresh alone
+  /// first checks the queued copies against the saved library, as the
+  /// foreground's refresh would; nothing is fetched (#223).
   func continueInBackground() async {
-    guard !foreground, verified, let downloads else { return }
+    guard !foreground, let downloads else { return }
+    let stamp = account.generation
     DiagnosticsLog.shared.record("watch", "background refresh")
+    if !verified {
+      do { try await reconcile() } catch {
+        guard account.isCurrent(stamp), !foreground else { return }
+        DiagnosticsLog.shared.record(
+          "watch",
+          "background refresh could not read the saved library: \(error.localizedDescription)")
+        scheduleRefresh()
+        return
+      }
+      guard account.isCurrent(stamp), !foreground, verified else { return }
+    }
+    // The hand-off runs only while the foreground worker is stopped.
+    if downloads.preparationAllowed { await downloads.suspendPreparation() }
+    guard account.isCurrent(stamp), !foreground else { return }
     await downloads.reload()
     await handOff()
   }

@@ -81,6 +81,8 @@
     private var suspending: Set<String> = []
     private var session: URLSession!
     private(set) var ready = false
+    /// Reattaches the session's transfers; `ready` once it finishes.
+    private var setup: Task<Void, Never>?
     var budgetBytes: Int64 = 5 * 1024 * 1024 * 1024 { didSet { try? persistOptions() } }
     var allowsCellular = false { didSet { try? persistOptions() } }
     var userPaused = false { didSet { try? persistOptions() } }
@@ -114,7 +116,7 @@
       configuration.httpMaximumConnectionsPerHost = 2
       configuration.timeoutIntervalForResource = 7 * 86400
       session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
-      Task {
+      setup = Task {
         let existing = await session.allTasks
         for task in existing {
           if let id = task.taskDescription, let job = jobs[id],
@@ -133,6 +135,9 @@
         await onUpdate?(nil, nil, nil)
       }
     }
+    /// Returns once the session's transfers are reattached: a launch for a
+    /// background refresh opens the session just before it hands copies on.
+    func untilReady() async { await setup?.value }
     private func persistOptions() throws {
       try JSONEncoder().encode([
         "budget": budgetBytes, "cellular": allowsCellular ? 1 : 0, "paused": PersistedPause.saved(userPaused),
