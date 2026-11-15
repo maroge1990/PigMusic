@@ -188,6 +188,17 @@ extension FoundResults {
     }
   }
 
+  /// The server's library or request queue changed (#211). Its ranked
+  /// answers carry each song's server state, so every cached one is dropped
+  /// and, with `reask`, the search on screen asks the server again; Apple's
+  /// and MusicBrainz's answers stay, and the results shown stay until the
+  /// new ones arrive.
+  public func serverChanged(reask: Bool = true, now: Date = Date()) async {
+    for key in answers.keys { answers[key]?.results = nil }
+    guard reask, source != nil, !query.isEmpty else { return }
+    await search(query, now: now)
+  }
+
   private nonisolated static func signedOut(_ error: any Error) -> Bool {
     error as? NativeFailure == .authentication
   }

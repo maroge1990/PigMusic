@@ -245,3 +245,47 @@ private struct FailingSource: FoundSearchSource {
   await search.search("Yellow")
   #expect(search.error != nil && !search.loading)
 }
+
+/// A server whose answer for a song changes, counting what it is asked.
+private actor ChangingSource: FoundSearchSource {
+  var state = "requested"
+  var counts = [0, 0, 0]
+  func set(_ value: String) { state = value }
+  func foundResults(query: String) async throws -> FoundResults {
+    counts[0] += 1
+    return decode(
+      #"{"top":[],"songs":[{"id":"yellow","title":"Yellow","artist":"Coldplay","server_state":"\#(state)"}],"albums":[],"artists":[],"playlists":[]}"#
+    )
+  }
+  func onlineResults(query: String) async throws -> OnlineResults {
+    counts[1] += 1
+    return decode(onlineJSON)
+  }
+  func catalogueArtists(query: String, offset: Int) async throws -> CatalogueArtistPage {
+    counts[2] += 1
+    return decode(#"{"artists":[],"total":0,"offset":0,"next_offset":null}"#)
+  }
+}
+
+/// #211: a finished request shows in search without waiting five minutes.
+@MainActor @Test func aServerChangeRefreshesTheCachedServerState() async {
+  let source = ChangingSource()
+  let search = FoundSearch(source: source)
+  await search.search("Yellow")
+  #expect(search.results?.songs.first?.serverState == "requested")
+  await source.set("in_library")
+  // Within the answer lifetime the cached answer is reused...
+  await search.search("Yellow")
+  #expect(search.results?.songs.first?.serverState == "requested")
+  // ...until the server announces a change: the search on screen asks again.
+  await search.serverChanged()
+  #expect(search.results?.songs.first?.serverState == "in_library")
+  // Only the server's ranked lane: Apple and MusicBrainz aren't asked again.
+  #expect(await source.counts == [2, 1, 1])
+  // Another cached query is asked again when next shown.
+  await search.search("Other")
+  await source.set("requested")
+  await search.serverChanged()
+  await search.search("Yellow")
+  #expect(search.results?.songs.first?.serverState == "requested")
+}

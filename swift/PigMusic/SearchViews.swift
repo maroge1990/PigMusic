@@ -52,6 +52,7 @@ struct SearchView: View {
   }
   private func search(force: Bool) async {
     await model.foundSearch?.search(query, force: force)
+    model.noteSearchStates()
   }
   private func focusIfAsked() {
     guard focusRequest != handledFocus else { return }

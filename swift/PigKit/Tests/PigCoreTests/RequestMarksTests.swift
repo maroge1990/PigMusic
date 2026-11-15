@@ -37,4 +37,32 @@ struct RequestMarksTests {
     marks.sent(["never-asked"])
     #expect(!marks.contains("never-asked"))
   }
+
+  /// #211: a request the server finished must not keep its song Requested.
+  @Test func aCompletedRequestClearsItsMark() {
+    var marks = RequestMarks()
+    for id in ["done", "failed", "busy", "library"] { marks.queued(id) }
+    marks.sent(["done", "failed", "busy"])
+    func song(_ id: String, _ state: String, library: String? = nil) -> Track {
+      var track = Track(id: id, title: id, artist: "A")
+      track.serverState = state
+      track.libraryTrackId = library
+      return track
+    }
+    // A fresh server answer: finished (under its library id too), failed,
+    // still being got.
+    marks.observed([
+      song("done", "in_library", library: "lib-done"), song("failed", "failed"),
+      song("busy", "requested"),
+    ])
+    #expect(!marks.contains("done") && !marks.contains("failed"))
+    #expect(marks.contains("busy"))
+    // A song now in this phone's copy of the library, under any id.
+    marks.queued("lib-x")
+    marks.observed([song("x", "in_library", library: "lib-x")])
+    #expect(!marks.contains("lib-x"))
+    marks.settled(["library"])
+    #expect(!marks.contains("library"))
+    #expect(marks.all == ["busy"])
+  }
 }

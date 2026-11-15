@@ -5,9 +5,23 @@ import SwiftUI
 
 struct SongActionsView: View {
   let model: AppModel
-  let track: Track
+  /// The song as the sheet opened with it; `song` is it now (#211).
+  let opened: Track
   @Environment(\.dismiss) private var dismiss
   @State private var addedToLibrary = false
+  /// This phone's copy of the library holds it, read again on each sync.
+  @State private var held = false
+  init(model: AppModel, track: Track) {
+    self.model = model
+    opened = track
+  }
+  /// Follows search's newest answer and the library while the sheet is open,
+  /// so a request that finishes offers downloads without reopening it.
+  private var track: Track {
+    var live = model.liveState(opened)
+    if held { live.serverState = "in_library" }
+    return live
+  }
   private var favourite: Bool? { model.favourites[track.id] }
   @State private var loading = false
   @State private var message: StatusMessage?
@@ -42,7 +56,9 @@ struct SongActionsView: View {
             Button("Add to my library", systemImage: "plus") {
               Task { await add() }
             }.disabled(loading || !model.canMutate)
-          } else if track.serverState == "requested" || model.isRequested(track.id) {
+          } else if track.serverState != "in_library",
+            track.serverState == "requested" || model.isRequested(track.id)
+          {
             // #206: the same mark as an album page's requested songs.
             Label("Requested", systemImage: "clock").foregroundStyle(.secondary)
           } else if track.serverState == "not_in_library" {
@@ -93,6 +109,7 @@ struct SongActionsView: View {
         .undoBar(model.undo)
         .toolbar { Button("Done") { dismiss() }.disabled(loading) }
         .task { await loadFavourite() }
+        .task(id: model.libraryRevision) { held = await model.inLibrary(opened.actionTrack.id) }
     }.interactiveDismissDisabled(model.mutationActive)
   }
   private func loadFavourite() async {

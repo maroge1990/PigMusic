@@ -4,7 +4,8 @@
 /// cancelled, finished requests cleared): then the sent marks go, so a song
 /// never stays Requested after its request is gone (Codex round 1). Asking
 /// again for a song still requested is harmless: the server answers that it
-/// is already asked for.
+/// is already asked for. A song the server shows in the library, or this
+/// phone's library holds, is no longer marked (#211).
 public struct RequestMarks: Sendable, Equatable {
   /// In the request outbox, not yet confirmed by the server.
   public private(set) var waiting: Set<String> = []
@@ -22,4 +23,20 @@ public struct RequestMarks: Sendable, Equatable {
   }
   /// A request was cancelled or cleared: forget every sent mark.
   public mutating func requestsChanged() { sent = [] }
+  /// Every marked song.
+  public var all: Set<String> { waiting.union(sent) }
+  /// These songs are in the person's library now (#211): a request that
+  /// finished must not leave them Requested.
+  public mutating func settled(_ ids: some Sequence<String>) {
+    waiting.subtract(ids)
+    sent.subtract(ids)
+  }
+  /// A fresh server answer about these songs (#211): one the server says is
+  /// in the library, or whose request failed, is no longer marked, under
+  /// its own id or its library id.
+  public mutating func observed(_ tracks: some Sequence<Track>) {
+    for track in tracks where ["in_library", "failed"].contains(track.serverState) {
+      settled([track.id] + (track.libraryTrackId.map { [$0] } ?? []))
+    }
+  }
 }

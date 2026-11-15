@@ -203,9 +203,12 @@ enum PlayOrigin: Hashable {
               libraryEvent = event.data
               await refresh()
             }
-            // A request moved on the server: open request lists reload.
+            // A request moved on the server: open request lists reload, and
+            // search's cached server states are dropped (#211). A finished
+            // request also changes the library revision, which asks again.
             if event.name == "queue" {
               requestsRevision += 1
+              await foundSearch?.serverChanged(reask: false)
               await refreshServerRequests()
             }
           }
@@ -515,7 +518,10 @@ enum PlayOrigin: Hashable {
       // change. Reconnecting the live updates syncs often with none. Covers
       // reload only when the sync changed one.
       let libraryChanged = (try? await store?.revision()) != before
-      if libraryChanged { homeLibraryChanged() }
+      if libraryChanged {
+        homeLibraryChanged()
+        await serverStatesChanged(generation: stamp)
+      }
       if reloadGate.afterSync(libraryChanged: libraryChanged) {
         try await loadCache(
           artworkChanged: (try? await store?.artworkRevision()) != artworkBefore)
@@ -934,6 +940,39 @@ enum PlayOrigin: Hashable {
   static func undoKey(cancelRequest id: String) -> String { "request-cancel:" + id }
   func isRequested(_ id: String) -> Bool {
     requestedSongs.contains(id) || undo.hides(Self.undoKey(request: id))
+  }
+  /// The library changed (#211): a requested song this phone's library now
+  /// holds is no longer marked, and search asks the server again for the
+  /// states it shows (without holding up the refresh).
+  private func serverStatesChanged(generation stamp: Int) async {
+    let marked = requestedSongs.all
+    if let store, !marked.isEmpty, let held = try? await store.sourceRevisions(ids: marked),
+      account.isCurrent(stamp)
+    {
+      requestedSongs.settled(held.keys)
+    }
+    guard account.isCurrent(stamp), let foundSearch else { return }
+    Task { [weak self] in
+      await foundSearch.serverChanged()
+      guard let self, account.isCurrent(stamp) else { return }
+      noteSearchStates()
+    }
+  }
+  /// Search's newest answer: songs it shows finished are no longer marked.
+  func noteSearchStates() {
+    requestedSongs.observed(foundSearch?.results?.songs ?? [])
+  }
+  /// A song as search's newest answer has it (#211), so an open song sheet
+  /// follows a request that finishes; the song itself when search hasn't it.
+  func liveState(_ track: Track) -> Track {
+    foundSearch?.results?.songs.first {
+      $0.id == track.id || $0.libraryTrackId == track.id
+    }?.actionTrack ?? track
+  }
+  /// Whether this phone's copy of the person's library holds the song.
+  func inLibrary(_ id: String) async -> Bool {
+    guard let store else { return false }
+    return (try? await store.sourceRevisions(ids: [id]))?.keys.contains(id) ?? false
   }
   /// Asks the server for `track` at once, with Undo (D-79): when the Undo
   /// runs out the request joins the outbox, which sends it now or, offline,
