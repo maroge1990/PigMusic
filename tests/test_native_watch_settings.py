@@ -62,3 +62,18 @@ def test_the_watch_shows_the_iphone_song_instead_of_a_phone_remote():
     assert '"Now playing on iPhone, ' in row and 'systemImage: "iphone"' in row
     assert "PhoneNowPlaying.decode(data)" in model
     assert "sendNowPlaying(" in (PHONE / "AppModel.swift").read_text()
+
+
+def test_a_reinstalled_watch_gets_the_phone_song_again():
+    """Codex on #220: the phone sent its song once and kept the key, so a
+    Watch reinstalled mid-song never showed the iPhone row until the song
+    changed. Every (re)activation or install change resends the latest."""
+    controller = (PHONE / "WatchPhoneController.swift").read_text()
+    activated = controller[controller.index("link?.onActivated = {") :]
+    activated = activated[: activated.index("link?.onMessage")]
+    assert "resendNowPlaying()" in activated
+    resend = controller[controller.index("private func resendNowPlaying()") :]
+    resend = resend[: resend.index("\n  }\n")]
+    assert "nowPlayingSent = nil" in resend
+    send = controller[controller.index("func sendNowPlaying(") :]
+    assert send.index("nowPlayingLatest =") < send.index("guard link?.available")

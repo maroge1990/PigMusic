@@ -88,6 +88,8 @@ import UIKit
         sent.forgetManifests()
         contextSent = nil
         await publish()
+        // A reinstalled Watch lost the phone's song: send it again (Codex on #220).
+        resendNowPlaying()
       }
       link?.onMessage = { [weak self] data in
         if let diagnostics = CompanionDiagnostics.decode(data), diagnostics.text != nil {
@@ -839,10 +841,21 @@ import UIKit
   @ObservationIgnored private var nowPlayingSent: String?
   @ObservationIgnored private var nowPlayingPending: String?
   @ObservationIgnored private var nowPlayingSend: Task<Void, Never>?
+  /// The phone's latest state, sent again when the Watch reconnects or is
+  /// reinstalled, which loses what it had.
+  @ObservationIgnored private var nowPlayingLatest: (track: Track?, playing: Bool, cover: UIImage?)?
+  private func resendNowPlaying() {
+    guard let latest = nowPlayingLatest else { return }
+    nowPlayingSent = nil
+    nowPlayingSend?.cancel()
+    nowPlayingPending = nil
+    sendNowPlaying(latest.track, playing: latest.playing, cover: latest.cover)
+  }
   /// Tells the Watch what plays here, for its home (D-104): only when the
   /// song, play/pause or the cover's presence changes, a second after the
   /// last change, so progress ticks and start-up flicker send nothing.
   func sendNowPlaying(_ track: Track?, playing: Bool, cover: UIImage?) {
+    nowPlayingLatest = (track, playing, cover)
     let key = track.map { "\($0.id)|\(playing)|\(cover != nil)" } ?? "stopped"
     guard link?.available == true else { return }
     // Already waiting to go: the debounce is not restarted by every tick.
