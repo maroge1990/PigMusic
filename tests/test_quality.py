@@ -670,16 +670,15 @@ def test_a_song_no_source_can_find_fails_within_the_job_ceiling(tmp_path, monkey
 
     import server.downloader as downloader
 
-    real = time.monotonic
-    began = real()
-    # A minute passes in 0.06 s.
+    # The downloader's clock moves only when a stuck source polls, a second
+    # each time: from accelerated real time (a minute in 0.06 s) a stalled
+    # runner skewed the test (#189).
+    now = [0.0]
     monkeypatch.setattr(
         downloader,
         "time",
         types.SimpleNamespace(
-            monotonic=lambda: began + (real() - began) * 1000,
-            time=time.time,
-            sleep=time.sleep,
+            monotonic=lambda: now[0], time=time.time, sleep=time.sleep
         ),
     )
     store = Store(tmp_path)
@@ -700,8 +699,8 @@ def test_a_song_no_source_can_find_fails_within_the_job_ceiling(tmp_path, monkey
         def attempt(self, job, profile, errors):
             levels.append(profile)
             while True:  # Every source hangs until the budget ends it.
+                now[0] += 1
                 self.check(job["id"])
-                time.sleep(0.002)
 
     worker = Stuck(store)
     started = downloader.time.monotonic()
