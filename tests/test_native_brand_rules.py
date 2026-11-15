@@ -118,8 +118,16 @@ def test_compared_figures_use_rounded_tabular_numerals():
         "func pigFigures() -> some View { fontDesign(.rounded).monospacedDigit() }"
         in brand
     )
-    assert 'downloaded"\n        ).pigFigures()' in source("DownloadsView.swift")
-    assert source("WatchDownloadsView.swift").count(".pigFigures()") == 2
+    # #209: the Downloads hub's song counts, and the album and playlist rows'
+    # counts and sizes on the iPhone and Watch pages (one shared section).
+    downloads = source("DownloadsView.swift")
+    assert (
+        "Text(detail).font(PigType.footnote).foregroundStyle(.secondary).pigFigures()"
+        in (downloads)
+    )
+    assert "subtitle: group.caption, subtitleFigures: true" in downloads
+    assert "if subtitleFigures { line.pigFigures() }" in source("Components.swift")
+    assert "DeviceGroupsSection(" in source("WatchDownloadsView.swift")
     assert ".font(.caption).pigFigures()" in source("LibraryViews.swift")
     watch = (ROOT / "swift/PigMusicWatch/PigMusicWatchApp.swift").read_text()
     assert watch.count(".pigFigures()") == 4

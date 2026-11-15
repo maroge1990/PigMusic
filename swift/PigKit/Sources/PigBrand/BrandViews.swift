@@ -121,15 +121,15 @@ public struct PigBrandSplash: View {
 }
 
 /// A quiet moment (brand 1.8 section 14, D-82): the product's mark, unchanged,
-/// with a short title, one friendly line and at most one action. Only for an
+/// with a short title, at most one friendly line and at most one action. Only for an
 /// empty screen, an error or offline; never on a screen with content and never
 /// beside a destructive action. The mark is decoration, hidden from VoiceOver.
 public struct PigQuietState<Action: View>: View {
   private let title: String
-  private let line: String
+  private let line: String?
   private let action: Action
   @ScaledMetric(relativeTo: .title) private var markSize: CGFloat = 72
-  public init(_ title: String, line: String, @ViewBuilder action: () -> Action) {
+  public init(_ title: String, line: String?, @ViewBuilder action: () -> Action) {
     self.title = title
     self.line = line
     self.action = action()
@@ -140,7 +140,7 @@ public struct PigQuietState<Action: View>: View {
         .frame(width: markSize, height: markSize)
         .accessibilityHidden(true)
       Text(title).font(PigType.headline.weight(.semibold))
-      Text(line).font(PigType.subhead).foregroundStyle(.secondary)
+      if let line { Text(line).font(PigType.subhead).foregroundStyle(.secondary) }
       action.padding(.top, 4)
     }
     .multilineTextAlignment(.center)
@@ -152,6 +152,10 @@ public struct PigQuietState<Action: View>: View {
 extension PigQuietState where Action == EmptyView {
   public init(_ title: String, line: String) {
     self.init(title, line: line) { EmptyView() }
+  }
+  /// The title alone, where a line would only explain (D-101).
+  public init(_ title: String) {
+    self.init(title, line: nil) { EmptyView() }
   }
 }
 

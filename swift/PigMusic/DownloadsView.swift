@@ -33,7 +33,9 @@ private struct DownloadList: View {
     let groups = DeviceGroup.build(downloads.records.filter { $0.state == "ready" })
     List {
       if downloads.records.isEmpty {
-        Text("No downloads yet").foregroundStyle(.secondary)
+        PigQuietState(
+          "No downloads yet"
+        ).listRowBackground(Color.clear)
       }
       if !transfers.isEmpty {
         Section("Transfers") {
@@ -120,7 +122,7 @@ struct DeviceGroupsSection: View {
                 }
             }
           } label: {
-            CollectionRow(group.title, subtitle: group.caption) {
+            CollectionRow(group.title, subtitle: group.caption, subtitleFigures: true) {
               ArtworkThumb(model: model, source: group.artwork, title: group.title)
             }
           }

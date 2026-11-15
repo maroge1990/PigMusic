@@ -694,17 +694,21 @@ struct CollectionRow<Thumb: View, Trailing: View>: View {
   let title: String
   var subtitle: String?
   var subtitleLines = 2
+  /// The subtitle holds compared figures (counts, sizes): D-84 numerals.
+  var subtitleFigures = false
   var thumb: Thumb
   var trailing: Trailing
   @Environment(\.colorScheme) private var scheme
   init(
     _ title: String, subtitle: String? = nil, subtitleLines: Int = 2,
+    subtitleFigures: Bool = false,
     @ViewBuilder thumb: () -> Thumb,
     @ViewBuilder trailing: () -> Trailing = { EmptyView() }
   ) {
     self.title = title
     self.subtitle = subtitle
     self.subtitleLines = subtitleLines
+    self.subtitleFigures = subtitleFigures
     self.thumb = thumb()
     self.trailing = trailing()
   }
@@ -714,8 +718,9 @@ struct CollectionRow<Thumb: View, Trailing: View>: View {
       VStack(alignment: .leading, spacing: 2) {
         Text(title).foregroundStyle(PigBrand.text(scheme)).lineLimit(2)
         if let subtitle, !subtitle.isEmpty {
-          Text(subtitle).font(PigType.footnote).foregroundStyle(.secondary)
+          let line = Text(subtitle).font(PigType.footnote).foregroundStyle(.secondary)
             .lineLimit(subtitleLines)
+          if subtitleFigures { line.pigFigures() } else { line }
         }
       }
       Spacer(minLength: 0)
