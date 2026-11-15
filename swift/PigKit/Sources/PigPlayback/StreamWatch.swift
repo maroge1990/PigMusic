@@ -68,10 +68,20 @@ public struct StreamWatch: Sendable {
 /// would otherwise wait for ever (Codex, #115). A new song, a pause or a stop
 /// cancels it; so does the first progress past where it is measured from.
 @MainActor public final class StreamRecoveryDeadline {
+  /// How the deadline waits: `Task.sleep` in the apps; tests pass a clock
+  /// they advance themselves, so no assertion depends on scheduler latency.
+  public typealias Sleep = @Sendable (Duration) async throws -> Void
   private let limit: Duration
+  private let sleep: Sleep
   private var task: Task<Void, Never>?
   private var expired: (@MainActor () -> Void)?
-  public init(limit: Duration = StreamWatch.stallLimit) { self.limit = limit }
+  public init(
+    limit: Duration = StreamWatch.stallLimit,
+    sleep: @escaping Sleep = { try await Task.sleep(for: $0) }
+  ) {
+    self.limit = limit
+    self.sleep = sleep
+  }
   /// A recovery is running, or held by an audio interruption.
   public var isActive: Bool { expired != nil }
   /// Held by an audio interruption: no time runs until `resume()`.
@@ -90,8 +100,9 @@ public struct StreamWatch: Sendable {
   private func arm() {
     task?.cancel()
     let limit = limit
+    let sleep = sleep
     task = Task { [weak self] in
-      do { try await Task.sleep(for: limit) } catch { return }
+      do { try await sleep(limit) } catch { return }
       guard !Task.isCancelled, let self, let expired = self.expired else { return }
       self.task = nil
       self.expired = nil

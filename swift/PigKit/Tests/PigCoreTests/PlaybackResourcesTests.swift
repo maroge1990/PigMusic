@@ -251,15 +251,24 @@ struct StreamWatchTests {
     #expect(watch.observe(position: 0, at: at(35)) == .renew)
   }
 
+  // #222: these drive the deadline with a TestClock. With wall-clock sleeps
+  // (a 100 ms limit, a 400 ms wait) a loaded runner sometimes fired the
+  // deadline late, or reached a check before the deadline had started.
+
   /// Codex round 1: a renewal waits on the new item's seek with the progress
   /// ticks stopped; a seek that never completes must still end in a failure.
   @MainActor @Test func aRecoveryWhoseSeekNeverCompletesFailsInTime() async throws {
-    let deadline = StreamRecoveryDeadline(limit: .milliseconds(100))
+    let clock = TestClock()
+    let deadline = StreamRecoveryDeadline(limit: .milliseconds(100), sleep: clock.sleep)
     var failed = false
     let seek = Seek()
     deadline.start { failed = true }
     let recovery = Task { await seek.wait() }  // The new item's seek: never completes.
-    try await Task.sleep(for: .milliseconds(400))
+    #expect(await clock.sleeping())
+    clock.advance(by: .milliseconds(99))
+    #expect(!failed && deadline.isActive && clock.pending == 1)
+    clock.advance(by: .milliseconds(1))
+    #expect(await waitForOnMain { failed })
     #expect(failed && !deadline.isActive)
     seek.finish()
     await recovery.value
@@ -267,23 +276,29 @@ struct StreamWatchTests {
 
   /// Skipping, pausing or the first progress during the recovery: no failure.
   @MainActor @Test func aRecoveryCancelledInTimeNeverFails() async throws {
-    let deadline = StreamRecoveryDeadline(limit: .milliseconds(100))
+    let clock = TestClock()
+    let deadline = StreamRecoveryDeadline(limit: .milliseconds(100), sleep: clock.sleep)
     var failed = false
+    var ended = false
     deadline.start { failed = true }
     deadline.cancel()
     // Starting again (a second renewal) replaces the first deadline.
     deadline.start { failed = true }
-    deadline.start {}
-    try await Task.sleep(for: .milliseconds(400))
-    #expect(!failed && !deadline.isActive)
+    deadline.start { ended = true }
+    #expect(await clock.sleeping())
+    clock.advance(by: .milliseconds(400))
+    #expect(await waitForOnMain { ended })
+    #expect(!failed && !deadline.isActive && clock.pending == 0)
   }
 
   /// #116: renewed at 2:00, the person seeks back to 0:00; the stream then
   /// plays normally from there and must never fail for being below 2:00.
   @MainActor @Test func aBackwardSeekDuringRecoveryRecoversFromTheSeek() async throws {
-    let deadline = StreamRecoveryDeadline(limit: .milliseconds(150))
+    let clock = TestClock()
+    let deadline = StreamRecoveryDeadline(limit: .milliseconds(150), sleep: clock.sleep)
     var failed = false
     deadline.start(from: 120) { failed = true }
+    #expect(await clock.sleeping())
     deadline.progressed(elapsed: 120, playing: false)  // Still preparing.
     deadline.seeked(to: 0)
     #expect(deadline.baseline == 0 && deadline.isActive)
@@ -292,8 +307,8 @@ struct StreamWatchTests {
     #expect(deadline.isActive)
     // Normal playback from 0:00, still far below 2:00.
     deadline.progressed(elapsed: 0.25, playing: true)
-    #expect(!deadline.isActive)
-    try await Task.sleep(for: .milliseconds(400))
+    #expect(!deadline.isActive && clock.pending == 0)
+    clock.advance(by: .milliseconds(400))
     #expect(!failed)
 
     // A forward seek moves the baseline the same way; a seek with no
@@ -311,36 +326,44 @@ struct StreamWatchTests {
   /// #117: an interruption (a call, Siri) that ends just before the deadline
   /// must not let the old timer fail the stream at once on resume.
   @MainActor @Test func anInterruptionEndingBeforeTheDeadlineGetsAFreshOne() async throws {
-    let deadline = StreamRecoveryDeadline(limit: .milliseconds(300))
+    let clock = TestClock()
+    let deadline = StreamRecoveryDeadline(limit: .milliseconds(300), sleep: clock.sleep)
     var failed = false
     deadline.start(from: 60) { failed = true }
-    try await Task.sleep(for: .milliseconds(200))
+    #expect(await clock.sleeping())
+    clock.advance(by: .milliseconds(200))
     deadline.suspend()
-    #expect(deadline.isActive && deadline.isSuspended)
-    try await Task.sleep(for: .milliseconds(50))
+    #expect(deadline.isActive && deadline.isSuspended && clock.pending == 0)
+    clock.advance(by: .milliseconds(50))
     deadline.resume()  // 250 ms in: the old deadline had 50 ms left.
-    try await Task.sleep(for: .milliseconds(150))
+    #expect(await clock.sleeping())
+    clock.advance(by: .milliseconds(150))
     #expect(!failed && deadline.isActive)  // Past the old 300 ms.
     // The stream then plays on: recovered, never failed.
     deadline.progressed(elapsed: 60.5, playing: true)
-    try await Task.sleep(for: .milliseconds(400))
-    #expect(!failed && !deadline.isActive)
+    clock.advance(by: .milliseconds(400))
+    #expect(!failed && !deadline.isActive && clock.pending == 0)
   }
 
   /// #117: an interruption outlasting the deadline neither fails the stream
   /// meanwhile nor drops the deadline: resumed, the recovery is still bounded.
   @MainActor @Test func anInterruptionOutlastingTheDeadlineKeepsTheRecoveryBounded() async throws {
-    let deadline = StreamRecoveryDeadline(limit: .milliseconds(100))
+    let clock = TestClock()
+    let deadline = StreamRecoveryDeadline(limit: .milliseconds(100), sleep: clock.sleep)
     var failed = false
     deadline.start(from: 60) { failed = true }
     deadline.suspend()
-    try await Task.sleep(for: .milliseconds(300))
-    #expect(!failed && deadline.isActive)
+    clock.advance(by: .milliseconds(300))
+    #expect(!failed && deadline.isActive && clock.pending == 0)
     // Resume without a running recovery does nothing; this one has one.
     deadline.resume()
     #expect(!deadline.isSuspended)
     // The preparation or seek never completes: it still fails, in time.
-    try await Task.sleep(for: .milliseconds(400))
+    #expect(await clock.sleeping())
+    clock.advance(by: .milliseconds(99))
+    #expect(!failed && deadline.isActive)
+    clock.advance(by: .milliseconds(1))
+    #expect(await waitForOnMain { failed })
     #expect(failed && !deadline.isActive)
     // After a cancel (pause, new song) there is nothing to resume.
     failed = false

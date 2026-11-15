@@ -64,8 +64,9 @@ struct DiagnosticsLogTests {
     defer { try? FileManager.default.removeItem(at: root) }
     let log = DiagnosticsLog(directory: root)
     log.record("test", "soon")
-    try await Task.sleep(for: .seconds(1))
-    #expect(DiagnosticsLog(directory: root).text().contains("soon"))
+    // The write lands about half a second later; poll for it rather than
+    // sleep a fixed second a loaded runner could overrun (#222).
+    #expect(await waitFor { DiagnosticsLog(directory: root).text().contains("soon") })
     log.record("test", "suspended")
     log.background()
     _ = log.text()

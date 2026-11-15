@@ -16,7 +16,9 @@ import Testing
   var runs = 0
   deferred.schedule(after: .milliseconds(20), isCurrent: { current }) { runs += 1 }
   current = false  // The account changes while it waits.
-  try await Task.sleep(for: .milliseconds(120))
+  // Wait for the run to clear itself; a fixed 120 ms sleep was a wall-clock
+  // margin a loaded runner could miss (#222).
+  try await settle { !deferred.isPending }
   #expect(runs == 0)
   #expect(!deferred.isPending)
   current = true
