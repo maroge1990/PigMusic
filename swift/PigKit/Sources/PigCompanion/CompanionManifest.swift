@@ -90,15 +90,19 @@ public struct CompanionReceipt: Codable, Sendable {
   public var usedBytes: Int64
   public var budgetBytes: Int64
   public var manifestApplied: Bool
+  /// When the Watch stored recently arrived songs, by song id (#219). Nil
+  /// from Watch builds before 29, which don't say.
+  public var arrivals: [String: Date]?
   public init(
     context: CompanionContext, ready: [String: String], usedBytes: Int64, budgetBytes: Int64,
-    manifestApplied: Bool = true
+    manifestApplied: Bool = true, arrivals: [String: Date]? = nil
   ) {
     self.context = context
     self.ready = ready
     self.usedBytes = usedBytes
     self.budgetBytes = budgetBytes
     self.manifestApplied = manifestApplied
+    self.arrivals = arrivals
   }
 }
 public enum CompanionFailure: Error, LocalizedError {
@@ -120,7 +124,12 @@ public struct CompanionAcknowledgement: Codable, Sendable {
   public var usedBytes: Int64
   public var budgetBytes: Int64
   public var manifestApplied: Bool
-  public init(receipt: CompanionReceipt, manifest: CompanionManifest) {
+  /// Arrival times (seconds since 1970) of songs stored in the last two days,
+  /// by position, newest 400 at most (#219). An older phone ignores them.
+  public var arrivals: [Int: Int64]?
+  public static let arrivalWindow: TimeInterval = 2 * 86400
+  public static let arrivalLimit = 400
+  public init(receipt: CompanionReceipt, manifest: CompanionManifest, now: Date = Date()) {
     context = receipt.context
     positions = manifest.songs.indices.filter {
       receipt.ready[manifest.songs[$0].id] == manifest.songs[$0].checksum
@@ -128,6 +137,17 @@ public struct CompanionAcknowledgement: Codable, Sendable {
     usedBytes = receipt.usedBytes
     budgetBytes = receipt.budgetBytes
     manifestApplied = receipt.manifestApplied
+    if let times = receipt.arrivals {
+      let recent = positions.compactMap { position -> (Int, Date)? in
+        guard let time = times[manifest.songs[position].id],
+          now.timeIntervalSince(time) <= Self.arrivalWindow
+        else { return nil }
+        return (position, time)
+      }
+      .sorted { $0.1 > $1.1 }.prefix(Self.arrivalLimit)
+      arrivals = Dictionary(
+        uniqueKeysWithValues: recent.map { ($0.0, Int64($0.1.timeIntervalSince1970)) })
+    }
   }
   public func receipt(for manifest: CompanionManifest) throws -> CompanionReceipt {
     guard context == manifest.context, positions.count <= manifest.songs.count,
@@ -137,8 +157,18 @@ public struct CompanionAcknowledgement: Codable, Sendable {
     else { throw CompanionFailure.invalid }
     let ready = Dictionary(
       uniqueKeysWithValues: positions.map { (manifest.songs[$0].id, manifest.songs[$0].checksum) })
+    // Arrival times only for songs this receipt confirms; anything else is dropped.
+    let confirmed = Set(positions)
+    let times = arrivals.map { arrivals in
+      Dictionary(
+        uniqueKeysWithValues: arrivals.filter { confirmed.contains($0.key) }.prefix(
+          Self.arrivalLimit
+        ).map {
+          (manifest.songs[$0.key].id, Date(timeIntervalSince1970: TimeInterval($0.value)))
+        })
+    }
     return CompanionReceipt(
       context: context, ready: ready, usedBytes: usedBytes, budgetBytes: budgetBytes,
-      manifestApplied: manifestApplied)
+      manifestApplied: manifestApplied, arrivals: times)
   }
 }

@@ -53,6 +53,9 @@ import SwiftUI
   /// The context last handed to WatchConnectivity, which keeps delivering it.
   @ObservationIgnored private var contextSent: CompanionContext?
   @ObservationIgnored private let deferredPublish = DeferredRun()
+  /// When each song passed each step on its way to the Watch (#219).
+  @ObservationIgnored private(set) var deliveryLog = WatchDeliveryLog()
+  @ObservationIgnored private var deliveryLogURL: URL?
   init(model: AppModel, defaults: UserDefaults) {
     self.model = model
     self.defaults = defaults
@@ -105,6 +108,11 @@ import SwiftUI
             }
             receipt = confirmed
             confirmedAt = Date()
+            noteDelivery { log in
+              for id in confirmed.ready.keys {
+                log.arrived(id, at: confirmed.arrivals?[id] ?? Date())
+              }
+            }
             saveReceipt()
             downloads?.budgetBytes = confirmed.budgetBytes
             await publish()
@@ -165,6 +173,11 @@ import SwiftUI
       .flatMap { try? JSONDecoder().decode([String: Set<String>].self, from: $0) } ?? [:]
     manifestURL = directory.appendingPathComponent("watch-manifest.json")
     receiptURL = directory.appendingPathComponent("watch-receipt.json")
+    deliveryLogURL = directory.appendingPathComponent("watch-delivery.json")
+    deliveryLog =
+      deliveryLogURL.flatMap { try? Data(contentsOf: $0) }
+      .flatMap { try? JSONDecoder().decode(WatchDeliveryLog.self, from: $0) } ?? WatchDeliveryLog()
+    noteDelivery { $0.phone(foreground: foreground) }
     let previousManifest = directory.appendingPathComponent(
       "watch-manifest-\(context.revision).json")
     if context.account == namespace,
@@ -205,6 +218,7 @@ import SwiftUI
   }
   func resume() {
     foreground = true
+    noteDelivery { $0.phone(foreground: true) }
     link?.refreshState()
     // Watch AAC preparation restarts only after the library was reconciled.
     if verified { downloads?.resumePreparation() }
@@ -284,7 +298,9 @@ import SwiftUI
         message = "Add these songs to your library before downloading them to Watch."
         return message.map(StatusMessage.error)
       }
+      let known = Set(downloads.records.map(\.id))
       try await downloads.enqueue(personal, quality: "aac", origin: origin)
+      noteDelivery { $0.sent(personal.map(\.id).filter { !known.contains($0) }) }
       var result =
         "Sending \(personal.count) song\(personal.count == 1 ? "" : "s") to Apple Watch. Follow progress in Downloads › Apple Watch."
       if personal.count < Set(tracks.map(\.id)).count {
@@ -416,8 +432,9 @@ import SwiftUI
       isCurrent: { [weak self] in self?.removals == started },
       release: { ids, origin in await downloads.release(ids: ids, origin: origin) },
       lookup: { try? await store.track(id: $0) },
-      enqueue: { tracks, origin in
+      enqueue: { [weak self] tracks, origin in
         try? await downloads.enqueue(tracks, quality: "aac", origin: origin)
+        self?.noteDelivery { $0.sent(tracks.map(\.id)) }
       })
     guard finished else { return }
     if plan.subscriptions != subscriptions {
@@ -433,11 +450,15 @@ import SwiftUI
   /// leave the system's background downloads and Watch transfers running.
   func suspend() async {
     foreground = false
+    noteDelivery { $0.phone(foreground: false) }
     account.cancel("poll")
     await downloads?.suspendPreparation()
   }
   func disconnect() {
     account.end()
+    deliveryLog = WatchDeliveryLog()
+    if let deliveryLogURL { try? FileManager.default.removeItem(at: deliveryLogURL) }
+    deliveryLogURL = nil
     deferredPublish.cancel()
     if let downloads { Task { await downloads.clear() } }
     downloads = nil
@@ -476,6 +497,10 @@ import SwiftUI
     var songs: [CompanionSong] = []
     var files: [String: URL] = [:]
     let ready = downloads.records.filter { $0.state == "ready" && $0.checksum != nil }
+    noteDelivery { log in
+      log.retain(Set(downloads.records.map(\.id)))
+      for record in ready { log.ready(record.id) }
+    }
     let key = ready.map { "\($0.id):\($0.checksum ?? ""):\($0.track.sourceRevision ?? "")" }
     let archiveRevision = await downloads.archive.revision
     if !force, let cache = readyCache, cache.key == key, cache.archive == archiveRevision {
@@ -616,8 +641,18 @@ import SwiftUI
       if let data = try? JSONEncoder().encode(envelope) {
         link?.transfer(file, metadata: data)
         sent.mark("audio:" + identity)
+        noteDelivery { $0.handed(song.id) }
       }
     }
+  }
+  /// Changes the delivery log, saving it when something changed.
+  private func noteDelivery(_ change: (inout WatchDeliveryLog) -> Void) {
+    var next = deliveryLog
+    change(&next)
+    guard next != deliveryLog else { return }
+    deliveryLog = next
+    guard let deliveryLogURL, let data = try? JSONEncoder().encode(next) else { return }
+    try? data.write(to: deliveryLogURL, options: .atomic)
   }
   /// Publishes again once the batch interval has passed.
   private func deferPublish(after seconds: TimeInterval) {

@@ -310,6 +310,9 @@ struct DiagnosticsView: View {
       "", "== iPhone log ==", DiagnosticsLog.shared.text(),
     ]
     if let pending = model.refreshFailurePending { parts.append("[sync] \(pending)") }
+    if let watch = model.watch, watch.supported {
+      parts += ["", "== Watch delivery ==", watch.deliveryLog.summary()]
+    }
     if let watch = model.watch?.watchDiagnostics {
       parts += [
         "", "== Watch log (\(watch.version ?? "unknown"), sent \(watch.sentAt.formatted(.iso8601))) ==",

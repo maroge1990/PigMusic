@@ -21,13 +21,21 @@ public enum CompanionArrival: Equatable, Sendable {
 /// account revokes the library at once.
 public actor CompanionArchive {
   private let directory: URL
+  private let now: @Sendable () -> Date
   private var manifest: CompanionManifest
   private var context: CompanionContext
   private var appliedRevision: Int64?
   private var removed: Set<String>
+  /// When each stored file arrived, by checksum, for the phone's delivery
+  /// times (#219).
+  private var arrivals: [String: Date]
   public private(set) var budgetBytes: Int64
-  public init(directory: URL, budgetBytes: Int64 = 1024 * 1024 * 1024) throws {
+  public init(
+    directory: URL, budgetBytes: Int64 = 1024 * 1024 * 1024,
+    now: @escaping @Sendable () -> Date = { Date() }
+  ) throws {
     self.directory = directory
+    self.now = now
     self.budgetBytes = budgetBytes
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let decoder = JSONDecoder()
@@ -38,6 +46,10 @@ public actor CompanionArchive {
       (try? decoder.decode(
         Set<String>.self, from: Data(contentsOf: directory.appendingPathComponent("removed.json"))))
       ?? []
+    arrivals =
+      (try? decoder.decode(
+        [String: Date].self,
+        from: Data(contentsOf: directory.appendingPathComponent("arrivals.json")))) ?? [:]
     self.budgetBytes =
       (try? decoder.decode(
         Int64.self, from: Data(contentsOf: directory.appendingPathComponent("budget.json"))))
@@ -186,7 +198,12 @@ public actor CompanionArchive {
     directory.appendingPathComponent(checksum + ".m4a")
   }
   private func clean() throws {
-    let keep = Set(manifest.songs.filter { !removed.contains($0.id) }.map { $0.checksum + ".m4a" })
+    let kept = Set(manifest.songs.filter { !removed.contains($0.id) }.map(\.checksum))
+    if arrivals.keys.contains(where: { !kept.contains($0) }) {
+      arrivals = arrivals.filter { kept.contains($0.key) }
+      saveArrivals()
+    }
+    let keep = Set(kept.map { $0 + ".m4a" })
     for file in try FileManager.default.contentsOfDirectory(
       at: directory, includingPropertiesForKeys: nil)
     where file.pathExtension == "m4a" && !keep.contains(file.lastPathComponent) {
@@ -210,6 +227,7 @@ public actor CompanionArchive {
   public func receipt() -> CompanionReceipt {
     var ready: [String: String] = [:]
     var sizes: [String: Int64] = [:]
+    var times: [String: Date] = [:]
     if let account = context.account, manifest.context.account == account,
       appliedRevision == manifest.context.revision
     {
@@ -220,12 +238,13 @@ public actor CompanionArchive {
       {
         ready[song.id] = song.checksum
         sizes[song.checksum] = song.bytes
+        if let time = arrivals[song.checksum] { times[song.id] = time }
       }
     }
     return CompanionReceipt(
       context: context, ready: ready, usedBytes: sizes.values.reduce(0, +),
       budgetBytes: budgetBytes,
-      manifestApplied: appliedRevision == context.revision
+      manifestApplied: appliedRevision == context.revision, arrivals: times
     )
   }
   /// The phone announces a new revision before the songs already on their way
@@ -290,5 +309,11 @@ public actor CompanionArchive {
     } else {
       try FileManager.default.moveItem(at: temporary, to: url(ticket.checksum))
     }
+    arrivals[ticket.checksum] = now()
+    saveArrivals()
+  }
+  private func saveArrivals() {
+    try? JSONEncoder().encode(arrivals).write(
+      to: directory.appendingPathComponent("arrivals.json"), options: .atomic)
   }
 }
