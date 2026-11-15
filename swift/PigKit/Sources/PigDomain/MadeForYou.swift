@@ -155,20 +155,43 @@ public enum RewindLink: Sendable, Hashable {
   case catalogueArtist(String)
 }
 
-/// A Rewind cover address, as an artwork the app can load.
+/// A Rewind cover address, as an artwork the app can load (#216). The server
+/// sends a stored cover (`/api/v1/covers/<sha>.jpg`, or its pre-/api/v1
+/// form), a catalogue release cover, or a library album's or artist's own
+/// artwork address, which the app resolves through its library.
 public enum RewindCover: Sendable, Hashable {
   case stored(String)
   case release(String)
+  case libraryAlbum(String)
+  case libraryArtist(String)
   public init?(_ url: String?) {
     guard let url else { return nil }
-    let path = url.split(separator: "?", maxSplits: 1).first.map(String.init) ?? url
-    let release = "/api/v1/catalogue/artwork/release/"
-    let stored = "/api/v1/covers/"
-    if path.hasPrefix(release), path.count > release.count {
-      self = .release(String(path.dropFirst(release.count)))
-    } else if path.hasPrefix(stored), path.count > stored.count {
-      let name = String(path.dropFirst(stored.count))
-      self = .stored(name.hasSuffix(".jpg") ? String(name.dropLast(4)) : name)
+    let path = String(url.prefix { $0 != "?" && $0 != "#" })
+    func rest(_ prefix: String) -> String? {
+      guard path.hasPrefix(prefix) else { return nil }
+      let value = String(path.dropFirst(prefix.count))
+      return value.isEmpty || value.contains("/") ? nil : value.removingPercentEncoding
+    }
+    if let id = rest("/api/v1/catalogue/artwork/release/")
+      ?? rest("/api/catalogue/artwork/release/")
+    {
+      self = .release(id)
+    } else if let name = rest("/api/v1/covers/") ?? rest("/api/artwork/") {
+      // Only a content hash names stored bytes; other cached names don't.
+      guard name.hasSuffix(".jpg") else { return nil }
+      let sha = String(name.dropLast(4))
+      guard sha.count == 64, sha.allSatisfy({ $0.isHexDigit && !$0.isUppercase }) else {
+        return nil
+      }
+      self = .stored(sha)
+    } else if let id = rest("/api/v1/library-artwork/albums/")
+      ?? rest("/api/library-artwork/albums/")
+    {
+      self = .libraryAlbum(id)
+    } else if let id = rest("/api/v1/library-artwork/artists/")
+      ?? rest("/api/library-artwork/artists/")
+    {
+      self = .libraryArtist(id)
     } else {
       return nil
     }

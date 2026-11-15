@@ -138,8 +138,7 @@ struct MadeForYouTests {
     #expect(RewindCover(artist.coverUrl) == .release("rel-1"))
     let album = try #require(rewind.topAlbums.first)
     #expect(album.link == .libraryAlbum(id: "alb-1", release: "rel-1"))
-    #expect(RewindCover(album.coverUrl) == .stored("abc"))
-    #expect(RewindCover("/api/v1/library-artwork/albums/x") == nil && RewindCover(nil) == nil)
+    #expect(RewindCover(album.coverUrl) == nil)  // not a content hash
     #expect(rewind.topMixes.map(\.coverKind) == ["radio", "daily", "daily"])
     #expect(rewind.topMixes.first?.edition == "e1")
   }
@@ -156,5 +155,24 @@ struct MadeForYouTests {
     #expect(rewind.days.isEmpty)
     #expect(rewind.topArtists.first?.link == nil && rewind.topArtists.first?.new == false)
     #expect(rewind.topAlbums.first?.link == nil)
+  }
+
+  @Test func everyCoverAddressRewindSendsBecomesArtwork() {
+    let sha = String(repeating: "ab", count: 32)
+    #expect(RewindCover("/api/v1/covers/\(sha).jpg") == .stored(sha))
+    #expect(RewindCover("/api/v1/covers/\(sha).jpg?v=3") == .stored(sha))
+    #expect(RewindCover("/api/artwork/\(sha).jpg") == .stored(sha))
+    #expect(RewindCover("/api/v1/catalogue/artwork/release/rel-1") == .release("rel-1"))
+    #expect(RewindCover("/api/catalogue/artwork/release/rel-1") == .release("rel-1"))
+    // Library albums and artists without a stored cover: their own address.
+    #expect(
+      RewindCover("/api/v1/library-artwork/albums/requested-7") == .libraryAlbum("requested-7"))
+    #expect(RewindCover("/api/library-artwork/albums/a1?v=2") == .libraryAlbum("a1"))
+    #expect(RewindCover("/api/v1/library-artwork/artists/x1") == .libraryArtist("x1"))
+    // Cached names that aren't content hashes, and anything else: none.
+    #expect(RewindCover("/api/v1/covers/catalogue-cover-abc.jpg") == nil)
+    #expect(RewindCover("/api/v1/covers/\(sha.uppercased()).jpg") == nil)
+    #expect(RewindCover("/api/v1/library-artwork/tracks/t1") == nil)
+    #expect(RewindCover("https://example.com/a.jpg") == nil && RewindCover(nil) == nil)
   }
 }

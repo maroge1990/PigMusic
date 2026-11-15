@@ -485,8 +485,41 @@ enum RewindFigures {
     switch RewindCover(url) {
     case .stored(let sha): return .stored(sha)
     case .release(let id): return .release(id)
-    case nil: return nil
+    case .libraryAlbum, .libraryArtist, nil: return nil
     }
+  }
+}
+
+/// What a Rewind row's cover can be found from: the server's address, and
+/// for an album its library album and catalogue release.
+struct RewindArt: Hashable {
+  var url: String?
+  var album: String?
+  var release: String?
+  /// A library artist, drawn with the library's artist image.
+  var artist: String?
+}
+
+extension AppModel {
+  /// A Rewind cover as the library draws it (#216): a stored or catalogue
+  /// cover as is; a library album's or artist's own address, or an album
+  /// with no usable address, through the library's own artwork for it.
+  func rewindArtwork(_ art: RewindArt) async -> ArtworkSource? {
+    if let direct = RewindFigures.source(art.url) { return direct }
+    var artistId = art.artist
+    if case .libraryArtist(let id) = RewindCover(art.url) { artistId = id }
+    var albumId = art.album
+    if case .libraryAlbum(let id) = RewindCover(art.url) { albumId = id }
+    if let albumId, let album = try? await store?.album(id: albumId),
+      let source = album.artworkSource
+    {
+      return source
+    }
+    if let release = art.release, UUID(uuidString: release) != nil { return .release(release) }
+    if let artistId, let artist = try? await store?.artist(id: artistId) {
+      return await artistCover(artist).map { .stored($0) }
+    }
+    return nil
   }
 }
 
@@ -683,7 +716,7 @@ struct RewindView: View {
     let sizes = RewindBar.heights(top.map(\.minutes))
     ForEach(Array(top.enumerated()), id: \.offset) { index, artist in
       let row = RewindRankRow(
-        model: model, rank: index + 1, source: RewindFigures.source(artist.coverUrl),
+        model: model, rank: index + 1, art: RewindArt(url: artist.coverUrl, artist: artist.libraryId),
         title: artist.name, subtitle: "\(artist.minutes.formatted()) min", size: sizes[index],
         circle: true, new: artist.new)
       linked(row, artist.link, title: artist.name)
@@ -694,7 +727,9 @@ struct RewindView: View {
     let sizes = RewindBar.heights(top.map(\.plays))
     ForEach(Array(top.enumerated()), id: \.offset) { index, album in
       let row = RewindRankRow(
-        model: model, rank: index + 1, source: RewindFigures.source(album.coverUrl),
+        model: model, rank: index + 1,
+        art: RewindArt(
+          url: album.coverUrl, album: album.libraryId, release: album.musicbrainzReleaseId),
         title: album.title, subtitle: album.artist + " · " + RewindFigures.plays(album.plays),
         size: sizes[index])
       linked(row, album.link, title: album.title)
@@ -747,7 +782,9 @@ struct RewindMixCovers: View {
 struct RewindRankRow: View {
   let model: AppModel
   let rank: Int
-  let source: AppModel.ArtworkSource?
+  var source: AppModel.ArtworkSource?
+  /// Resolved through the library when `source` is nil.
+  var art: RewindArt?
   let title: String
   let subtitle: String
   /// 0...1 against number 1.
@@ -756,6 +793,7 @@ struct RewindRankRow: View {
   var new = false
   /// A song that can no longer play: shown dimmed.
   var unavailable = false
+  @State private var resolved: AppModel.ArtworkSource?
   @ScaledMetric(relativeTo: .subheadline) private var rankWidth: CGFloat = 22
   @Environment(\.colorScheme) private var scheme
   var spoken: String {
@@ -767,7 +805,11 @@ struct RewindRankRow: View {
       Text("\(rank)").font(PigType.subhead.weight(.bold)).pigFigures()
         .foregroundStyle(rank <= 3 ? PigBrand.textAccent(scheme) : PigBrand.secondary(scheme))
         .frame(minWidth: rankWidth, alignment: .trailing)
-      ArtworkThumb(model: model, source: source, title: title, circle: circle)
+      ArtworkThumb(model: model, source: source ?? resolved, title: title, circle: circle)
+        .task(id: art) {
+          guard source == nil, let art else { return }
+          resolved = await model.rewindArtwork(art)
+        }
       VStack(alignment: .leading, spacing: 4) {
         HStack(spacing: 6) {
           Text(title).foregroundStyle(PigBrand.text(scheme)).lineLimit(1)
