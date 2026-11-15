@@ -38,7 +38,18 @@ def test_privacy_descriptions_survive_regeneration():
         assert found == [IPHONE_INFO[key]] * 2
         # One source only: the hand-written Info.plist does not repeat it.
         assert key.removeprefix("INFOPLIST_KEY_") not in info
-    assert info["UIBackgroundModes"] == ["audio"]
+    # Audio plays in the background; a background refresh carries on with
+    # Watch copies the server was still preparing (#219).
+    assert info["UIBackgroundModes"] == ["audio", "fetch"]
+    assert info["BGTaskSchedulerPermittedIdentifiers"] == [
+        "au.com.pig.music.watchprepare"
+    ]
+    phone = (ROOT / "swift/PigMusic/WatchPhoneController.swift").read_text()
+    assert 'static let refreshIdentifier = "au.com.pig.music.watchprepare"' in phone
+    suspend = phone.split("  func suspend() async {", 1)[1].split("\n  }\n", 1)[0]
+    assert suspend.rstrip().endswith("await handOff()")
+    app = (ROOT / "swift/PigMusic/PigMusicApp.swift").read_text()
+    assert ".backgroundTask(.appRefresh(WatchPhoneController.refreshIdentifier))" in app
 
 
 @pytest.mark.skipif(

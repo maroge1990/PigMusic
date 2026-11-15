@@ -1,3 +1,4 @@
+import BackgroundTasks
 import PigAPI
 import Foundation
 import Observation
@@ -6,6 +7,7 @@ import PigCompanion
 import PigDomain
 import PigDownloads
 import SwiftUI
+import UIKit
 
 @MainActor @Observable final class WatchPhoneController {
   /// The Watch's budget until it reports its own (CompanionArchive's default).
@@ -471,13 +473,74 @@ import SwiftUI
       saveExclusions()
     }
   }
-  /// The app left the foreground: stop polling and server-side preparation, but
-  /// leave the system's background downloads and Watch transfers running.
+  /// The app left the foreground: stop polling and the foreground worker, but
+  /// leave the system's background downloads and Watch transfers running, and
+  /// hand them every queued copy the server has ready (#219).
   func suspend() async {
     foreground = false
     noteDelivery { $0.phone(foreground: false) }
     account.cancel("poll")
     await downloads?.suspendPreparation()
+    await handOff()
+  }
+  /// The background refresh that carries on with Watch copies the server was
+  /// still preparing when the app left (#219). Registered in Info.plist.
+  static let refreshIdentifier = "au.com.pig.music.watchprepare"
+  @ObservationIgnored private var handOffTask = UIBackgroundTaskIdentifier.invalid
+  @ObservationIgnored private var handOffExpired = false
+  /// Hands queued Watch copies to the background session, within the time
+  /// iOS gives an app that just left, or a background refresh. Copies the
+  /// server is still preparing wait for a refresh the system schedules when
+  /// it suits the battery; the foreground resumes them as before.
+  private func handOff() async {
+    guard verified, !foreground, let downloads, handOffTask == .invalid else { return }
+    let stamp = account.generation
+    handOffExpired = false
+    handOffTask = UIApplication.shared.beginBackgroundTask(withName: "Send songs to Apple Watch") {
+      [weak self] in
+      MainActor.assumeIsolated { self?.endHandOff(expired: true) }
+    }
+    defer { endHandOff(expired: false) }
+    guard
+      let outcome = await downloads.handOffToBackground(isCancelled: { [weak self] in
+        guard let self else { return true }
+        return foreground || handOffExpired || !account.isCurrent(stamp)
+      })
+    else { return }
+    if !outcome.handed.isEmpty || !outcome.waiting.isEmpty {
+      DiagnosticsLog.shared.record(
+        "watch",
+        "background hand-off: \(outcome.handed.count) copies to the background session, \(outcome.waiting.count) waiting"
+          + (outcome.stopped ? " (stopped early)" : ""))
+    }
+    guard account.isCurrent(stamp) else { return }
+    if !outcome.waiting.isEmpty, !foreground { scheduleRefresh() }
+    // Copies already ready go on to the Watch now.
+    await publish()
+  }
+  private func endHandOff(expired: Bool) {
+    if expired { handOffExpired = true }
+    guard handOffTask != .invalid else { return }
+    UIApplication.shared.endBackgroundTask(handOffTask)
+    handOffTask = .invalid
+  }
+  private func scheduleRefresh() {
+    let request = BGAppRefreshTaskRequest(identifier: Self.refreshIdentifier)
+    request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
+    do { try BGTaskScheduler.shared.submit(request) } catch {
+      DiagnosticsLog.shared.record(
+        "watch", "background refresh not scheduled: \(error.localizedDescription)")
+    }
+  }
+  /// A background refresh: hand over what the server has prepared since, and
+  /// schedule another while songs still wait. Only while this run of the app
+  /// left the foreground signed in; a launch for the refresh alone waits for
+  /// the foreground.
+  func continueInBackground() async {
+    guard !foreground, verified, let downloads else { return }
+    DiagnosticsLog.shared.record("watch", "background refresh")
+    await downloads.reload()
+    await handOff()
   }
   func disconnect() {
     account.end()

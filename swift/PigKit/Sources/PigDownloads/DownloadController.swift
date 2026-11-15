@@ -52,6 +52,26 @@ import PigDomain
         progress[id] = total > 0 ? Double(bytes) / Double(total) : 0
       }
     }
+    /// Hands the queued copies to the background session in one pass once
+    /// the app has left the foreground (#219): copies the server has ready
+    /// download while the app is suspended, instead of waiting for the
+    /// foreground worker. Nil when there is nothing to do this way (no
+    /// background session, the person's Pause, or preparation running).
+    public func handOffToBackground(limit: Int = 64, isCancelled: () -> Bool) async
+      -> BackgroundHandOff.Outcome?
+    {
+      guard let background, background.ready, !userPaused, !preparationAllowed, worker == nil
+      else { return nil }
+      let records = await archive.snapshot()
+      let outcome = await BackgroundHandOff.run(
+        records, source: source, limit: min(limit, max(0, 128 - background.activeCount)),
+        isCancelled: { isCancelled() || preparationAllowed }
+      ) { record, copy, request in
+        try await background.enqueue(record: record, manifest: copy, request: request)
+      }
+      await reload()
+      return outcome
+    }
     public func setCellular(_ enabled: Bool) async {
       await interrupt()
       allowsCellular = enabled

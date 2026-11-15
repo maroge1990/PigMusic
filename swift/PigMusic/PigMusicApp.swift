@@ -31,6 +31,10 @@ import UIKit
           if value == .active { Task { await model.receiveShazamShares() } }
         }
     }
+    // Watch copies the server was still preparing when the app left (#219).
+    .backgroundTask(.appRefresh(WatchPhoneController.refreshIdentifier)) {
+      await model.watch?.continueInBackground()
+    }
   }
 }
 
