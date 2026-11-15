@@ -30,7 +30,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   take 1.5 s median (p90 3.1 s) on the path, not the server. Next: ask Mark whether HTTP/3 stays off, then suggest
   "Always use HTTPS".
 - **YouTube trial (#193, D-91):** ends ~21 Nov; then the numbers on #193 and #191, a hand sample, and Mark decides
-  keep or remove (next free decision number: D-102).
+  keep or remove (next free decision number: D-103).
 - **Retirement checks 28 Nov (#201)**, **#171** night-time `lifecycle_lock` holds, D-78 clean-up of old Unraid
   containers and `releases/native-20261114-v1`: unchanged from 14 Nov.
 - **Ways of working:** area batches (D-50), Codex rounds per D-59 and D-71, Claude pushes and releases (D-99); D-58
