@@ -132,6 +132,33 @@ def test_server_fetched_cover_is_addressable_by_hash(tmp_path):
     assert NativeSync(store).page(owner, "albums")["items"][0]["cover_sha"] is None
 
 
+def test_checking_for_new_portraits_reads_identities_at_once(tmp_path, monkeypatch):
+    """#145: after every warmer pass, each artist still waiting for a
+    portrait cost a document read of its own."""
+    from server.library_artwork import portraits_waiting
+    from server.store import Store
+
+    tracks = [
+        {
+            "id": str(i),
+            "title": f"Song {i}",
+            "artist": f"Artist {i}",
+            "album": f"Album {i}",
+            "relative_path": f"a{i}.mp3",
+        }
+        for i in range(10)
+    ]
+    (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": tracks}))
+    store = Store(tmp_path)
+    single = []
+    real_read = store.read_document
+    monkeypatch.setattr(
+        store, "read_document", lambda name: single.append(name) or real_read(name)
+    )
+    assert not portraits_waiting(store)
+    assert single == []
+
+
 def test_artist_portrait_reaches_native_once_fetched(tmp_path):
     from PIL import Image
     from server.library_artwork import portraits_waiting

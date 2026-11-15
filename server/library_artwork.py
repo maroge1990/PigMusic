@@ -150,11 +150,18 @@ def portraits_waiting(store):
 
     if not media_settings(store)["portraits"]:
         return False
-    for artist in list(store.library["artists"]):
-        if (artist.get("cover_url") or "").endswith("?portraits=1"):
-            known = store.read_document("library-artist:" + artist["id"])
-            if portrait_target(store, artist["name"], known.get("id")).is_file():
-                return True
+    waiting = [
+        artist
+        for artist in list(store.library["artists"])
+        if (artist.get("cover_url") or "").endswith("?portraits=1")
+    ]
+    # One read for every waiting artist's identity, after every warmer pass:
+    # it was a read per artist (#145).
+    saved = store.read_documents(["library-artist:" + a["id"] for a in waiting])
+    for artist in waiting:
+        known = saved.get("library-artist:" + artist["id"]) or {}
+        if portrait_target(store, artist["name"], known.get("id")).is_file():
+            return True
     return False
 
 
