@@ -155,4 +155,44 @@ private struct Offline: Error {}
     try await store.acknowledgeMutation(refused.id)
     #expect(try await store.pendingMutations().isEmpty && confirmations == [other.id])
   }
+
+  /// Codex round 1 on batch 13 (#212): a favourite the server refuses must
+  /// read as refused, not as saved on this phone, and must not count as the
+  /// song's favourite state afterwards.
+  @Test func aRefusedFavouriteReadsAsRefusedAndNeverAsTheState() async throws {
+    let (store, root) = try makeStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let refused = OfflineMutation(action: "favourite", track: song, favourite: true)
+    let other = Track(id: "other", title: "Other", artist: "Artist")
+    let saved = OfflineMutation(action: "favourite", track: other, favourite: true)
+    try await store.enqueueMutation(refused)
+    try await store.enqueueMutation(saved)
+    let server = Server()
+    server.answers = [refused.id: MutationRejection.rejected]
+    var applied = false
+    var confirmed: Set<String> = []
+    _ = try await EditOutbox.send(
+      store: store, isCurrent: { true }, applied: &applied, confirmed: { confirmed.insert($0) }
+    ) { try server.apply($0) }
+    let pending = try await store.pendingMutations()
+    #expect(
+      EditOutbox.outcome(of: refused.id, confirmed: confirmed.contains(refused.id), pending: pending)
+        == .refused)
+    #expect(
+      EditOutbox.outcome(of: saved.id, confirmed: confirmed.contains(saved.id), pending: pending)
+        == .confirmed)
+    #expect(EditOutbox.favourite(song.id, in: pending) == nil)
+    // Offline, an edit waits and its favourite is the state shown.
+    let waiting = OfflineMutation(action: "favourite", track: other, favourite: false)
+    try await store.enqueueMutation(waiting)
+    server.answers = [waiting.id: Offline()]
+    _ = try await EditOutbox.send(store: store, isCurrent: { true }, applied: &applied) {
+      try server.apply($0)
+    }
+    let later = try await store.pendingMutations()
+    #expect(EditOutbox.outcome(of: waiting.id, confirmed: false, pending: later) == .queued)
+    #expect(EditOutbox.favourite(other.id, in: later) == false)
+    // An edit the person discarded is refused too: nothing confirmed it.
+    #expect(EditOutbox.outcome(of: "gone", confirmed: false, pending: later) == .refused)
+  }
 }

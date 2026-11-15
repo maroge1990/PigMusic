@@ -852,11 +852,10 @@ enum PlayOrigin: Hashable {
     // Every answer belongs to this account: a sign-out while reading drops it (#101).
     let stamp = account.generation
     let store = self.store
-    if let pending = pendingEdits.last(where: {
-      $0.mutation.action == "favourite" && $0.mutation.track?.id == track.id
-    }) {
-      // The edit waiting on this phone is the newest state.
-      if let value = pending.mutation.favourite { favourites.change(track.id, value) }
+    if let value = EditOutbox.favourite(track.id, in: pendingEdits) {
+      // The edit waiting on this phone is the newest state; a refused one
+      // isn't (Codex on #212).
+      favourites.change(track.id, value)
       return
     }
     // A change made while this reads wins over what the read finds.
@@ -882,20 +881,36 @@ enum PlayOrigin: Hashable {
     let stamp = account.generation
     let store = self.store
     guard let tap = favourites.tap(track.id) else { return nil }
+    let mutation = OfflineMutation(action: "favourite", track: track, favourite: tap.value)
     do {
-      let confirmed = try await saveEdit(
-        OfflineMutation(action: "favourite", track: track, favourite: tap.value))
+      let outcome = try await saveEditOutcome(mutation)
       try account.check(stamp)
+      if outcome == .refused {
+        // The server refused it: the star goes back, and the refused edit
+        // leaves the outbox so later taps aren't held behind it (Codex).
+        try? await store?.acknowledgeMutation(mutation.id)
+        if account.isCurrent(stamp), let store {
+          pendingEdits = (try? await store.pendingMutations()) ?? pendingEdits
+        }
+        throw MutationRejection.rejected
+      }
+      let confirmed = outcome == .confirmed
       // A newer tap meanwhile is what the star shows and what is kept.
       try? await store?.cache(favourites[track.id] ?? tap.value, key: "favourite:" + track.id)
       confirmations += 1
       return (tap.value, confirmed)
     } catch {
+      // Refused, or never saved: the star goes back unless a newer tap came.
       favourites.refused(tap)
       throw error
     }
   }
   @discardableResult func saveEdit(_ mutation: OfflineMutation) async throws -> Bool {
+    try await saveEditOutcome(mutation) == .confirmed
+  }
+  /// Saves an edit and says whether the server confirmed it, it waits on
+  /// this phone, or it was refused (Codex on #212).
+  func saveEditOutcome(_ mutation: OfflineMutation) async throws -> EditOutbox.Outcome {
     guard let store, person != nil else { throw NativeFailure.authentication }
     let stamp = account.generation
     try await store.enqueueMutation(mutation)
@@ -908,7 +923,9 @@ enum PlayOrigin: Hashable {
     try account.check(stamp)
     // Only the server's receipt confirms it: an edit discarded meanwhile has
     // also left the outbox (Codex, batch 9).
-    return appliedEdits.remove(mutation.id) != nil
+    return EditOutbox.outcome(
+      of: mutation.id, confirmed: appliedEdits.remove(mutation.id) != nil,
+      pending: (try? await store.pendingMutations()) ?? pendingEdits)
   }
   /// Edits the server's receipts confirmed, until saveEdit reads them.
   @ObservationIgnored private var appliedEdits: Set<String> = []

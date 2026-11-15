@@ -18,6 +18,32 @@ import PigStore
     case signedOut
   }
 
+  /// What became of one edit after a send (Codex on #212).
+  public enum Outcome: Equatable, Sendable {
+    /// The server's receipt says it applied it.
+    case confirmed
+    /// Still waiting on this phone (offline, or behind another edit).
+    case queued
+    /// Rejected, in conflict, or discarded: it will not be applied as made.
+    case refused
+  }
+  public nonisolated static func outcome(
+    of id: String, confirmed: Bool, pending: [PendingMutation]
+  ) -> Outcome {
+    if confirmed { return .confirmed }
+    guard let item = pending.first(where: { $0.id == id }) else { return .refused }
+    return item.state == "queued" ? .queued : .refused
+  }
+  /// A song's favourite as the newest edit still waiting to be sent has it;
+  /// a refused one is not the song's state.
+  public nonisolated static func favourite(_ trackId: String, in pending: [PendingMutation])
+    -> Bool?
+  {
+    pending.last {
+      $0.state == "queued" && $0.mutation.action == "favourite" && $0.mutation.track?.id == trackId
+    }?.mutation.favourite
+  }
+
   /// What an edit changes, for keeping dependent edits in order.
   public nonisolated static func scope(_ mutation: OfflineMutation) -> String {
     if let playlist = mutation.playlistId { return "playlist:" + playlist }
