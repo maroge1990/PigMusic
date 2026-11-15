@@ -149,12 +149,28 @@ public struct CompanionAcknowledgement: Codable, Sendable {
         uniqueKeysWithValues: recent.map { ($0.0, Int64($0.1.timeIntervalSince1970)) })
     }
   }
-  public func receipt(for manifest: CompanionManifest) throws -> CompanionReceipt {
+  /// What this acknowledgement confirms against `manifest`, the phone's
+  /// latest. Until the Watch applies that manifest, its positions count the
+  /// songs of the one before, which the phone no longer holds (#221): they
+  /// confirm nothing here, and the songs ready stay those of `lastApplied`,
+  /// the last receipt whose manifest was applied, for the same account.
+  public func receipt(for manifest: CompanionManifest, lastApplied: CompanionReceipt? = nil)
+    throws -> CompanionReceipt
+  {
     guard context == manifest.context, positions.count <= manifest.songs.count,
       Set(positions).count == positions.count,
       positions.allSatisfy({ manifest.songs.indices.contains($0) }),
       usedBytes >= 0, budgetBytes >= 128 * 1024 * 1024, budgetBytes <= 8 * 1024 * 1024 * 1024
     else { throw CompanionFailure.invalid }
+    guard manifestApplied else {
+      let kept =
+        lastApplied.flatMap {
+          $0.manifestApplied && $0.context.account == context.account ? $0.ready : nil
+        } ?? [:]
+      return CompanionReceipt(
+        context: context, ready: kept, usedBytes: usedBytes, budgetBytes: budgetBytes,
+        manifestApplied: false)
+    }
     let ready = Dictionary(
       uniqueKeysWithValues: positions.map { (manifest.songs[$0].id, manifest.songs[$0].checksum) })
     // Arrival times only for songs this receipt confirms; anything else is dropped.

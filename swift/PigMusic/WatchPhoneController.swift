@@ -111,7 +111,7 @@ import UIKit
             advance(account: namespace)
             await publish(force: true)
           } else if let manifest = published,
-            let confirmed = try? acknowledgement.receipt(for: manifest),
+            let confirmed = try? acknowledgement.receipt(for: manifest, lastApplied: lastReceipt),
             confirmed.context == context
           {
             if receipt?.ready.count != confirmed.ready.count || receipt?.context != confirmed.context {
@@ -123,7 +123,7 @@ import UIKit
             receipt = confirmed
             // Until the Watch applies this manifest, its positions count the
             // songs of the one before: only an applied receipt says which
-            // songs are there.
+            // songs are there, and an unapplied one shows its songs (#221).
             if confirmed.manifestApplied {
               lastReceipt = confirmed
               committed = Set(manifest.songs.map(WatchDelivery.identity))
