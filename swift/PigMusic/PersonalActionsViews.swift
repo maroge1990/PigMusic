@@ -45,8 +45,8 @@ struct SongActionsView: View {
         Section {
           if let favourite {
             Button(
-              favourite ? "Remove from favourites" : "Add to favourites",
-              systemImage: favourite ? "star.slash" : "star"
+              FavouriteStates.action(favourite: favourite),
+              systemImage: FavouriteStates.symbol(favourite: favourite)
             ) {
               Task { await changeFavourite() }
             }
@@ -341,8 +341,8 @@ struct FavouriteStar: View {
   private var favourite: Bool { model.favourites[track.id] ?? false }
   var body: some View {
     RoundIcon(
-      label: favourite ? "Remove from favourites" : "Add to favourites",
-      systemImage: favourite ? "star.fill" : "star"
+      label: FavouriteStates.action(favourite: favourite),
+      systemImage: FavouriteStates.symbol(favourite: favourite)
     ) {
       Task { await toggle() }
     }

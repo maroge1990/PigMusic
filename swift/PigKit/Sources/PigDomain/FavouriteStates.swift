@@ -14,6 +14,13 @@ public struct FavouriteStates: Sendable {
   /// retried after each successful refresh (Codex on #212).
   private var waiting: [String: Track] = [:]
   public init() {}
+  /// The one star design (#227): filled for a favourite, outlined for not,
+  /// on the player's star and the song sheet's button alike.
+  public static func symbol(favourite: Bool) -> String { favourite ? "star.fill" : "star" }
+  /// What tapping the star does, for its label and VoiceOver.
+  public static func action(favourite: Bool) -> String {
+    favourite ? "Remove from favourites" : "Add to favourites"
+  }
   /// Unknown states to read again, in song id order.
   public var unresolved: [Track] { waiting.keys.sorted().compactMap { waiting[$0] } }
   /// A song's star is shown: while its state is unknown it waits for a read.

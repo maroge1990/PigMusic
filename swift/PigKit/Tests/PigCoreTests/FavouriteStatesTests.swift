@@ -149,3 +149,13 @@ private actor ReadLatch {
   #expect(answered.map(\.track.id) == ["a"])
   #expect(states["a"] == false && states["b"] == true)
 }
+
+/// #227: one star design. The song sheet showed a struck-through star
+/// (`star.slash`) on "Remove from favourites" while the player's star was
+/// filled: a favourite is a filled star everywhere, an outline otherwise.
+@Test func aFavouriteIsAFilledStarEverywhere() {
+  #expect(FavouriteStates.symbol(favourite: true) == "star.fill")
+  #expect(FavouriteStates.symbol(favourite: false) == "star")
+  #expect(FavouriteStates.action(favourite: true) == "Remove from favourites")
+  #expect(FavouriteStates.action(favourite: false) == "Add to favourites")
+}
