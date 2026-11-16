@@ -283,8 +283,9 @@ struct RequestsView: View {
         }
       }
     }
-    if let failure, !(failure is CancellationError) { error = failure.userMessage }
+    // Read the list first: reading it clears the page's message.
     await load(reset: true)
+    if let failure, !(failure is CancellationError) { error = failure.userMessage }
   }
   /// At once, with Undo (D-79): sent when the Undo runs out (#206).
   private func cancel(_ item: RequestGroupItem) {
