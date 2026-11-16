@@ -9,13 +9,17 @@ import UIKit
   @UIApplicationDelegateAdaptor(PigMusicAppDelegate.self) private var delegate
   @State private var model = AppModel()
   @State private var starting = true
+  /// The splash has begun to fade (#207); `starting` ends when it has gone.
+  @State private var leaving = false
   @Environment(\.scenePhase) private var phase
   var body: some Scene {
     WindowGroup {
       RootView(model: model)
         // The Undo bar's own window, above sheets (#210).
         .background { UndoOverlayInstaller(model: model).accessibilityHidden(true) }
-        .overlay { if starting { PigBrandSplash().transition(splashExit) } }
+        .overlay {
+          if starting { SplashCover(leaving: leaving) { starting = false }.ignoresSafeArea() }
+        }
         .task {
           await model.restore()
           finishStarting()
@@ -47,13 +51,49 @@ extension PigMusicApp {
       // UI tests measure the splash: --hold-splash keeps it on screen.
       if ProcessInfo.processInfo.arguments.contains("--hold-splash") { return }
     #endif
-    withAnimation(.easeInOut(duration: 0.9)) { starting = false }
+    leaving = true
   }
-  /// The pig grows a little as it fades slowly into the app (#207); a plain
-  /// fade with Reduce Motion. The 0.9 s ease comes from finishStarting().
-  fileprivate var splashExit: AnyTransition {
-    UIAccessibility.isReduceMotionEnabled
-      ? .opacity : .opacity.combined(with: .scale(scale: 1.05))
+}
+
+/// The launch splash and its exit (#207): the pig grows a little as it fades
+/// into the app over 0.9 s, a plain fade with Reduce Motion. The SwiftUI
+/// transition this replaces never ran: a simulator recording showed the pig
+/// gone in a single frame. A Core Animation fade runs on the render server,
+/// so it also keeps going while the app's first page is still being built.
+private struct SplashCover: UIViewControllerRepresentable {
+  let leaving: Bool
+  let gone: () -> Void
+  func makeUIViewController(context: Context) -> Controller { Controller() }
+  func updateUIViewController(_ controller: Controller, context: Context) {
+    if leaving { controller.leave(then: gone) }
+  }
+
+  final class Controller: UIViewController {
+    private let splash = UIHostingController(rootView: PigBrandSplash())
+    private var left = false
+    override func viewDidLoad() {
+      super.viewDidLoad()
+      view.backgroundColor = .clear
+      addChild(splash)
+      splash.view.backgroundColor = .clear
+      splash.view.frame = view.bounds
+      splash.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+      view.addSubview(splash.view)
+      splash.didMove(toParent: self)
+    }
+    func leave(then gone: @escaping () -> Void) {
+      guard !left else { return }
+      left = true
+      view.isUserInteractionEnabled = false
+      let grow = !UIAccessibility.isReduceMotionEnabled
+      UIView.animate(withDuration: 0.9, delay: 0, options: [.curveEaseInOut]) {
+        self.view.alpha = 0
+        // Scales the pig from the centre without touching the view's frame.
+        if grow { self.view.layer.sublayerTransform = CATransform3DMakeScale(1.05, 1.05, 1) }
+      } completion: { _ in
+        gone()
+      }
+    }
   }
 }
 
