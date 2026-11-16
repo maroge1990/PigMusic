@@ -191,24 +191,36 @@ public actor LibraryStore {
           return own
         }
       }
-      // Candidates: the same recording, and songs sharing every title word.
+      // Candidates: the same recording, and songs with every word of the
+      // edition-free title and of the lead artist, which every copy the
+      // server's matching could take has. Uniqueness and the server's order
+      // need all of them: a lookup that reaches its cap may have been cut
+      // short, and then nothing is taken.
+      let cap = 500
       var rows: [Data] = []
       if let recording = song.musicbrainzRecordingId, !recording.isEmpty {
-        rows += try Data.fetchAll(
+        let found = try Data.fetchAll(
           db,
           sql:
-            "SELECT payload FROM tracks WHERE json_extract(CAST(payload AS TEXT),'$.musicbrainz_recording_id')=? ORDER BY id LIMIT 50",
-          arguments: [recording])
+            "SELECT payload FROM tracks WHERE json_extract(CAST(payload AS TEXT),'$.musicbrainz_recording_id')=? ORDER BY id LIMIT ?",
+          arguments: [recording, cap + 1])
+        guard found.count <= cap else { return nil }
+        rows += found
       }
       // Titles compare without edition qualifiers, so are looked up that way.
       let words = SongIdentity.titleKey(song.title)
       if !words.isEmpty {
-        let terms = words.map { "title : \"" + $0 + "\"" }.joined(separator: " AND ")
-        rows += try Data.fetchAll(
+        let terms =
+          (words.map { "title : \"" + $0 + "\"" }
+          + SongIdentity.leadArtist(song.artist).map { "artist : \"" + $0 + "\"" })
+          .joined(separator: " AND ")
+        let found = try Data.fetchAll(
           db,
           sql:
-            "SELECT t.payload FROM tracks t JOIN track_search s ON t.rowid=s.rowid WHERE track_search MATCH ? ORDER BY t.id LIMIT 200",
-          arguments: [terms])
+            "SELECT t.payload FROM tracks t JOIN track_search s ON t.rowid=s.rowid WHERE track_search MATCH ? ORDER BY t.id LIMIT ?",
+          arguments: [terms, cap + 1])
+        guard found.count <= cap else { return nil }
+        rows += found
       }
       // Each with its album, for the server's order among editions.
       let tracks = try rows.compactMap { try decode($0) }

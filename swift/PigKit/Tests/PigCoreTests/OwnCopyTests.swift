@@ -183,4 +183,35 @@ struct OwnCopyTests {
       "catalogue:x", "Song - 2011 Remaster", "Band", recording: "rec-other-song", duration: 240)
     #expect(try await store.ownCopy(of: conflicting) == nil)
   }
+
+  /// Codex confirmation (high): the lookup capped its candidates, so with
+  /// 199 other artists' "Song" first, only one of two same-edition copies
+  /// was seen and taken. Candidates are now the title and lead artist, and
+  /// a lookup that may have been cut short takes nothing.
+  @Test func twinsPastTheCandidateCapAreStillSeen() async throws {
+    let store = try LibraryStore(path: ":memory:")
+    var tracks = (0..<199).map { index in
+      owned(String(format: "a%03d", index), "Song", "Artist \(index)", album: "Album \(index)")
+    }
+    tracks += ["z-twin-1", "z-twin-2"].map {
+      owned($0, "Song", "Twin Band", album: "Twin Album", duration: 200)
+    }
+    try await store.replace(LibrarySnapshot(revision: "one", tracks: tracks))
+    var twin = owned("catalogue:twin", "Song", "Twin Band", album: "Twin Album", duration: 200)
+    twin.explicitEdition = true
+    #expect(try await store.ownCopy(of: twin) == nil)
+    // One copy of that edition among them is still found.
+    var lone = owned("catalogue:a150", "Song", "Artist 150", album: "Album 150")
+    lone.explicitEdition = true
+    #expect(try await store.ownCopy(of: lone)?.id == "a150")
+  }
+
+  @Test func aLookupThatMayBeCutShortTakesNothing() async throws {
+    let store = try LibraryStore(path: ":memory:")
+    let tracks = (0..<501).map { index in
+      owned(String(format: "m%03d", index), "Many Song", "Many Band", album: "Edition \(index)")
+    }
+    try await store.replace(LibrarySnapshot(revision: "one", tracks: tracks))
+    #expect(try await store.ownCopy(of: owned("catalogue:many", "Many Song", "Many Band")) == nil)
+  }
 }
