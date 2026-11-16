@@ -31,6 +31,11 @@ public struct Track: Codable, Sendable, Identifiable, Hashable {
     }
     return result
   }
+  /// The state a row or the song sheet shows (#206): a song asked for here
+  /// (`requested`) shows Requested at once, before the server says so.
+  public func shownState(requested: @autoclosure () -> Bool) -> String? {
+    serverState == "not_in_library" && requested() ? "requested" : serverState
+  }
   public init(
     id: String, title: String, artist: String, album: String? = nil, duration: Double? = nil
   ) {

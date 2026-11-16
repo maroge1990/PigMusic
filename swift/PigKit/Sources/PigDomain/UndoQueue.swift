@@ -32,8 +32,10 @@ import Observation
   }
 
   /// Whether a screen should leave this thing out: waiting or being sent.
+  /// Read from observed state, so the screen that asked redraws when it is
+  /// scheduled or undone (#206); `items` and `actions` change together.
   public func hides(_ id: String) -> Bool {
-    sending.contains(id) || actions[id] != nil
+    sending.contains(id) || items.contains { $0.id == id }
   }
 
   /// Whether anything whose id starts with `prefix` is waiting or being sent.

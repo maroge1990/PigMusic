@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import PigDomain
 import Testing
 
@@ -128,4 +129,26 @@ import Testing
   #expect(ledger.plan(playlist: "p", position: 0, revision: 0) == nil)
   #expect(ledger.plan(playlist: "p", position: 1, revision: 0) == .init(0, 1))
   #expect(!ledger.removed(playlist: "p", position: 0, revision: 1))
+}
+
+private final class Noticed: @unchecked Sendable {
+  private let lock = NSLock()
+  private var noticed = false
+  var value: Bool { lock.withLock { noticed } }
+  func set() { lock.withLock { noticed = true } }
+}
+
+/// #206: a screen that asked whether something hides (the song sheet's
+/// Requested mark) must redraw when it is scheduled or undone; `hides` read
+/// only unobserved state, so "Request song" stayed after the tap.
+@MainActor @Test func aScreenThatAskedWhetherSomethingHidesSeesItScheduledAndUndone() {
+  let queue = UndoQueue(wait: .seconds(600), linger: .zero)
+  let scheduled = Noticed()
+  withObservationTracking { _ = queue.hides("request:song") } onChange: { scheduled.set() }
+  queue.schedule("request:song", label: "Requested Song") { true }
+  #expect(scheduled.value)
+  let undone = Noticed()
+  withObservationTracking { _ = queue.hides("request:song") } onChange: { undone.set() }
+  queue.undo("request:song")
+  #expect(undone.value)
 }

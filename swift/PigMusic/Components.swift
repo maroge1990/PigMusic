@@ -428,6 +428,8 @@ struct SongRow: View {
   private var copies: (phone: DeviceCopyMark?, watch: DeviceCopyMark?) {
     model.deviceCopies(track.id)
   }
+  /// Requested as soon as it is asked for here, as in its sheet (#206).
+  private var state: String? { track.shownState(requested: model.isRequested(track.id)) }
   private var deviceLabels: [String] {
     let copies = copies
     func label(_ mark: DeviceCopyMark?, _ device: String) -> String? {
@@ -477,7 +479,7 @@ struct SongRow: View {
     case .failed:
       Image(systemName: "exclamationmark.circle").foregroundStyle(PigBrand.danger(scheme))
     case nil:
-      switch track.serverState {
+      switch state {
       case "household_available":
         Image(systemName: "cloud").foregroundStyle(.tertiary)
       case "requested":
@@ -492,7 +494,7 @@ struct SongRow: View {
     }
   }
   private var stateLabel: String {
-    switch track.serverState {
+    switch state {
     case "household_available": "On the server, not in your library"
     case "not_in_library": "Not downloaded"
     case "requested": "Requested"

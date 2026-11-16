@@ -65,4 +65,19 @@ struct RequestMarksTests {
     #expect(!marks.contains("library"))
     #expect(marks.all == ["busy"])
   }
+
+  /// #206: a row shows Requested as soon as the song is asked for here,
+  /// before the server's answer says so; any other state is kept.
+  @Test func aRowShowsRequestedOnceTheSongIsAskedFor() {
+    var song = Track(id: "s", title: "Song", artist: "A")
+    song.serverState = "not_in_library"
+    #expect(song.shownState(requested: true) == "requested")
+    #expect(song.shownState(requested: false) == "not_in_library")
+    for state in ["in_library", "household_available", "failed"] {
+      song.serverState = state
+      #expect(song.shownState(requested: true) == state)
+    }
+    song.serverState = nil
+    #expect(song.shownState(requested: true) == nil)
+  }
 }
