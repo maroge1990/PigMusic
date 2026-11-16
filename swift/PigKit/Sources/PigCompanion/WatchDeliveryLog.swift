@@ -50,6 +50,12 @@ public struct WatchDeliveryLog: Codable, Sendable, Equatable {
     entry.phoneForeground = foreground(at: date)
     entries[id] = entry
   }
+  /// How many of these songs, confirmed by the Watch, are sent songs whose
+  /// arrival isn't recorded yet: the Watch's new songs, each counted once
+  /// however often it confirms them (D-113's clock).
+  public func newArrivals(_ ids: some Sequence<String>) -> Int {
+    Set(ids).filter { entries[$0].map { $0.arrived == nil } ?? false }.count
+  }
   /// Songs no longer sent to the Watch are forgotten, so a later send starts again.
   public mutating func retain(_ ids: Set<String>) {
     entries = entries.filter { ids.contains($0.key) }

@@ -28,16 +28,23 @@ import PigDomain
     /// Nothing to do: signed out, another account, or back in the foreground,
     /// whose own work takes over.
     case stopped
+    /// The Watch has received nothing for too long (D-113): nothing is
+    /// restored, handed on or asked for until the app is opened again.
+    case limitReached
   }
 
   /// Runs one refresh. `attached` is the generation of the account this
   /// launch already holds, nil when it has none yet. Every step after an
   /// await checks the account is still the same one and the app still away.
+  /// `mayStart` is the Watch's background limit (`WatchBackgroundWork`),
+  /// asked before anything starts and again before each later step.
   public static func run(
     attached: Int?, fence: AccountFence, inForeground: () -> Bool,
+    mayStart: () -> Bool = { true },
     restore: () async -> Restoration, handOff: () async -> Void, reschedule: () -> Void
   ) async -> Result {
     guard !inForeground() else { return .stopped }
+    guard mayStart() else { return .limitReached }
     let generation: Int
     if let attached {
       generation = attached
@@ -49,11 +56,13 @@ import PigDomain
         return .stopped
       case .unavailable(let left):
         guard fence.isCurrent(left), !inForeground() else { return .stopped }
+        guard mayStart() else { return .limitReached }
         reschedule()
         return .rescheduled
       }
     }
     guard fence.isCurrent(generation), !inForeground() else { return .stopped }
+    guard mayStart() else { return .limitReached }
     await handOff()
     return .handedOff
   }

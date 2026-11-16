@@ -1,4 +1,5 @@
 import Foundation
+import PigCompanion
 import PigDomain
 import PigDownloads
 import Testing
@@ -147,6 +148,39 @@ private actor PreparedCopies: DeviceCopySource {
       }, handOff: { launch.handOffs += 1 }, reschedule: { launch.rescheduled += 1 })
     #expect(result == .stopped)
     #expect(launch.handOffs == 0)
+  }
+
+  /// D-113: once the Watch has received nothing for two hours, a background
+  /// refresh restores nothing, hands nothing on and asks for no other
+  /// refresh, so the chain of refreshes ends; before that it carries on.
+  @Test func aRefreshAfterTheWatchLimitStartsNothingAndAsksForNoOther() async {
+    let left = Date(timeIntervalSince1970: 1_800_000_000)
+    var work = WatchBackgroundWork()
+    work.left(at: left)
+    for (minutes, allowed) in [(0.0, true), (119.0, true), (120.0, false), (600.0, false)] {
+      for locked in [false, true] {
+        let launch = Launch()
+        let now = left.addingTimeInterval(minutes * 60)
+        let result = await BackgroundRefresh.run(
+          attached: nil, fence: launch.fence, inForeground: { false },
+          mayStart: { work.mayStart(at: now) },
+          restore: {
+            launch.restorations += 1
+            return locked
+              ? .unavailable(generation: launch.fence.generation)
+              : .attached(generation: launch.fence.advance())
+          }, handOff: { launch.handOffs += 1 }, reschedule: { launch.rescheduled += 1 })
+        if allowed {
+          #expect(result == (locked ? .rescheduled : .handedOff))
+          #expect(launch.restorations == 1)
+          #expect(launch.handOffs + launch.rescheduled == 1)
+        } else {
+          #expect(result == .limitReached)
+          #expect(launch.restorations == 0 && launch.handOffs == 0 && launch.rescheduled == 0)
+        }
+      }
+    }
+    #expect(work.isStopped)
   }
 
   /// The scene and the background refresh restore the account once between

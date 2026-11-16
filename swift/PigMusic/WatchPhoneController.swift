@@ -97,9 +97,50 @@ import UIKit
   /// When each song passed each step on its way to the Watch (#219).
   @ObservationIgnored private(set) var deliveryLog = WatchDeliveryLog()
   @ObservationIgnored private var deliveryLogURL: URL?
+  /// Watch copies prepared while the app is away, and the limit that stops
+  /// that work on its own (D-113). Saved, so a background launch keeps the
+  /// clock the app left with.
+  @ObservationIgnored private(set) var backgroundWork = WatchBackgroundWork()
+  private static let backgroundWorkKey = "pig.watch.background-work"
+  /// Ready copies on the iPhone last noted as a finished background download.
+  @ObservationIgnored private var readyNoted = 0
+  private func noteBackground(_ change: (inout WatchBackgroundWork) -> Void) {
+    var next = backgroundWork
+    change(&next)
+    guard next != backgroundWork else { return }
+    let stopping = next.isStopped && !backgroundWork.isStopped
+    backgroundWork = next
+    if let data = try? JSONEncoder().encode(next) {
+      defaults.set(data, forKey: Self.backgroundWorkKey)
+    }
+    if stopping {
+      DiagnosticsLog.shared.record(
+        "watch",
+        "background Watch work stopped: no new song on the Watch for 2 h; nothing more starts until the app is opened")
+    }
+  }
+  /// The foreground by UIKit's state too: a launch in the background that
+  /// never became active is away whatever this controller was told, so it
+  /// neither prepares copies (D-51) nor escapes the Watch limit (D-113).
+  private var inForeground: Bool {
+    foreground && UIApplication.shared.applicationState != .background
+  }
+  /// Whether work may start now: always in the foreground; in the background
+  /// only while the Watch keeps receiving songs (D-113). Every background
+  /// start (a hand-off, a Watch transfer, a refresh) asks this first.
+  func mayStartInBackground() -> Bool {
+    if inForeground { return true }
+    var allowed = false
+    noteBackground { allowed = $0.mayStart() }
+    return allowed
+  }
   init(model: AppModel, defaults: UserDefaults) {
     self.model = model
     self.defaults = defaults
+    backgroundWork =
+      defaults.data(forKey: Self.backgroundWorkKey)
+      .flatMap { try? JSONDecoder().decode(WatchBackgroundWork.self, from: $0) }
+      ?? WatchBackgroundWork()
     context = CompanionContext(
       revision: Int64(defaults.integer(forKey: "pig.watch.revision")),
       account: defaults.string(forKey: "pig.watch.account"))
@@ -155,6 +196,11 @@ import UIKit
             // songs of the one before: only an applied receipt says which
             // songs are there, and an unapplied one shows its songs (#221).
             if confirmed.manifestApplied {
+              // Songs new on the Watch keep background work going (D-113):
+              // each sent song counts once, when the delivery log first
+              // records its arrival, so repeated receipts never do.
+              let arrived = deliveryLog.newArrivals(confirmed.ready.keys)
+              noteBackground { $0.received(arrived) }
               lastReceipt = confirmed
               committed = Set(manifest.songs.map(WatchDelivery.identity))
               noteApplied(manifest)
@@ -217,9 +263,10 @@ import UIKit
       directory: directory.appendingPathComponent("WatchBackgroundTransfers"))
     // Restored for a background refresh (#223): the new controller must not
     // start preparing once its session is ready (D-51).
-    if !foreground { await downloads?.suspendPreparation() }
-    // A copy finished in the background goes on to the Watch straight away.
-    downloads?.onChange = { [weak self] in await self?.publish() }
+    if !inForeground { await downloads?.suspendPreparation() }
+    // A copy finished in the background goes on to the Watch straight away,
+    // and copies the server finished since are handed on (D-113).
+    downloads?.onChange = { [weak self] in await self?.downloadsChanged() }
     await downloads?.reload()
     subscriptionsURL = directory.appendingPathComponent("watch-playlists.json")
     subscriptions =
@@ -287,6 +334,7 @@ import UIKit
   func resume() {
     foreground = true
     noteDelivery { $0.phone(foreground: true) }
+    noteBackground { $0.entered() }
     link?.refreshState()
     // Watch AAC preparation restarts only after the library was reconciled.
     if verified { downloads?.resumePreparation() }
@@ -321,7 +369,7 @@ import UIKit
     guard account.isCurrent(stamp) else { return }
     // A reconcile that finishes after the phone was locked must not restart
     // preparation (#65); returning to the foreground does that.
-    if foreground { downloads.resumePreparation() }
+    if inForeground { downloads.resumePreparation() }
     await publish()
   }
   var supported: Bool { link?.supported == true }
@@ -381,6 +429,8 @@ import UIKit
       try await downloads.enqueue(personal, quality: "aac", origin: origin)
       noteDelivery { $0.sent(personal.map(\.id).filter { !known.contains($0) }) }
       await publish()
+      // Asked for from the Watch while the app is away: handed on at once.
+      if !foreground { await handOff() }
       return .sent
     } catch {
       message = error.userMessage
@@ -542,6 +592,8 @@ import UIKit
   func suspend() async {
     foreground = false
     noteDelivery { $0.phone(foreground: false) }
+    // The two hours of D-113 start now.
+    noteBackground { $0.left() }
     account.cancel("poll")
     await downloads?.suspendPreparation()
     await handOff()
@@ -556,7 +608,8 @@ import UIKit
   /// server is still preparing wait for a refresh the system schedules when
   /// it suits the battery; the foreground resumes them as before.
   private func handOff() async {
-    guard verified, !foreground, let downloads, handOffTask == .invalid else { return }
+    guard verified, !foreground, let downloads, handOffTask == .invalid, mayStartInBackground()
+    else { return }
     let stamp = account.generation
     handOffExpired = false
     handOffTask = UIApplication.shared.beginBackgroundTask(withName: "Send songs to Apple Watch") {
@@ -574,12 +627,31 @@ import UIKit
       DiagnosticsLog.shared.record(
         "watch",
         "background hand-off: \(outcome.handed.count) copies to the background session, \(outcome.waiting.count) waiting"
+          + (outcome.unavailable.isEmpty ? "" : ", \(outcome.unavailable.count) unavailable")
           + (outcome.stopped ? " (stopped early)" : ""))
+      noteBackground { $0.note(.queued, count: outcome.handed.count, waiting: outcome.waiting.count) }
     }
     guard account.isCurrent(stamp) else { return }
     if !outcome.waiting.isEmpty, !foreground { scheduleRefresh() }
     // Copies already ready go on to the Watch now.
     await publish()
+  }
+  /// A background download changed a Watch copy (it finished, or failed).
+  /// Its copy goes on to the Watch, and while the app is away the copies the
+  /// server finished meanwhile are handed on: each finished download is the
+  /// next step's occasion, so nothing polls (D-113).
+  private func downloadsChanged() async {
+    guard !foreground, let downloads else {
+      await publish()
+      return
+    }
+    let ready = downloads.records.filter { $0.state == "ready" && !$0.delivered }.count
+    if ready > readyNoted { noteBackground { $0.note(.finished, count: ready) } }
+    readyNoted = ready
+    await publish()
+    if downloads.records.contains(where: { $0.state == "queued" && $0.paused != true }) {
+      await handOff()
+    }
   }
   private func endHandOff(expired: Bool) {
     if expired { handOffExpired = true }
@@ -587,13 +659,24 @@ import UIKit
     UIApplication.shared.endBackgroundTask(handOffTask)
     handOffTask = .invalid
   }
+  /// Asks iOS for a background refresh, which it runs when it suits the
+  /// battery. Never once the Watch limit stopped background work (D-113):
+  /// then no refresh is pending, and the chain of refreshes ends.
   func scheduleRefresh() {
+    guard mayStartInBackground() else { return }
     let request = BGAppRefreshTaskRequest(identifier: Self.refreshIdentifier)
     request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
-    do { try BGTaskScheduler.shared.submit(request) } catch {
+    do {
+      try BGTaskScheduler.shared.submit(request)
+      noteBackground { $0.note(.refreshAsked) }
+    } catch {
       DiagnosticsLog.shared.record(
         "watch", "background refresh not scheduled: \(error.localizedDescription)")
     }
+  }
+  /// iOS ran a background refresh (noted for the diagnostics export).
+  func refreshRan() {
+    noteBackground { $0.note(.refreshRan) }
   }
   /// A launch for a background refresh alone, with no scene (#223): nothing
   /// runs as the foreground until the scene's first activation resumes it.
@@ -610,6 +693,7 @@ import UIKit
     guard !foreground, let downloads else { return }
     let stamp = account.generation
     DiagnosticsLog.shared.record("watch", "background refresh")
+    guard mayStartInBackground() else { return }
     if !verified {
       do { try await reconcile() } catch {
         guard account.isCurrent(stamp), !foreground else { return }
@@ -667,6 +751,10 @@ import UIKit
     await publishing.run(force: force) { await self.publishOnce(force: $0) }
   }
   private func publishOnce(force: Bool) async {
+    // Once the Watch limit stopped background work (D-113), nothing goes to
+    // the Watch until the app is opened: no context, manifest or audio. The
+    // Watch keeps what it has; the foreground's publish carries on.
+    guard mayStartInBackground() else { return }
     guard verified, let downloads, let namespace, let baseManifestURL = manifestURL else {
       if context.account == nil { try? link?.publish(context) }
       return
@@ -854,6 +942,7 @@ import UIKit
     // which lists every ready song: the Watch holds it until that arrives.
     let nextContext = CompanionContext(
       revision: max(context.revision, peerRevision) + 1, account: namespace)
+    var handed = 0
     for (song, isAhead) in audio.send.map({ ($0, false) }) + audio.ahead.map({ ($0, true) }) {
       guard let file = files[song.id] else { continue }
       let identity = WatchDelivery.identity(song)
@@ -864,8 +953,10 @@ import UIKit
         link?.transfer(file, metadata: data)
         sent.mark("audio:" + identity)
         noteDelivery { $0.handed(song.id) }
+        handed += 1
       }
     }
+    if handed > 0, !foreground { noteBackground { $0.note(.sent, count: handed) } }
   }
   /// The iPhone's copy of a song goes once the Watch confirms holding it, and
   /// a song the Watch later loses is fetched from the server again (#218).

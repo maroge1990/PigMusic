@@ -214,11 +214,15 @@ enum PlayOrigin: Hashable {
     // A launch for the refresh alone has never been active: nothing may run
     // as the foreground, which resumes it all at the first activation.
     if foreground.suspended { watch.leaveForeground() }
+    watch.refreshRan()
     let attached = person != nil && !restoration.isRunning ? account.generation : nil
     var reason = ""
     let result = await BackgroundRefresh.run(
       attached: attached, fence: account,
       inForeground: { !foreground.suspended },
+      // D-113: once the Watch has received nothing for two hours, the
+      // refresh restores nothing, hands nothing on and asks for no other.
+      mayStart: { watch.mayStartInBackground() },
       restore: {
         // A sign-in under way is not a saved account to restore.
         guard restoration.isRunning || !busy else {
