@@ -348,3 +348,30 @@ def test_cleared_history_never_brings_back_a_removed_id(tmp_path, monkeypatch):
             download(store, claim)
             assert mine() not in seen, seen
         assert len(set(seen)) == 3
+
+
+def test_a_failed_request_asked_for_again_without_an_edition_is_queued(
+    tmp_path, monkeypatch
+):
+    # Mark's device round, 17 Nov: two songs of a playlist whose earlier
+    # requests (from an album, so with its release) had failed were asked for
+    # again from the playlist, which names no release. The server answered
+    # 500 (KeyError on the missing release) and the iPhone said ServerBusy.
+    app, client, owner, _ = household(tmp_path, monkeypatch)
+    with client:
+        store = app.state.store
+        hold_downloads(store, monkeypatch)
+        first = client.post("/api/v1/requests", json={"tracks": [song()]})
+        assert first.json()["created"] == 1, first.text
+        with store.connect() as conn:
+            conn.execute("UPDATE queue SET status='failed'")
+        plain = song()
+        del plain["musicbrainz_release_id"]
+        again = client.post("/api/v1/requests", json={"tracks": [plain]})
+        assert again.status_code == 200, again.text
+        assert again.json()["created"] == 1, again.json()
+        assert sorted(statuses(store)) == ["failed", "waiting_for_sources"]
+        # Asked for once more: still one new job.
+        repeat = client.post("/api/v1/requests", json={"tracks": [plain]})
+        assert repeat.status_code == 200, repeat.text
+        assert len(statuses(store)) == 2

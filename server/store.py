@@ -1801,7 +1801,8 @@ class Store:
                     and json.loads(prior[1]).get("musicbrainz_release_id")
                     not in {None, payload.get("musicbrainz_release_id")}
                 ):
-                    key = identifier(key, payload["musicbrainz_release_id"])
+                    # A request may name no release (a playlist song).
+                    key = identifier(key, payload.get("musicbrainz_release_id") or "")
                     prior = conn.execute(
                         "SELECT status,payload FROM queue WHERE id=?", (key,)
                     ).fetchone()
