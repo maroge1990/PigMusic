@@ -81,6 +81,9 @@ private struct SearchStartView: View {
     Section {
       ForEach(model.recentSearches.picks) { pick in
         switch pick {
+        case .song(let song) where model.undo.removing(song):
+          // Removed from the library, waiting for its Undo (D-108).
+          EmptyView()
         case .song(let song):
           SongRow(model: model, track: song) {
             // Played as the library holds it now, so a newer download is used.
@@ -141,7 +144,9 @@ struct SavedArtistView: View {
   @State private var identityMessage: String?
   @State private var albums: [Album] = []
   /// Owned songs, album by album, for Play and the Songs list.
-  @State private var songs: [Track] = []
+  @State private var owned: [Track] = []
+  /// Less a song removed from the library, waiting for its Undo (D-108).
+  private var songs: [Track] { model.undo.withoutRemoved(owned) }
   @State private var cover: String?
   @State private var loading = false
   @State private var more = true
@@ -215,6 +220,8 @@ struct SavedArtistView: View {
       if albums.isEmpty { await load() }
       cover = await model.artistCover(artist)
     }
+    // A song removed from the library stays gone once its Undo is sent (D-108).
+    .onChange(of: model.libraryRevision) { Task { await loadSongs() } }
   }
   private func explore() async {
     if identity == nil {
@@ -233,7 +240,7 @@ struct SavedArtistView: View {
   private func loadSongs() async {
     var tracks: [Track] = []
     for album in albums { tracks += await model.albumTracks(album) }
-    songs = tracks
+    owned = tracks
   }
   private func load() async {
     guard !loading, let store = model.store else { return }
@@ -303,7 +310,11 @@ private struct FoundResultsView: View {
     let screen = search.screen
     List {
       Section {
-        let items = screen[kind]
+        // Less a song removed from the library, waiting for its Undo (D-108).
+        let items = screen[kind].filter { item in
+          guard case .song(let song) = item else { return true }
+          return !model.undo.removing(song)
+        }
         ForEach(items) { item in row(item) }
         if items.isEmpty {
           if search.loading {

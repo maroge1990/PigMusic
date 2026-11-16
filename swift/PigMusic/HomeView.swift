@@ -244,12 +244,14 @@ struct MixDetailView: View {
   let mix: PersonalMix
   @State private var notice: StatusMessage?
   @State private var saving = false
-  /// Without songs hidden, or waiting for their Undo (#183).
+  /// Without songs hidden, or waiting for their Undo (#183), nor songs
+  /// being removed from the library (D-108).
   private var tracks: [Track] {
-    mix.tracks.filter {
-      let key = AppModel.undoKey(mix: mix.id, song: $0.id)
-      return !model.hiddenMixSongs.contains(key) && !model.undo.hides(key)
-    }
+    model.undo.withoutRemoved(
+      mix.tracks.filter {
+        let key = AppModel.undoKey(mix: mix.id, song: $0.id)
+        return !model.hiddenMixSongs.contains(key) && !model.undo.hides(key)
+      })
   }
   var body: some View {
     // A List (not the album pages' ScrollView) keeps swipe to hide; styled

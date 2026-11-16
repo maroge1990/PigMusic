@@ -38,6 +38,24 @@ import Observation
     sending.contains(id) || items.contains { $0.id == id }
   }
 
+  /// The Undo id of removing a song from the person's library (D-108).
+  public static func removalKey(_ songId: String) -> String { "library-remove:" + songId }
+
+  /// Whether this song's removal from the library waits for its Undo or is
+  /// being sent, under its own id or its library id (D-108, #214).
+  public func removing(_ song: Track) -> Bool {
+    hides(Self.removalKey(song.id))
+      || song.libraryTrackId.map { hides(Self.removalKey($0)) } == true
+  }
+
+  /// `songs` less those whose removal from the library waits for its Undo
+  /// or is being sent (D-108, #214): every screen that lists the person's
+  /// songs shows the same, and Undo brings them back untouched.
+  public func withoutRemoved(_ songs: [Track]) -> [Track] {
+    guard pending(prefix: Self.removalKey("")) else { return songs }
+    return songs.filter { !removing($0) }
+  }
+
   /// Whether anything whose id starts with `prefix` is waiting or being sent.
   public func pending(prefix: String) -> Bool {
     items.contains { $0.id.hasPrefix(prefix) } || sending.contains { $0.hasPrefix(prefix) }

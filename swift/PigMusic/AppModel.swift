@@ -1756,7 +1756,7 @@ enum PlayOrigin: Hashable {
   static func undoKey(mix: String, song: String) -> String { "mix-song:" + mix + ":" + song }
   static func undoKey(download id: String) -> String { "download:" + id }
   static func undoKey(watchTransfer id: String) -> String { "watch-transfer:" + id }
-  static func undoKey(removeFromLibrary id: String) -> String { "library-remove:" + id }
+  static func undoKey(removeFromLibrary id: String) -> String { UndoQueue.removalKey(id) }
   /// Removes a song from this person's library and from this iPhone and the
   /// Watch, at once with Undo (D-79, #214): no preview, no confirmation.
   /// Nothing is sent until the Undo runs out; the devices' copies go only

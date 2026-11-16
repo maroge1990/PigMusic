@@ -110,12 +110,7 @@ struct LibraryView: View {
     @State private var debugArtist: Artist?
   #endif
   /// Songs, less those removed from the library and waiting for their Undo (#214).
-  private var shownSongs: [Track] {
-    guard model.undo.pending(prefix: AppModel.undoKey(removeFromLibrary: "")) else {
-      return model.songs
-    }
-    return model.songs.filter { !model.undo.hides(AppModel.undoKey(removeFromLibrary: $0.id)) }
-  }
+  private var shownSongs: [Track] { model.undo.withoutRemoved(model.songs) }
   @ViewBuilder private var content: some View {
     switch tab {
     case .artists:
@@ -231,7 +226,9 @@ struct ChipStyle: ButtonStyle {
 struct AlbumView: View {
   @Bindable var model: AppModel
   let album: Album
-  @State private var tracks: [Track] = []
+  @State private var loaded: [Track] = []
+  /// Less a song removed from the library, waiting for its Undo (D-108).
+  private var tracks: [Track] { model.undo.withoutRemoved(loaded) }
   /// The release's full tracklist from the catalogue, so a partly owned album
   /// shows its other songs in order, as on the web. Nil offline or unmatched.
   @State private var release: CatalogueRelease?
@@ -259,7 +256,7 @@ struct AlbumView: View {
       }
     }
     // Owned songs the release does not list (another edition's bonus tracks).
-    return merged + owned
+    return model.undo.withoutRemoved(merged + owned)
   }
   private var missing: [Track] {
     rows.filter { $0.serverState == "not_in_library" }
@@ -316,7 +313,7 @@ struct AlbumView: View {
       if let artist { SavedArtistView(model: model, artist: artist) }
     }
     .task(id: "\(album.id)#\(model.libraryRevision)") {
-      tracks = await model.albumTracks(album)
+      loaded = await model.albumTracks(album)
       // The other songs no longer wait behind the artist lookup (#59).
       async let found = model.savedArtist(id: album.artistId, name: album.artist)
       await loadRelease()

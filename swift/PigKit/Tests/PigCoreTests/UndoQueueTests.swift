@@ -152,3 +152,27 @@ private final class Noticed: @unchecked Sendable {
   queue.undo("request:song")
   #expect(undone.value)
 }
+
+/// D-108 (#214): a song removed from the library leaves every list at once,
+/// under its own id or as another row's library copy, stays out while the
+/// removal is sent, and Undo brings it back untouched.
+@MainActor @Test func aRemovedSongLeavesEveryListUntilItsUndo() async {
+  let queue = UndoQueue(wait: .seconds(600), linger: .seconds(600))
+  let mine = Track(id: "lib-1", title: "Song", artist: "A")
+  let other = Track(id: "lib-2", title: "Other", artist: "A")
+  var found = Track(id: "rec-1", title: "Song", artist: "A")
+  found.libraryTrackId = "lib-1"
+  let list = [mine, other, found]
+  #expect(queue.withoutRemoved(list) == list)
+  queue.schedule(UndoQueue.removalKey("lib-1"), label: "Removed Song") { true }
+  #expect(queue.withoutRemoved(list) == [other])
+  queue.undo(UndoQueue.removalKey("lib-1"))
+  #expect(queue.withoutRemoved(list) == list)
+  queue.schedule(UndoQueue.removalKey("lib-1"), label: "Removed Song") { true }
+  await queue.sendAllAndWait()
+  #expect(queue.withoutRemoved(list) == [other])
+  // Other Undo actions hide nothing here.
+  let others = UndoQueue(wait: .seconds(600))
+  others.schedule("request:lib-1", label: "Requested Song") { true }
+  #expect(others.withoutRemoved(list) == list)
+}
