@@ -277,7 +277,7 @@ struct DiagnosticsView: View {
         }
       } footer: {
         Text(
-          "The export holds app events, connection states and crash call stacks from this iPhone and the Watch. It contains no passwords, sign-in tokens or music links."
+          "The export holds app events, connection states, battery figures and crash call stacks from this iPhone and the Watch. It contains no passwords, sign-in tokens or music links."
         )
       }
     }
@@ -304,7 +304,15 @@ struct DiagnosticsView: View {
     if let pending = model.refreshFailurePending { parts.append("[sync] \(pending)") }
     if let watch = model.watch, watch.supported {
       parts += ["", "== Watch delivery ==", watch.deliveryLog.summary()]
+      parts += ["", "== Watch copies in the background ==", watch.backgroundWork.summary()]
     }
+    // What the app's work cost the battery, as iOS measures it (D-113).
+    let battery = BatteryReports.shared.reports()
+    parts += ["", "== Battery and background use (MetricKit, about a day per report) =="]
+    if battery.isEmpty {
+      parts.append("No report yet: iOS sends one about once a day, for the day before.")
+    }
+    for report in battery { parts += [report.text(), ""] }
     if let watch = model.watch?.watchDiagnostics {
       parts += [
         "", "== Watch log (\(watch.version ?? "unknown"), sent \(watch.sentAt.formatted(.iso8601))) ==",

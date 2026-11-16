@@ -382,6 +382,8 @@ extension View {
     DiagnosticsLog.shared.launched("iPhone", version: AppVersion.text)
     // The system delivers crash reports from earlier runs on a later launch.
     MXMetricManager.shared.add(CrashReports.shared)
+    // The day's background, processor and network figures (D-113).
+    MXMetricManager.shared.add(BatteryReports.shared)
     return true
   }
   func application(
@@ -436,5 +438,79 @@ final class CrashReports: NSObject, MXMetricManagerSubscriber, @unchecked Sendab
       at: directory, includingPropertiesForKeys: nil)) ?? [])
       .filter { $0.pathExtension == "json" }
       .sorted { $0.lastPathComponent < $1.lastPathComponent }
+  }
+}
+
+/// The day's battery-related figures MetricKit delivers (about once a day,
+/// for the day before), kept on this iPhone (newest seven) for the
+/// diagnostics export (D-113): after a test with the phone locked, they show
+/// what the background Watch work cost.
+final class BatteryReports: NSObject, MXMetricManagerSubscriber, @unchecked Sendable {
+  static let shared = BatteryReports()
+  private let directory = FileManager.default.urls(
+    for: .applicationSupportDirectory, in: .userDomainMask
+  ).first!.appendingPathComponent("Diagnostics/Metrics")
+
+  func didReceive(_ payloads: [MXMetricPayload]) {
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    for payload in payloads {
+      let metrics = Self.metrics(payload)
+      let name = "metrics-\(Int(payload.timeStampEnd.timeIntervalSince1970)).json"
+      try? JSONEncoder().encode(metrics).write(to: directory.appendingPathComponent(name))
+      DiagnosticsLog.shared.record(
+        "battery", "MetricKit report received for \(payload.timeStampBegin) to \(payload.timeStampEnd)")
+    }
+    for old in files().dropLast(7) { try? FileManager.default.removeItem(at: old) }
+  }
+  /// The kept reports, oldest first.
+  func reports() -> [BatteryMetrics] {
+    files().compactMap {
+      (try? Data(contentsOf: $0)).flatMap { try? JSONDecoder().decode(BatteryMetrics.self, from: $0) }
+    }
+  }
+  private func files() -> [URL] {
+    ((try? FileManager.default.contentsOfDirectory(
+      at: directory, includingPropertiesForKeys: nil)) ?? [])
+      .filter { $0.pathExtension == "json" }
+      .sorted { $0.lastPathComponent < $1.lastPathComponent }
+  }
+  private static func metrics(_ payload: MXMetricPayload) -> BatteryMetrics {
+    var metrics = BatteryMetrics(
+      from: payload.timeStampBegin, to: payload.timeStampEnd,
+      appVersion: payload.latestApplicationVersion)
+    func seconds(_ value: Measurement<UnitDuration>?) -> Double? {
+      value?.converted(to: .seconds).value
+    }
+    func bytes(_ value: Measurement<UnitInformationStorage>?) -> Double? {
+      value?.converted(to: .bytes).value
+    }
+    let time = payload.applicationTimeMetrics
+    metrics.foregroundTime = seconds(time?.cumulativeForegroundTime)
+    metrics.backgroundTime = seconds(time?.cumulativeBackgroundTime)
+    metrics.backgroundAudioTime = seconds(time?.cumulativeBackgroundAudioTime)
+    metrics.backgroundLocationTime = seconds(time?.cumulativeBackgroundLocationTime)
+    metrics.cpuTime = seconds(payload.cpuMetrics?.cumulativeCPUTime)
+    metrics.gpuTime = seconds(payload.gpuMetrics?.cumulativeGPUTime)
+    let network = payload.networkTransferMetrics
+    metrics.wifiDown = bytes(network?.cumulativeWifiDownload)
+    metrics.wifiUp = bytes(network?.cumulativeWifiUpload)
+    metrics.cellularDown = bytes(network?.cumulativeCellularDownload)
+    metrics.cellularUp = bytes(network?.cumulativeCellularUpload)
+    metrics.diskWrites = bytes(payload.diskIOMetrics?.cumulativeLogicalWrites)
+    if let exits = payload.applicationExitMetrics?.backgroundExitData {
+      let counts = [
+        ("normal", exits.cumulativeNormalAppExitCount),
+        ("memory limit", exits.cumulativeMemoryResourceLimitExitCount),
+        ("memory pressure", exits.cumulativeMemoryPressureExitCount),
+        ("processor limit", exits.cumulativeCPUResourceLimitExitCount),
+        ("watchdog", exits.cumulativeAppWatchdogExitCount),
+        ("background task overran", exits.cumulativeBackgroundTaskAssertionTimeoutExitCount),
+        ("suspended holding a locked file", exits.cumulativeSuspendedWithLockedFileExitCount),
+        ("crash", exits.cumulativeBadAccessExitCount + exits.cumulativeIllegalInstructionExitCount),
+        ("other abnormal", exits.cumulativeAbnormalExitCount),
+      ]
+      for (reason, count) in counts where count > 0 { metrics.backgroundExits[reason] = count }
+    }
+    return metrics
   }
 }
