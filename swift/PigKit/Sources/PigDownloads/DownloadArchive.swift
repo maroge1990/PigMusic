@@ -176,6 +176,18 @@ public actor DownloadArchive {
     }
     return plan
   }
+  /// The records and the ready songs' files read in one step, with the
+  /// revision they belong to (#218). The Watch manifest is built from this,
+  /// never from records read before a hand-over and files read after it,
+  /// which dropped every song whose file the hand-over had just deleted.
+  /// With `reusing` equal to the current revision, the files are not checked
+  /// again (nil): nothing changed since the caller's copy of them.
+  public func listing(reusing known: Int? = nil) -> DownloadListing {
+    let ready = records.filter { $0.state == "ready" && $0.checksum != nil }
+    return DownloadListing(
+      revision: revision, records: records,
+      files: known == revision ? nil : localFiles(ready.map(\.track)))
+  }
   public func localFile(_ track: Track) -> URL? {
     guard let record = records.first(where: { $0.id == track.id }) else { return nil }
     return localFile(track, record: record)

@@ -75,6 +75,16 @@ def test_watch_audio_does_not_wait_for_the_manifest_round_trip():
     assert "context: isAhead ? nextContext : context" in publish
 
 
+def test_the_watch_manifest_is_built_from_one_reading_of_the_archive():
+    """#218: a publish read the records, then the files after two hand-overs
+    had deleted them, and listed 5 of 97 songs; the Watch deleted the rest."""
+    phone = (APP / "WatchPhoneController.swift").read_text()
+    publish = body(phone, "private func publishOnce(")
+    assert "downloads.records.filter" not in publish
+    assert "localFiles(" not in publish
+    assert "await downloads.archive.listing(" in publish
+
+
 def test_forgetting_changed_sources_removes_them_before_any_suspension():
     """#76 (Codex round 1): releasing one source suspends the repository
     actor; a song leased meanwhile must not be released by the same pass."""

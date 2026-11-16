@@ -44,11 +44,11 @@ import UIKit
   @ObservationIgnored private let account = AccountFence()
   @ObservationIgnored private var peerRevision: Int64 = 0
   @ObservationIgnored private let publishing = WatchPublishLoop()
-  /// The ready songs and their files from the last publish, with what they
-  /// were built from. The two-second poll reuses them while nothing changed
-  /// instead of checking every file again (RV23).
-  @ObservationIgnored private var readyCache:
-    (key: [String], archive: Int, songs: [CompanionSong], files: [String: URL])?
+  /// The ready songs' files from the last publish, with the archive revision
+  /// they were read at. The poll reuses them while the archive is unchanged
+  /// instead of checking every file again (RV23); the archive hands them
+  /// back with its records in one read, so they never mix revisions (#218).
+  @ObservationIgnored private var readyCache: (archive: Int, files: [String: URL])?
   /// When each manifest or song was last handed to WatchConnectivity.
   @ObservationIgnored private var sent = CompanionSendLog()
   @ObservationIgnored private var lastAdvance = Date.distantPast
@@ -611,32 +611,31 @@ import UIKit
     }
     if force { sent.reset() }
     let stamp = account.generation
-    var songs: [CompanionSong] = []
-    var files: [String: URL] = [:]
-    let ready = downloads.records.filter { $0.state == "ready" && $0.checksum != nil }
+    // Records and files from one reading of the archive (#218): a hand-over
+    // settled between two separate reads dropped every song it delivered.
+    let listing = await downloads.archive.listing(reusing: force ? nil : readyCache?.archive)
+    guard account.isCurrent(stamp) else { return }
+    let files: [String: URL]
+    if let fresh = listing.files {
+      files = fresh
+      readyCache = (listing.revision, fresh)
+    } else {
+      files = readyCache?.files ?? [:]
+    }
+    let ready = listing.records.filter { $0.state == "ready" && $0.checksum != nil }
     noteDelivery { log in
-      log.retain(Set(downloads.records.map(\.id)))
+      log.retain(Set(listing.records.map(\.id)))
       for record in ready { log.ready(record.id) }
     }
-    let key = ready.map { "\($0.id):\($0.checksum ?? ""):\($0.track.sourceRevision ?? "")" }
-    let archiveRevision = await downloads.archive.revision
-    if !force, let cache = readyCache, cache.key == key, cache.archive == archiveRevision {
-      songs = cache.songs
-      files = cache.files
-    } else {
-      // One indexed lookup for every ready song, not a search per song.
-      files = await downloads.archive.localFiles(ready.map(\.track))
-      // A song the Watch holds stays listed without the iPhone's copy (#218);
-      // with no file, its audio is never sent again.
-      for record in ready {
-        if let checksum = record.checksum, files[record.id] != nil || record.delivered {
-          songs.append(CompanionSong(track: record.track, checksum: checksum, bytes: record.total))
-        }
+    // A song the Watch holds stays listed without the iPhone's copy (#218);
+    // with no file, its audio is never sent again.
+    var songs: [CompanionSong] = []
+    for record in ready {
+      if let checksum = record.checksum, files[record.id] != nil || record.delivered {
+        songs.append(CompanionSong(track: record.track, checksum: checksum, bytes: record.total))
       }
-      songs.sort { $0.id < $1.id }
-      readyCache = (key, archiveRevision, songs, files)
     }
-    guard account.isCurrent(stamp) else { return }
+    songs.sort { $0.id < $1.id }
     let ids = Set(songs.map(\.id))
     var remainingOccurrences = 10000
     // Only playlists sent to the Watch appear there, including empty ones.

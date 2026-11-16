@@ -129,6 +129,26 @@ import Testing
     #expect(a.effectiveOrigins == [.direct])
   }
 
+  /// A publish read the records, then the files after two hand-overs had
+  /// deleted them; the archive now hands both back from one revision.
+  @Test func aListingReadsRecordsAndFilesAtOneRevision() async throws {
+    let root = folder()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let archive = try await archive(root, ["a", "b", "c"])
+    let before = await archive.listing()
+    #expect(before.files?.keys.sorted() == ["a", "b", "c"])
+    let all = ["a": checksum("a"), "b": checksum("b"), "c": checksum("c")]
+    try await archive.settleHandOver(
+      listed: all, ready: ["a": checksum("a"), "b": checksum("b")], applied: true)
+    // The hand-over changed the revision: files cached before it don't count.
+    let after = await archive.listing(reusing: before.revision)
+    #expect(after.revision != before.revision)
+    #expect(after.files?.keys.sorted() == ["c"])
+    #expect(after.records.filter(\.delivered).map(\.id).sorted() == ["a", "b"])
+    // Nothing changed since: the caller's files still hold.
+    #expect(await archive.listing(reusing: after.revision).files == nil)
+  }
+
   @Test func theDeliveredStateSurvivesAReload() async throws {
     let root = folder()
     defer { try? FileManager.default.removeItem(at: root) }

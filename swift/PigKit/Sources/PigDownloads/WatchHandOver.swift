@@ -53,3 +53,17 @@ public enum WatchHandOver {
     return plan
   }
 }
+
+/// One consistent reading of a `DownloadArchive` (see `listing(reusing:)`).
+public struct DownloadListing: Sendable {
+  public var revision: Int
+  public var records: [DownloadRecord]
+  /// Song id to the iPhone's file, for the ready songs that have one; nil
+  /// when the caller's copy from the same revision still holds.
+  public var files: [String: URL]?
+  public init(revision: Int, records: [DownloadRecord], files: [String: URL]?) {
+    self.revision = revision
+    self.records = records
+    self.files = files
+  }
+}
