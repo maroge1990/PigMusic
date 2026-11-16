@@ -14,6 +14,9 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   500, and ServerBusy is said in words (#235). Codex: one medium fixed and confirmed; nothing open.
 - **Waiting on Mark's device check:** #229 song menu, #219 Watch background delivery and battery figures, #232–#235.
 - **Decisions:** D-114 (Remove all alert). Next: D-115.
+- **Review, 17 Nov:** polish and resilience review of server, web, iPhone and Watch filed as #236–#253. The server
+  did not crash that morning (one 500, #235); the real gaps are workers that stop for good on one error (#236) and
+  a stuck server nothing restarts (#238). Mark has the report and picks the order.
 - **Mac:** about 15 GB free; Mark's PigTV project shares the simulators and runs `simctl shutdown all`, which can kill
   our tap-through runs.
 
@@ -27,8 +30,12 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Next
 
-#226 (an unreadable download list or a source change must not empty the Watch), #230 and #231 (findings), #225 (test
-workers' memory growth).
+From the 17 Nov review, in the suggested order (Mark confirms): **A, stay up:** #236, #238, #239, #237. **B, say what
+happened:** #241, #245, #244, #240. **C, one vocabulary** (Mark chooses the words): #246. **D, one of each:** #247,
+#248, #249, #183, #250. **E, the plain screens:** #251, #252, #209. Smaller: #242, #243, #253.
+
+Then: #226 (an unreadable download list or a source change must not empty the Watch), #230 and #231 (findings), #225
+(test workers' memory growth).
 
 ## Later
 
