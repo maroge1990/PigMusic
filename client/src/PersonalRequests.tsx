@@ -21,7 +21,7 @@ type Item = {
   quality?: string | null;
   updated_at?: string | null;
 };
-type Phase = "active" | "waiting" | "done" | "failed";
+type Phase = "active" | "waiting" | "paused" | "done" | "failed";
 type Group = {
   id: string;
   kind: "album" | "song";
@@ -34,6 +34,7 @@ type Group = {
   active: number;
   waiting: number;
   failed: number;
+  paused?: number;
   progress: number;
   requested_at: string;
   updated_at: string;
@@ -57,11 +58,13 @@ const labels: Record<string, [string, Phase]> = {
   completed: ["In your library", "done"],
   downloaded: ["In your library", "done"],
   cancelled: ["Cancelled", "failed"],
+  paused: ["Paused", "paused"],
   failed: ["Couldn't get this song", "failed"],
 };
 
 const badge = {
   waiting: "requested",
+  paused: "requested",
   active: "active",
   done: "library",
   failed: "failed",
@@ -77,12 +80,14 @@ function summary(group: Group) {
   if (group.active) parts.push(`${group.active} downloading`);
   if (group.waiting) parts.push(`${group.waiting} waiting`);
   if (group.failed) parts.push(`${group.failed} failed`);
+  if (group.paused) parts.push(`${group.paused} paused`);
   return parts.join(" · ");
 }
 
 const groupLabel: Record<Phase, string> = {
   active: "Downloading",
   waiting: "Waiting",
+  paused: "Paused",
   done: "In your library",
   failed: "Needs attention",
 };

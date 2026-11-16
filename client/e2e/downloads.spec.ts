@@ -217,3 +217,36 @@ test("#197: open details follow the request as it changes", async ({
   );
   await expect(story).toContainText("No source had a copy");
 });
+
+test("#228: a paused request reads Paused", async ({ page }) => {
+  const paused = {
+    ...groups,
+    total: 1,
+    active: 0,
+    groups: [
+      {
+        ...groups.groups[0],
+        state: "paused",
+        songs: 2,
+        done: 1,
+        waiting: 0,
+        failed: 0,
+        paused: 1,
+        progress: 0.5,
+        items: [songs[0], { ...songs[2], status: "paused" }],
+      },
+    ],
+  };
+  await mockApi(page, {
+    answers: {
+      "/v1/requests/groups": (route) => route.fulfill({ json: paused }),
+      "/v1/requests": (route) =>
+        route.fulfill({ json: { items: [], next_offset: null, active: 0 } }),
+    },
+  });
+  await page.goto("/#/downloads");
+  const card = page.locator(".request-group");
+  await expect(card).toContainText("1 of 2 songs in your library · 1 paused");
+  await card.locator(":scope > summary").click();
+  await expect(card.locator("li").nth(1)).toContainText("Paused");
+});

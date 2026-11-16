@@ -102,6 +102,7 @@ export function QueueView({
                     completed: "Downloaded and imported",
                     failed: "Failed",
                     cancelled: "Cancelled",
+                    paused: "Paused",
                   } as Record<string, string>
                 )[item.status] || item.status}
                 {item.source && ` · ${sourceName(item.source)}`}
