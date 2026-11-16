@@ -49,32 +49,33 @@ final class DemoLibraryTests: XCTestCase {
     XCTAssertEqual(pig.frame.midY, screen.midY, accuracy: 1)
   }
 
-  /// #210: an Undo offered in a song's ⋯ card floats whole just above the
-  /// card, then settles above the mini player once the card closes, and goes
-  /// when its 10 s are up.
-  func testTheUndoBarFloatsAboveASheetThenTheMiniPlayer() {
+  /// #210, #229: Request song in a song's ⋯ menu offers its Undo whole,
+  /// just above the mini player, and the Undo goes when its 10 s are up.
+  /// The menu leaves no sheet behind to float above.
+  func testRequestFromTheMenuShowsTheUndoAboveTheMiniPlayer() {
     continueAfterFailure = false
-    app.launchArguments = ["--demo", "--demo-play", "--undo-in-sheet"]
+    app.launchArguments = ["--demo", "--demo-play"]
     app.launch()
-    let card = app.navigationBars["Song actions"]
-    expect(card, timeout: 30)
+    expect(miniPlayer, timeout: 30)
+    // A Popular song on Home: the demo's library songs can't be requested.
+    let more = app.buttons["More actions for Chart Song 1"]
+    expect(more)
+    for _ in 0..<5 where !more.isHittable { app.swipeUp() }
+    more.tap()
+    let request = app.buttons["Request song"]
+    expect(request)
+    // Not in the library: none of the library's own actions.
+    XCTAssertFalse(app.buttons["Remove from library"].exists)
+    request.tap()
     let undo = app.buttons["Undo"]
     expect(undo)
-    let label = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Requested '"))
-      .firstMatch
+    let label = app.staticTexts["Requested Chart Song 1"]
     expect(label)
+    XCTAssertFalse(request.exists)
     let screen = app.windows.firstMatch.frame
-    XCTAssertTrue(undo.isHittable)
-    // Above the card's top edge, over the dimmed page, and wholly on screen.
-    XCTAssertLessThanOrEqual(undo.frame.maxY, card.frame.minY)
-    XCTAssertGreaterThan(undo.frame.minY, screen.minY)
     // Inset like the bar on the tabs: 16 pt margins plus the bar's own padding.
     XCTAssertGreaterThanOrEqual(label.frame.minX, screen.minX + 32 - 1)
     XCTAssertLessThanOrEqual(undo.frame.maxX, screen.maxX - 32 + 1)
-    app.buttons["Done"].tap()
-    XCTAssertTrue(card.waitForNonExistence(timeout: 5))
-    // The same bar, now just above the mini player.
-    expect(miniPlayer)
     let settled = expectation(
       for: NSPredicate { _, _ in
         undo.exists && undo.frame.maxY <= self.miniPlayer.frame.minY
@@ -120,18 +121,42 @@ final class DemoLibraryTests: XCTestCase {
     expect(app.buttons["Now playing: Open Road"])
   }
 
+  /// D-112 (#229): a song's ⋯ opens a pop-up menu, not a sheet, and a long
+  /// press on the row opens the same menu.
   func testASongsMenuOffersItsActions() {
     launch()
     playSunrise()
     app.buttons["Pause"].tap()
     app.buttons["More actions for First Light"].tap()
-    expect(app.staticTexts["Song actions"])
+    checkSongMenu()
+    // The quality is chosen in the Download submenu (D-106).
+    app.buttons["Download"].tap()
+    expect(app.buttons["Original"])
+    expect(app.buttons["Smaller AAC copy"])
+    dismissMenu()
+    app.buttons["Play First Light by The Orchard"].press(forDuration: 1.2)
+    checkSongMenu()
+    dismissMenu()
+  }
+
+  private func checkSongMenu(file: StaticString = #filePath, line: UInt = #line) {
     // Play next and Add to queue are offered while something is playing.
-    for action in ["Play next", "Add to queue", "Add to playlist", "Download original"] {
-      XCTAssertTrue(app.buttons[action].exists, action)
+    expect(app.buttons["Play next"], file: file, line: line)
+    for action in [
+      "Add to queue", "Add to playlist", "Download", "Send to Apple Watch", "Remove from library",
+    ] {
+      XCTAssertTrue(app.buttons[action].exists, action, file: file, line: line)
     }
-    app.buttons["Done"].tap()
-    XCTAssertTrue(app.staticTexts["Song actions"].waitForNonExistence(timeout: 5))
+    // A library song is never offered for request, and nothing is a sheet.
+    XCTAssertFalse(app.buttons["Request song"].exists, file: file, line: line)
+    XCTAssertFalse(app.navigationBars["Song actions"].exists, file: file, line: line)
+  }
+
+  /// A tap above the menu closes it without choosing anything.
+  private func dismissMenu(file: StaticString = #filePath, line: UInt = #line) {
+    app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
+    XCTAssertTrue(
+      app.buttons["Play next"].waitForNonExistence(timeout: 5), file: file, line: line)
   }
 
   func testLibraryLeadsFromAnArtistToTheirAlbum() {

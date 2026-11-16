@@ -114,36 +114,6 @@ struct PlaylistToolsView: View {
   }
 }
 
-struct AddToPlaylistView: View {
-  let model: AppModel
-  let track: Track
-  @State private var message: StatusMessage?
-  @State private var loading = false
-  var body: some View {
-    List {
-      ForEach(model.playlists.filter { $0.favourites != true }) { playlist in
-        Button(playlist.name) {
-          Task {
-            loading = true
-            defer { loading = false }
-            do {
-              let confirmed = try await model.saveEdit(
-                OfflineMutation(action: "append", playlistId: playlist.id, track: track))
-              message = .info(
-                confirmed
-                  ? "Added to \(playlist.name). Repeated songs are kept as separate entries."
-                  : "Added on this iPhone; it will be sent when you're online.")
-            } catch { message = .error(error.userMessage) }
-          }
-        }.disabled(loading || !model.canMutate)
-      }
-      NavigationLink("Create or import playlists") { PlaylistToolsView(model: model) }
-      if loading { ProgressView() }
-      if let message { StatusText(message) }
-    }.pigCanvas().navigationTitle("Add to playlist").navigationBarTitleDisplayMode(.inline)
-  }
-}
-
 struct PlaylistView: View {
   @Environment(\.colorScheme) private var scheme
   @Bindable var model: AppModel

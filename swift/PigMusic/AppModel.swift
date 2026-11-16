@@ -59,7 +59,6 @@ enum PlayOrigin: Hashable {
   /// The ranked search (D-61); this phone's library when the server can't
   /// answer, and the only one in the demo (#177).
   var foundSearch: FoundSearch?
-  var actionTrack: Track?
   /// Favourite state by song, shared by the player's star and Song actions.
   var favourites = FavouriteStates()
   /// What this person opened or played from search, newest first (D-61).
@@ -969,6 +968,24 @@ enum PlayOrigin: Hashable {
     else { return }
     try? await store?.cache(confirmed, key: key)
   }
+  /// A song's favourite state from this iPhone alone, a waiting edit or the
+  /// cached answer, without asking the server (#229): read for each song whose
+  /// ⋯ menu could open, so the menu shows its favourite item at once.
+  func peekFavourite(_ track: Track) async {
+    guard favourites[track.id] == nil else { return }
+    if let value = EditOutbox.favourite(track.id, in: pendingEdits) {
+      favourites.change(track.id, value)
+      return
+    }
+    let stamp = account.generation
+    let revision = favourites.revision(track.id)
+    guard
+      let cached = (try? await store?.cached(EditOutbox.favouriteCacheKey(track.id), as: Bool.self))
+        ?? nil,
+      account.isCurrent(stamp), favourites[track.id] == nil
+    else { return }
+    favourites.answer(track.id, cached, since: revision)
+  }
   /// Flips a song's favourite at once (#212) and saves it through the edit
   /// outbox; a refused save puts the old state back. The new state, and
   /// whether the server confirmed it (false when it waits on this phone);
@@ -1844,7 +1861,6 @@ enum PlayOrigin: Hashable {
     downloads = nil
     foundSearch?.clear()
     foundSearch = nil
-    actionTrack = nil
     favourites.clear()
     recentSearches = RecentSearches()
     recentSearchesLoaded = false

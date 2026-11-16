@@ -385,6 +385,10 @@ struct SongRow: View {
       .joined(separator: " · ")
   }
   var body: some View {
+    // The ⋯ button and a long press open the same menu (D-112, #229).
+    SongActionsLookup(model: model, track: track.actionTrack) { menu in row(menu) }
+  }
+  private func row(_ menu: SongActionsMenu) -> some View {
     HStack(spacing: 12) {
       Button {
         play()
@@ -415,16 +419,14 @@ struct SongRow: View {
       )
       .accessibilityValue(current ? "Now playing" : ([stateLabel] + deviceLabels).joined(separator: ", "))
       indicator
-      Button {
-        model.actionTrack = track
+      Menu {
+        menu
       } label: {
         Image(systemName: "ellipsis").frame(minWidth: moreWidth, minHeight: 44).foregroundStyle(.secondary)
       }.buttonStyle(.plain).accessibilityLabel("More actions for \(track.title)")
     }
     .frame(minHeight: 48)
-    .contextMenu {
-      Button("Song actions…", systemImage: "ellipsis.circle") { model.actionTrack = track }
-    }
+    .contextMenu { menu }
   }
   private var copies: (phone: DeviceCopyMark?, watch: DeviceCopyMark?) {
     model.deviceCopies(track.id)

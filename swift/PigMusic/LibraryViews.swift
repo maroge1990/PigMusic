@@ -533,9 +533,6 @@ struct NowPlayingView: View {
   @Environment(\.colorScheme) private var scheme
   /// Dragging updates only this value; one seek happens when the drag ends.
   @State private var scrubbing: Double?
-  /// Song actions open from this sheet: the app's own action sheet can't
-  /// show while the player covers it (#100).
-  @State private var actionTrack: Track?
   /// The playing cover's colour behind the player (#199).
   @State private var swatch: CoverRGB?
   // Sections are separate properties so each type-checks quickly.
@@ -565,12 +562,6 @@ struct NowPlayingView: View {
       }
       .navigationTitle("Now playing").navigationBarTitleDisplayMode(.inline)
       .toolbar { Button("Done") { dismiss() } }
-      .sheet(item: $actionTrack) {
-        SongActionsView(model: model, track: $0.actionTrack)
-          .presentationDetents([.medium, .large])
-          .presentationDragIndicator(.visible)
-          .presentationContentInteraction(.scrolls)
-      }
     }.pigBrandedCanvas()
   }
   private var current: Track? { player.queue.current?.track }
@@ -663,7 +654,14 @@ struct NowPlayingView: View {
   @ViewBuilder private var songControls: some View {
     if let track = current {
       FavouriteStar(model: model, track: track.actionTrack)
-      RoundIcon(label: "Song actions", systemImage: "ellipsis") { actionTrack = track }
+      // The same pop-up menu as a song row's ⋯ (D-112, #229).
+      SongActionsLookup(model: model, track: track.actionTrack) { menu in
+        Menu {
+          menu
+        } label: {
+          RoundIconLabel(systemImage: "ellipsis")
+        }.buttonStyle(.plain).accessibilityLabel("Song actions")
+      }
     }
   }
   private func ring(_ on: Bool) -> some View {

@@ -4,176 +4,164 @@ import PigDomain
 import PigSync
 import SwiftUI
 
-struct SongActionsView: View {
+/// A song's ⋯ pop-up menu (D-112, #229): the same from a row's ⋯ button, a
+/// long press on the row and the player's ⋯. Nothing in it scrolls or
+/// competes with a swipe, as the Song actions sheet did. Which items show is
+/// SongMenu's (PigDomain); this draws them and runs them. A menu can't wait
+/// for anything while it opens, so what it needs is looked up before then
+/// (SongActionsLookup); results come as a haptic and failures as the app's
+/// message line.
+struct SongActionsMenu: View {
   let model: AppModel
-  /// The song as the sheet opened with it; `song` is it now (#211).
+  /// The song as its row or the player has it.
   let opened: Track
-  @Environment(\.dismiss) private var dismiss
-  @State private var addedToLibrary = false
-  /// The library's own copy of the song, read again on each sync (#211):
-  /// found by id, recording, or title and artist, since a row from Home,
-  /// a catalogue page or search carries a catalogue or recording id.
-  @State private var own: Track?
-  /// The library has been looked at once: until then the sheet offers
-  /// neither Request nor the library's actions, so Request never flashes.
-  @State private var looked = false
-  init(model: AppModel, track: Track) {
-    self.model = model
-    opened = track
-  }
-  /// Follows search's newest answer and the library while the sheet is open,
-  /// so a request that finishes offers downloads without reopening it. A
-  /// song the library holds is acted on as the library's own song.
-  private var track: Track {
-    if var own {
-      own.serverState = "in_library"
-      return own
-    }
-    return model.liveState(opened)
-  }
-  private var favourite: Bool? { model.favourites[track.id] }
-  @State private var loading = false
-  @State private var message: StatusMessage?
+  /// The library's own copy of the song (#211), when found.
+  let own: Track?
+  /// The library has been looked at for it: until then the menu offers
+  /// neither Request nor the library's actions, so Request never shows for
+  /// a song the library holds.
+  let looked: Bool
   var body: some View {
-    NavigationStack {
-      Form {
-        Section {
-          VStack(alignment: .leading, spacing: 2) {
-            Text(track.title).lineLimit(1)
-            Text(track.artist).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
-          }
-        }
-        Section {
-          if let favourite {
-            Button(
-              FavouriteStates.action(favourite: favourite),
-              systemImage: FavouriteStates.symbol(favourite: favourite)
-            ) {
-              Task { await changeFavourite() }
-            }
-          } else {
-            Button("Load favourite status") { Task { await loadFavourite() } }.disabled(loading)
-          }
-          if !looked {
-            EmptyView()
-          } else if addedToLibrary {
-            Button("Play song", systemImage: "play.fill") {
-              var saved = track
-              saved.serverState = "in_library"
-              model.play([saved])
-              dismiss()
-            }
-          } else if track.serverState == "household_available" {
-            Button("Add to my library", systemImage: "plus") {
-              Task { await add() }
-            }.disabled(loading || !model.canMutate)
-          } else if track.serverState != "in_library",
-            track.serverState == "requested" || model.isRequested(track.id)
-          {
-            // #206: the same mark as an album page's requested songs.
-            Label("Requested", systemImage: "clock").foregroundStyle(.secondary)
-          } else if track.serverState == "not_in_library" {
-            if track.id.hasPrefix("mix:") {
-              Button("Add to my library", systemImage: "arrow.down.circle") {
-                Task { await request() }
-              }.disabled(loading || !model.canMutate)
-            } else {
-              // At once, with Undo; sent when the server can be reached (#206).
-              Button("Request song", systemImage: "arrow.down.circle") {
-                model.requestLater(track)
-              }.disabled(!model.canRequest)
-            }
-          }
-        }
-        Section {
-          if model.player.queue.current != nil {
-            Button("Play next") {
-              model.player.enqueue([track], next: true)
-              model.confirmations += 1
-            }
-            Button("Add to queue") {
-              model.player.enqueue([track])
-              model.confirmations += 1
-            }
-          }
-          NavigationLink("Add to playlist") { AddToPlaylistView(model: model, track: track) }
-          if looked, track.serverState == "in_library" || track.serverState == nil {
-            Button("Download original", systemImage: "arrow.down.circle") {
-              Task { await model.download([track]) }
-            }
-            Button("Send to Apple Watch", systemImage: "applewatch") {
-              // D-103: a success tap, no text; a failure says why.
-              Task {
-                message = nil
-                switch await model.watch?.enqueue([track]) {
-                case .sent: model.confirmations += 1
-                case .failed(let reason): message = .error(reason)
-                case .superseded, nil: break
-                }
-              }
-            }
-            Button("Download smaller AAC copy") {
-              Task { await model.download([track], quality: "aac") }
-            }
-            // At once, with Undo (D-79, #214).
-            Button("Remove from library", systemImage: "minus.circle", role: .destructive) {
-              model.removeFromLibraryLater(track)
-              dismiss()
-            }
-          }
-        }
-        if loading { ProgressView() }
-        if let message { Section { StatusText(message) } }
-      }.pigCanvas().navigationTitle("Song actions").navigationBarTitleDisplayMode(.inline)
-        .toolbar { Button("Done") { dismiss() }.disabled(loading) }
-        // Again once the library's own copy is found (#211).
-        .task(id: track.id) { await loadFavourite() }
-        .task(id: model.libraryRevision) {
-          own = await model.ownCopy(of: opened)
-          looked = true
-        }
-    }
-    .interactiveDismissDisabled(model.mutationActive)
-  }
-  private func loadFavourite() async {
-    guard !loading else { return }
-    loading = true
-    defer { loading = false }
-    await model.loadFavourite(track)
-  }
-  /// The button changes at once (#212); the message follows the save.
-  private func changeFavourite() async {
-    message = nil
-    do {
-      guard let saved = try await model.tapFavourite(track) else { return }
-      message = .info(
-        saved.confirmed
-          ? (saved.value ? "Added to favourites." : "Removed from favourites.")
-          : "Favourite saved on this iPhone; it will be sent when you're online.")
-    } catch is CancellationError {} catch { message = .error(error.userMessage) }
-  }
-  private func add() async {
-    guard !loading else { return }
-    loading = true
-    defer { loading = false }
-    do {
-      let count = try await model.performPersonal {
-        try await $0.addMembership(trackIds: [track.id])
+    let track = SongMenu.resolved(own: own, live: model.liveState(opened))
+    let sections = SongMenu.sections(
+      for: track, looked: looked, requested: model.isRequested(track.id),
+      favourite: model.favourites[track.id], playing: model.player.queue.current != nil)
+    ForEach(Array(sections.enumerated()), id: \.offset) { _, items in
+      Section {
+        ForEach(items, id: \.self) { item($0, track) }
       }
-      message = .info(count > 0 ? "Added to your library." : "Already in your library.")
-      addedToLibrary = true
-    } catch is CancellationError {} catch { message = .error(error.userMessage) }
+    }
   }
-  private func request() async {
-    guard !loading else { return }
-    loading = true
-    defer { loading = false }
+  @ViewBuilder private func item(_ item: SongMenuItem, _ track: Track) -> some View {
+    switch item {
+    case .playNext:
+      Button("Play next", systemImage: "text.line.first.and.arrowtriangle.forward") {
+        model.player.enqueue([track], next: true)
+        model.confirmations += 1
+      }
+    case .addToQueue:
+      Button("Add to queue", systemImage: "text.line.last.and.arrowtriangle.forward") {
+        model.player.enqueue([track])
+        model.confirmations += 1
+      }
+    case .addToPlaylist:
+      let playlists = model.playlists.filter { $0.favourites != true }
+      Menu("Add to playlist", systemImage: "text.badge.plus") {
+        ForEach(playlists) { playlist in
+          Button(playlist.name) { Task { await add(track, to: playlist) } }
+        }
+        if playlists.isEmpty { Text("No playlists yet") }
+      }.disabled(!model.canMutate)
+    case .favourite(let favourite):
+      // Changes at once (#212); a refusal puts it back.
+      Button(
+        FavouriteStates.action(favourite: favourite),
+        systemImage: FavouriteStates.symbol(favourite: favourite)
+      ) {
+        Task { await changeFavourite(track) }
+      }
+    case .loadFavourite:
+      Button("Load favourite status", systemImage: "star") {
+        Task { await model.loadFavourite(track) }
+      }
+    case .addToLibrary:
+      Button("Add to my library", systemImage: "plus") {
+        Task { await addToLibrary(track) }
+      }.disabled(!model.canMutate)
+    case .requestMix:
+      Button("Add to my library", systemImage: "arrow.down.circle") {
+        Task { await request(track) }
+      }.disabled(!model.canMutate)
+    case .requested:
+      // #206: the same mark as an album page's requested songs.
+      Button("Requested", systemImage: "clock") {}.disabled(true)
+    case .request:
+      // At once, with Undo; sent when the server can be reached (#206).
+      Button("Request song", systemImage: "arrow.down.circle") {
+        model.requestLater(track)
+      }.disabled(!model.canRequest)
+    case .download:
+      // D-106: the quality is chosen in a pop-up.
+      Menu("Download", systemImage: "arrow.down.circle") {
+        Button("Original") { Task { await model.download([track]) } }
+        Button("Smaller AAC copy") { Task { await model.download([track], quality: "aac") } }
+      }
+    case .sendToWatch:
+      Button("Send to Apple Watch", systemImage: "applewatch") {
+        Task { await sendToWatch(track) }
+      }
+    case .removeFromLibrary:
+      // At once, with Undo (D-79, #214, D-108).
+      Button("Remove from library", systemImage: "minus.circle", role: .destructive) {
+        model.removeFromLibraryLater(track)
+      }
+    }
+  }
+  private func changeFavourite(_ track: Track) async {
+    do { try await model.tapFavourite(track) } catch is CancellationError {} catch {
+      model.message = error.userMessage
+    }
+  }
+  private func add(_ track: Track, to playlist: Playlist) async {
+    do {
+      try await model.saveEdit(
+        OfflineMutation(action: "append", playlistId: playlist.id, track: track))
+      model.confirmations += 1
+    } catch is CancellationError {} catch { model.message = error.userMessage }
+  }
+  private func addToLibrary(_ track: Track) async {
+    do {
+      _ = try await model.performPersonal { try await $0.addMembership(trackIds: [track.id]) }
+      model.confirmations += 1
+    } catch is CancellationError {} catch { model.message = error.userMessage }
+  }
+  private func request(_ track: Track) async {
     do {
       let result = try await model.performPersonal { try await $0.requestMusic([track]) }
-      message = .info(
-        "Requested: \(result.created) new, \(result.existing) already asked for, \(result.skipped) left out."
-          + (result.downloadsEnabled ? "" : " Downloads are off on the server, so it will wait."))
-    } catch is CancellationError {} catch { message = .error(error.userMessage) }
+      if result.downloadsEnabled {
+        model.confirmations += 1
+      } else {
+        model.message = "Requested. Downloads are off on the server, so it will wait."
+      }
+    } catch is CancellationError {} catch { model.message = error.userMessage }
+  }
+  /// D-103: a success tap, no text; a failure says why.
+  private func sendToWatch(_ track: Track) async {
+    switch await model.watch?.enqueue([track]) {
+    case .sent: model.confirmations += 1
+    case .failed(let reason): model.message = reason
+    case .superseded, nil: break
+    }
+  }
+}
+
+/// Looks up what a song's ⋯ menu needs before it can open (#229): the
+/// library's own copy (#211), again after each sync, off the main thread in
+/// the library store, and the favourite state this iPhone already holds. The
+/// server is never asked for every row's favourite; the menu offers to load
+/// one it doesn't know.
+struct SongActionsLookup<Content: View>: View {
+  let model: AppModel
+  let track: Track
+  @ViewBuilder let content: (SongActionsMenu) -> Content
+  @State private var own: Track?
+  /// The song the lookup answered; another song (the player's next) waits
+  /// for its own.
+  @State private var looked: String?
+  var body: some View {
+    let found = looked == track.id
+    content(SongActionsMenu(model: model, opened: track, own: found ? own : nil, looked: found))
+      .task(id: Key(id: track.id, revision: model.libraryRevision)) {
+        let copy = await model.ownCopy(of: track)
+        guard !Task.isCancelled else { return }
+        own = copy
+        looked = track.id
+        await model.peekFavourite(SongMenu.resolved(own: copy, live: model.liveState(track)))
+      }
+  }
+  private struct Key: Hashable {
+    let id: String
+    let revision: Int
   }
 }
 

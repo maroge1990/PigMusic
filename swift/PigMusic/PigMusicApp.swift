@@ -240,14 +240,6 @@ struct LibraryShell: View {
         }
         .undoBarSheet(model)
       }
-      .sheet(item: $model.actionTrack) {
-        // A half-height card like the web's ⋯ menu; drag up for every action.
-        SongActionsView(model: model, track: $0.actionTrack)
-          .undoBarSheet(model)
-          .presentationDetents([.medium, .large])
-          .presentationDragIndicator(.visible)
-          .presentationContentInteraction(.scrolls)
-      }
       #if DEBUG
         // Headless UI review: --tab=<name>, --demo-play and --show-player.
         .task {
@@ -263,15 +255,6 @@ struct LibraryShell: View {
             if !arguments.contains("--demo-autoplay") { model.player.pause() }
             // The full player opens only from a MiniPlayer tap; screenshots need it.
             if arguments.contains("--show-player") { showPlayer = true }
-          }
-          // #210: a song's ⋯ card with an Undo waiting, as after Request song
-          // (the demo's songs are all in the library, so none can be requested).
-          if arguments.contains("--undo-in-sheet") {
-            while model.songs.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
-            let song = model.songs[0]
-            model.actionTrack = song
-            try? await Task.sleep(for: .seconds(1))
-            model.undo.schedule("ui-test:" + song.id, label: "Requested " + song.title) { true }
           }
         }
       #endif
