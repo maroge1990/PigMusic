@@ -77,12 +77,15 @@ def test_watch_audio_does_not_wait_for_the_manifest_round_trip():
 
 def test_the_watch_manifest_is_built_from_one_reading_of_the_archive():
     """#218: a publish read the records, then the files after two hand-overs
-    had deleted them, and listed 5 of 97 songs; the Watch deleted the rest."""
+    had deleted them, and listed 5 of 97 songs; the Watch deleted the rest.
+    The listing rule itself is tested in PigKit (WatchListingTests)."""
     phone = (APP / "WatchPhoneController.swift").read_text()
     publish = body(phone, "private func publishOnce(")
     assert "downloads.records.filter" not in publish
     assert "localFiles(" not in publish
     assert "await downloads.archive.listing(" in publish
+    assert "WatchListing.songs(" in publish
+    assert "(published?.songs ?? []) + appliedSongs" in publish
 
 
 def test_forgetting_changed_sources_removes_them_before_any_suspension():

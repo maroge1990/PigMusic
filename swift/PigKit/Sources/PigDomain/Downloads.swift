@@ -73,6 +73,14 @@ public struct DownloadRecord: Codable, Sendable, Identifiable, Equatable {
     total = 0
   }
 }
+extension DownloadRecord {
+  /// A Watch copy the Watch confirmed holding (#218): the record stays, so the
+  /// Watch's library keeps listing the song and its storage still counts, but
+  /// the iPhone's own file of it is gone. Saved with the records as a ready
+  /// record without a file name; only the Watch's copies ever become one.
+  public var delivered: Bool { state == "ready" && fileName == nil && checksum != nil }
+}
+
 public enum OfflineFailure: Error, LocalizedError, Sendable {
   case authentication, integrity, quota, unsafeResponse, cancelled
   /// Removing an album's or playlist's songs from the device failed (#128).

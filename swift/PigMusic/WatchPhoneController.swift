@@ -62,9 +62,15 @@ import UIKit
   /// it files their audio on arrival. Any other song waits there for its
   /// manifest, so fewer of those are sent at a time.
   @ObservationIgnored private var committed: Set<String> = []
+  /// The songs of that manifest: the Watch may hold any of them, so none
+  /// leaves the next manifest while its record stays (#218).
+  @ObservationIgnored private var appliedSongs: [CompanionSong] = []
+  /// The songs last logged as kept on the Watch without an iPhone copy.
+  @ObservationIgnored private var keptLogged: Set<String> = []
   private func forgetConfirmations() {
     lastReceipt = nil
     committed = []
+    appliedSongs = []
   }
   /// When each song passed each step on its way to the Watch (#219).
   @ObservationIgnored private(set) var deliveryLog = WatchDeliveryLog()
@@ -129,6 +135,7 @@ import UIKit
             if confirmed.manifestApplied {
               lastReceipt = confirmed
               committed = Set(manifest.songs.map(WatchDelivery.identity))
+              appliedSongs = manifest.songs
               noteDelivery { log in
                 for id in confirmed.ready.keys {
                   log.arrived(id, at: confirmed.arrivals?[id] ?? Date())
@@ -222,6 +229,7 @@ import UIKit
         if saved.receipt.manifestApplied {
           lastReceipt = saved.receipt
           committed = Set(old.songs.map(WatchDelivery.identity))
+          appliedSongs = old.songs
         }
         confirmedAt = saved.at
         downloads?.budgetBytes = saved.receipt.budgetBytes
@@ -627,15 +635,23 @@ import UIKit
       log.retain(Set(listing.records.map(\.id)))
       for record in ready { log.ready(record.id) }
     }
-    // A song the Watch holds stays listed without the iPhone's copy (#218);
-    // with no file, its audio is never sent again.
-    var songs: [CompanionSong] = []
-    for record in ready {
-      if let checksum = record.checksum, files[record.id] != nil || record.delivered {
-        songs.append(CompanionSong(track: record.track, checksum: checksum, bytes: record.total))
+    // A song stays listed while its record stays, with the checksum it was
+    // listed with, even without the iPhone's copy: a hand-over or a refetch
+    // never deletes it from the Watch; only a removal does (#218).
+    let sameAccountListing = published?.context.account == namespace
+    let listed = WatchListing.songs(
+      records: listing.records, hasFile: { files[$0] != nil },
+      earlier: sameAccountListing ? (published?.songs ?? []) + appliedSongs : [],
+      held: sameAccountListing ? lastReceipt?.ready ?? [:] : [:])
+    var songs = listed.songs
+    if listed.held != keptLogged {
+      keptLogged = listed.held
+      if !listed.held.isEmpty {
+        DiagnosticsLog.shared.record(
+          "watch",
+          "keeping \(listed.held.count) songs the Watch holds listed while the iPhone has no copy")
       }
     }
-    songs.sort { $0.id < $1.id }
     let ids = Set(songs.map(\.id))
     var remainingOccurrences = 10000
     // Only playlists sent to the Watch appear there, including empty ones.

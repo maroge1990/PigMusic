@@ -1,14 +1,6 @@
 import Foundation
 import PigDomain
 
-extension DownloadRecord {
-  /// A Watch copy the Watch confirmed holding (#218): the record stays, so the
-  /// Watch's library keeps listing the song and its storage still counts, but
-  /// the iPhone's own file of it is gone. Saved with the records as a ready
-  /// record without a file name; only the Watch's copies ever become one.
-  public var delivered: Bool { state == "ready" && fileName == nil && checksum != nil }
-}
-
 /// What the Watch's confirmation means for the iPhone's copies of the songs
 /// sent to it (#218). The iPhone kept a hidden AAC copy of every one; once the
 /// Watch confirms holding a song, that copy is deleted, and a song the Watch
