@@ -201,10 +201,11 @@ struct RequestsView: View {
       if !groups.isEmpty {
         Section("Transfers") {
           ForEach(groups) { group in
+            let items = group.items.filter {
+              !model.undo.hides(AppModel.undoKey(cancelRequest: $0.id))
+            }
             DisclosureGroup {
-              ForEach(
-                group.items.filter { !model.undo.hides(AppModel.undoKey(cancelRequest: $0.id)) }
-              ) { item in
+              ForEach(items) { item in
                 songRow(item)
                   .swipeActions {
                     if Self.cancellable.contains(item.status) {
@@ -212,22 +213,15 @@ struct RequestsView: View {
                     }
                   }
               }
-              let failed = group.items.filter { ["failed", "cancelled"].contains($0.status) }
-              if failed.count > 1 {
-                Button("Retry \(failed.count) songs") { Task { await retry(failed) } }
-                  .disabled(loading || !model.canMutate)
-              }
             } label: {
-              VStack(alignment: .leading, spacing: 4) {
-                CollectionRow(group.title, subtitle: group.artist + " · " + group.summary) {
-                  ArtworkThumb(
-                    model: model, source: group.releaseId.map { .release($0) }, title: group.title)
-                }
-                if group.state != "done" {
-                  ProgressView(value: min(1, max(0, group.progress)))
-                }
-              }
-              .accessibilityElement(children: .combine)
+              // The album's mark acts on all its songs (D-110).
+              TransferGroupLabel(
+                model: model, title: group.title, subtitle: group.artist + " · " + group.summary,
+                artwork: group.releaseId.map { .release($0) },
+                control: TransferGroupControl(items.map { ($0.id, Self.control($0)) }),
+                noun: group.songs == 1 ? "song" : "album", progress: group.progress,
+                disabled: loading || !model.canMutate
+              ) { tap, ids in Task { await act(tap, ids: ids) } }
             }
           }
           if next != nil {
@@ -248,32 +242,42 @@ struct RequestsView: View {
   private static let cancellable: Set<String> = [
     "waiting_for_sources", "searching", "downloading", "validating",
   ]
+  private static func control(_ item: RequestGroupItem) -> TransferControl {
+    TransferControl.server(status: item.status, progress: item.requestProgress)
+  }
+  /// A song, whose mark is its control (D-109): pause, resume or retry.
   private func songRow(_ item: RequestGroupItem) -> some View {
-    VStack(alignment: .leading, spacing: 4) {
-      Text(item.title)
-      Text(
-        [
-          RequestStatus.label(item.status), item.source.map(RequestSource.name) ?? "",
-          item.quality ?? "",
-        ]
-        .filter { !$0.isEmpty }.joined(separator: " · ")
-      ).font(PigType.caption).foregroundStyle(.secondary)
-      if let progress = item.requestProgress {
-        ProgressView(value: min(1, max(0, progress)))
+    HStack(spacing: 4) {
+      VStack(alignment: .leading, spacing: 4) {
+        Text(item.title)
+        Text(
+          [
+            RequestStatus.label(item.status), item.source.map(RequestSource.name) ?? "",
+            item.quality ?? "",
+          ]
+          .filter { !$0.isEmpty }.joined(separator: " · ")
+        ).font(PigType.caption).foregroundStyle(.secondary)
+        if let error = item.error, !error.isEmpty {
+          StatusText(error, kind: .error)
+        }
       }
-      if let error = item.error, !error.isEmpty {
-        StatusText(error, kind: .error)
-      }
-      if ["failed", "cancelled"].contains(item.status) {
-        Button("Retry request") { Task { await retry([item]) } }
-          .disabled(loading || !model.canMutate)
-      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .accessibilityElement(children: .combine)
+      TransferMarkButton(Self.control(item)) { tap in Task { await act(tap, ids: [item.id]) } }
+        .disabled(loading || !model.canMutate)
     }
   }
-  private func retry(_ items: [RequestGroupItem]) async {
+  /// Pauses, resumes or retries these requests, then reads the list again.
+  private func act(_ tap: TransferTap, ids: [String]) async {
     do {
-      for item in items {
-        _ = try await model.performPersonal { try await $0.retryRequest(id: item.id) }
+      for id in ids {
+        _ = try await model.performPersonal { service in
+          switch tap {
+          case .pause: try await service.pauseRequest(id: id)
+          case .resume: try await service.resumeRequest(id: id)
+          case .retry: try await service.retryRequest(id: id)
+          }
+        }
       }
       await load(reset: true)
     } catch { self.error = error.userMessage }

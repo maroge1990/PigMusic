@@ -39,8 +39,23 @@ private struct DownloadList: View {
       }
       if !transfers.isEmpty {
         Section("Transfers") {
-          ForEach(transfers) { record in
-            TransferRow(model: model, downloads: downloads, record: record)
+          // By album or playlist, as on the Server page (D-109).
+          ForEach(DownloadGrouping.transfers(transfers) { $0.state == "ready" }) { group in
+            DisclosureGroup {
+              ForEach(group.records) { record in
+                TransferRow(model: model, downloads: downloads, record: record)
+              }
+            } label: {
+              let control = TransferGroupControl(
+                group.records.map {
+                  ($0.id, TransferControl.phone($0, progress: downloads.progress[$0.id]))
+                })
+              TransferGroupLabel(
+                model: model, title: group.title,
+                subtitle: group.lead + " · " + control.summary(done: "on your phone"),
+                artwork: group.artwork, control: control, noun: group.noun
+              ) { tap, ids in act(tap, on: group.records.filter { ids.contains($0.id) }) }
+            }
           }
           if transfers.contains(where: { $0.state != "ready" }) {
             if downloads.running || downloads.records.contains(where: { $0.state == "downloading" }) {
@@ -88,6 +103,14 @@ private struct DownloadList: View {
     }
     .confirmationDialog("Remove all downloads from this iPhone?", isPresented: $clearing) {
       Button("Remove all", role: .destructive) { Task { await downloads.clear() } }
+    }
+  }
+  /// An album's mark (D-110): pause, resume or retry these songs.
+  private func act(_ tap: TransferTap, on records: [DownloadRecord]) {
+    Task {
+      for record in records {
+        await TransferRow.act(tap, on: record, downloads: downloads)
+      }
     }
   }
 }
@@ -173,28 +196,31 @@ struct DeviceGroupsSection: View {
   }
 }
 
-/// One transfer, shown by its mark: clock (queued), pause (paused on its own),
-/// progress ring, check, or a warning that retries. Swipe or touch and hold to
-/// pause or resume the song, or cancel it (#127).
+/// One transfer, shown by its mark, which is its control (D-109): tap the
+/// clock or progress ring to pause the song, the pause circle to resume it,
+/// the retry mark to retry it. Swipe or touch and hold to pause or resume the
+/// song, or cancel it (#127).
 private struct TransferRow: View {
   let model: AppModel
   @Bindable var downloads: DownloadController
   let record: DownloadRecord
   @Environment(\.colorScheme) private var scheme
   var body: some View {
-    HStack(spacing: 12) {
-      ArtworkThumb(model: model, source: record.track.artworkSource, title: record.track.title)
+    HStack(spacing: 4) {
       VStack(alignment: .leading, spacing: 2) {
         Text(record.track.title).lineLimit(1)
         Text(record.track.artist).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
         // Said in words as well as by the red mark; the mark retries.
         if record.state == "failed", !record.isPaused { StatusText("Couldn't download", kind: .error) }
       }
-      Spacer(minLength: 0)
-      mark.frame(width: 28, height: 28)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .accessibilityElement(children: .combine)
+      .accessibilityValue(stateLabel)
+      TransferMarkButton(TransferControl.phone(record, progress: downloads.progress[record.id])) {
+        tap in
+        Task { await Self.act(tap, on: record, downloads: downloads) }
+      }
     }
-    .accessibilityElement(children: .combine)
-    .accessibilityValue(stateLabel)
     .swipeActions {
       if record.state != "ready" {
         Button("Cancel", role: .destructive) { cancel() }
@@ -230,33 +256,16 @@ private struct TransferRow: View {
       }
     }
   }
-  @ViewBuilder private var mark: some View {
-    if record.isPaused {
-      Image(systemName: "pause.circle").foregroundStyle(.secondary)
-    } else {
-      stateMark
-    }
-  }
-  @ViewBuilder private var stateMark: some View {
-    switch record.state {
-    case "ready":
-      Image(systemName: "checkmark.circle.fill").foregroundStyle(PigBrand.accent(scheme))
-    case "downloading":
-      ProgressView(value: downloads.progress[record.id] ?? 0).progressViewStyle(.circular)
-        .controlSize(.small).tint(PigBrand.accent(scheme))
-    case "failed":
-      Button {
-        Task {
-          try? await downloads.enqueue(
-            [record.track], quality: record.quality,
-            origin: record.effectiveOrigins.last ?? .direct)
-        }
-      } label: {
-        Image(systemName: "exclamationmark.arrow.circlepath")
-          .foregroundStyle(PigBrand.danger(scheme))
-      }.buttonStyle(.borderless).accessibilityLabel("Retry")
-    default:
-      Image(systemName: "clock").foregroundStyle(.secondary)
+  /// What a song's mark (or its album's) does to it.
+  static func act(_ tap: TransferTap, on record: DownloadRecord, downloads: DownloadController)
+    async
+  {
+    switch tap {
+    case .pause: await downloads.pause(id: record.id)
+    case .resume: await downloads.resume(id: record.id)
+    case .retry:
+      try? await downloads.enqueue(
+        [record.track], quality: record.quality, origin: record.effectiveOrigins.last ?? .direct)
     }
   }
   private var stateLabel: String {
@@ -270,8 +279,8 @@ private struct TransferRow: View {
   }
 }
 
-/// Downloads grouped the way they were added: by album, or by playlist. A song
-/// added both ways appears in both groups.
+/// Downloads grouped the way they were added: by album, or by playlist
+/// (`DownloadGrouping`). A song added both ways appears in both groups.
 struct DeviceGroup: Identifiable {
   let id: String
   let title: String
@@ -280,47 +289,107 @@ struct DeviceGroup: Identifiable {
   let artwork: AppModel.ArtworkSource?
   let records: [DownloadRecord]
   static func build(_ ready: [DownloadRecord]) -> [DeviceGroup] {
-    var playlists: [String: (name: String, records: [DownloadRecord])] = [:]
-    var albums: [String: [DownloadRecord]] = [:]
-    for record in ready {
-      for origin in record.effectiveOrigins {
-        if let id = origin.playlistId {
-          playlists[id, default: (origin.playlistName ?? "Playlist", [])].records.append(record)
-        } else {
-          let track = record.track
-          let key = track.albumId ?? "\(track.albumArtist ?? track.artist)|\(track.album ?? "")"
-          albums[key, default: []].append(record)
-        }
-      }
-    }
-    let playlistGroups = playlists.map { id, value in
+    DownloadGrouping.build(ready).map { group in
       DeviceGroup(
-        id: "playlist:" + id, title: value.name,
-        caption: caption("Playlist", value.records),
-        origin: DownloadOrigin(playlistId: id, playlistName: value.name),
-        artwork: value.records.lazy.compactMap(\.track.artworkSource).first,
-        records: value.records)
+        id: group.id, title: group.title, caption: caption(group.lead, group.records),
+        origin: group.origin, artwork: group.artwork, records: group.records)
     }
-    let albumGroups = albums.map { key, records in
-      let sorted = records.sorted {
-        ($0.track.discNumber ?? 1, $0.track.trackNumber ?? 0, $0.track.title)
-          < ($1.track.discNumber ?? 1, $1.track.trackNumber ?? 0, $1.track.title)
-      }
-      let first = sorted[0].track
-      return DeviceGroup(
-        id: "album:" + key, title: first.album.flatMap { $0.isEmpty ? nil : $0 } ?? first.title,
-        caption: caption(first.albumArtist ?? first.artist, sorted), origin: .direct,
-        artwork: sorted.lazy.compactMap(\.track.artworkSource).first, records: sorted)
-    }
-    func order(_ groups: [DeviceGroup]) -> [DeviceGroup] {
-      groups.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
-    }
-    return order(playlistGroups) + order(albumGroups)
   }
   private static func caption(_ lead: String, _ records: [DownloadRecord]) -> String {
     let size = ByteCountFormatter.string(
       fromByteCount: records.reduce(0) { $0 + $1.total }, countStyle: .file)
     return "\(lead) · \(records.count) song\(records.count == 1 ? "" : "s") · \(size)"
+  }
+}
+
+extension DownloadGrouping {
+  var artwork: AppModel.ArtworkSource? { records.lazy.compactMap(\.track.artworkSource).first }
+  /// For VoiceOver on the group's mark: "Pause album", "Resume playlist".
+  var noun: String { origin.playlistId == nil ? "album" : "playlist" }
+}
+
+/// The mark on the right of a transfer, which is also its control (D-109):
+/// clock, progress ring, pause circle, retry mark or check. A mark that does
+/// something is a 44 pt button with its own VoiceOver label and a light tap;
+/// it never also opens or taps its row. One that does nothing is only shown.
+struct TransferMarkButton: View {
+  let mark: TransferMark
+  let tap: TransferTap?
+  let label: String?
+  let action: () -> Void
+  @Environment(\.colorScheme) private var scheme
+  @State private var taps = 0
+  var body: some View {
+    if tap != nil, let label {
+      Button {
+        taps += 1
+        action()
+      } label: {
+        image.frame(width: 44, height: 44).contentShape(Rectangle())
+      }
+      .buttonStyle(.borderless)
+      .accessibilityLabel(label)
+      .sensoryFeedback(.impact(weight: .light), trigger: taps)
+    } else {
+      image.frame(width: 44, height: 44).accessibilityHidden(true)
+    }
+  }
+  @ViewBuilder private var image: some View {
+    switch mark {
+    case .waiting:
+      Image(systemName: "clock").foregroundStyle(.secondary)
+    case .downloading(let share):
+      ProgressView(value: share).progressViewStyle(.circular)
+        .controlSize(.small).tint(PigBrand.accent(scheme))
+    case .paused:
+      Image(systemName: "pause.circle").foregroundStyle(.secondary)
+    case .failed:
+      Image(systemName: "exclamationmark.arrow.circlepath").foregroundStyle(PigBrand.danger(scheme))
+    case .done:
+      Image(systemName: "checkmark.circle.fill").foregroundStyle(PigBrand.accent(scheme))
+    }
+  }
+}
+extension TransferMarkButton {
+  init(_ control: TransferControl, action: @escaping (TransferTap) -> Void) {
+    self.init(mark: control.mark, tap: control.tap, label: control.label) {
+      if let tap = control.tap { action(tap) }
+    }
+  }
+}
+
+/// An album's (or playlist's) row on the three Downloads pages (D-109): cover,
+/// title, "artist · summary", a progress bar while it is under way, and the
+/// album's mark, which acts on all its songs (D-110).
+struct TransferGroupLabel: View {
+  let model: AppModel
+  let title: String
+  let subtitle: String
+  let artwork: AppModel.ArtworkSource?
+  let control: TransferGroupControl
+  /// "album", "playlist" or "song", for VoiceOver.
+  let noun: String
+  /// The server's own measure of the group, where it has one.
+  var progress: Double?
+  /// Only the mark: the row still opens.
+  var disabled = false
+  let action: (TransferTap, [String]) -> Void
+  var body: some View {
+    HStack(spacing: 4) {
+      VStack(alignment: .leading, spacing: 4) {
+        CollectionRow(title, subtitle: subtitle, subtitleFigures: true) {
+          ArtworkThumb(model: model, source: artwork, title: title)
+        }
+        if control.mark != .done {
+          ProgressView(value: min(1, max(0, progress ?? control.progress)))
+        }
+      }
+      .accessibilityElement(children: .combine)
+      TransferMarkButton(mark: control.mark, tap: control.tap, label: control.label(noun)) {
+        if let tap = control.tap { action(tap, control.ids) }
+      }
+      .disabled(disabled)
+    }
   }
 }
 

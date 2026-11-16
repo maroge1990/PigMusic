@@ -9,7 +9,6 @@ import SwiftUI
 /// and Server pages, with no explanatory text (#209, D-101). Music is chosen
 /// from album, artist, playlist and song pages.
 struct WatchDownloadsView: View {
-  @Environment(\.colorScheme) private var scheme
   let model: AppModel
   @State private var clearing = false
   @State private var now = Date()
@@ -29,33 +28,9 @@ struct WatchDownloadsView: View {
         }
         if !transfers.isEmpty {
           Section("Transfers") {
-            ForEach(transfers) { record in
-              HStack(spacing: 12) {
-                ArtworkThumb(
-                  model: model, source: record.track.artworkSource, title: record.track.title)
-                VStack(alignment: .leading, spacing: 2) {
-                  Text(record.track.title).lineLimit(1)
-                  Text("\(status(record, watch: watch)) · \(record.track.artist)")
-                    .font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
-                }
-                Spacer(minLength: 0)
-                mark(record, watch: watch).frame(width: 28, height: 28)
-              }
-              .accessibilityElement(children: .combine)
-              .swipeActions {
-                if !onWatch(record, watch: watch) {
-                  // At once, with Undo (D-79), like the iPhone's own downloads.
-                  Button("Cancel", role: .destructive) {
-                    let id = record.id
-                    model.undo.schedule(
-                      AppModel.undoKey(watchTransfer: id), label: "Cancelled " + record.track.title
-                    ) {
-                      await watch.remove(id)
-                      return true
-                    }
-                  }
-                }
-              }
+            // By album or playlist, as on the Server page (D-109).
+            ForEach(DownloadGrouping.transfers(transfers) { onWatch($0, watch: watch) }) { group in
+              transferGroup(group, watch: watch)
             }
           }
         }
@@ -126,25 +101,77 @@ struct WatchDownloadsView: View {
     record.delivered
       || (record.checksum != nil && watch.receipt?.ready[record.id] == record.checksum)
   }
-  @ViewBuilder private func mark(_ record: DownloadRecord, watch: WatchPhoneController)
+  private func control(_ record: DownloadRecord, watch: WatchPhoneController) -> TransferControl {
+    TransferControl.watch(
+      record, onWatch: onWatch(record, watch: watch),
+      progress: watch.downloads?.progress[record.id])
+  }
+  /// An album's row, whose mark acts on all its songs (D-110), opening to
+  /// its songs.
+  private func transferGroup(_ group: DownloadGrouping, watch: WatchPhoneController)
     -> some View
   {
-    if onWatch(record, watch: watch) {
-      Image(systemName: "checkmark.circle.fill").foregroundStyle(PigBrand.accent(scheme))
-    } else if record.state == "failed" {
-      Button {
-        Task { await watch.enqueue([record.track], origin: record.effectiveOrigins.last ?? .direct) }
-      } label: {
-        Image(systemName: "exclamationmark.arrow.circlepath").foregroundStyle(PigBrand.danger(scheme))
-      }.buttonStyle(.borderless).accessibilityLabel("Retry")
-    } else if record.state == "ready" {
-      Image(systemName: "applewatch.radiowaves.left.and.right").foregroundStyle(.secondary)
-    } else {
-      ProgressView().controlSize(.small)
+    DisclosureGroup {
+      ForEach(group.records) { record in
+        transferRow(record, watch: watch)
+      }
+    } label: {
+      let album = TransferGroupControl(group.records.map { ($0.id, control($0, watch: watch)) })
+      TransferGroupLabel(
+        model: model, title: group.title,
+        subtitle: group.lead + " · " + album.summary(done: "on your watch"),
+        artwork: group.artwork, control: album, noun: group.noun
+      ) { tap, ids in
+        let records = group.records.filter { ids.contains($0.id) }
+        Task {
+          for record in records { await act(tap, on: record, watch: watch) }
+        }
+      }
+    }
+  }
+  /// A song, whose mark is its control (D-109). Only the iPhone's preparation
+  /// of its copy pauses; a song waiting for the Watch has nothing to tap.
+  private func transferRow(_ record: DownloadRecord, watch: WatchPhoneController) -> some View {
+    HStack(spacing: 4) {
+      VStack(alignment: .leading, spacing: 2) {
+        Text(record.track.title).lineLimit(1)
+        Text("\(status(record, watch: watch)) · \(record.track.artist)")
+          .font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .accessibilityElement(children: .combine)
+      TransferMarkButton(control(record, watch: watch)) { tap in
+        Task { await act(tap, on: record, watch: watch) }
+      }
+    }
+    .swipeActions {
+      if !onWatch(record, watch: watch) {
+        // At once, with Undo (D-79), like the iPhone's own downloads.
+        Button("Cancel", role: .destructive) {
+          let id = record.id
+          model.undo.schedule(
+            AppModel.undoKey(watchTransfer: id), label: "Cancelled " + record.track.title
+          ) {
+            await watch.remove(id)
+            return true
+          }
+        }
+      }
+    }
+  }
+  private func act(_ tap: TransferTap, on record: DownloadRecord, watch: WatchPhoneController)
+    async
+  {
+    switch tap {
+    case .pause: await watch.downloads?.pause(id: record.id)
+    case .resume: await watch.downloads?.resume(id: record.id)
+    case .retry:
+      await watch.enqueue([record.track], origin: record.effectiveOrigins.last ?? .direct)
     }
   }
   private func status(_ record: DownloadRecord, watch: WatchPhoneController) -> String {
     if onWatch(record, watch: watch) { return "On Watch" }
+    if record.isPaused { return "Paused" }
     return switch record.state {
     case "ready": "Waiting for Watch"
     case "failed": "Failed"
