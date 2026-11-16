@@ -24,6 +24,17 @@ public enum WatchListing {
     }
   }
 
+  /// The songs earlier versions listed for `account`, in the order given
+  /// (the published manifest, the last one written, the one the Watch last
+  /// applied). A manifest of another account counts for nothing; one that is
+  /// missing (a failed publication cleared it) doesn't hide the others.
+  public static func earlier(account: String?, _ manifests: CompanionManifest?...)
+    -> [CompanionSong]
+  {
+    guard let account else { return [] }
+    return manifests.compactMap { $0 }.filter { $0.context.account == account }.flatMap(\.songs)
+  }
+
   /// `records`: the Watch archive's records; `hasFile`: whether the iPhone
   /// has a song's file; `earlier`: songs of earlier versions, the published
   /// one first, then the one the Watch last confirmed applying; `held`: that

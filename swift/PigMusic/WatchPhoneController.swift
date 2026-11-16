@@ -62,15 +62,26 @@ import UIKit
   /// it files their audio on arrival. Any other song waits there for its
   /// manifest, so fewer of those are sent at a time.
   @ObservationIgnored private var committed: Set<String> = []
-  /// The songs of that manifest: the Watch may hold any of them, so none
-  /// leaves the next manifest while its record stays (#218).
-  @ObservationIgnored private var appliedSongs: [CompanionSong] = []
+  /// That manifest itself, saved across launches: the Watch may hold any of
+  /// its songs, so none leaves the next manifest while its record stays
+  /// (#218). Kept through failed publications and new versions; it counts
+  /// only for its own account, and goes with the account.
+  @ObservationIgnored private var appliedManifest: CompanionManifest?
+  @ObservationIgnored private var appliedManifestURL: URL?
+  /// The last manifest written for the Watch. Unlike `published`, a failed
+  /// publication doesn't clear it (Codex on #218).
+  @ObservationIgnored private var lastWritten: CompanionManifest?
   /// The songs last logged as kept on the Watch without an iPhone copy.
   @ObservationIgnored private var keptLogged: Set<String> = []
   private func forgetConfirmations() {
     lastReceipt = nil
     committed = []
-    appliedSongs = []
+  }
+  private func noteApplied(_ manifest: CompanionManifest) {
+    guard appliedManifest != manifest else { return }
+    appliedManifest = manifest
+    guard let appliedManifestURL, let data = try? JSONEncoder().encode(manifest) else { return }
+    try? data.write(to: appliedManifestURL, options: .atomic)
   }
   /// When each song passed each step on its way to the Watch (#219).
   @ObservationIgnored private(set) var deliveryLog = WatchDeliveryLog()
@@ -135,7 +146,7 @@ import UIKit
             if confirmed.manifestApplied {
               lastReceipt = confirmed
               committed = Set(manifest.songs.map(WatchDelivery.identity))
-              appliedSongs = manifest.songs
+              noteApplied(manifest)
               noteDelivery { log in
                 for id in confirmed.ready.keys {
                   log.arrived(id, at: confirmed.arrivals?[id] ?? Date())
@@ -208,6 +219,11 @@ import UIKit
       .flatMap { try? JSONDecoder().decode([String: Set<String>].self, from: $0) } ?? [:]
     manifestURL = directory.appendingPathComponent("watch-manifest.json")
     receiptURL = directory.appendingPathComponent("watch-receipt.json")
+    appliedManifestURL = directory.appendingPathComponent("watch-applied-manifest.json")
+    appliedManifest =
+      appliedManifestURL.flatMap { try? Data(contentsOf: $0) }
+      .flatMap { try? JSONDecoder().decode(CompanionManifest.self, from: $0) }
+    lastWritten = nil
     deliveryLogURL = directory.appendingPathComponent("watch-delivery.json")
     deliveryLog =
       deliveryLogURL.flatMap { try? Data(contentsOf: $0) }
@@ -221,6 +237,7 @@ import UIKit
       old.context == context
     {
       published = old
+      lastWritten = old
       if let saved = receiptURL.flatMap({ try? Data(contentsOf: $0) })
         .flatMap({ try? JSONDecoder().decode(SavedReceipt.self, from: $0) }),
         saved.receipt.context == context
@@ -229,7 +246,6 @@ import UIKit
         if saved.receipt.manifestApplied {
           lastReceipt = saved.receipt
           committed = Set(old.songs.map(WatchDelivery.identity))
-          appliedSongs = old.songs
         }
         confirmedAt = saved.at
         downloads?.budgetBytes = saved.receipt.budgetBytes
@@ -598,6 +614,10 @@ import UIKit
     subscriptionsURL = nil
     if let receiptURL { try? FileManager.default.removeItem(at: receiptURL) }
     receiptURL = nil
+    if let appliedManifestURL { try? FileManager.default.removeItem(at: appliedManifestURL) }
+    appliedManifestURL = nil
+    appliedManifest = nil
+    lastWritten = nil
     sent.reset()
     link?.cancelTransfers()
     advance(account: nil)
@@ -638,11 +658,13 @@ import UIKit
     // A song stays listed while its record stays, with the checksum it was
     // listed with, even without the iPhone's copy: a hand-over or a refetch
     // never deletes it from the Watch; only a removal does (#218).
-    let sameAccountListing = published?.context.account == namespace
+    // Whatever cleared `published` (a failed write, a newer Watch revision),
+    // the manifests written and applied for this account still count.
     let listed = WatchListing.songs(
       records: listing.records, hasFile: { files[$0] != nil },
-      earlier: sameAccountListing ? (published?.songs ?? []) + appliedSongs : [],
-      held: sameAccountListing ? lastReceipt?.ready ?? [:] : [:])
+      earlier: WatchListing.earlier(
+        account: namespace, published, lastWritten, appliedManifest),
+      held: lastReceipt?.context.account == namespace ? lastReceipt?.ready ?? [:] : [:])
     var songs = listed.songs
     if listed.held != keptLogged {
       keptLogged = listed.held
@@ -726,6 +748,7 @@ import UIKit
           return
         }
         try data.write(to: manifestURL, options: .atomic)
+        lastWritten = next
       } catch {
         published = nil
         failPublish(error.userMessage)

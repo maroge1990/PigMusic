@@ -155,4 +155,44 @@ import Testing
     // Both files survive the Watch's clean-up.
     #expect(await watch.receipt().ready == all)
   }
+
+  /// Codex on #218: a failed manifest write cleared the published manifest,
+  /// and with it every earlier song, so the retry dropped a song being
+  /// fetched again and the Watch deleted its audio.
+  @Test func aFailedPublicationDoesNotDropASongBeingFetchedAgain() async throws {
+    let root = folder()
+    let watchRoot = folder()
+    defer {
+      try? FileManager.default.removeItem(at: root)
+      try? FileManager.default.removeItem(at: watchRoot)
+    }
+    let archive = try await archive(root, ["a", "b"])
+    let first = CompanionContext(revision: 1, account: "one")
+    let applied = CompanionManifest(context: first, songs: await listed(archive).songs)
+    let watch = try CompanionArchive(directory: watchRoot)
+    try await watch.apply(first)
+    try await watch.apply(applied)
+    for song in applied.songs {
+      let incoming = folder()
+      try payload(song.id).write(to: incoming)
+      try await watch.accept(
+        incoming, ticket: CompanionFile(context: first, songId: song.id, checksum: song.checksum))
+    }
+    let all = ["a": checksum("a"), "b": checksum("b")]
+    try await archive.settleHandOver(listed: all, ready: all, applied: true)
+    // An applied confirmation that missed a queues it again...
+    try await archive.settleHandOver(listed: all, ready: ["b": checksum("b")], applied: true)
+    // ...and the next manifest's write fails: nothing is published (nil),
+    // nothing new written. The retry runs before a's copy is ready.
+    let earlier = WatchListing.earlier(account: "one", nil, nil, applied)
+    let retry = await listed(archive, earlier: earlier)
+    #expect(retry.songs.map(\.id) == ["a", "b"])
+    let second = CompanionContext(revision: 3, account: "one")
+    try await watch.apply(second)
+    try await watch.apply(CompanionManifest(context: second, songs: retry.songs))
+    #expect(await watch.receipt().ready == all)
+    // Another account's manifests never count.
+    #expect(WatchListing.earlier(account: "two", applied).isEmpty)
+    #expect(WatchListing.earlier(account: nil, applied).isEmpty)
+  }
 }

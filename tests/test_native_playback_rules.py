@@ -85,7 +85,7 @@ def test_the_watch_manifest_is_built_from_one_reading_of_the_archive():
     assert "localFiles(" not in publish
     assert "await downloads.archive.listing(" in publish
     assert "WatchListing.songs(" in publish
-    assert "(published?.songs ?? []) + appliedSongs" in publish
+    assert "account: namespace, published, lastWritten, appliedManifest" in publish
 
 
 def test_a_watch_link_failure_clears_once_a_publish_gets_through():
