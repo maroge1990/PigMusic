@@ -5,16 +5,16 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 16 Nov 2026 (Melbourne), late night.*
+*Overwritten at the end of every session. 17 Nov 2026 (Melbourne), morning.*
 
-- **Live:** release `watchbg-20261116-v1`, server `762bc6b`, healthy. **TestFlight:** 0.2.0 (1034) from `762bc6b`.
-- **Batch 24 (#219, D-113):** Watch copies prepared while the iPhone is locked (server prepares, background
-  downloader, no polling), stopping after 2 h with nothing new on the Watch until the app is opened; diagnostics show
-  background events and MetricKit battery figures. Codex: one high fixed and confirmed; medium filed as #231.
-- **Batch 23 (#229, D-112):** song actions are a pop-up menu (⋯, long press, Now Playing). Medium filed as #230.
-- **Batches 20–22** checked by Mark on 1021 and closed.
-- **Decisions:** D-112 (song menu), D-113 (Watch background with a 2 h stop). Next: D-114.
-- **Mac:** about 14 GB free; Mark's PigTV project shares the simulators and runs `simctl shutdown all`, which can kill
+- **Live:** release `retry-20261117-v1`, server `5154afa`, healthy. **TestFlight:** 0.2.0 (1041) from `5154afa`.
+- **Batch 25 (device round on 1034):** a song that fails while paused shows its failure and retry mark, its pause
+  kept for automatic re-adds (#232); Remove all asks with a centred alert (#233, D-114); one Clear finished button,
+  pink only when there is something to clear (#234); a failed song asked for again from a playlist no longer answers
+  500, and ServerBusy is said in words (#235). Codex: one medium fixed and confirmed; nothing open.
+- **Waiting on Mark's device check:** #229 song menu, #219 Watch background delivery and battery figures, #232–#235.
+- **Decisions:** D-114 (Remove all alert). Next: D-115.
+- **Mac:** about 15 GB free; Mark's PigTV project shares the simulators and runs `simctl shutdown all`, which can kill
   our tap-through runs.
 
 ## Now
