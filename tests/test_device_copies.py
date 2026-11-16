@@ -456,3 +456,49 @@ def test_source_hashes_survive_a_restart(tmp_path, monkeypatch):
     assert DeviceCopies(copies.store).manifest("song", "original")["sha256"] == (
         checksum(source)
     )
+
+
+def test_many_copies_are_asked_for_in_one_request(tmp_path, monkeypatch):
+    """#219 (D-113): the phone asks the server to prepare every Watch copy in
+    one request and later downloads the finished ones; the server converts
+    them on its own. Only the person's own songs are answered."""
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg is required for the AAC encoder version")
+    app, owner, member, token, track = household(tmp_path, monkeypatch)
+    root = tmp_path / "nas"
+    (root / "private").mkdir(parents=True)
+    (root / "private/song.mp3").write_bytes(b"original-media-unchanged")
+    monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(root))
+    kicks = []
+    monkeypatch.setattr(DeviceCopies, "kick", lambda self: kicks.append(1))
+    ask = {"track_ids": ["song", "missing", "song"], "quality": "aac"}
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token},
+    ) as client:
+        # Not in the member's library yet: nothing is prepared or revealed.
+        response = client.post("/api/v1/device-copies", json=ask)
+        assert response.status_code == 200, response.text
+        assert response.json() == {
+            "copies": [
+                {"track_id": "song", "device_copy": None},
+                {"track_id": "missing", "device_copy": None},
+            ]
+        }
+        assert not kicks
+        app.state.store.user_libraries.add(member, ["song"])
+        copies = client.post("/api/v1/device-copies", json=ask).json()["copies"]
+        assert [c["track_id"] for c in copies] == ["song", "missing"]
+        assert copies[1]["device_copy"] is None
+        song = copies[0]["device_copy"]
+        assert song["state"] == "queued" and song["quality"] == "aac"
+        assert "private" not in json.dumps(copies)
+        # Saved as a job, so the server converts it whether or not the phone
+        # asks again, and its converters were started.
+        assert app.state.device_copies.read(song["key"])["state"] == "queued"
+        assert kicks
+        too_many = {"track_ids": [f"s{i}" for i in range(101)]}
+        assert client.post("/api/v1/device-copies", json=too_many).status_code == 422
+    with TestClient(app, base_url="https://private.ts.net") as anonymous:
+        assert anonymous.post("/api/v1/device-copies", json=ask).status_code == 401
