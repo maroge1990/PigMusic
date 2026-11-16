@@ -7,9 +7,13 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 *Overwritten at the end of every session. 16 Nov 2026 (Melbourne), late morning.*
 
-- **Live:** release `warm-20261116-v1`, server `629079a`, healthy (rollback container `PigMusic-before-warm-20261116-v1`).
-  **TestFlight:** 0.2.0 (979) from `629079a`, uploaded 16 Nov 10:11 by `scripts/testflight.sh` (cloud signing, build
-  = commit count).
+- **Live:** release `warm-20261116-v1`, server `629079a`, healthy. **TestFlight:** 0.2.0 (985) from `21da13b`,
+  uploaded 16 Nov 13:36 (native only; server unchanged).
+- **Device round in progress (#184), 16 Nov:** step 1 pass; the Watch lost all its music (#218: a hand-over race made
+  the iPhone publish a 5-song list instead of 97, then a refetch flip-flop). Batch 19 (`d0d6e24..21da13b`) fixes it
+  and the stale "not installed" text (#208); two Codex rounds, two highs fixed and confirmed. Rarer remaining risks:
+  #226. Songs don't reach the Watch with the iPhone locked (#219; D-51 prepares copies only in the foreground: a
+  decision for Mark).
 - **Built and waiting only for Mark's device round:** batches 13–18 (#126, #127, #202, #203, #206–#221, #223), plus
   older device checks (#112, #116, #117, #123, #124, #149, #157–#163, #168, #176, #178, #180, #183). The round's 22
   steps are on [#184](https://github.com/maroge1990/PigMusic/issues/184).
@@ -35,8 +39,8 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Next
 
-No build work is queued: the next batch comes from Mark's device round. Small findings left: #225 (test workers'
-memory growth).
+Next batch comes from the device round. Queued: #226 (an unreadable download list or a source change must not
+empty the Watch), #219 (locked delivery, after Mark decides on D-51), #225 (test workers' memory growth).
 
 ## Later
 
