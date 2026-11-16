@@ -5,9 +5,12 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 16 Nov 2026 (Melbourne), evening.*
+*Overwritten at the end of every session. 16 Nov 2026 (Melbourne), night.*
 
-- **Live:** release `pause-20261116-v1`, server `0632ec6`, healthy. **TestFlight:** 0.2.0 (1012) from `0632ec6`.
+- **Live:** release `again-20261116-v1`, server `8662317`, healthy. **TestFlight:** 0.2.0 (1021) from `8662317`.
+- **Batch 22 (16 Nov), Mark's checks of 1012:** Watch songs waiting for the Watch can be paused (#228; held back, the
+  manifest unchanged); a removed song can be requested again (#211, D-111: your own request lifts your own removal's
+  block; a re-download never reuses the removed id). Codex rounds 1–2, three findings fixed and confirmed.
 - **Batch 21 (16 Nov), Downloads pages (#228, D-109/D-110):** the server pauses and resumes one request (new status
   `paused`; asking again resumes it); This iPhone, Watch and Server pages group transfers by album, the mark on the
   right pauses, resumes or retries a song, and an album's mark does it for the whole album. Codex rounds 1–2, one
@@ -18,12 +21,12 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 - **Device round on build 985 (#184):** 13 steps pass; 17 (Shazam) and 18 (Reduce Transparency, Larger Text) on hold.
   Songs reach the Watch mainly with its app open (#219, D-51).
 - **Decisions:** D-108 (removal hides everywhere until Undo runs out), D-109 (one design for the Downloads pages),
-  D-110 (an album's mark acts on the whole album). Next: D-111.
+  D-110 (an album's mark acts on the whole album), D-111 (your request overrides your own removal's block). Next: D-112.
 - **Mac:** about 15 GB free.
 
 ## Now
 
-1. **Mark checks build 1012:** batch 20 (#206, #207, #210, #211, #214, #227) and batch 21 (#228), then steps 17 and
+1. **Mark checks build 1021:** batch 20 (#206, #207, #210, #211, #214, #227) and batch 21 (#228), then steps 17 and
    18 of #184.
 2. **YouTube trial ends ~21 Nov** (#193): keep or remove, Mark's decision.
 3. **Retirement, 28 Nov** (#201): remove what batches 4, 6 and 8 replaced once #191's pass marks are met (taps that
