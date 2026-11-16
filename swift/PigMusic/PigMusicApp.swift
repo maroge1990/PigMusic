@@ -13,6 +13,8 @@ import UIKit
   var body: some Scene {
     WindowGroup {
       RootView(model: model)
+        // The Undo bar's own window, above sheets (#210).
+        .background { UndoOverlayInstaller(model: model).accessibilityHidden(true) }
         .overlay { if starting { PigBrandSplash().transition(splashExit) } }
         .task {
           await model.restore()
@@ -189,17 +191,19 @@ struct LibraryShell: View {
     tabs
       .sheet(isPresented: $showPlayer) {
         NowPlayingView(model: model) { artistRoute = $0 }
-          .undoBar(model, inSheet: true)
+          .undoBarSheet(model)
       }
       .sheet(isPresented: $showAccount) {
         NavigationStack {
           AccountView(model: model).pigCanvas()
             .toolbar { Button("Done") { showAccount = false } }
         }
+        .undoBarSheet(model)
       }
       .sheet(item: $model.actionTrack) {
         // A half-height card like the web's ⋯ menu; drag up for every action.
         SongActionsView(model: model, track: $0.actionTrack)
+          .undoBarSheet(model)
           .presentationDetents([.medium, .large])
           .presentationDragIndicator(.visible)
           .presentationContentInteraction(.scrolls)
@@ -219,6 +223,15 @@ struct LibraryShell: View {
             if !arguments.contains("--demo-autoplay") { model.player.pause() }
             // The full player opens only from a MiniPlayer tap; screenshots need it.
             if arguments.contains("--show-player") { showPlayer = true }
+          }
+          // #210: a song's ⋯ card with an Undo waiting, as after Request song
+          // (the demo's songs are all in the library, so none can be requested).
+          if arguments.contains("--undo-in-sheet") {
+            while model.songs.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
+            let song = model.songs[0]
+            model.actionTrack = song
+            try? await Task.sleep(for: .seconds(1))
+            model.undo.schedule("ui-test:" + song.id, label: "Requested " + song.title) { true }
           }
         }
       #endif
@@ -282,8 +295,8 @@ struct LibraryShell: View {
         }
       }
     }
-    // One Undo bar for every page of every tab (#210), above the mini player.
-    .undoBar(model)
+    // The one Undo bar rests above the mini player on every tab (#210).
+    .undoBarResting(model, active: destination == selection)
     // Older systems: the player docks directly above the tab bar inside each
     // tab, so it never covers the tabs or the end of a list.
     .safeAreaInset(edge: .bottom, spacing: 0) {

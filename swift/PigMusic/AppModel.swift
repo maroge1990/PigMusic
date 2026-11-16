@@ -23,8 +23,8 @@ enum PlayOrigin: Hashable {
   var watch: WatchPhoneController?
   /// Removals, hides and cancels waiting for their Undo (D-79, #183).
   let undo = UndoQueue()
-  /// Open sheets carrying the Undo bar: the tabs' bar waits for them (#210).
-  var undoSheets = 0
+  /// Where the one Undo bar sits: above a sheet or the mini player (#210).
+  let undoPlacement = UndoPlacement()
   /// Undos VoiceOver has heard while they wait, so a bar moving from a
   /// sheet to the tabs doesn't announce one twice (#210).
   @ObservationIgnored private var announcedUndo: Set<String> = []

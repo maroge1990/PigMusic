@@ -132,7 +132,6 @@ struct SongActionsView: View {
           looked = true
         }
     }
-    .undoBar(model, inSheet: true)
     .interactiveDismissDisabled(model.mutationActive)
   }
   private func loadFavourite() async {

@@ -2,6 +2,7 @@ import PigAPI
 import PigBrand
 import PigDomain
 import SwiftUI
+import UIKit
 
 /// Album or artist artwork, matching the web client: a rose halo with initials
 /// while loading or when no image exists. A refresh never blanks a loaded image.
@@ -791,33 +792,166 @@ struct UndoBar: View {
   }
 }
 
-/// One Undo bar for the whole app (#210): the tabs carry it just above the
-/// mini player and tab bar, and a sheet carries it just above its own bottom
-/// while it is open. When the last sheet closes the tabs' bar slides up into
-/// place over 0.3 s (a fade with Reduce Motion); the action's 10 s run on.
-private struct UndoBarHost: ViewModifier {
+/// Where the app's one Undo bar sits (#210), in window points: just above
+/// the topmost open sheet that reports its top edge, otherwise just above the
+/// mini player and tab bar. The bar is drawn in its own window above the
+/// app's (UndoOverlayWindow), so no sheet clips or covers it.
+@MainActor @Observable final class UndoPlacement {
+  enum Slot: Hashable { case resting, aboveSheet, overSheet }
+  /// The bottom of the selected tab's page: the top of the mini player and tab bar.
+  fileprivate var restingBottom: CGFloat?
+  /// The top edges of the open sheets that carry `undoBarSheet`, newest last.
+  fileprivate var sheets: [(id: UUID, top: CGFloat)] = []
+  /// The bar's height with its margins, as last drawn.
+  fileprivate var barHeight: CGFloat = 60
+
+  /// Where the bar's bottom margin ends in a window `height` points tall. A
+  /// sheet too tall to leave room above it has the bar over its bottom.
+  func bottom(height: CGFloat, safeTop: CGFloat, safeBottom: CGFloat) -> (CGFloat, Slot) {
+    if let top = sheets.last?.top {
+      if top - barHeight >= safeTop { return (top, .aboveSheet) }
+      return (height - safeBottom, .overSheet)
+    }
+    return (restingBottom ?? height - safeBottom, .resting)
+  }
+  fileprivate func sheet(_ id: UUID, top: CGFloat?) {
+    let index = sheets.firstIndex { $0.id == id }
+    switch (index, top) {
+    case (let index?, let top?): if sheets[index].top != top { sheets[index].top = top }
+    case (nil, let top?): sheets.append((id, top))
+    case (let index?, nil): sheets.remove(at: index)
+    case (nil, nil): break
+    }
+  }
+}
+
+/// The app's one Undo bar in the overlay window (#210). It slides between the
+/// places UndoPlacement gives over 0.3 s; with Reduce Motion it fades out of
+/// one place and into the next instead. The action's 10 s run on throughout.
+struct UndoOverlay: View {
   let model: AppModel
-  let inSheet: Bool
+  /// Reports the bar's frame, so the window passes every other touch through.
+  let onFrame: (CGRect) -> Void
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  private var shown: Bool { inSheet || model.undoSheets == 0 }
+  var body: some View {
+    GeometryReader { proxy in
+      let safe = proxy.safeAreaInsets
+      let height = proxy.size.height + safe.top + safe.bottom
+      let place = model.undoPlacement.bottom(
+        height: height, safeTop: safe.top, safeBottom: safe.bottom)
+      let bottom = place.0
+      let slot = place.1
+      let curve: Animation = reduceMotion ? .easeInOut(duration: 0.3) : .smooth(duration: 0.3)
+      ZStack(alignment: .bottom) {
+        Color.clear
+        VStack(spacing: 0) {
+          Spacer(minLength: 0)
+          UndoBar(model: model)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+              onFrame(frame)
+              if frame.height > 0, frame.height != model.undoPlacement.barHeight {
+                model.undoPlacement.barHeight = frame.height
+              }
+            }
+            .onDisappear { onFrame(.zero) }
+        }
+        .padding(.bottom, max(0, height - bottom))
+        // Reduce Motion: a new identity per place, so the bar fades across.
+        .id(reduceMotion ? slot : .resting)
+        .transition(.opacity)
+      }
+      .ignoresSafeArea()
+      .animation(curve, value: model.undo.items.last?.id)
+      .animation(curve, value: slot)
+      .animation(reduceMotion ? nil : curve, value: bottom)
+    }
+    .preferredColorScheme(
+      model.preferences.appearance == "dark"
+        ? .dark : (model.preferences.appearance == "light" ? .light : nil))
+  }
+}
+
+/// A window above the app's own, sheets included, that takes touches only on
+/// the Undo bar (#210); every other touch goes through to the app.
+final class UndoOverlayWindow: UIWindow {
+  var barFrame: CGRect = .zero
+  override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    guard barFrame.contains(point) else { return nil }
+    return super.hitTest(point, with: event)
+  }
+}
+
+/// Opens the Undo overlay window on the app's scene, once.
+struct UndoOverlayInstaller: UIViewRepresentable {
+  let model: AppModel
+  func makeUIView(context: Context) -> InstallerView { InstallerView(model: model) }
+  func updateUIView(_ view: InstallerView, context: Context) {}
+
+  final class InstallerView: UIView {
+    let model: AppModel
+    private var overlay: UndoOverlayWindow?
+    init(model: AppModel) {
+      self.model = model
+      super.init(frame: .zero)
+      isUserInteractionEnabled = false
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override func didMoveToWindow() {
+      super.didMoveToWindow()
+      guard overlay == nil, let scene = window?.windowScene else { return }
+      let overlay = UndoOverlayWindow(windowScene: scene)
+      overlay.windowLevel = .normal + 1
+      let host = UIHostingController(
+        rootView: UndoOverlay(model: model) { [weak overlay] in overlay?.barFrame = $0 })
+      host.view.backgroundColor = .clear
+      overlay.rootViewController = host
+      overlay.isHidden = false
+      self.overlay = overlay
+    }
+  }
+}
+
+private struct UndoBarSheet: ViewModifier {
+  let model: AppModel
+  @State private var id = UUID()
   func body(content: Content) -> some View {
     content
-      .safeAreaInset(edge: .bottom, spacing: 0) {
-        Group { if shown { UndoBar(model: model) } }
-          .animation(
-            reduceMotion ? .easeInOut(duration: 0.3) : .smooth(duration: 0.3),
-            value: shown ? model.undo.items.last?.id : nil)
+      .background {
+        Color.clear.ignoresSafeArea()
+          .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: {
+            model.undoPlacement.sheet(id, top: $0)
+          }
       }
-      .onAppear { if inSheet { model.undoSheets += 1 } }
-      .onDisappear { if inSheet { model.undoSheets = max(0, model.undoSheets - 1) } }
+      .onDisappear { model.undoPlacement.sheet(id, top: nil) }
+  }
+}
+
+private struct UndoBarResting: ViewModifier {
+  let model: AppModel
+  let active: Bool
+  @State private var bottom: CGFloat?
+  func body(content: Content) -> some View {
+    // A zero-height inset at the page's bottom, where the tabs' bar used to sit.
+    content.safeAreaInset(edge: .bottom, spacing: 0) {
+      Color.clear.frame(height: 0)
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: {
+          bottom = $0
+          if active { model.undoPlacement.restingBottom = $0 }
+        }
+        .onChange(of: active) { _, now in
+          if now, let bottom { model.undoPlacement.restingBottom = bottom }
+        }
+    }
   }
 }
 
 extension View {
-  /// Shows the app's Undo bar at the bottom of this view: once on the tabs,
-  /// and on each sheet (`inSheet`), which hides the tabs' bar while open.
-  func undoBar(_ model: AppModel, inSheet: Bool = false) -> some View {
-    modifier(UndoBarHost(model: model, inSheet: inSheet))
+  /// A sheet the Undo bar floats just above while it is open (#210).
+  func undoBarSheet(_ model: AppModel) -> some View { modifier(UndoBarSheet(model: model)) }
+  /// A tab's page: while no sheet is open the Undo bar rests just above its
+  /// bottom, the mini player and tab bar. Only the selected tab reports.
+  func undoBarResting(_ model: AppModel, active: Bool) -> some View {
+    modifier(UndoBarResting(model: model, active: active))
   }
 }
 

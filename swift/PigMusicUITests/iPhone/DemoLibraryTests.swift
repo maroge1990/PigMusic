@@ -49,6 +49,43 @@ final class DemoLibraryTests: XCTestCase {
     XCTAssertEqual(pig.frame.midY, screen.midY, accuracy: 1)
   }
 
+  /// #210: an Undo offered in a song's ⋯ card floats whole just above the
+  /// card, then settles above the mini player once the card closes, and goes
+  /// when its 10 s are up.
+  func testTheUndoBarFloatsAboveASheetThenTheMiniPlayer() {
+    continueAfterFailure = false
+    app.launchArguments = ["--demo", "--demo-play", "--undo-in-sheet"]
+    app.launch()
+    let card = app.navigationBars["Song actions"]
+    expect(card, timeout: 30)
+    let undo = app.buttons["Undo"]
+    expect(undo)
+    let label = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Requested '"))
+      .firstMatch
+    expect(label)
+    let screen = app.windows.firstMatch.frame
+    XCTAssertTrue(undo.isHittable)
+    // Above the card's top edge, over the dimmed page, and wholly on screen.
+    XCTAssertLessThanOrEqual(undo.frame.maxY, card.frame.minY)
+    XCTAssertGreaterThan(undo.frame.minY, screen.minY)
+    // Inset like the bar on the tabs: 16 pt margins plus the bar's own padding.
+    XCTAssertGreaterThanOrEqual(label.frame.minX, screen.minX + 32 - 1)
+    XCTAssertLessThanOrEqual(undo.frame.maxX, screen.maxX - 32 + 1)
+    app.buttons["Done"].tap()
+    XCTAssertTrue(card.waitForNonExistence(timeout: 5))
+    // The same bar, now just above the mini player.
+    expect(miniPlayer)
+    let settled = expectation(
+      for: NSPredicate { _, _ in
+        undo.exists && undo.frame.maxY <= self.miniPlayer.frame.minY
+          && undo.frame.maxY > self.miniPlayer.frame.minY - 80
+      }, evaluatedWith: nil)
+    wait(for: [settled], timeout: 3)
+    XCTAssertTrue(undo.isHittable)
+    XCTAssertEqual(app.buttons.matching(identifier: "Undo").count, 1)
+    XCTAssertTrue(undo.waitForNonExistence(timeout: 12))
+  }
+
   /// #62: an album opened from Home looks like the same album in Library.
   func testAHomeAlbumOpensAsALibraryAlbum() {
     launch()
