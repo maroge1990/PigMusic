@@ -1,4 +1,4 @@
-from .queue_states import CANCELLABLE, FINISHED, PAUSED, PENDING, RETRYABLE, sql
+from .queue_states import CANCELLABLE, DONE, FINISHED, PAUSED, PENDING, RETRYABLE, sql
 from .lifecycle import TimedRLock, coordinated, step
 import itertools
 import json
@@ -1635,7 +1635,9 @@ class Store:
     ):
         """Queue catalogue songs. `resume_paused` only for a person asking
         for them now (#228): a song whose job they or another paused
-        resumes. Automatic paths (artist monitoring) leave a pause alone."""
+        resumes, and a song whose job finished but which is no longer in the
+        household library (removed since) is queued again (#211). Automatic
+        paths (artist monitoring) leave both alone."""
         settings = self.download_settings()
         if preferred and tracks:
             album_id = self.album_key(tracks[0])
@@ -1726,7 +1728,8 @@ class Store:
                                 "SELECT id,payload FROM queue WHERE status NOT IN "
                                 "('cancelled','failed') AND "
                                 "json_extract(payload,'$.song_key')=json(?) "
-                                "ORDER BY created_at,id",
+                                # A job still to finish before a finished one.
+                                "ORDER BY status IN " + sql(DONE) + ",created_at,id",
                                 (json.dumps(payload["song_key"]),),
                             )
                             if compatible(request_intent(json.loads(row[1])), payload)
@@ -1745,6 +1748,22 @@ class Store:
                     not in {None, payload.get("musicbrainz_release_id")}
                 ):
                     key = identifier(key, payload["musicbrainz_release_id"])
+                    prior = conn.execute(
+                        "SELECT status,payload FROM queue WHERE id=?", (key,)
+                    ).fetchone()
+                # A finished job stands for its song only while the song is
+                # in the household library: one asked for now after it was
+                # removed is a new job (#211). Not the finished row again: its
+                # id is the published song's, which the removal keeps hidden
+                # (and Recovery may restore). The new job's id follows from
+                # the finished one's, so asking twice still makes one job.
+                while (
+                    resume_paused
+                    and prior
+                    and prior[0] in DONE
+                    and track["status"] == "missing"
+                ):
+                    key = identifier(key, "again")
                     prior = conn.execute(
                         "SELECT status,payload FROM queue WHERE id=?", (key,)
                     ).fetchone()

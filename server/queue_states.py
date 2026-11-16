@@ -21,6 +21,9 @@ PENDING = ACTIVE + (PAUSED,)
 CANCELLABLE = PAUSABLE + (PAUSED,)
 # Finished: Clear removes these (never a paused request).
 FINISHED = ("completed", "downloaded", "failed", "cancelled")
+# Finished with a file. Asked for again once the song has left the library,
+# one is queued again (#211).
+DONE = ("completed", "downloaded")
 # Finished without a file: Retry queues these again.
 RETRYABLE = ("failed", "cancelled")
 
