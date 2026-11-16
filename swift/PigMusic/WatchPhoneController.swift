@@ -427,42 +427,24 @@ import UIKit
     await publish()
   }
   /// The person's pause on Watch songs not yet on the Watch (D-109). A song
-  /// still being prepared pauses its preparation; a song ready on the iPhone
-  /// is held back: its audio isn't handed to the Watch, and the next publish
-  /// cancels a transfer already queued. Either way it stays in the manifest,
-  /// so pausing never deletes anything on the Watch.
+  /// still being prepared pauses its preparation and stays held once ready; a
+  /// song ready on the iPhone is held back: its audio isn't handed to the
+  /// Watch, and the next publish cancels a transfer already queued. The
+  /// archive records it in one step, whatever state the song reached by then
+  /// (Codex round 1 on #228). Either way it stays in the manifest, so pausing
+  /// never deletes anything on the Watch.
   func pause(_ ids: [String]) async {
-    guard let downloads else { return }
-    var holding: Set<String> = []
-    for id in ids {
-      guard let record = downloads.records.first(where: { $0.id == id }) else { continue }
-      if record.state == "ready" {
-        holding.insert(id)
-      } else {
-        await downloads.pause(id: id)
-      }
-    }
-    guard !holding.isEmpty else { return }
-    try? await downloads.archive.setHeld(ids: holding, true)
-    await downloads.reload()
+    guard let downloads, !ids.isEmpty else { return }
+    await downloads.pauseForWatch(ids: Set(ids))
     await publish()
   }
   /// The person's Resume: a held song's audio goes out as normal, at once.
   func resume(_ ids: [String]) async {
-    guard let downloads else { return }
-    var releasing: Set<String> = []
-    for id in ids {
-      guard let record = downloads.records.first(where: { $0.id == id }) else { continue }
-      if record.held == true {
-        releasing.insert(id)
-        if let checksum = record.checksum { sent.forget("audio:\(id):\(checksum)") }
-      } else {
-        await downloads.resume(id: id)
-      }
+    guard let downloads, !ids.isEmpty else { return }
+    await downloads.resumeForWatch(ids: Set(ids))
+    for record in downloads.records where ids.contains(record.id) {
+      if let checksum = record.checksum { sent.forget("audio:\(record.id):\(checksum)") }
     }
-    guard !releasing.isEmpty else { return }
-    try? await downloads.archive.setHeld(ids: releasing, false)
-    await downloads.reload()
     await publish()
   }
   private func subscribe(_ id: String, name: String?) {

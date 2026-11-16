@@ -369,6 +369,26 @@ import PigDomain
     await reload()
     resume(automatic: true)
   }
+  /// The person's pause on Watch songs (D-109; see `DownloadArchive.pauseForWatch`).
+  /// The archive decides each song's state in the same step that records the
+  /// pause, so a copy finishing meanwhile is held rather than missed. A
+  /// worker preparing one restarts without it, as `pause(id:)` does.
+  public func pauseForWatch(ids: Set<String>) async {
+    let preparing = (try? await archive.pauseForWatch(ids: ids)) ?? []
+    if preparing.isEmpty {
+      await reload()
+    } else {
+      await interrupt()
+      resume(automatic: true)
+    }
+  }
+  /// The person's Resume for Watch songs: held copies go to the Watch again,
+  /// and paused ones are prepared with the rest.
+  public func resumeForWatch(ids: Set<String>) async {
+    try? await archive.resumeForWatch(ids: ids)
+    await reload()
+    resume(automatic: true)
+  }
   /// Stops work for an internal change without recording a Pause (#65).
   private func interrupt() async {
     await stopWorker()

@@ -69,7 +69,8 @@ public struct DownloadRecord: Codable, Sendable, Identifiable, Equatable {
   public var watchChecksum: String?
   public var watchBytes: Int64?
   /// The person paused a Watch song whose copy is ready on the iPhone but not
-  /// yet on the Watch (D-109): its audio is held back until they resume it.
+  /// yet on the Watch (D-109), or paused while it was still being prepared:
+  /// once ready, its audio is held back until they resume it.
   /// It stays in the Watch's manifest, so holding it never deletes anything
   /// there. Kept apart from `paused`, which a ready song may carry over from
   /// before (#127) without being held.

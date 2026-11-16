@@ -81,8 +81,10 @@ public actor DownloadArchive {
         // including a ready Watch copy they held back (D-109).
         if old.state != "ready" {
           replacement.paused = old.paused
+          replacement.held = old.held
         } else if old.isHeld {
           replacement.paused = true
+          replacement.held = true
         }
         // The Watch keeps listing a copy it may hold (#218).
         if old.delivered {
@@ -299,17 +301,44 @@ public actor DownloadArchive {
     records[index].paused = paused ? true : nil
     try persist()
   }
-  /// The person's pause on Watch songs ready on the iPhone but not yet on the
-  /// Watch (D-109): their audio isn't handed to the Watch until they resume
-  /// them. Only the transfer step reads it; the Watch's listing doesn't, so it
-  /// never removes a song from the manifest. Saved with the list.
-  public func setHeld(ids: Set<String>, _ held: Bool) throws {
+  /// The person's pause on Watch songs not yet on the Watch (D-109), recorded
+  /// in one step whatever state each song is in by then. A ready copy is held:
+  /// its audio isn't handed to the Watch until they resume it. A copy still
+  /// being prepared is paused, and held too, so it stays held when its file
+  /// finishes anyway (Codex round 1 on #228: a pause racing that completion
+  /// let the song go to the Watch). Only the transfer step reads `held`; the
+  /// Watch's listing doesn't, so it never removes a song from the manifest.
+  /// The iPhone's own downloads use `setPaused`, which this leaves alone.
+  /// Gives the ids whose preparation it paused.
+  @discardableResult
+  public func pauseForWatch(ids: Set<String>) throws -> Set<String> {
+    var preparing: Set<String> = []
     var changed = false
     for index in records.indices where ids.contains(records[index].id) {
-      if held && (records[index].state != "ready" || records[index].delivered) { continue }
-      let value: Bool? = held ? true : nil
-      guard records[index].held != value else { continue }
-      records[index].held = value
+      let record = records[index]
+      switch record.state {
+      case "ready" where !record.delivered:
+        guard record.held != true else { continue }
+        records[index].held = true
+      case "queued", "downloading":
+        preparing.insert(record.id)
+        guard record.paused != true || record.held != true else { continue }
+        records[index].paused = true
+        records[index].held = true
+      default: continue
+      }
+      changed = true
+    }
+    if changed { try persist() }
+    return preparing
+  }
+  /// The person's Resume for Watch songs: the hold and any pause go.
+  public func resumeForWatch(ids: Set<String>) throws {
+    var changed = false
+    for index in records.indices where ids.contains(records[index].id) {
+      guard records[index].held != nil || records[index].paused != nil else { continue }
+      records[index].held = nil
+      records[index].paused = nil
       changed = true
     }
     if changed { try persist() }

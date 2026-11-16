@@ -278,7 +278,7 @@ import Testing
     try await archive.settleHandOver(
       listed: all, ready: ["a": checksum("a")], applied: true)
     // Mark pauses the whole album.
-    try await archive.setHeld(ids: ["a", "b", "c"], true)
+    try await archive.pauseForWatch(ids: ["a", "b", "c"])
     let records = await archive.snapshot()
     func record(_ id: String) throws -> DownloadRecord {
       try #require(records.first { $0.id == id })
@@ -304,7 +304,7 @@ import Testing
     let b = try #require(await archive.snapshot().first { $0.id == "b" })
     #expect(b.delivered && b.held == nil)
     // Resumed, c goes out as normal; the listing never changed.
-    try await archive.setHeld(ids: ["c"], false)
+    try await archive.resumeForWatch(ids: ["c"])
     #expect(await archive.snapshot().allSatisfy { !$0.isHeld })
     #expect(await listed(archive, earlier: published).songs == published)
     let resumed = WatchDelivery.audio(
@@ -312,11 +312,60 @@ import Testing
       due: { _ in true })
     #expect(resumed.send.map(\.id) == ["c"])
     // Added again in another quality while held, its new copy stays paused.
-    try await archive.setHeld(ids: ["c"], true)
+    try await archive.pauseForWatch(ids: ["c"])
     try await archive.enqueue([try track("c")], quality: "original")
     let readded = try #require(await archive.snapshot().first { $0.id == "c" })
-    #expect(readded.isPaused)
+    #expect(readded.isPaused && readded.held == true)
     #expect(await listed(archive, earlier: published).songs == published)
+  }
+
+  /// Codex round 1 on #228: the Pause chose its path from a copy of the
+  /// records, so a copy finishing just before the Pause (refused as ready) or
+  /// just after it (finishing cleared the pause) went to the Watch anyway.
+  /// The archive now records the Pause in one step and keeps it as a hold.
+  @Test func aWatchPauseRacingTheCopyFinishingStillHoldsTheSong() async throws {
+    let root = folder()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let archive = try DownloadArchive(directory: root)
+    try await archive.enqueue(try ["before", "after", "phone"].map(track), quality: "aac")
+    func finish(_ id: String) async throws {
+      let incoming = folder()
+      try payload(id).write(to: incoming)
+      let record = try #require(await archive.snapshot().first { $0.id == id })
+      try await archive.publishFile(incoming, record: record, manifest: try copy(id), budget: 1 << 30)
+    }
+    func record(_ id: String) async throws -> DownloadRecord {
+      try #require(await archive.snapshot().first { $0.id == id })
+    }
+    // Finished just before the Pause reached the archive.
+    try await finish("before")
+    #expect(try await archive.pauseForWatch(ids: ["before"]).isEmpty)
+    // Paused while preparing, then finished anyway.
+    #expect(try await archive.pauseForWatch(ids: ["after"]) == ["after"])
+    #expect(try await record("after").isPaused)
+    try await finish("after")
+    #expect(try await record("after").isHeld)
+    #expect(try await record("after").paused == nil)
+    // The iPhone's own pause keeps #127: a finished file is no longer paused.
+    try await archive.setPaused(id: "phone", true)
+    try await finish("phone")
+    #expect(try await record("phone").isHeld == false)
+    // Neither paused song's audio goes to the Watch until Resume; both stay listed.
+    let listing = await listed(archive)
+    #expect(listing.songs.map(\.id) == ["after", "before", "phone"])
+    let receipt = CompanionReceipt(
+      context: CompanionContext(revision: 1, account: "one"), ready: [:], usedBytes: 0,
+      budgetBytes: 1 << 30)
+    func sent() async -> [String] {
+      let paused = Set(await archive.snapshot().filter(\.isHeld).map(\.id))
+      return WatchDelivery.audio(
+        songs: listing.songs, receipt: receipt, inFlight: [], paused: paused,
+        hasFile: { _ in true }, due: { _ in true }
+      ).send.map(\.id)
+    }
+    #expect(await sent() == ["phone"])
+    try await archive.resumeForWatch(ids: ["before", "after"])
+    #expect(await sent() == ["after", "before", "phone"])
   }
 
   @Test func recordsSavedBeforeTheWatchFieldsStillLoad() throws {
