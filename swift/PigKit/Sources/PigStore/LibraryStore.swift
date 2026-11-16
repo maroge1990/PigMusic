@@ -177,8 +177,8 @@ public actor LibraryStore {
   }
   /// This person's own copy of `song` (#211), so a song shown from Home, a
   /// catalogue page, search or a playlist offers what the library holds:
-  /// by id (or its library id), else a copy of the same recording or title
-  /// that the server's matching accepts (`SongIdentity.matches`).
+  /// by id (or its library id), else the copy of the same recording or
+  /// title that the server's matching would take (`SongIdentity.pick`).
   public func ownCopy(of song: Track) throws -> Track? {
     try database.read { db in
       func decode(_ data: Data?) throws -> Track? {
@@ -200,7 +200,8 @@ public actor LibraryStore {
             "SELECT payload FROM tracks WHERE json_extract(CAST(payload AS TEXT),'$.musicbrainz_recording_id')=? ORDER BY id LIMIT 50",
           arguments: [recording])
       }
-      let words = SongIdentity.words(song.title)
+      // Titles compare without edition qualifiers, so are looked up that way.
+      let words = SongIdentity.titleKey(song.title)
       if !words.isEmpty {
         let terms = words.map { "title : \"" + $0 + "\"" }.joined(separator: " AND ")
         rows += try Data.fetchAll(
@@ -209,11 +210,20 @@ public actor LibraryStore {
             "SELECT t.payload FROM tracks t JOIN track_search s ON t.rowid=s.rowid WHERE track_search MATCH ? ORDER BY t.id LIMIT 200",
           arguments: [terms])
       }
-      // Only what the server's matching accepts, its own edition first; a
-      // conflicting recording or another explicit edition is never taken.
-      let candidates = try rows.compactMap { try decode($0) }
-      return candidates.first { SongIdentity.sameEdition(song, $0) }
-        ?? candidates.first { SongIdentity.matches(song, $0) }
+      // Each with its album, for the server's order among editions.
+      let tracks = try rows.compactMap { try decode($0) }
+      var albums: [String: Album] = [:]
+      for id in Set(tracks.compactMap(\.albumId)) {
+        if let data = try Data.fetchOne(
+          db, sql: "SELECT payload FROM albums WHERE id=?", arguments: [id])
+        {
+          albums[id] = try LibraryCodec.decoder().decode(Album.self, from: data)
+        }
+      }
+      // Only the copy the server's matching would take; nothing it would
+      // send to review (an ambiguous edition, a conflicting recording).
+      return SongIdentity.pick(
+        song, from: tracks.map { (track: $0, album: $0.albumId.flatMap { albums[$0] }) })
     }
   }
   /// Each known track's source revision (nil when it has none) in one query.

@@ -180,13 +180,14 @@ public enum LibraryNamespace {
 
 /// Whether a song shown from elsewhere (Home, a catalogue page, search, a
 /// playlist entry) is a song the person's library holds (#211), by the
-/// server's matching (`server/matching.py`, `LibraryIndex.match`): the same
-/// edition (artist, title, album and album artist, no conflicting release
-/// or recording id, lengths within 5 s), else, unless the song was asked
-/// for as one edition (`explicitEdition`), any edition of the same song
-/// (title, lead artist and kind of recording; no conflicting recording id;
-/// lengths within 8 s). Anything the server would send to review is no
-/// match: Remove and Download must never act on another recording.
+/// server's matching (`server/matching.py`, `LibraryIndex.match`): the one
+/// copy of the same edition (artist, title, album and album artist, no
+/// conflicting release or recording id, lengths within 5 s), else, unless
+/// the song was asked for as one edition (`explicitEdition`), the best copy
+/// of the same song on any edition (edition-free title, lead artist and
+/// kind of recording; no conflicting recording id; lengths within 8 s).
+/// Anything the server would send to review is no match: Remove and
+/// Download must never act on another recording or an arbitrary file.
 public enum SongIdentity {
   /// Lowercased words without punctuation, as the server's `normalise`
   /// compares them: "Choosin’ Texas" is ["choosin", "texas"].
@@ -194,6 +195,45 @@ public enum SongIdentity {
     text.precomposedStringWithCompatibilityMapping.lowercased()
       .components(separatedBy: CharacterSet.alphanumerics.inverted)
       .filter { !$0.isEmpty }
+  }
+  // The server's qualifier patterns (`EDITION`, `DISTINCT`, `FEATURE`,
+  // `QUALIFIER`), unchanged.
+  nonisolated(unsafe) private static let edition = try! NSRegularExpression(
+    pattern:
+      #"\b(deluxe|expanded|edition|remaster(ed)?|anniversary|bonus|special|collector'?s|reissue|explicit|clean|mono|stereo|super|album version|(19|20)\d\d)\b"#,
+    options: .caseInsensitive)
+  nonisolated(unsafe) private static let distinct = try! NSRegularExpression(
+    pattern:
+      #"\b(live|acoustic|demos?|remix(es)?|mix|edit|instrumentals?|karaoke|sessions?|unplugged|cover|reprise|orchestral|piano)\b"#,
+    options: .caseInsensitive)
+  nonisolated(unsafe) private static let feature = try! NSRegularExpression(
+    pattern: #"^\s*(feat\.?|ft\.?|featuring|with)\s"#, options: .caseInsensitive)
+  nonisolated(unsafe) private static let qualifier = try! NSRegularExpression(
+    pattern: #"\s*(?:[\(\[]([^\)\]]*)[\)\]]|\s-\s([^\(\)\[\]]*))\s*$"#)
+  private static func found(_ pattern: NSRegularExpression, in text: String) -> Bool {
+    pattern.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+  }
+  /// The title without trailing edition qualifiers (the server's
+  /// `strip_edition`): "Go Your Own Way - 2004 Remaster" is "Go Your Own
+  /// Way", but "Brat (Live)" stays. Featured-artist credits go too.
+  public static func stripEdition(_ title: String) -> String {
+    var text = title
+    while let match = qualifier.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+      let whole = Range(match.range, in: text)
+    {
+      let named = [1, 2].lazy.compactMap { Range(match.range(at: $0), in: text) }.first
+        .map { String(text[$0]) } ?? ""
+      guard found(feature, in: named) || (found(edition, in: named) && !found(distinct, in: named))
+      else { break }
+      text = String(text[..<whole.lowerBound])
+    }
+    let stripped = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    return stripped.isEmpty ? title : stripped
+  }
+  /// Titles compare without edition qualifiers (the server's `title_key`).
+  public static func titleKey(_ title: String) -> [String] {
+    let key = words(stripEdition(title))
+    return key.isEmpty ? words(title) : key
   }
   /// The lead credit's words.
   public static func leadArtist(_ artist: String) -> [String] {
@@ -216,13 +256,26 @@ public enum SongIdentity {
     Set(words(track.album ?? "").compactMap { flavours[$0] })
       .union(track.recordingKind ?? [])
   }
-  /// Whether `owned` may stand in for `song`.
-  public static func matches(_ song: Track, _ owned: Track) -> Bool {
-    sameEdition(song, owned) || (song.explicitEdition != true && same(song, owned))
+  /// The library copy the server's matching would take for `song` among
+  /// `candidates` (each with its album when known), or nil when it would
+  /// take none or send the song to review.
+  public static func pick(_ song: Track, from candidates: [(track: Track, album: Album?)])
+    -> Track?
+  {
+    var seen = Set<String>()
+    let unique = candidates.filter { seen.insert($0.track.id).inserted }
+    // Several copies of one edition are usable only when their hashes prove
+    // the same bytes, which this phone can't see: none of them is taken.
+    let edition = unique.filter { sameEdition(song, $0.track) }
+    if edition.count == 1 { return edition[0].track }
+    if song.explicitEdition == true { return nil }
+    // Any edition: the server takes the best copy (`any_edition`).
+    return unique.filter { same(song, $0.track) }
+      .min { rank(song, $0.track, $0.album) < rank(song, $1.track, $1.album) }?.track
   }
-  /// The same song on any edition (`any_edition`, `compatible`).
+  /// The same song on any edition (`compatible`).
   public static func same(_ song: Track, _ owned: Track) -> Bool {
-    guard !words(song.title).isEmpty, words(song.title) == words(owned.title),
+    guard !titleKey(song.title).isEmpty, titleKey(song.title) == titleKey(owned.title),
       leadArtist(song.artist) == leadArtist(owned.artist), kinds(song) == kinds(owned),
       !conflict(song.musicbrainzRecordingId, owned.musicbrainzRecordingId)
     else { return false }
@@ -244,6 +297,26 @@ public enum SongIdentity {
       !conflict(song.musicbrainzRecordingId, owned.musicbrainzRecordingId)
     else { return false }
     return closeLengths(song, owned, within: 5)
+  }
+  /// The server's order among any-edition copies: the requested album's
+  /// title first, then the artist's own albums, the fullest, the oldest,
+  /// then by id.
+  private static func rank(_ song: Track, _ owned: Track, _ album: Album?) -> (
+    Int, Int, Int, Int, String
+  ) {
+    let title = titleKey(album?.title ?? owned.album ?? "")
+    let artist = leadArtist(album?.artist ?? owned.albumArtist ?? owned.artist)
+    let year =
+      (album?.year?.text).flatMap { text in
+        text.range(of: #"\d{4}"#, options: .regularExpression).flatMap { Int(text[$0]) }
+      } ?? 0
+    return (
+      title == titleKey(song.album ?? "") ? 0 : 1,
+      artist == leadArtist(song.artist) ? 0 : 1,
+      -(album?.trackCount ?? (album?.tracks?.count ?? 0)),
+      year == 0 ? 9999 : year,
+      owned.id
+    )
   }
   private static func conflict(_ left: String?, _ right: String?) -> Bool {
     guard let left, let right, !left.isEmpty, !right.isEmpty else { return false }

@@ -110,4 +110,77 @@ struct OwnCopyTests {
     single.explicitEdition = nil
     #expect(try await store.ownCopy(of: single)?.id == "lib-edition")
   }
+
+  private func filed(_ track: Track, on album: String) -> Track {
+    var track = track
+    track.albumId = album
+    return track
+  }
+  private func editionStore() async throws -> LibraryStore {
+    let store = try LibraryStore(path: ":memory:")
+    try await store.replace(
+      LibrarySnapshot(
+        revision: "one",
+        tracks: [
+          // Two files with the same edition tags and no content identity.
+          owned("lib-twin-1", "Twin Song", "Band", album: "Twin Album", duration: 200),
+          owned("lib-twin-2", "Twin Song", "Band", album: "Twin Album", duration: 201),
+          // One song on a compilation (sorts first) and on the artist's album.
+          filed(
+            owned("lib-a-comp", "Rank Song", "Band", album: "Best Of", duration: 150), on: "comp"),
+          filed(
+            owned("lib-z-own", "Rank Song", "Band", album: "Rank Album", duration: 151), on: "own"),
+          owned("lib-song", "Song", "Band", recording: "rec-song", duration: 240),
+          owned("lib-way", "Go Your Own Way", "Fleetwood Mac", duration: 220),
+          owned("lib-dreams", "Dreams (2004 Remaster)", "Fleetwood Mac", duration: 257),
+        ],
+        albums: [
+          Album(id: "comp", title: "Best Of", artist: "Various Artists", trackCount: 20),
+          Album(id: "own", title: "Rank Album", artist: "Band", trackCount: 10),
+        ]))
+    return store
+  }
+
+  /// Codex round 2 on batch 20 (high): an explicit edition the library holds
+  /// twice, with nothing proving the files identical, goes to review on the
+  /// server: the phone must not pick one of them.
+  @Test func anAmbiguousExplicitEditionIsNoMatch() async throws {
+    let store = try await editionStore()
+    var twin = owned("catalogue:twin", "Twin Song", "Band", album: "Twin Album", duration: 200)
+    twin.explicitEdition = true
+    #expect(try await store.ownCopy(of: twin) == nil)
+    // Any edition: the server picks one copy (its album, then the fullest,
+    // then by id), and so does the phone.
+    twin.explicitEdition = nil
+    #expect(try await store.ownCopy(of: twin)?.id == "lib-twin-1")
+  }
+
+  @Test func anyEditionPrefersTheRequestedAlbumAsTheServerDoes() async throws {
+    let store = try await editionStore()
+    let song = owned("catalogue:rank", "Rank Song", "Band", album: "Rank Album (Deluxe)")
+    #expect(try await store.ownCopy(of: song)?.id == "lib-z-own")
+  }
+
+  /// Codex confirmation (medium): edition qualifiers ("- 2011 Remaster")
+  /// are not part of a song's title, as in the server's `title_key`; live
+  /// and remix qualifiers are, and known recordings still must agree.
+  @Test func anEditionQualifierDoesNotHideTheLibraryCopy() async throws {
+    let store = try await editionStore()
+    let remaster = owned(
+      "catalogue:rec-song", "Song - 2011 Remaster", "Band", recording: "rec-song", duration: 241)
+    #expect(try await store.ownCopy(of: remaster)?.id == "lib-song")
+    let way = owned("catalogue:way", "Go Your Own Way - 2004 Remaster", "Fleetwood Mac")
+    #expect(try await store.ownCopy(of: way)?.id == "lib-way")
+    let dreams = owned("catalogue:dreams", "Dreams", "Fleetwood Mac", duration: 257)
+    #expect(try await store.ownCopy(of: dreams)?.id == "lib-dreams")
+    // Live and remix stay distinct; a conflicting recording never matches.
+    #expect(
+      try await store.ownCopy(of: owned("c1", "Go Your Own Way (Live)", "Fleetwood Mac")) == nil)
+    #expect(
+      try await store.ownCopy(of: owned("c2", "Go Your Own Way - 2004 Remix", "Fleetwood Mac"))
+        == nil)
+    let conflicting = owned(
+      "catalogue:x", "Song - 2011 Remaster", "Band", recording: "rec-other-song", duration: 240)
+    #expect(try await store.ownCopy(of: conflicting) == nil)
+  }
 }
