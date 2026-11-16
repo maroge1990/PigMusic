@@ -81,4 +81,27 @@ final class ServerTests: XCTestCase {
     XCTAssertFalse(app.staticTexts["Connect and refresh your phone library first."].exists)
     expect(app.buttons["Download"])
   }
+
+  /// D-109: the iPhone page lists its transfers by album, as the Server page
+  /// does; the album row opens to its songs (#228).
+  func testThePhonesTransfersAreGroupedByAlbum() throws {
+    try signIn()
+    tap(app.tabBars.buttons["Library"])
+    let artist = app.buttons["The Test Pilots, 1 album"]
+    expect(artist, timeout: 30)
+    tap(artist)
+    tap(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Night Drive'")).firstMatch)
+    tap(app.buttons["Download"])
+    tap(app.buttons["Download smaller copies"])
+    tap(app.tabBars.buttons["Downloads"])
+    tap(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'iPhone'")).firstMatch)
+    let song = app.descendants(matching: .any)
+      .matching(NSPredicate(format: "label BEGINSWITH 'Headlights'")).firstMatch
+    // The album, not its songs: they show once it opens.
+    let album = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Night Drive'")).firstMatch
+    expect(album, timeout: 30)
+    XCTAssertFalse(song.exists, app.debugDescription)
+    tap(album)
+    expect(song)
+  }
 }
