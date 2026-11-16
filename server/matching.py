@@ -139,6 +139,20 @@ def request_intent(payload):
     return {**payload, **(payload.get("requested") or {})}
 
 
+def delivers(job, request):
+    """Whether queued `job` would deliver `request` (#211): a compatible
+    song and, for "only this edition", that very edition asked for as such.
+    An explicit job satisfies an ordinary request; never the reverse."""
+    intent = request_intent(job)
+    if not compatible(intent, request):
+        return False
+    return not request.get("explicit_edition") or bool(
+        intent.get("explicit_edition")
+        and intent.get("musicbrainz_release_id")
+        == request.get("musicbrainz_release_id")
+    )
+
+
 def compatible(left, right):
     """The one song-compatibility policy for any edition: library matching,
     queue deduplication, duplicate detection and source selection. Same lead

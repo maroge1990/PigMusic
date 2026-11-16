@@ -34,6 +34,7 @@ from .matching import (
     exclusion_key,
     request_intent,
     same_song,
+    delivers,
     song_key,
 )
 
@@ -1796,14 +1797,27 @@ class Store:
                 # removed is a new job (#211). Not the finished row again: its
                 # id is the published song's, which the removal keeps hidden
                 # (and Recovery may restore). The new job's id follows from
-                # the finished one's, so asking twice still makes one job.
+                # the finished one's, so asking twice still makes one job. A
+                # later job in the chain that another request made is joined
+                # only when it would deliver this one (an ordinary request
+                # can't stand for "only this edition"); otherwise the chain
+                # goes on to a job of this request's own.
+                stepped = False
                 while (
                     resume_paused
                     and prior
-                    and prior[0] in DONE
                     and track["status"] == "missing"
+                    and (
+                        prior[0] in DONE
+                        or (
+                            stepped
+                            and prior[0] not in RETRYABLE
+                            and not delivers(json.loads(prior[1]), payload)
+                        )
+                    )
                 ):
                     key = identifier(key, "again")
+                    stepped = True
                     prior = conn.execute(
                         "SELECT status,payload FROM queue WHERE id=?", (key,)
                     ).fetchone()

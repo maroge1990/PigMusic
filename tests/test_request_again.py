@@ -278,3 +278,41 @@ def test_a_block_someone_else_made_still_refuses(tmp_path, monkeypatch):
         assert statuses(store) == ["completed"]
         # The member's own request would lift only their own removal's block.
         assert store.user_libraries.request(member, [song()])["skipped"] == 1
+
+
+def test_an_ordinary_job_in_the_chain_never_stands_for_an_edition(
+    tmp_path, monkeypatch
+):
+    # Codex round 1: explicit edition A finished and removed, then the song
+    # asked for ordinarily from release B (a new job after A's), then A
+    # explicitly again: that must be a job for A, not B's ordinary one.
+    # And an ordinary request afterwards may join either.
+    app, client, owner, _ = household(tmp_path, monkeypatch)
+    a = song(explicit_edition=True)
+    b = song(musicbrainz_release_id="22222222-2222-4222-8222-222222222222")
+    with client:
+        store = app.state.store
+        claim = hold_downloads(store, monkeypatch)
+        client.post("/api/v1/requests", json={"tracks": [a]})
+        download(store, claim)
+        remove(client, [store.user_libraries.projection(owner)["tracks"][0]["id"]])
+        assert (
+            client.post("/api/v1/requests", json={"tracks": [b]}).json()["created"] == 1
+        )
+        explicit = client.post("/api/v1/requests", json={"tracks": [a]}).json()
+        assert (explicit["created"], explicit["existing"]) == (1, 0), explicit
+        waiting = [
+            i for i in store.queue()["items"] if i["status"] == "waiting_for_sources"
+        ]
+        assert sorted(
+            (bool(i.get("explicit_edition")), i["musicbrainz_release_id"])
+            for i in waiting
+        ) == [
+            (False, b["musicbrainz_release_id"]),
+            (True, a["musicbrainz_release_id"]),
+        ]
+        # Asked for again: each joins its own job.
+        for track in (a, b):
+            repeat = client.post("/api/v1/requests", json={"tracks": [track]})
+            assert repeat.json()["existing"] == 1, repeat.json()
+        assert len(statuses(store)) == 3
