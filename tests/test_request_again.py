@@ -225,3 +225,56 @@ def test_an_edition_asked_for_again_twice_makes_one_job(tmp_path, monkeypatch):
         ]
         assert [(c["created"], c["existing"]) for c in counts] == [(1, 0), (0, 1)]
         assert sorted(statuses(store)) == ["completed", "waiting_for_sources"]
+
+
+def test_asking_for_the_song_you_removed_lifts_your_own_block(tmp_path, monkeypatch):
+    # Mark's exact case (D-111): the same edition he removed, asked for again.
+    # His removal's exclusion gives way to his own request; the song comes
+    # back under a new id (the removal still hides the old one).
+    app, client, owner, _ = household(tmp_path, monkeypatch)
+    with client:
+        store = app.state.store
+        claim = hold_downloads(store, monkeypatch)
+        client.post("/api/v1/requests", json={"tracks": [song()]})
+        download(store, claim)
+        old = store.user_libraries.projection(owner)["tracks"][0]["id"]
+        remove(client, [old])
+
+        # Monitoring (no person asking) still respects the block.
+        automatic = store.submit_catalogue(
+            [{**song(), "status": "missing"}], user_id=owner
+        )
+        assert automatic["skipped"] == 1 and statuses(store) == ["completed"]
+
+        again = client.post("/api/v1/requests", json={"tracks": [song()]})
+        assert again.json()["created"] == 1, again.json()
+        groups = client.get("/api/v1/requests/groups").json()["groups"]
+        # Only the new request shows: the finished one it replaced is hidden.
+        assert [g["state"] for g in groups] == ["waiting"], groups
+        download(store, claim)
+        (back,) = store.user_libraries.projection(owner)["tracks"]
+        assert back["id"] != old and back["title"] == "Choosin' Texas"
+        # The block stays for automatic paths.
+        with store.connect() as conn:
+            assert conn.execute(
+                "SELECT count(*) FROM documents WHERE name LIKE 'excluded:%'"
+            ).fetchone() == (1,)
+
+
+def test_a_block_someone_else_made_still_refuses(tmp_path, monkeypatch):
+    # An administrator's removal (Recovery) is nobody's own to lift.
+    from server.recovery import Recovery
+
+    app, client, owner, member = household(tmp_path, monkeypatch, member=True)
+    with client:
+        store = app.state.store
+        claim = hold_downloads(store, monkeypatch)
+        client.post("/api/v1/requests", json={"tracks": [song()]})
+        download(store, claim)
+        identity = store.user_libraries.projection(owner)["tracks"][0]["id"]
+        Recovery(store).remove(identity)
+        refused = client.post("/api/v1/requests", json={"tracks": [song()]})
+        assert refused.json()["skipped"] == 1, refused.json()
+        assert statuses(store) == ["completed"]
+        # The member's own request would lift only their own removal's block.
+        assert store.user_libraries.request(member, [song()])["skipped"] == 1

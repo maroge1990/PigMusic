@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from .queue_states import (
     ACTIVE,
     CANCELLABLE,
+    DONE,
     FINISHED,
     PAUSABLE,
     PAUSED,
@@ -1338,7 +1339,15 @@ class UserLibrary:
                 (user_id,),
             ).fetchall()
         downloads_enabled = self.store.download_settings()["enabled"]
-        jobs = [_job(*record) for record in records]
+        # A finished job a newer one for the same song replaced (asked for
+        # again after removal, #211: its id follows from this one's) is
+        # history, not a second entry.
+        ids = {record[0] for record in records}
+        jobs = [
+            _job(*record)
+            for record in records
+            if not (record[2] in DONE and identifier(record[0], "again") in ids)
+        ]
         result = [
             _group_summary(key, songs) for key, songs in _group(jobs, user_id).items()
         ]

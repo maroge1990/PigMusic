@@ -1629,6 +1629,30 @@ class Store:
                 "downloads_enabled": settings["enabled"],
             }
 
+    @staticmethod
+    def _removed_by(conn, removal_id):
+        """The person whose own library removal made Trash record
+        `removal_id`, read from its removal operation (D-111); None for one
+        an administrator or a tidy-up made."""
+        if not removal_id:
+            return None
+        row = conn.execute(
+            "SELECT payload FROM documents WHERE name=?", ("removed:" + removal_id,)
+        ).fetchone()
+        operation_id = row and json.loads(row[0]).get("operation_id")
+        if not operation_id:
+            return None
+        row = conn.execute(
+            "SELECT payload FROM documents WHERE name=?",
+            ("library-removal:" + operation_id,),
+        ).fetchone()
+        if not row:
+            return None
+        operation = json.loads(row[0])
+        if removal_id not in operation.get("recovery_ids", []):
+            return None
+        return operation.get("user_id")
+
     @coordinated
     def submit_catalogue(
         self, tracks, preferred=None, user_id=None, resume_paused=False
@@ -1654,7 +1678,7 @@ class Store:
             conn.execute("BEGIN IMMEDIATE")
             # Read both legacy and edition-aware exclusions once per batch.
             exclusions = [
-                json.loads(r[0])["track"]
+                json.loads(r[0])
                 for r in conn.execute(
                     "SELECT payload FROM documents WHERE name >= 'excluded:' AND name < 'excluded;'"
                 )
@@ -1663,7 +1687,18 @@ class Store:
 
             scopes = request_scope(tracks)
             for track, scope in zip(tracks, scopes):
-                if any(same_song(old, track) for old in exclusions):
+                blocking = [e for e in exclusions if same_song(e["track"], track)]
+                # A person asking now lifts a block their own removal of the
+                # song made (D-111); it still stops automatic paths, and a
+                # block anyone else made still refuses.
+                if blocking and not (
+                    resume_paused
+                    and user_id
+                    and all(
+                        self._removed_by(conn, e.get("removal_id")) == user_id
+                        for e in blocking
+                    )
+                ):
                     skipped += 1
                     continue
                 if track["status"] == "downloaded":
