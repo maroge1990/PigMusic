@@ -224,8 +224,10 @@ public struct DownloadGrouping: Sendable, Identifiable {
 /// the others; only a failure for which `stops` holds (signed out, account
 /// changed, cancelled) ends the run. Gives the first failure, if any.
 public enum TransferBatch {
+  /// Runs on the caller's actor, so its closures needn't be Sendable.
   public static func run(
-    _ ids: [String], stops: (Error) -> Bool, action: (String) async throws -> Void
+    _ ids: [String], isolation: isolated (any Actor)? = #isolation,
+    stops: (Error) -> Bool, action: (String) async throws -> Void
   ) async -> Error? {
     var first: Error?
     for id in ids {
