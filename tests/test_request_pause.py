@@ -302,3 +302,23 @@ def test_the_download_log_says_paused(tmp_path):
     insert(store, "job", "paused", **song(), requested_by=[member])
     lines = store.user_libraries.request_log(member, "job")["lines"]
     assert lines[-1] == {"text": "Paused", "ok": True}
+
+
+def test_asking_again_resumes_a_paused_request_but_automatic_paths_do_not(
+    tmp_path,
+):
+    store, owner, member = fixture(tmp_path)
+    wanted = {**song("Wanted"), "status": "missing"}
+    store.user_libraries.request(member, [wanted])
+    with store.connect() as conn:
+        (key,) = conn.execute("SELECT id FROM queue").fetchone()
+    store.user_libraries.pause_request(member, key)
+    # Artist monitoring (automatic) and policy changes leave the pause alone.
+    store.submit_catalogue([wanted], user_id=owner)
+    with store.connect() as conn:
+        HouseholdPolicy(store).reconcile_pending(conn)
+    assert status(store, key) == "paused"
+    # A person asking for the song now resumes it, whoever paused it.
+    result = store.user_libraries.request(owner, [wanted])
+    assert result["existing"] == 1
+    assert status(store, key) == "waiting_for_sources"

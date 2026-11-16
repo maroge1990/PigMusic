@@ -1,4 +1,4 @@
-from .queue_states import CANCELLABLE, FINISHED, PENDING, RETRYABLE, sql
+from .queue_states import CANCELLABLE, FINISHED, PAUSED, PENDING, RETRYABLE, sql
 from .lifecycle import TimedRLock, coordinated, step
 import itertools
 import json
@@ -1630,7 +1630,12 @@ class Store:
             }
 
     @coordinated
-    def submit_catalogue(self, tracks, preferred=None, user_id=None):
+    def submit_catalogue(
+        self, tracks, preferred=None, user_id=None, resume_paused=False
+    ):
+        """Queue catalogue songs. `resume_paused` only for a person asking
+        for them now (#228): a song whose job they or another paused
+        resumes. Automatic paths (artist monitoring) leave a pause alone."""
         settings = self.download_settings()
         if preferred and tracks:
             album_id = self.album_key(tracks[0])
@@ -1764,6 +1769,12 @@ class Store:
                                 "UPDATE queue SET payload=? WHERE id=?",
                                 (json.dumps(previous), key),
                             )
+                    if resume_paused and prior[0] == PAUSED:
+                        conn.execute(
+                            "UPDATE queue SET status='waiting_for_sources',"
+                            "updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=?",
+                            (key, PAUSED),
+                        )
                     from .household_policy import HouseholdPolicy
 
                     HouseholdPolicy(self).reconcile_pending(conn)

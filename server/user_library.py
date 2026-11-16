@@ -1509,7 +1509,10 @@ class UserLibrary:
                 track = {k: v for k, v in track.items() if k != "recording_kind"}
             result = self.store.index.match(track)
             prepared.append({**track, "status": result.status})
-        return self.store.submit_catalogue(prepared, user_id=user_id)
+        # The person asks for these now: a paused one resumes (#228).
+        return self.store.submit_catalogue(
+            prepared, user_id=user_id, resume_paused=True
+        )
 
     def history(self, user_id, events, session_id):
         """Record listens of the person's songs, household songs (they play for
