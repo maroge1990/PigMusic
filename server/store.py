@@ -1631,6 +1631,19 @@ class Store:
             }
 
     @staticmethod
+    def _song_id_taken(conn, identity):
+        """Whether a song was removed under `identity` (any Trash record,
+        restored ones too): a job under it would publish a song the removal
+        hides, or one a restore would collide with (#211)."""
+        return bool(
+            conn.execute(
+                "SELECT 1 FROM documents WHERE name >= 'removed:' AND name < 'removed;' "
+                "AND json_extract(payload,'$.track_id')=? LIMIT 1",
+                (identity,),
+            ).fetchone()
+        )
+
+    @staticmethod
     def _removed_by(conn, removal_id):
         """The person whose own library removal made Trash record
         `removal_id`, read from its removal operation (D-111); None for one
@@ -1801,18 +1814,20 @@ class Store:
                 # later job in the chain that another request made is joined
                 # only when it would deliver this one (an ordinary request
                 # can't stand for "only this edition"); otherwise the chain
-                # goes on to a job of this request's own.
+                # goes on to a job of this request's own. A job is never made
+                # (or revived) under an id a song was removed under, though
+                # Clear removed the finished job that had it:
+                # the removal would hide the new song (Codex round 2).
                 stepped = False
                 while (
-                    resume_paused
-                    and prior
-                    and track["status"] == "missing"
-                    and (
-                        prior[0] in DONE
-                        or (
-                            stepped
-                            and prior[0] not in RETRYABLE
-                            and not delivers(json.loads(prior[1]), payload)
+                    self._song_id_taken(conn, key)
+                    if not prior or prior[0] in RETRYABLE
+                    else (
+                        resume_paused
+                        and track["status"] == "missing"
+                        and (
+                            prior[0] in DONE
+                            or (stepped and not delivers(json.loads(prior[1]), payload))
                         )
                     )
                 ):

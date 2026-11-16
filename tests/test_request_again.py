@@ -316,3 +316,35 @@ def test_an_ordinary_job_in_the_chain_never_stands_for_an_edition(
             repeat = client.post("/api/v1/requests", json={"tracks": [track]})
             assert repeat.json()["existing"] == 1, repeat.json()
         assert len(statuses(store)) == 3
+
+
+def test_cleared_history_never_brings_back_a_removed_id(tmp_path, monkeypatch):
+    # Codex round 2: with the finished job cleared from the Server queue
+    # (before or after the removal), and again for a song a re-download in
+    # the chain brought back and that was removed in turn, the request must
+    # still publish under a new id that the removal does not hide.
+    app, client, owner, _ = household(tmp_path, monkeypatch)
+    with client:
+        store = app.state.store
+        claim = hold_downloads(store, monkeypatch)
+        seen = []
+
+        def mine():
+            (track,) = store.user_libraries.projection(owner)["tracks"]
+            return track["id"]
+
+        client.post("/api/v1/requests", json={"tracks": [song()]})
+        download(store, claim)
+        for clear_first in (True, False, True):
+            seen.append(mine())
+            if clear_first:
+                store.clear_queue(finished_only=True)
+            remove(client, [seen[-1]])
+            if not clear_first:
+                store.clear_queue(finished_only=True)
+            assert statuses(store) == []
+            again = client.post("/api/v1/requests", json={"tracks": [song()]})
+            assert again.json()["created"] == 1, again.json()
+            download(store, claim)
+            assert mine() not in seen, seen
+        assert len(set(seen)) == 3
