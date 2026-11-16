@@ -184,10 +184,14 @@ def test_collection_rows_share_one_component_thumb_and_radius():
         "SearchViews.swift",
         "LibraryViews.swift",
         "CatalogueViews.swift",
-        "PersonalActionsViews.swift",
         "DownloadsView.swift",
     ):
         assert "CollectionRow(" in app[name], name
+    # #228: the Server page's albums use the Downloads pages' shared label,
+    # which draws them with CollectionRow.
+    assert "TransferGroupLabel(" in app["PersonalActionsViews.swift"]
+    label = app["DownloadsView.swift"].split("struct TransferGroupLabel", 1)[1]
+    assert "CollectionRow(" in label.split("\n}\n", 1)[0]
     # #209: the Watch page's albums and playlists come from the iPhone page's
     # shared section, which draws them with CollectionRow.
     assert "DeviceGroupsSection(" in app["WatchDownloadsView.swift"]
