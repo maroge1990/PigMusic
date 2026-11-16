@@ -174,3 +174,39 @@ struct TransferMarksTests {
     #expect(DownloadGrouping.build(records).map(\.title) == ["Mix", "Amber", "Blue", "lone"])
   }
 }
+
+/// Codex, batch 21 round 2: one song finishing before its pause must not
+/// leave the album's later songs downloading.
+struct TransferBatchTests {
+  struct Finished: Error {}
+  struct SignedOut: Error {}
+  actor Calls {
+    var ids: [String] = []
+    func add(_ id: String) { ids.append(id) }
+  }
+
+  @Test func aSongThatAlreadyFinishedDoesNotStopTheRest() async {
+    let calls = Calls()
+    let failure = await TransferBatch.run(["a", "b", "c"], stops: { $0 is SignedOut }) { id in
+      await calls.add(id)
+      if id == "a" { throw Finished() }
+    }
+    #expect(await calls.ids == ["a", "b", "c"])
+    #expect(failure is Finished)
+  }
+
+  @Test func signingOutStopsTheRun() async {
+    let calls = Calls()
+    let failure = await TransferBatch.run(["a", "b", "c"], stops: { $0 is SignedOut }) { id in
+      await calls.add(id)
+      if id == "a" { throw SignedOut() }
+    }
+    #expect(await calls.ids == ["a"])
+    #expect(failure is SignedOut)
+  }
+
+  @Test func allDoneGivesNoFailure() async {
+    let failure = await TransferBatch.run(["a"], stops: { _ in true }) { _ in }
+    #expect(failure == nil)
+  }
+}

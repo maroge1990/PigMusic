@@ -1,6 +1,7 @@
 import PigAPI
 import PigBrand
 import PigDomain
+import PigSync
 import SwiftUI
 
 struct SongActionsView: View {
@@ -268,19 +269,22 @@ struct RequestsView: View {
     }
   }
   /// Pauses, resumes or retries these requests, then reads the list again.
+  /// A song that changed first (it finished, say) doesn't stop the others;
+  /// signing out or a cancelled task does.
   private func act(_ tap: TransferTap, ids: [String]) async {
-    do {
-      for id in ids {
-        _ = try await model.performPersonal { service in
-          switch tap {
-          case .pause: try await service.pauseRequest(id: id)
-          case .resume: try await service.resumeRequest(id: id)
-          case .retry: try await service.retryRequest(id: id)
-          }
+    let failure = await TransferBatch.run(
+      ids, stops: { $0 is CancellationError || ($0 as? NativeFailure) == .authentication }
+    ) { id in
+      _ = try await model.performPersonal { service in
+        switch tap {
+        case .pause: try await service.pauseRequest(id: id)
+        case .resume: try await service.resumeRequest(id: id)
+        case .retry: try await service.retryRequest(id: id)
         }
       }
-      await load(reset: true)
-    } catch { self.error = error.userMessage }
+    }
+    if let failure, !(failure is CancellationError) { error = failure.userMessage }
+    await load(reset: true)
   }
   /// At once, with Undo (D-79): sent when the Undo runs out (#206).
   private func cancel(_ item: RequestGroupItem) {

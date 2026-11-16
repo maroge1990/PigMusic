@@ -218,3 +218,24 @@ public struct DownloadGrouping: Sendable, Identifiable {
     return open + groups.filter { $0.records.allSatisfy(finished) }
   }
 }
+
+/// An album's mark acts on each of its songs in turn (D-110). One song that
+/// can't take it (it finished, or someone else changed it first) doesn't stop
+/// the others; only a failure for which `stops` holds (signed out, account
+/// changed, cancelled) ends the run. Gives the first failure, if any.
+public enum TransferBatch {
+  public static func run(
+    _ ids: [String], stops: (Error) -> Bool, action: (String) async throws -> Void
+  ) async -> Error? {
+    var first: Error?
+    for id in ids {
+      do {
+        try await action(id)
+      } catch {
+        if first == nil { first = error }
+        if stops(error) { break }
+      }
+    }
+    return first
+  }
+}
