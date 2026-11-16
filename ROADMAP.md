@@ -5,25 +5,26 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 16 Nov 2026 (Melbourne), late afternoon.*
+*Overwritten at the end of every session. 16 Nov 2026 (Melbourne), evening.*
 
-- **Live:** release `warm-20261116-v1`, server `629079a`, healthy. **TestFlight:** 0.2.0 (998) from `91aec81`
-  (batch 20, native only; server unchanged).
-- **Device round on build 985 done (#184):** 13 steps pass; 17 (Shazam) and 18 (Reduce Transparency, Larger Text) on
-  hold. The Watch music loss (#218) is fixed and confirmed; songs still reach the Watch mainly with its app open
-  (#219, D-51).
-- **Batch 20 (16 Nov), the round's failures:** #206 Requested at once, #211 the song sheet acts on the library's own
-  copy by the server's matching rules, #214 a song being removed vanishes from every library list (D-108), #227 one
-  star design, #210 one floating Undo bar above sheets then the mini player, #207 splash fade that actually runs.
-  Codex rounds 1–2 and four confirmations approved; Mac tests and tap-through pass. Waits for Mark's device check on
-  998. Not measured: the first-launch cache migration's time on a large library.
-- **Decisions:** D-108 (removal hides everywhere until Undo runs out), D-109 (one design for the three Downloads
-  pages, #228). Next: D-110.
+- **Live:** release `pause-20261116-v1`, server `0632ec6`, healthy. **TestFlight:** 0.2.0 (1012) from `0632ec6`.
+- **Batch 21 (16 Nov), Downloads pages (#228, D-109/D-110):** the server pauses and resumes one request (new status
+  `paused`; asking again resumes it); This iPhone, Watch and Server pages group transfers by album, the mark on the
+  right pauses, resumes or retries a song, and an album's mark does it for the whole album. Codex rounds 1–2, one
+  medium fixed and confirmed. Waits for Mark's device check on 1012. Not verified: real taps (simulator downloads
+  finish too fast).
+- **Batch 20 (16 Nov), device-round failures:** #206, #207, #210, #211, #214, #227, in 998 and 1012. Waits for Mark's
+  device check. Not measured: the first-launch cache migration's time on a large library.
+- **Device round on build 985 (#184):** 13 steps pass; 17 (Shazam) and 18 (Reduce Transparency, Larger Text) on hold.
+  Songs reach the Watch mainly with its app open (#219, D-51).
+- **Decisions:** D-108 (removal hides everywhere until Undo runs out), D-109 (one design for the Downloads pages),
+  D-110 (an album's mark acts on the whole album). Next: D-111.
 - **Mac:** about 15 GB free.
 
 ## Now
 
-1. **Mark checks build 998** (#206, #207, #210, #211, #214, #227), then steps 17 and 18 of #184.
+1. **Mark checks build 1012:** batch 20 (#206, #207, #210, #211, #214, #227) and batch 21 (#228), then steps 17 and
+   18 of #184.
 2. **YouTube trial ends ~21 Nov** (#193): keep or remove, Mark's decision.
 3. **Retirement, 28 Nov** (#201): remove what batches 4, 6 and 8 replaced once #191's pass marks are met (taps that
    play ≥ 90%; first sound median ≤ 1.5 s, p90 ≤ 3 s; mix downloads ≥ 80%; placeholders ≤ 2%).
@@ -32,10 +33,8 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Next
 
-1. **Batch 21, Downloads pages (#228, D-109):** one design on This iPhone, Watch and Server, grouped by album; tap the
-   mark to pause, resume or retry; the server learns to pause and resume one request (API change).
-2. #226 (an unreadable download list or a source change must not empty the Watch), #219 (locked delivery, after Mark
-   decides on D-51), #225 (test workers' memory growth).
+#226 (an unreadable download list or a source change must not empty the Watch), #219 (locked delivery, after Mark
+decides on D-51), #225 (test workers' memory growth).
 
 ## Later
 
