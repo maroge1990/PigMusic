@@ -722,13 +722,13 @@ import UIKit
         let data = try JSONEncoder().encode(next)
         guard data.count <= 2 * 1024 * 1024 else {
           published = nil
-          message = "Watch metadata is too large. Choose fewer songs or shorter playlist names."
+          failPublish("Watch metadata is too large. Choose fewer songs or shorter playlist names.")
           return
         }
         try data.write(to: manifestURL, options: .atomic)
       } catch {
         published = nil
-        message = error.userMessage
+        failPublish(error.userMessage)
         return
       }
     }
@@ -736,11 +736,13 @@ import UIKit
     // publishes again: send the context only when it changed (or when asked).
     if force || contextSent != context {
       do { try link?.publish(context) } catch {
-        message = error.userMessage
+        failPublish(error.userMessage)
         return
       }
       contextSent = context
     }
+    // The Watch link took this version: an earlier failure no longer applies.
+    publishSucceeded()
     let outstanding = (link?.outstanding ?? []).compactMap {
       try? JSONDecoder().decode(CompanionEnvelope.self, from: $0)
     }
@@ -777,8 +779,7 @@ import UIKit
       inFlight: Set(outstanding.compactMap { $0.file.map { "\($0.songId):\($0.checksum)" } }),
       hasFile: { files[$0] != nil }, due: due)
     if audio.budgetFull {
-      let full = "Watch storage budget is full. Remove Watch songs before adding more."
-      if message != full { message = full }
+      failPublish("Watch storage budget is full. Remove Watch songs before adding more.")
     }
     // A song ahead of the published manifest names the next library version,
     // which lists every ready song: the Watch holds it until that arrives.
@@ -829,6 +830,18 @@ import UIKit
         log.sent(plan.refetch.keys)
       }
     }
+  }
+  /// The message a publish left (#208), such as WatchConnectivity's "not
+  /// installed" while the Watch app reinstalled: the next publish that gets
+  /// through clears it, not only Retry.
+  @ObservationIgnored private var publishFailure: String?
+  private func failPublish(_ text: String) {
+    if message != text { message = text }
+    publishFailure = text
+  }
+  private func publishSucceeded() {
+    if let publishFailure, message == publishFailure { message = nil }
+    publishFailure = nil
   }
   /// Changes the delivery log, saving it when something changed.
   private func noteDelivery(_ change: (inout WatchDeliveryLog) -> Void) {

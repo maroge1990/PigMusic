@@ -88,6 +88,18 @@ def test_the_watch_manifest_is_built_from_one_reading_of_the_archive():
     assert "(published?.songs ?? []) + appliedSongs" in publish
 
 
+def test_a_watch_link_failure_clears_once_a_publish_gets_through():
+    """#208: WatchConnectivity's "not installed" stayed on the Watch page long
+    after the Watch app was reinstalled; only Retry cleared it."""
+    phone = (APP / "WatchPhoneController.swift").read_text()
+    publish = body(phone, "private func publishOnce(")
+    assert "message = error.userMessage" not in publish
+    assert "failPublish(error.userMessage)" in publish
+    taken = publish.split("contextSent = context", 1)[1].split("let outstanding", 1)[0]
+    assert "publishSucceeded()" in taken
+    assert "message = nil" in body(phone, "private func publishSucceeded(")
+
+
 def test_forgetting_changed_sources_removes_them_before_any_suspension():
     """#76 (Codex round 1): releasing one source suspends the repository
     actor; a song leased meanwhile must not be released by the same pass."""
