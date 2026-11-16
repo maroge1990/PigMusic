@@ -40,6 +40,41 @@ struct WatchBackgroundWorkTests {
     do { let allowed = idle.mayStart(at: at(2)); #expect(!allowed) }
   }
 
+  /// Codex round 1 on batch 24: iOS kept the phone suspended for three hours,
+  /// so nothing asked and no stop was recorded; the Watch's confirmation that
+  /// came in then restarted the clock and work went on.
+  @Test func aLateConfirmationAfterTheLimitNeverRestartsWork() throws {
+    var work = WatchBackgroundWork()
+    work.left(at: at(0))
+    work.received(1, at: at(3))
+    #expect(work.isStopped)
+    do { let allowed = work.mayStart(at: at(3)); #expect(!allowed) }
+    var saved = try JSONDecoder().decode(
+      WatchBackgroundWork.self, from: JSONEncoder().encode(work))
+    do { let allowed = saved.mayStart(at: at(3, minutes: 1)); #expect(!allowed) }
+    // Restored from saved state with nothing asked yet: the same.
+    var restored = WatchBackgroundWork()
+    restored.left(at: at(0))
+    var reloaded = try JSONDecoder().decode(
+      WatchBackgroundWork.self, from: JSONEncoder().encode(restored))
+    reloaded.received(2, at: at(2, minutes: 30))
+    do { let allowed = reloaded.mayStart(at: at(2, minutes: 31)); #expect(!allowed) }
+    // A launch in the background with nothing recorded: a confirmation
+    // doesn't open a new two hours either.
+    var fresh = WatchBackgroundWork()
+    fresh.received(1, at: at(5), away: true)
+    do { let allowed = fresh.mayStart(at: at(5)); #expect(!allowed) }
+    // Within the limit, a confirmation still restarts the clock.
+    var live = WatchBackgroundWork()
+    live.left(at: at(0))
+    live.received(1, at: at(1, minutes: 59))
+    do { let allowed = live.mayStart(at: at(3, minutes: 58)); #expect(allowed) }
+    // In the foreground nothing is judged.
+    var open = WatchBackgroundWork()
+    open.received(1, at: at(5), away: false)
+    #expect(!open.isStopped)
+  }
+
   @Test func aStopHoldsUntilTheAppIsOpenedAgain() {
     var work = WatchBackgroundWork()
     work.left(at: at(0))

@@ -75,6 +75,11 @@ public struct WatchBackgroundWork: Codable, Sendable, Equatable {
   /// Whether background work may start now. The first refusal records the
   /// stop, which lasts until `entered(at:)`.
   public mutating func mayStart(at now: Date = Date()) -> Bool {
+    latchExpiry(at: now)
+  }
+  /// Judges the clock as it stands at `now` and records the stop the first
+  /// time it has run out; returns whether work may start.
+  @discardableResult private mutating func latchExpiry(at now: Date) -> Bool {
     if Self.allows(
       now: now, leftForeground: leftForeground, lastReceived: lastReceived,
       stopped: stoppedAt != nil)
@@ -102,9 +107,14 @@ public struct WatchBackgroundWork: Codable, Sendable, Equatable {
     if wasAway { note(.resumed, at: date) }
   }
   /// The Watch confirmed `count` songs it didn't have. Restarts the clock,
-  /// but never lifts a stop.
-  public mutating func received(_ count: Int, at date: Date = Date()) {
+  /// but never lifts a stop. `away`: the app is not in the foreground (by
+  /// default, when it left and hasn't come back). While away, the old clock
+  /// is judged first: iOS may have kept the app suspended past the limit
+  /// with nothing asking, and a confirmation coming in later must not
+  /// restart work the limit had already ended (Codex round 1 on batch 24).
+  public mutating func received(_ count: Int, at date: Date = Date(), away: Bool? = nil) {
     guard count > 0 else { return }
+    if away ?? (leftForeground != nil) { latchExpiry(at: date) }
     lastReceived = max(lastReceived ?? date, date)
     if leftForeground != nil { note(.received, count: count, at: date) }
   }

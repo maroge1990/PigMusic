@@ -200,7 +200,7 @@ import UIKit
               // each sent song counts once, when the delivery log first
               // records its arrival, so repeated receipts never do.
               let arrived = deliveryLog.newArrivals(confirmed.ready.keys)
-              noteBackground { $0.received(arrived) }
+              noteBackground { $0.received(arrived, away: !inForeground) }
               lastReceipt = confirmed
               committed = Set(manifest.songs.map(WatchDelivery.identity))
               noteApplied(manifest)
