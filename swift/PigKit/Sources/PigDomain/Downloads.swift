@@ -62,6 +62,12 @@ public struct DownloadRecord: Codable, Sendable, Identifiable, Equatable {
   /// The person paused this song on its own (#127). It waits until they resume
   /// it; the Resume for all downloads and internal restarts leave it paused.
   public var paused: Bool?
+  /// The checksum and size the Watch was listed with, kept while a Watch
+  /// copy is fetched again (#218): the Watch's manifest keeps listing the
+  /// song from these, so it never deletes audio it may still hold. Saved
+  /// with the records; cleared once the new copy is ready.
+  public var watchChecksum: String?
+  public var watchBytes: Int64?
   public var isPaused: Bool { paused == true && state != "ready" }
   public var id: String { track.id }
   public var effectiveOrigins: [DownloadOrigin] { origins ?? [.direct] }

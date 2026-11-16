@@ -195,4 +195,63 @@ import Testing
     #expect(WatchListing.earlier(account: "two", applied).isEmpty)
     #expect(WatchListing.earlier(account: nil, applied).isEmpty)
   }
+
+  /// Codex confirming 213c33f: the earlier manifests live outside the
+  /// records. With the applied one unsaved, a failed publication and a
+  /// relaunch, nothing remembered a song being fetched again, and the next
+  /// manifest dropped it. The record now keeps it, saved with the records.
+  @Test func aRefetchStaysListedAcrossARelaunchWithNoEarlierManifest() async throws {
+    let root = folder()
+    let watchRoot = folder()
+    defer {
+      try? FileManager.default.removeItem(at: root)
+      try? FileManager.default.removeItem(at: watchRoot)
+    }
+    let archive = try await archive(root, ["a", "b"])
+    let first = CompanionContext(revision: 1, account: "one")
+    let songs = await listed(archive).songs
+    let watch = try CompanionArchive(directory: watchRoot)
+    try await watch.apply(first)
+    try await watch.apply(CompanionManifest(context: first, songs: songs))
+    for song in songs {
+      let incoming = folder()
+      try payload(song.id).write(to: incoming)
+      try await watch.accept(
+        incoming, ticket: CompanionFile(context: first, songId: song.id, checksum: song.checksum))
+    }
+    let all = ["a": checksum("a"), "b": checksum("b")]
+    try await archive.settleHandOver(listed: all, ready: all, applied: true)
+    try await archive.settleHandOver(listed: all, ready: ["b": checksum("b")], applied: true)
+    // Relaunch: only downloads.json survives; no manifest was saved.
+    let reopened = try DownloadArchive(directory: root)
+    let refetching = try #require(await reopened.snapshot().first { $0.id == "a" })
+    #expect(refetching.state == "queued")
+    #expect(refetching.watchChecksum == checksum("a"))
+    #expect(refetching.watchBytes == Int64(payload("a").count))
+    let next = await listed(reopened, earlier: WatchListing.earlier(account: "one", nil, nil, nil))
+    #expect(next.songs == songs)
+    #expect(next.kept == ["a"])
+    let second = CompanionContext(revision: 5, account: "one")
+    try await watch.apply(second)
+    try await watch.apply(CompanionManifest(context: second, songs: next.songs))
+    #expect(await watch.receipt().ready == all)
+    // The new copy takes over; the Watch's listing fields go with it.
+    let incoming = FileManager.default.temporaryDirectory.appendingPathComponent(
+      UUID().uuidString)
+    try payload("a").write(to: incoming)
+    try await reopened.publishFile(
+      incoming, record: refetching, manifest: try copy("a"), budget: 1 << 30)
+    let ready = try #require(await reopened.snapshot().first { $0.id == "a" })
+    #expect(ready.state == "ready" && ready.watchChecksum == nil && ready.watchBytes == nil)
+    #expect(await listed(reopened).songs == songs)
+    // Removing it still drops it.
+    try await reopened.remove(id: "a")
+    #expect(await listed(reopened).songs.map(\.id) == ["b"])
+  }
+
+  @Test func recordsSavedBeforeTheWatchFieldsStillLoad() throws {
+    let json = #"{"track":{"id":"a","title":"Song","artist":"Artist"},"quality":"aac","state":"queued","bytes":0,"total":0}"#
+    let record = try LibraryCodec.decoder().decode(DownloadRecord.self, from: Data(json.utf8))
+    #expect(record.watchChecksum == nil && record.watchBytes == nil)
+  }
 }

@@ -79,6 +79,14 @@ public actor DownloadArchive {
         replacement.origins = old.origins
         // Adding the song again (an album, a retry) keeps the person's pause.
         if old.state != "ready" { replacement.paused = old.paused }
+        // The Watch keeps listing a copy it may hold (#218).
+        if old.delivered {
+          replacement.watchChecksum = old.checksum
+          replacement.watchBytes = old.total
+        } else {
+          replacement.watchChecksum = old.watchChecksum
+          replacement.watchBytes = old.watchBytes
+        }
         if old.track.sourceRevision == track.sourceRevision {
           if old.state == "ready", let name = old.fileName {
             replacement.retained = RetainedDownload(
@@ -164,6 +172,10 @@ public actor DownloadArchive {
       } else if plan.refetch[record.id] == record.checksum, record.delivered {
         var fresh = DownloadRecord(track: record.track, quality: record.quality)
         fresh.origins = record.origins
+        // Saved in the same write: the Watch keeps listing the song with
+        // what it was listed with until the new copy is ready.
+        fresh.watchChecksum = record.checksum
+        fresh.watchBytes = record.total
         records[index] = fresh
       }
     }
@@ -374,6 +386,8 @@ public actor DownloadArchive {
     records[index].total = manifest.bytes
     records[index].fileName = name
     records[index].checksum = expected
+    records[index].watchChecksum = nil
+    records[index].watchBytes = nil
     do { try persist() } catch {
       records[index] = previous
       try? FileManager.default.removeItem(at: output)
@@ -462,6 +476,8 @@ public actor DownloadArchive {
     try FileManager.default.moveItem(at: temporary, to: output)
     let retained = records[index].retained
     let paused = records[index].paused
+    let watchChecksum = records[index].watchChecksum
+    let watchBytes = records[index].watchBytes
     records[index].retained = nil
     records[index].state = "ready"
     clearFinishedPause(index)
@@ -469,9 +485,13 @@ public actor DownloadArchive {
     records[index].total = bytes
     records[index].fileName = name
     records[index].checksum = expected
+    records[index].watchChecksum = nil
+    records[index].watchBytes = nil
     do { try persist() } catch {
       records[index].retained = retained
       records[index].paused = paused
+      records[index].watchChecksum = watchChecksum
+      records[index].watchBytes = watchBytes
       records[index].state = "failed"
       try? FileManager.default.removeItem(at: output)
       throw error

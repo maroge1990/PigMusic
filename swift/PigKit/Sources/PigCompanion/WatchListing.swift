@@ -46,6 +46,11 @@ public enum WatchListing {
     let before = Dictionary(earlier.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     var result = Result(songs: [])
     var seen: Set<String> = []
+    func keep(_ record: DownloadRecord, checksum: String, bytes: Int64) {
+      result.songs.append(CompanionSong(track: record.track, checksum: checksum, bytes: bytes))
+      result.kept.insert(record.id)
+      if held[record.id] == checksum { result.held.insert(record.id) }
+    }
     for record in records {
       guard seen.insert(record.id).inserted else { continue }
       // A ready song: the iPhone has its file, or the Watch confirmed it.
@@ -54,11 +59,12 @@ public enum WatchListing {
       {
         result.songs.append(
           CompanionSong(track: record.track, checksum: checksum, bytes: record.total))
+      } else if let checksum = record.watchChecksum, let bytes = record.watchBytes, bytes > 0 {
+        // Fetched again: the record itself keeps what the Watch was listed
+        // with, saved with the records, so no earlier manifest is needed.
+        keep(record, checksum: checksum, bytes: bytes)
       } else if let song = before[record.id] {
-        result.songs.append(
-          CompanionSong(track: record.track, checksum: song.checksum, bytes: song.bytes))
-        result.kept.insert(record.id)
-        if held[record.id] == song.checksum { result.held.insert(record.id) }
+        keep(record, checksum: song.checksum, bytes: song.bytes)
       }
     }
     result.songs.sort { $0.id < $1.id }

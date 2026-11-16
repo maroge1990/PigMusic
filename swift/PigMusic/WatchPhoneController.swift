@@ -77,11 +77,22 @@ import UIKit
     lastReceipt = nil
     committed = []
   }
+  /// The applied manifest last saved: a failed save is tried again with the
+  /// next confirmation. A second layer only: a song fetched again keeps its
+  /// Watch listing on its own record (`DownloadRecord.watchChecksum`).
+  @ObservationIgnored private var appliedManifestSaved: CompanionManifest?
   private func noteApplied(_ manifest: CompanionManifest) {
-    guard appliedManifest != manifest else { return }
     appliedManifest = manifest
-    guard let appliedManifestURL, let data = try? JSONEncoder().encode(manifest) else { return }
-    try? data.write(to: appliedManifestURL, options: .atomic)
+    guard appliedManifestSaved != manifest, let appliedManifestURL,
+      let data = try? JSONEncoder().encode(manifest)
+    else { return }
+    do {
+      try data.write(to: appliedManifestURL, options: .atomic)
+      appliedManifestSaved = manifest
+    } catch {
+      DiagnosticsLog.shared.record(
+        "watch", "saving the applied Watch manifest failed: \(error.localizedDescription)")
+    }
   }
   /// When each song passed each step on its way to the Watch (#219).
   @ObservationIgnored private(set) var deliveryLog = WatchDeliveryLog()
@@ -223,6 +234,7 @@ import UIKit
     appliedManifest =
       appliedManifestURL.flatMap { try? Data(contentsOf: $0) }
       .flatMap { try? JSONDecoder().decode(CompanionManifest.self, from: $0) }
+    appliedManifestSaved = appliedManifest
     lastWritten = nil
     deliveryLogURL = directory.appendingPathComponent("watch-delivery.json")
     deliveryLog =
@@ -617,6 +629,7 @@ import UIKit
     if let appliedManifestURL { try? FileManager.default.removeItem(at: appliedManifestURL) }
     appliedManifestURL = nil
     appliedManifest = nil
+    appliedManifestSaved = nil
     lastWritten = nil
     sent.reset()
     link?.cancelTransfers()
