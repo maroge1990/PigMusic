@@ -1,4 +1,4 @@
-from .queue_states import ACTIVE, CANCELLABLE, FINISHED, RETRYABLE, sql
+from .queue_states import CANCELLABLE, FINISHED, PENDING, RETRYABLE, sql
 from .lifecycle import TimedRLock, coordinated, step
 import itertools
 import json
@@ -789,9 +789,11 @@ class Store:
                         row = conn.execute(
                             "SELECT status,payload FROM queue WHERE id=?", (request_id,)
                         ).fetchone()
+                        # A paused request (#228) is not published, as
+                        # when it pauses while its file moves in.
                         if (
                             row
-                            and row[0] not in {"cancelled", "failed"}
+                            and row[0] not in {"cancelled", "failed", "paused"}
                             and (
                                 not metadata.get("_claim_token")
                                 or json.loads(row[1]).get("claim_token")
@@ -1187,7 +1189,7 @@ class Store:
             active
             if active is not None
             else conn.execute(
-                "SELECT id,payload FROM queue WHERE status IN " + sql(ACTIVE)
+                "SELECT id,payload FROM queue WHERE status IN " + sql(PENDING)
             ).fetchall()
         )
         for request_id, raw in active:

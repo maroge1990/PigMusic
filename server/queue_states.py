@@ -6,10 +6,20 @@ The admin queue (Store) cancels and retries whole jobs; a person's requests
 
 # Work still to do or under way.
 ACTIVE = ("waiting_for_sources", "searching", "downloading", "validating", "importing")
-# Active states a request can be cancelled in: importing is publishing a
-# file that has already passed validation, and finishes on its own.
-CANCELLABLE = ("waiting_for_sources", "searching", "downloading", "validating")
-# Finished: Clear removes these.
+# Active states a person can pause a request in (#228): importing is
+# publishing a file that has already passed validation, and finishes on its
+# own.
+PAUSABLE = ("waiting_for_sources", "searching", "downloading", "validating")
+# Paused by a person (#228): neither active nor finished. Nothing claims or
+# schedules it, a restart keeps it, and Resume puts it back to
+# waiting_for_sources.
+PAUSED = "paused"
+# Not finished: work under way, still to do, or paused. What holds a song as
+# requested (it is still wanted) while ACTIVE counts only work in progress.
+PENDING = ACTIVE + (PAUSED,)
+# States a request can be cancelled in: the pausable ones, and paused.
+CANCELLABLE = PAUSABLE + (PAUSED,)
+# Finished: Clear removes these (never a paused request).
 FINISHED = ("completed", "downloaded", "failed", "cancelled")
 # Finished without a file: Retry queues these again.
 RETRYABLE = ("failed", "cancelled")

@@ -6,7 +6,7 @@ import time
 import uuid
 from pathlib import Path
 
-from .queue_states import ACTIVE
+from .queue_states import PENDING
 from .lifecycle import coordinated
 from .matching import same_song
 from .media import track_file
@@ -40,7 +40,7 @@ class PersonalRemoval:
                 for key, status, raw in conn.execute(
                     "SELECT id,status,payload FROM queue"
                 )
-                if status in ACTIVE
+                if status in PENDING
             ]
         owned = {r[1] for r in memberships if r[0] == user_id}
         if set(ids) != owned or not set(ids).issubset(tracks):
@@ -144,7 +144,7 @@ class PersonalRemoval:
             ).fetchall():
                 job = json.loads(raw)
                 if (
-                    status in ACTIVE
+                    status in PENDING
                     and user_id in job.get("requested_by", [])
                     and any(same_song(job, t) for t in selected.values())
                 ):

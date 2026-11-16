@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from ..artist_identity import Ambiguous, cached_identities, resolve_artist
 from ..catalogue import RELEASE_INC, release_tracks, credit, edition_rank
 from ..library import normalise
-from ..queue_states import ACTIVE
+from ..queue_states import PENDING
 from ..matching import title_key as matching_title_key
 from ..releases import release_query
 from ..api_models import (
@@ -315,11 +315,11 @@ def discover_router(store, catalogue, popularity=None, warmer=None, http_client=
         with store.connect() as conn:
             rows = conn.execute(
                 "SELECT payload FROM queue WHERE status IN ("
-                + ",".join("?" * len(ACTIVE))
+                + ",".join("?" * len(PENDING))
                 + ") AND json_extract(payload,'$.musicbrainz_release_id')=? AND "
                 "EXISTS (SELECT 1 FROM json_each(queue.payload,'$.requested_by') "
                 "WHERE value=?)",
-                (*sorted(ACTIVE), release_id, user_id),
+                (*sorted(PENDING), release_id, user_id),
             ).fetchall()
         return [json.loads(row[0]) for row in rows]
 

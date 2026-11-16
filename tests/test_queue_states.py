@@ -3,11 +3,24 @@
 import re
 from pathlib import Path
 
-from server.queue_states import ACTIVE, CANCELLABLE, FINISHED, RETRYABLE, sql
+from server.queue_states import (
+    ACTIVE,
+    CANCELLABLE,
+    FINISHED,
+    PAUSABLE,
+    PAUSED,
+    PENDING,
+    RETRYABLE,
+    sql,
+)
 
 
 def test_the_state_sets_relate_as_the_queue_expects():
-    assert set(CANCELLABLE) == set(ACTIVE) - {"importing"}
+    assert set(PAUSABLE) == set(ACTIVE) - {"importing"}
+    assert set(CANCELLABLE) == set(PAUSABLE) | {PAUSED}
+    # Paused (#228) is neither active nor finished, but still pending.
+    assert PAUSED not in ACTIVE and PAUSED not in FINISHED
+    assert set(PENDING) == set(ACTIVE) | {PAUSED}
     assert set(RETRYABLE) <= set(FINISHED)
     assert not set(ACTIVE) & set(FINISHED)
     assert sql(RETRYABLE) == "('failed','cancelled')"

@@ -1,0 +1,304 @@
+"""Pause and resume one music request (#228, D-109)."""
+
+import json
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+
+from server.downloader import Cancelled, Downloader
+from server.household_policy import HouseholdPolicy
+from server.soulseek import candidate_for
+from server.store import Store
+from test_music_bug_fixes import client_for, seed_requests
+from test_native_sync import fixture
+from test_personal_libraries import household
+
+
+def song(title="Song", number=1, **extra):
+    return {
+        "title": title,
+        "artist": "Example",
+        "album": "Studio",
+        "album_artist": "Example",
+        "year": 2020,
+        "disc_number": 1,
+        "track_number": number,
+        "duration": 3,
+        "quality_profile": "mp3_320",
+        **extra,
+    }
+
+
+def insert(store, key, status, **payload):
+    with store.connect() as conn:
+        conn.execute(
+            "INSERT INTO queue(id,payload,status) VALUES (?,?,?)",
+            (key, json.dumps(payload), status),
+        )
+
+
+def status(store, key):
+    with store.connect() as conn:
+        return conn.execute("SELECT status FROM queue WHERE id=?", (key,)).fetchone()[0]
+
+
+def test_member_pauses_and_resumes_only_own_unfinished_requests(tmp_path, monkeypatch):
+    app, owner, member, token, _ = household(tmp_path, monkeypatch)
+    store = app.state.store
+    seed_requests(store, owner, member)
+    with client_for(app, token) as client:
+        for key in ("waiting_for_sources", "searching", "downloading", "validating"):
+            response = client.post(f"/api/v1/requests/{key}/pause")
+            assert response.status_code == 200, response.text
+            assert response.json() == {"paused": True}
+            assert status(store, key) == "paused"
+            # Pausing twice is a wrong state, like retrying a running request.
+            assert client.post(f"/api/v1/requests/{key}/pause").status_code == 400
+        # Finished requests have nothing to pause.
+        for key in ("completed", "downloaded", "failed", "cancelled"):
+            response = client.post(f"/api/v1/requests/{key}/pause")
+            assert response.status_code == 400
+            assert "unfinished" in response.json()["detail"]
+            assert status(store, key) == key
+            response = client.post(f"/api/v1/requests/{key}/resume")
+            assert response.status_code == 400
+            assert "paused" in response.json()["detail"]
+        for key in ("theirs-active", "missing"):
+            assert client.post(f"/api/v1/requests/{key}/pause").status_code == 404
+            assert client.post(f"/api/v1/requests/{key}/resume").status_code == 404
+        assert status(store, "theirs-active") != "paused"
+        for key in ("searching", "downloading"):
+            response = client.post(f"/api/v1/requests/{key}/resume")
+            assert response.status_code == 200, response.text
+            assert response.json() == {"resumed": True}
+            # Back to the queue: the downloader claims it as any other.
+            assert status(store, key) == "waiting_for_sources"
+    # Someone else's paused request: not theirs to resume.
+    insert(store, "theirs-paused", "paused", requested_by=[owner])
+    with client_for(app, token) as client:
+        assert client.post("/api/v1/requests/theirs-paused/resume").status_code == 404
+    assert status(store, "theirs-paused") == "paused"
+    with TestClient(app, base_url="https://private.ts.net") as anonymous:
+        assert anonymous.post("/api/v1/requests/theirs-active/pause").status_code in {
+            401,
+            403,
+        }
+
+
+def test_pausing_a_shared_request_pauses_the_one_job(tmp_path):
+    store, owner, member = fixture(tmp_path)
+    insert(store, "shared", "downloading", requested_by=[owner, member])
+    assert store.user_libraries.pause_request(member, "shared") == {"paused": True}
+    assert status(store, "shared") == "paused"
+    # Importing finishes on its own: its file has passed validation.
+    insert(store, "importing", "importing", requested_by=[member])
+    with pytest.raises(ValueError, match="unfinished"):
+        store.user_libraries.pause_request(member, "importing")
+    assert status(store, "importing") == "importing"
+    # Either of them resumes it.
+    assert store.user_libraries.resume_request(owner, "shared") == {"resumed": True}
+    assert status(store, "shared") == "waiting_for_sources"
+
+
+def test_nothing_claims_or_schedules_a_paused_request(tmp_path):
+    store = Store(tmp_path)
+    store.save_download_settings(
+        {"enabled": True, "profile": "mp3_320", "sources": ["freemp3cloud"]}
+    )
+    insert(store, "paused", "paused", **song(), requested_by=["someone"])
+    assert store.claim_request() is None
+    assert store.next_retry() is None
+    with store.connect() as conn:
+        conn.execute("UPDATE queue SET status='waiting_for_sources'")
+    assert store.claim_request()["id"] == "paused"
+
+
+def test_a_worker_never_overwrites_a_pause(tmp_path):
+    store, owner, member = fixture(tmp_path)
+    store.save_download_settings(
+        {"enabled": True, "profile": "mp3_320", "sources": ["freemp3cloud"]}
+    )
+    insert(store, "job", "waiting_for_sources", **song(), requested_by=[member])
+    job = store.claim_request()
+    token = job["claim_token"]
+    store.user_libraries.pause_request(member, "job")
+    # Each write a worker makes on its claim leaves the pause alone.
+    store.progress("job", 10_000, 10_000, token)
+    store.request_state("job", "validating", _claim_token=token)
+    store.request_state("job", "failed", _claim_token=token, error="x")
+    assert not store.defer_request(job, 60, 1)
+    assert not store.request_active("job", token)
+    assert status(store, "job") == "paused"
+    # A resumed request claimed afresh is out of the old worker's reach too.
+    store.user_libraries.resume_request(member, "job")
+    again = store.claim_request()
+    assert again["claim_token"] != token
+    store.request_state("job", "failed", _claim_token=token, error="old worker")
+    assert status(store, "job") == "searching"
+
+
+def test_the_downloader_stops_a_paused_job_without_failing_it(tmp_path, monkeypatch):
+    store, owner, member = fixture(tmp_path)
+    store.save_download_settings(
+        {"enabled": True, "profile": "mp3_320", "sources": ["freemp3cloud"]}
+    )
+    insert(store, "job", "waiting_for_sources", **song(), requested_by=[member])
+    job = store.claim_request()
+    worker = Downloader(store)
+    monkeypatch.setattr("server.downloader.download_root", lambda *a, **k: None)
+
+    def attempt(job, profile, errors, convert=False):
+        store.user_libraries.pause_request(member, job["id"])
+        worker.check(job["id"])
+        pytest.fail("A paused job must stop at its next check")
+
+    monkeypatch.setattr(worker, "attempt", attempt)
+    worker.process(job)
+    assert status(store, "job") == "paused"
+
+
+def test_pausing_cancels_the_jobs_soulseek_transfer(tmp_path, monkeypatch):
+    store, owner, member = fixture(tmp_path)
+    (tmp_path / "slskd-connection.json").write_text(
+        json.dumps(
+            {
+                "url": "http://localhost:5031",
+                "api_key": "test-only",
+                "download_root": str(tmp_path / "engine"),
+            }
+        )
+    )
+    store.save_download_settings(
+        {"enabled": True, "profile": "mp3_320", "sources": ["freemp3cloud"]}
+    )
+    insert(store, "job", "waiting_for_sources", **song(), requested_by=[member])
+    job = store.claim_request()
+    worker = Downloader(store)
+    worker.context.claim_token = job["claim_token"]
+    monkeypatch.setattr("server.downloader.download_root", lambda *a, **k: None)
+    monkeypatch.setattr("server.soulseek.TRANSFER_POLL", 0)
+    entry = {
+        "filename": "Music\\Example\\Studio\\01 Song.mp3",
+        "size": 10000,
+        "length": 3,
+        "bitRate": 320,
+    }
+    polls, deletes = [], []
+
+    def handler(request):
+        if request.method == "DELETE":
+            deletes.append((request.url.path, request.url.params.get("remove")))
+            return httpx.Response(204)
+        if request.method == "POST":
+            return httpx.Response(201)
+        polls.append(1)
+        if len(polls) == 2:
+            # The person pauses while the peer is sending.
+            store.user_libraries.pause_request(member, "job")
+        state = {"id": "owned-id", "stateDescription": "InProgress"}
+        return httpx.Response(
+            200,
+            json={
+                "directories": [
+                    {"files": [{**entry, **state, "bytesTransferred": 2000}]}
+                ]
+            },
+        )
+
+    worker.soulseek.client = lambda: httpx.Client(
+        base_url="http://engine/api/v0/", transport=httpx.MockTransport(handler)
+    )
+    candidate = {
+        **candidate_for(song(), {"username": "peer"}, entry),
+        "source": "soulseek",
+    }
+    with pytest.raises(Cancelled):
+        worker.transfer("job", candidate, tmp_path / "staged.mp3")
+    # The engine's transfer is cancelled; its partial file is kept (#96).
+    assert deletes == [("/api/v0/transfers/downloads/peer/owned-id", "false")]
+    assert status(store, "job") == "paused"
+
+
+def test_a_paused_request_stays_paused_across_a_restart(tmp_path):
+    store, owner, member = fixture(tmp_path)
+    insert(store, "paused", "paused", **song(), requested_by=[member])
+    insert(store, "running", "downloading", **song("Other", 2), requested_by=[member])
+    store.recover_requests()
+    assert status(store, "paused") == "paused"
+    assert status(store, "running") == "waiting_for_sources"
+    reopened = Store(tmp_path)
+    reopened.recover_requests()
+    assert status(reopened, "paused") == "paused"
+
+
+def test_clear_finished_keeps_paused_requests(tmp_path):
+    store, owner, member = fixture(tmp_path)
+    insert(store, "paused", "paused", **song(), requested_by=[member])
+    insert(store, "done", "completed", **song("Done", 2), requested_by=[member])
+    assert store.user_libraries.clear_requests(member) == {"cleared": 1}
+    store.clear_queue(finished_only=True)
+    assert status(store, "paused") == "paused"
+    assert store.user_libraries.queue(member)["total"] == 1
+
+
+def test_groups_count_a_paused_song_as_neither_active_nor_failed(tmp_path):
+    store, owner, member = fixture(tmp_path)
+    album = {"request_scope": {member: ["album", "example", "studio", ""]}}
+    insert(store, "a1", "paused", **song("One", 1), **album, requested_by=[member])
+    insert(
+        store,
+        "a2",
+        "completed",
+        **song("Two", 2),
+        **album,
+        requested_by=[member],
+    )
+    insert(store, "lone", "paused", **song("Lone", 1, album=""), requested_by=[member])
+    page = store.user_libraries.request_groups(member)
+    assert page["active"] == 0
+    groups = {g["title"]: g for g in page["groups"]}
+    studio = groups["Studio"]
+    assert studio["state"] == "paused"
+    assert (studio["active"], studio["waiting"], studio["failed"]) == (0, 0, 0)
+    assert studio["paused"] == 1 and studio["done"] == 1
+    assert studio["progress"] == 0.5
+    lone = groups["Lone"]
+    assert lone["state"] == "paused" and lone["paused"] == 1
+    assert lone["items"][0]["status"] == "paused"
+    # Still wanted: the song shows as requested, without download progress.
+    assert lone["items"][0]["server_state"] == "requested"
+    assert lone["items"][0]["request_progress"] is None
+    # A failure outranks a pause: the album's mark then retries (D-110).
+    insert(store, "a3", "failed", **song("Three", 3), **album, requested_by=[member])
+    page = store.user_libraries.request_groups(member)
+    studio = next(g for g in page["groups"] if g["title"] == "Studio")
+    assert studio["state"] == "failed" and studio["paused"] == 1
+    # Unfinished work, paused too, stays above finished requests.
+    assert page["groups"][-1]["title"] == "Studio"
+
+
+def test_a_paused_request_takes_a_new_quality_target_and_stays_paused(tmp_path):
+    store, owner, member = fixture(tmp_path)
+    insert(
+        store,
+        "job",
+        "paused",
+        **song(quality_profile="aac_256"),
+        requested_by=[member],
+    )
+    with store.connect() as conn:
+        HouseholdPolicy(store).reconcile_pending(conn)
+    assert status(store, "job") == "paused"
+    with store.connect() as conn:
+        payload = json.loads(
+            conn.execute("SELECT payload FROM queue WHERE id='job'").fetchone()[0]
+        )
+    assert payload["quality_profile"] != "aac_256"
+
+
+def test_the_download_log_says_paused(tmp_path):
+    store, owner, member = fixture(tmp_path)
+    insert(store, "job", "paused", **song(), requested_by=[member])
+    lines = store.user_libraries.request_log(member, "job")["lines"]
+    assert lines[-1] == {"text": "Paused", "ok": True}

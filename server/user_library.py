@@ -11,7 +11,16 @@ import re
 import time
 from urllib.parse import urlsplit
 
-from .queue_states import ACTIVE, CANCELLABLE, FINISHED, RETRYABLE, sql
+from .queue_states import (
+    ACTIVE,
+    CANCELLABLE,
+    FINISHED,
+    PAUSABLE,
+    PAUSED,
+    PENDING,
+    RETRYABLE,
+    sql,
+)
 from .library import identifier, normalise
 from .media import public_settings, saved_track_ids
 from .paths import versioned
@@ -101,8 +110,9 @@ def _present(job):
     job = {k: v for k, v in job.items() if k in _PRESENTED}
     active = job["status"] in ACTIVE
     job["server_state"] = (
+        # A paused request is still wanted (#228).
         "requested"
-        if active
+        if job["status"] in PENDING
         else (
             "in_library"
             if job["status"] == "completed"
@@ -150,11 +160,13 @@ def _phase(item):
         return "active"
     if status == "waiting_for_sources":
         return "waiting"
+    if status == PAUSED:
+        return "paused"
     return "done" if status in {"completed", "downloaded"} else "failed"
 
 
 # Which of two jobs for the same song to show: the most advanced, then newest.
-_RETRY_RANK = {"active": 0, "waiting": 1, "done": 2, "failed": 3}
+_RETRY_RANK = {"active": 0, "waiting": 1, "paused": 2, "done": 3, "failed": 4}
 
 
 def _group(jobs, user_id):
@@ -252,8 +264,12 @@ def _group_summary(key, slots):
         i.get("request_progress") or 0 for i, p in zip(songs, phases) if p == "active"
     )
     album = key[0] == "album"
-    # Unfinished work first; a group is done only when every song is.
-    state = next((p for p in ("active", "waiting", "failed") if p in phases), "done")
+    # Unfinished work first; a group is done only when every song is. A
+    # failure outranks a pause: the album's mark then retries (D-110).
+    state = next(
+        (p for p in ("active", "waiting", "failed", "paused") if p in phases),
+        "done",
+    )
     return {
         "id": identifier("request-group", *key),
         "kind": "album" if album else "song",
@@ -268,6 +284,7 @@ def _group_summary(key, slots):
         "active": phases.count("active"),
         "waiting": phases.count("waiting"),
         "failed": phases.count("failed"),
+        "paused": phases.count("paused"),
         "progress": (done + partial) / len(songs),
         "requested_at": min(_text(i.get("created_at")) for i in songs),
         "updated_at": max(_text(i.get("updated_at")) for i in songs),
@@ -717,7 +734,7 @@ class UserLibrary:
         jobs = []
         for request_id, status, raw in conn.execute(
             "SELECT id,status,payload FROM queue WHERE status IN "
-            + sql(ACTIVE + ("failed",))
+            + sql(PENDING + ("failed",))
             + " "
             "AND EXISTS (SELECT 1 FROM json_each(queue.payload,'$.requested_by') WHERE value=?)",
             (user_id,),
@@ -1205,6 +1222,53 @@ class UserLibrary:
             raise LookupError("Request not found")
         raise ValueError("Only failed or cancelled requests can be retried")
 
+    def pause_request(self, user_id, request_id):
+        """Pause one of this person's unfinished requests (#228, D-109).
+
+        Nothing claims a paused request, and a download under way stops: the
+        worker's next check finds its claim no longer running, raises
+        Cancelled and cancels its Soulseek transfer, and every write the
+        worker still makes is conditional on a running status, so it never
+        overwrites `paused`. Importing is not pausable: its file has passed
+        validation and finishes on its own. A request shared with another
+        household member is one job: pausing it pauses it for them too (one
+        household, D-109)."""
+        with self.store.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            result = conn.execute(
+                "UPDATE queue SET status='paused',updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=? AND status IN " + sql(PAUSABLE) + " AND " + _MINE,
+                (request_id, user_id),
+            )
+            if result.rowcount:
+                return {"paused": True}
+            mine = conn.execute(
+                "SELECT 1 FROM queue WHERE id=? AND " + _MINE, (request_id, user_id)
+            ).fetchone()
+        if not mine:
+            raise LookupError("Request not found")
+        raise ValueError("Only unfinished requests can be paused")
+
+    def resume_request(self, user_id, request_id):
+        """Resume one of this person's paused requests (#228): it waits for a
+        source again, so the downloader claims it as any other."""
+        with self.store.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            result = conn.execute(
+                "UPDATE queue SET status='waiting_for_sources',"
+                "updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='paused' AND "
+                + _MINE,
+                (request_id, user_id),
+            )
+            if result.rowcount:
+                return {"resumed": True}
+            mine = conn.execute(
+                "SELECT 1 FROM queue WHERE id=? AND " + _MINE, (request_id, user_id)
+            ).fetchone()
+        if not mine:
+            raise LookupError("Request not found")
+        raise ValueError("Only paused requests can be resumed")
+
     def request_log(self, user_id, request_id):
         """This person's request told step by step (#197)."""
         from .download_log import story
@@ -1240,7 +1304,7 @@ class UserLibrary:
                 "SELECT id,payload,status,created_at,updated_at FROM queue WHERE "
                 + _MINE
                 + " ORDER BY CASE WHEN status IN "
-                + sql(ACTIVE)
+                + sql(PENDING)
                 + " THEN 0 ELSE 1 END,created_at DESC,id LIMIT ? OFFSET ?",
                 (user_id, limit, offset),
             ).fetchall()
@@ -1279,7 +1343,7 @@ class UserLibrary:
             _group_summary(key, songs) for key, songs in _group(jobs, user_id).items()
         ]
         result.sort(key=lambda g: g["updated_at"], reverse=True)
-        result.sort(key=lambda g: g["state"] not in {"active", "waiting"})
+        result.sort(key=lambda g: g["state"] not in {"active", "waiting", "paused"})
         return {
             "total": len(result),
             "active": sum(job["status"] in ACTIVE for job in jobs),

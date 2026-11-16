@@ -103,4 +103,6 @@ def story(payload, status):
         lines.append({"text": "Done", "ok": True})
     elif status == "cancelled":
         lines.append({"text": "Cancelled", "ok": False})
+    elif status == "paused":
+        lines.append({"text": "Paused", "ok": True})
     return lines

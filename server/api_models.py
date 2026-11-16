@@ -395,12 +395,14 @@ class RequestGroupDTO(BaseModel):
     title: str
     artist: str = ""
     release_id: str | None = None
-    state: Literal["active", "waiting", "done", "failed"]
+    state: Literal["active", "waiting", "paused", "done", "failed"]
     songs: int
     done: int
     active: int
     waiting: int
     failed: int
+    # Songs a person paused (#228): neither active nor failed.
+    paused: int
     progress: float
     requested_at: str
     updated_at: str
@@ -655,6 +657,14 @@ class ArtistAcquisitionDTO(BaseModel):
 
 class RetriedDTO(BaseModel):
     retried: bool
+
+
+class PausedDTO(BaseModel):
+    paused: bool
+
+
+class ResumedDTO(BaseModel):
+    resumed: bool
 
 
 class CataloguePopularSongDTO(BaseModel):

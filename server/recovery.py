@@ -1,7 +1,7 @@
 """Hash-guarded, recoverable removal on the existing SMB filesystem."""
 
 import hashlib, json, os, stat, threading, time, uuid
-from .queue_states import ACTIVE, sql
+from .queue_states import PENDING, sql
 from .lifecycle import coordinated
 from pathlib import Path
 from .media import saved_track, track_file
@@ -123,7 +123,7 @@ class Recovery:
             if same_song(json.loads(payload), record["track"]):
                 conn.execute(
                     "UPDATE queue SET status='cancelled' WHERE id=? AND status IN "
-                    + sql(ACTIVE),
+                    + sql(PENDING),
                     (job_id,),
                 )
 

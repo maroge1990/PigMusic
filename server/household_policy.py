@@ -3,7 +3,7 @@
 import json
 import time
 import uuid
-from .queue_states import ACTIVE, sql
+from .queue_states import PAUSED, PENDING, sql
 from .lifecycle import coordinated
 from .library import identifier, normalise
 from .quality import PROFILES, rank, actual_profile, options
@@ -18,9 +18,11 @@ class HouseholdPolicy:
         members = {}
         for user, track in conn.execute("SELECT user_id,track_id FROM library_members"):
             members.setdefault(track, set()).add(user)
+        # Unfinished replacements, paused ones too (#228): one is never
+        # queued twice.
         active = {}
         for key, raw in conn.execute(
-            "SELECT id,payload FROM queue WHERE status IN " + sql(ACTIVE)
+            "SELECT id,payload FROM queue WHERE status IN " + sql(PENDING)
         ):
             job = json.loads(raw)
             active.setdefault(job.get("library_track_id"), []).append((key, raw))
@@ -87,7 +89,7 @@ class HouseholdPolicy:
         for key, status, raw in conn.execute(
             "SELECT id,status,payload FROM queue"
         ).fetchall():
-            if status not in ACTIVE:
+            if status not in PENDING:
                 continue
             job = json.loads(raw)
             desired = self.store.quality_policy(job, conn=conn, context=context)
@@ -99,9 +101,14 @@ class HouseholdPolicy:
                 )
                 for field in ("source", "received_bytes", "total_bytes", "error"):
                     job.pop(field, None)
+                # A paused request takes the new target and stays paused.
                 conn.execute(
-                    "UPDATE queue SET payload=?,status='waiting_for_sources',updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (json.dumps(job), key),
+                    "UPDATE queue SET payload=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (
+                        json.dumps(job),
+                        PAUSED if status == PAUSED else "waiting_for_sources",
+                        key,
+                    ),
                 )
 
     def membership_changed(self, conn, track_ids):
