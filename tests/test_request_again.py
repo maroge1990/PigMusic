@@ -148,6 +148,32 @@ def test_a_removed_song_asked_for_again_is_queued_again(tmp_path, monkeypatch):
         assert len(store.user_libraries.projection(owner)["tracks"]) == 1
 
 
+def test_a_finished_request_for_a_present_song_is_not_downloaded_again(
+    tmp_path, monkeypatch
+):
+    # The song is still in the household (another member keeps it): asking
+    # again puts it back in the person's library, downloads nothing, and
+    # tells the phone the song is taken care of (not "excluded").
+    app, client, owner, member = household(tmp_path, monkeypatch, member=True)
+    with client:
+        store = app.state.store
+        claim = hold_downloads(store, monkeypatch)
+        client.post("/api/v1/requests", json={"tracks": [song()]})
+        download(store, claim)
+        identity = store.user_libraries.projection(owner)["tracks"][0]["id"]
+        store.user_libraries.add(member, [identity])
+        removed = remove(client, [identity])
+        assert removed["deleted"] == 0
+        assert not store.user_libraries.contains(owner, identity)
+
+        again = client.post("/api/v1/requests", json={"tracks": [song()]})
+        assert again.status_code == 200, again.text
+        body = again.json()
+        assert body["created"] == 0 and body["existing"] == 1, body
+        assert store.user_libraries.contains(owner, identity)
+        assert statuses(store) == ["completed"]
+
+
 def test_monitoring_leaves_a_finished_request_alone(tmp_path, monkeypatch):
     # Without a person asking (artist monitoring), a finished job is never
     # queued again, even when its song has gone.

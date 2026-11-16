@@ -1683,6 +1683,11 @@ class Store:
                                 HouseholdPolicy(self).membership_changed(
                                     conn, [matched["id"]]
                                 )
+                                # Back in their library: the request is met,
+                                # not left out (#211). The iPhone reads a
+                                # skipped song as excluded from downloads.
+                                existing += 1
+                                continue
                     skipped += 1
                     continue
                 payload = {
