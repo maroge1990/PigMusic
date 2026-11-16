@@ -65,13 +65,15 @@ public struct RequestGroup: Codable, Sendable, Identifiable {
   public let title: String
   public let artist: String
   public let releaseId: String?
-  /// "active", "waiting", "done" or "failed".
+  /// "active", "waiting", "paused", "done" or "failed".
   public let state: String
   public let songs: Int
   public let done: Int
   public let active: Int
   public let waiting: Int
   public let failed: Int
+  /// Songs paused on the server (#228); nil from a server before pausing.
+  public let paused: Int?
   public let progress: Double
   public let updatedAt: String
   public let items: [RequestGroupItem]
@@ -82,6 +84,7 @@ public struct RequestGroup: Codable, Sendable, Identifiable {
     if active > 0 { parts.append("\(active) downloading") }
     if waiting > 0 { parts.append("\(waiting) waiting") }
     if failed > 0 { parts.append("\(failed) failed") }
+    if let paused, paused > 0 { parts.append("\(paused) paused") }
     return parts.joined(separator: " · ")
   }
 }

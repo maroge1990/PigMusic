@@ -126,6 +126,7 @@ public enum RequestStatus {
     case "importing": "Adding to the library"
     case "completed", "downloaded": "In your library"
     case "cancelled": "Cancelled"
+    case "paused": "Paused"
     case "failed": "Couldn't get this song"
     case "running", "queued": "Working on it"
     case "done": "Done"

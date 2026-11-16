@@ -154,6 +154,31 @@ extension NativeService {
         "Retry was not confirmed. Refresh requests before trying again.")
     }
   }
+  /// Pause one unfinished request on the server (#228): nothing downloads it
+  /// until it is resumed. A request shared with someone pauses for them too.
+  public func pauseRequest(id: String) async throws {
+    switch try await client.pause_request_api_v1_requests__request_id__pause_post(
+      .init(path: .init(request_id: id)))
+    {
+    case .ok: return
+    case .unauthorized: throw NativeFailure.authentication
+    default:
+      throw NativeFailure.unavailable(
+        "Pause was not confirmed. Refresh requests before trying again.")
+    }
+  }
+  /// Resume one paused request (#228): it waits for a source again.
+  public func resumeRequest(id: String) async throws {
+    switch try await client.resume_request_api_v1_requests__request_id__resume_post(
+      .init(path: .init(request_id: id)))
+    {
+    case .ok: return
+    case .unauthorized: throw NativeFailure.authentication
+    default:
+      throw NativeFailure.unavailable(
+        "Resume was not confirmed. Refresh requests before trying again.")
+    }
+  }
 
   /// How long a start took to be heard (#191). Counted by the server only;
   /// a failed report is not retried.
