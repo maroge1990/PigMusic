@@ -179,16 +179,19 @@ public enum LibraryNamespace {
 }
 
 /// Whether a song shown from elsewhere (Home, a catalogue page, search, a
-/// playlist entry) is a song the person's library holds (#211), as the
-/// server's library lookup decides when there is no shared recording id:
-/// the same title and lead artist ("Coldplay feat. Rihanna" is Coldplay),
-/// the same kind of recording (a live, remix or demo song is never the
-/// studio one) and, when both are known, lengths within 8 seconds.
+/// playlist entry) is a song the person's library holds (#211), by the
+/// server's matching (`server/matching.py`, `LibraryIndex.match`): the same
+/// edition (artist, title, album and album artist, no conflicting release
+/// or recording id, lengths within 5 s), else, unless the song was asked
+/// for as one edition (`explicitEdition`), any edition of the same song
+/// (title, lead artist and kind of recording; no conflicting recording id;
+/// lengths within 8 s). Anything the server would send to review is no
+/// match: Remove and Download must never act on another recording.
 public enum SongIdentity {
-  /// Lowercased words without accents or punctuation: "Choosin’ Texas" is
-  /// ["choosin", "texas"].
+  /// Lowercased words without punctuation, as the server's `normalise`
+  /// compares them: "Choosin’ Texas" is ["choosin", "texas"].
   public static func words(_ text: String) -> [String] {
-    text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+    text.precomposedStringWithCompatibilityMapping.lowercased()
       .components(separatedBy: CharacterSet.alphanumerics.inverted)
       .filter { !$0.isEmpty }
   }
@@ -213,14 +216,43 @@ public enum SongIdentity {
     Set(words(track.album ?? "").compactMap { flavours[$0] })
       .union(track.recordingKind ?? [])
   }
+  /// Whether `owned` may stand in for `song`.
+  public static func matches(_ song: Track, _ owned: Track) -> Bool {
+    sameEdition(song, owned) || (song.explicitEdition != true && same(song, owned))
+  }
+  /// The same song on any edition (`any_edition`, `compatible`).
   public static func same(_ song: Track, _ owned: Track) -> Bool {
     guard !words(song.title).isEmpty, words(song.title) == words(owned.title),
-      leadArtist(song.artist) == leadArtist(owned.artist), kinds(song) == kinds(owned)
+      leadArtist(song.artist) == leadArtist(owned.artist), kinds(song) == kinds(owned),
+      !conflict(song.musicbrainzRecordingId, owned.musicbrainzRecordingId)
     else { return false }
-    if let left = song.duration, let right = owned.duration, left > 0, right > 0 {
-      return abs(left - right) <= 8
+    return closeLengths(song, owned, within: 8)
+  }
+  /// The same song on the same edition (`context`, `same_song`).
+  public static func sameEdition(_ song: Track, _ owned: Track) -> Bool {
+    func context(_ track: Track) -> [[String]] {
+      [
+        words(track.artist), words(track.title), words(track.album ?? ""),
+        words(track.albumArtist ?? track.artist),
+      ]
     }
-    return true
+    // Stricter than the server here: a live, remix or demo song is never
+    // the studio one, even with the same tags.
+    guard !words(song.title).isEmpty, context(song) == context(owned),
+      kinds(song) == kinds(owned),
+      !conflict(song.musicbrainzReleaseId, owned.musicbrainzReleaseId),
+      !conflict(song.musicbrainzRecordingId, owned.musicbrainzRecordingId)
+    else { return false }
+    return closeLengths(song, owned, within: 5)
+  }
+  private static func conflict(_ left: String?, _ right: String?) -> Bool {
+    guard let left, let right, !left.isEmpty, !right.isEmpty else { return false }
+    return left != right
+  }
+  private static func closeLengths(_ left: Track, _ right: Track, within seconds: Double) -> Bool
+  {
+    guard let a = left.duration, let b = right.duration, a > 0, b > 0 else { return true }
+    return abs(a - b) <= seconds
   }
 }
 

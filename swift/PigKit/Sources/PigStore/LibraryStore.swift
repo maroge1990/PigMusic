@@ -177,8 +177,8 @@ public actor LibraryStore {
   }
   /// This person's own copy of `song` (#211), so a song shown from Home, a
   /// catalogue page, search or a playlist offers what the library holds:
-  /// by id (or its library id), else by MusicBrainz recording, else by the
-  /// same song under the server lookup's rules (`SongIdentity.same`).
+  /// by id (or its library id), else a copy of the same recording or title
+  /// that the server's matching accepts (`SongIdentity.matches`).
   public func ownCopy(of song: Track) throws -> Track? {
     try database.read { db in
       func decode(_ data: Data?) throws -> Track? {
@@ -191,29 +191,29 @@ public actor LibraryStore {
           return own
         }
       }
-      if let recording = song.musicbrainzRecordingId, !recording.isEmpty,
-        let own = try decode(
-          Data.fetchOne(
-            db,
-            sql:
-              "SELECT payload FROM tracks WHERE json_extract(CAST(payload AS TEXT),'$.musicbrainz_recording_id')=? ORDER BY id LIMIT 1",
-            arguments: [recording]))
-      {
-        return own
+      // Candidates: the same recording, and songs sharing every title word.
+      var rows: [Data] = []
+      if let recording = song.musicbrainzRecordingId, !recording.isEmpty {
+        rows += try Data.fetchAll(
+          db,
+          sql:
+            "SELECT payload FROM tracks WHERE json_extract(CAST(payload AS TEXT),'$.musicbrainz_recording_id')=? ORDER BY id LIMIT 50",
+          arguments: [recording])
       }
       let words = SongIdentity.words(song.title)
-      guard !words.isEmpty else { return nil }
-      // Candidates sharing every title word, then the full comparison.
-      let terms = words.map { "title : \"" + $0 + "\"" }.joined(separator: " AND ")
-      let rows = try Data.fetchAll(
-        db,
-        sql:
-          "SELECT t.payload FROM tracks t JOIN track_search s ON t.rowid=s.rowid WHERE track_search MATCH ? ORDER BY t.id LIMIT 200",
-        arguments: [terms])
-      for row in rows {
-        if let own = try decode(row), SongIdentity.same(song, own) { return own }
+      if !words.isEmpty {
+        let terms = words.map { "title : \"" + $0 + "\"" }.joined(separator: " AND ")
+        rows += try Data.fetchAll(
+          db,
+          sql:
+            "SELECT t.payload FROM tracks t JOIN track_search s ON t.rowid=s.rowid WHERE track_search MATCH ? ORDER BY t.id LIMIT 200",
+          arguments: [terms])
       }
-      return nil
+      // Only what the server's matching accepts, its own edition first; a
+      // conflicting recording or another explicit edition is never taken.
+      let candidates = try rows.compactMap { try decode($0) }
+      return candidates.first { SongIdentity.sameEdition(song, $0) }
+        ?? candidates.first { SongIdentity.matches(song, $0) }
     }
   }
   /// Each known track's source revision (nil when it has none) in one query.
