@@ -969,3 +969,22 @@ struct RowSeparator: View {
     Divider().padding(.leading, numbered ? number : artwork).accessibilityHidden(true)
   }
 }
+
+/// The Downloads pages' "Clear finished" (iPhone, Apple Watch, Server): one
+/// look everywhere, the accent while there is something to clear and dimmed
+/// grey when there isn't, set explicitly because the toolbar's own tint came
+/// and went (pink or black whatever the state).
+struct ClearFinishedButton: View {
+  let enabled: Bool
+  let action: () -> Void
+  @Environment(\.colorScheme) private var scheme
+  var body: some View {
+    Button(action: action) {
+      Text("Clear finished")
+        .foregroundStyle(
+          enabled ? AnyShapeStyle(PigBrand.accent(scheme)) : AnyShapeStyle(.tertiary))
+    }
+    .tint(PigBrand.accent(scheme))
+    .disabled(!enabled)
+  }
+}

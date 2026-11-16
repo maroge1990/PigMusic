@@ -270,3 +270,16 @@ def test_sending_to_the_watch_shows_no_pop_up_or_text():
     artist = sources()["SearchViews.swift"]
     assert "DownloadMenu(model: model, tracks: songs)" in artist
     assert "sendToWatch" not in artist
+
+
+def test_one_clear_finished_button():
+    """Device round 17 Nov: the three Downloads pages' "Clear finished" was
+    pink or black whatever the state; one button now draws it, the accent
+    only while there is something to clear."""
+    assert found('"Clear finished"') == ["Components.swift"]
+    for page in (
+        "DownloadsView.swift",
+        "WatchDownloadsView.swift",
+        "PersonalActionsViews.swift",
+    ):
+        assert "ClearFinishedButton(" in sources()[page], page

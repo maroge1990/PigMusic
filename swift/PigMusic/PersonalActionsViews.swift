@@ -221,8 +221,12 @@ struct RequestsView: View {
       }
     }.pigCanvas().navigationTitle("Server").navigationBarTitleDisplayMode(.inline)
       .toolbar {
-        Button("Clear finished") { Task { await clear() } }
-          .disabled(loading || !model.canMutate)
+        // Only while a finished request is listed, or more are still to load.
+        ClearFinishedButton(
+          enabled: !loading && model.canMutate
+            && (next != nil
+              || groups.contains { $0.items.contains { RequestStatus.finished.contains($0.status) } })
+        ) { Task { await clear() } }
       }
       .task { await load(reset: true) }
       // Live: the server's request queue changed.
