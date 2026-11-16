@@ -164,10 +164,14 @@ final class DemoLibraryTests: XCTestCase {
   }
 
   /// A tap above the menu closes it without choosing anything.
+  /// Taps outside the menu. A long press lifts the row as a preview, which
+  /// may sit where the first tap lands, so it tries the other end too.
   private func dismissMenu(file: StaticString = #filePath, line: UInt = #line) {
-    app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
-    XCTAssertTrue(
-      app.buttons["Play next"].waitForNonExistence(timeout: 5), file: file, line: line)
+    for spot in [0.08, 0.96] where app.buttons["Play next"].exists {
+      app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: spot)).tap()
+      _ = app.buttons["Play next"].waitForNonExistence(timeout: 3)
+    }
+    XCTAssertFalse(app.buttons["Play next"].exists, file: file, line: line)
   }
 
   func testLibraryLeadsFromAnArtistToTheirAlbum() {
