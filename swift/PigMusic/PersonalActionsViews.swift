@@ -9,18 +9,26 @@ struct SongActionsView: View {
   let opened: Track
   @Environment(\.dismiss) private var dismiss
   @State private var addedToLibrary = false
-  /// This phone's copy of the library holds it, read again on each sync.
-  @State private var held = false
+  /// The library's own copy of the song, read again on each sync (#211):
+  /// found by id, recording, or title and artist, since a row from Home,
+  /// a catalogue page or search carries a catalogue or recording id.
+  @State private var own: Track?
+  /// The library has been looked at once: until then the sheet offers
+  /// neither Request nor the library's actions, so Request never flashes.
+  @State private var looked = false
   init(model: AppModel, track: Track) {
     self.model = model
     opened = track
   }
   /// Follows search's newest answer and the library while the sheet is open,
-  /// so a request that finishes offers downloads without reopening it.
+  /// so a request that finishes offers downloads without reopening it. A
+  /// song the library holds is acted on as the library's own song.
   private var track: Track {
-    var live = model.liveState(opened)
-    if held { live.serverState = "in_library" }
-    return live
+    if var own {
+      own.serverState = "in_library"
+      return own
+    }
+    return model.liveState(opened)
   }
   private var favourite: Bool? { model.favourites[track.id] }
   @State private var loading = false
@@ -45,7 +53,9 @@ struct SongActionsView: View {
           } else {
             Button("Load favourite status") { Task { await loadFavourite() } }.disabled(loading)
           }
-          if addedToLibrary {
+          if !looked {
+            EmptyView()
+          } else if addedToLibrary {
             Button("Play song", systemImage: "play.fill") {
               var saved = track
               saved.serverState = "in_library"
@@ -86,7 +96,7 @@ struct SongActionsView: View {
             }
           }
           NavigationLink("Add to playlist") { AddToPlaylistView(model: model, track: track) }
-          if track.serverState == "in_library" || track.serverState == nil {
+          if looked, track.serverState == "in_library" || track.serverState == nil {
             Button("Download original", systemImage: "arrow.down.circle") {
               Task { await model.download([track]) }
             }
@@ -115,8 +125,12 @@ struct SongActionsView: View {
         if let message { Section { StatusText(message) } }
       }.pigCanvas().navigationTitle("Song actions").navigationBarTitleDisplayMode(.inline)
         .toolbar { Button("Done") { dismiss() }.disabled(loading) }
-        .task { await loadFavourite() }
-        .task(id: model.libraryRevision) { held = await model.inLibrary(opened.actionTrack.id) }
+        // Again once the library's own copy is found (#211).
+        .task(id: track.id) { await loadFavourite() }
+        .task(id: model.libraryRevision) {
+          own = await model.ownCopy(of: opened)
+          looked = true
+        }
     }
     .undoBar(model, inSheet: true)
     .interactiveDismissDisabled(model.mutationActive)

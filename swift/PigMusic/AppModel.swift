@@ -1135,10 +1135,12 @@ enum PlayOrigin: Hashable {
       $0.id == track.id || $0.libraryTrackId == track.id
     }?.actionTrack ?? track
   }
-  /// Whether this phone's copy of the person's library holds the song.
-  func inLibrary(_ id: String) async -> Bool {
-    guard let store else { return false }
-    return (try? await store.sourceRevisions(ids: [id]))?.keys.contains(id) ?? false
+  /// This phone's copy of the person's library's own song, found by id,
+  /// recording, or title and artist (#211): a row from Home, a catalogue
+  /// page or search carries a catalogue or recording id, not the library's.
+  func ownCopy(of track: Track) async -> Track? {
+    guard let store else { return nil }
+    return try? await store.ownCopy(of: track)
   }
   /// Asks the server for `track` at once, with Undo (D-79): when the Undo
   /// runs out the request joins the outbox, which sends it now or, offline,

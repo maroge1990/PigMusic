@@ -178,6 +178,52 @@ public enum LibraryNamespace {
   }
 }
 
+/// Whether a song shown from elsewhere (Home, a catalogue page, search, a
+/// playlist entry) is a song the person's library holds (#211), as the
+/// server's library lookup decides when there is no shared recording id:
+/// the same title and lead artist ("Coldplay feat. Rihanna" is Coldplay),
+/// the same kind of recording (a live, remix or demo song is never the
+/// studio one) and, when both are known, lengths within 8 seconds.
+public enum SongIdentity {
+  /// Lowercased words without accents or punctuation: "Choosin’ Texas" is
+  /// ["choosin", "texas"].
+  public static func words(_ text: String) -> [String] {
+    text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+      .components(separatedBy: CharacterSet.alphanumerics.inverted)
+      .filter { !$0.isEmpty }
+  }
+  /// The lead credit's words.
+  public static func leadArtist(_ artist: String) -> [String] {
+    let pattern = #"\s+(feat\.?|ft\.?|featuring|with|&|and|x|vs\.?)\s+|,\s*"#
+    let lead =
+      artist.range(of: pattern, options: [.regularExpression, .caseInsensitive])
+      .map { String(artist[..<$0.lowerBound]) } ?? artist
+    let found = words(lead)
+    return found.isEmpty ? words(artist) : found
+  }
+  private static let flavours: [String: String] = [
+    "live": "live", "unplugged": "unplugged", "acoustic": "acoustic", "karaoke": "karaoke",
+    "demo": "demo", "demos": "demo", "remix": "remix", "remixes": "remix", "remixed": "remix",
+    "session": "session", "sessions": "session", "instrumental": "instrumental",
+    "instrumentals": "instrumental",
+  ]
+  /// The kinds of recording a song is: named by its album's title ("Live at
+  /// Leeds") or known from its release (`recordingKind`).
+  public static func kinds(_ track: Track) -> Set<String> {
+    Set(words(track.album ?? "").compactMap { flavours[$0] })
+      .union(track.recordingKind ?? [])
+  }
+  public static func same(_ song: Track, _ owned: Track) -> Bool {
+    guard !words(song.title).isEmpty, words(song.title) == words(owned.title),
+      leadArtist(song.artist) == leadArtist(owned.artist), kinds(song) == kinds(owned)
+    else { return false }
+    if let left = song.duration, let right = owned.duration, left > 0, right > 0 {
+      return abs(left - right) <= 8
+    }
+    return true
+  }
+}
+
 extension PlaylistEntry {
   /// Your file, else the household file (played from the server without adding
   /// it), else the playlist's own description for a remote source.

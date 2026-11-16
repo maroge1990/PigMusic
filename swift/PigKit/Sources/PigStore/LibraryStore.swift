@@ -175,6 +175,47 @@ public actor LibraryStore {
       return try LibraryCodec.decoder().decode(Track.self, from: data)
     }
   }
+  /// This person's own copy of `song` (#211), so a song shown from Home, a
+  /// catalogue page, search or a playlist offers what the library holds:
+  /// by id (or its library id), else by MusicBrainz recording, else by the
+  /// same song under the server lookup's rules (`SongIdentity.same`).
+  public func ownCopy(of song: Track) throws -> Track? {
+    try database.read { db in
+      func decode(_ data: Data?) throws -> Track? {
+        try data.map { try LibraryCodec.decoder().decode(Track.self, from: $0) }
+      }
+      for id in [song.libraryTrackId, song.id].compactMap({ $0 }) {
+        if let own = try decode(
+          Data.fetchOne(db, sql: "SELECT payload FROM tracks WHERE id=?", arguments: [id]))
+        {
+          return own
+        }
+      }
+      if let recording = song.musicbrainzRecordingId, !recording.isEmpty,
+        let own = try decode(
+          Data.fetchOne(
+            db,
+            sql:
+              "SELECT payload FROM tracks WHERE json_extract(CAST(payload AS TEXT),'$.musicbrainz_recording_id')=? ORDER BY id LIMIT 1",
+            arguments: [recording]))
+      {
+        return own
+      }
+      let words = SongIdentity.words(song.title)
+      guard !words.isEmpty else { return nil }
+      // Candidates sharing every title word, then the full comparison.
+      let terms = words.map { "title : \"" + $0 + "\"" }.joined(separator: " AND ")
+      let rows = try Data.fetchAll(
+        db,
+        sql:
+          "SELECT t.payload FROM tracks t JOIN track_search s ON t.rowid=s.rowid WHERE track_search MATCH ? ORDER BY t.id LIMIT 200",
+        arguments: [terms])
+      for row in rows {
+        if let own = try decode(row), SongIdentity.same(song, own) { return own }
+      }
+      return nil
+    }
+  }
   /// Each known track's source revision (nil when it has none) in one query.
   /// Ids missing from the library are left out.
   public func sourceRevisions(ids: some Collection<String>) throws -> [String: String?] {
