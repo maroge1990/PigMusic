@@ -28,7 +28,13 @@ public enum NativeFailure: Error, LocalizedError, Sendable, Equatable {
 
 /// The server answered but can't act now (a rate limit, a restart, a proxy
 /// error): unlike `NativeFailure.unavailable`, trying again later can work.
-public struct ServerBusy: Error, Sendable {}
+public struct ServerBusy: LocalizedError, Sendable {
+  public init() {}
+  /// Shown where the request was made (Mark saw "PigSync.ServerBusy error 1").
+  public var errorDescription: String? {
+    "Your server couldn't take the request just now. PigMusic will try again."
+  }
+}
 
 extension Error {
   /// Whether this failure belongs to the song alone, so a queue may pass

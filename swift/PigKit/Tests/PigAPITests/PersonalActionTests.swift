@@ -93,7 +93,10 @@ struct PersonalActionTests {
     do {
       _ = try await service(transport).requestMusic([track])
       Issue.record("Expected the server to be busy")
-    } catch is ServerBusy {}  // Kept by the request outbox for later (#206).
+    } catch let busy as ServerBusy {
+      // Kept by the request outbox for later (#206), and said in words.
+      #expect(!busy.localizedDescription.contains("PigSync"))
+    }
     #expect(await transport.sent.count == 1)
     let expired = ActionTransport(#"{"code":"unauthorized","detail":"Sign in"}"#, status: 401)
     await #expect(throws: NativeFailure.authentication) {
