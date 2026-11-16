@@ -546,6 +546,12 @@ struct NowPlayingView: View {
           transport
           options
           if let error = player.error { failure(error) }
+          // What the song menu's actions said (a Watch that can't take the
+          // song, a playlist that failed): shown here, as the menu has no
+          // room for it (D-112).
+          if let message = model.message {
+            StatusText(message).multilineTextAlignment(.center)
+          }
           upNext
         }.padding(.horizontal, 24).padding(.bottom, 24)
       }
