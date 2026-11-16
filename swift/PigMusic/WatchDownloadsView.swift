@@ -61,12 +61,14 @@ struct WatchDownloadsView: View {
     .toolbar {
       if let watch = model.watch {
         let records = watch.downloads?.records ?? []
-        Button("Clear finished") {
+        ClearFinishedButton(
+          enabled: records.contains { onWatch($0, watch: watch) && $0.cleared != true }
+        ) {
           Task {
             await watch.downloads?.clearFinished(
               ids: Set(records.filter { onWatch($0, watch: watch) }.map(\.id)))
           }
-        }.disabled(!records.contains { onWatch($0, watch: watch) && $0.cleared != true })
+        }
       }
     }
     // A centred alert, not Undo: it removes every song (D-114).
@@ -171,6 +173,7 @@ struct WatchDownloadsView: View {
     case .pause: await watch.pause(records.map(\.id))
     case .resume: await watch.resume(records.map(\.id))
     case .retry:
+      await watch.downloads?.clearPause(ids: Set(records.map(\.id)))
       for record in records {
         await watch.enqueue([record.track], origin: record.effectiveOrigins.last ?? .direct)
       }

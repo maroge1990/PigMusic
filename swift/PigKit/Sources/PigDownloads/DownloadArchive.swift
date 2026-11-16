@@ -78,9 +78,9 @@ public actor DownloadArchive {
         var replacement = DownloadRecord(track: track, quality: quality)
         replacement.origins = old.origins
         // Adding the song again (an album, a retry) keeps the person's pause,
-        // including a ready Watch copy they held back (D-109). A failed song
-        // has no pause to keep: retrying it starts it.
-        if old.state != "ready" && old.state != "failed" {
+        // including a ready Watch copy they held back (D-109), and one kept
+        // through a failure: only their Resume or Retry (`clearPause`) ends it.
+        if old.state != "ready" {
           replacement.paused = old.paused
           replacement.held = old.held
         } else if old.isHeld {
@@ -344,6 +344,20 @@ public actor DownloadArchive {
     }
     if changed { try persist() }
   }
+  /// The person's Retry of failed songs (#232): a pause or hold kept through
+  /// the failure ends, so adding them again starts them. Automatic re-adds (a
+  /// followed playlist refreshed) don't call this and keep the pause.
+  public func clearPause(ids: Set<String>) throws {
+    var changed = false
+    for index in records.indices
+    where ids.contains(records[index].id) && records[index].state == "failed" {
+      guard records[index].held != nil || records[index].paused != nil else { continue }
+      records[index].held = nil
+      records[index].paused = nil
+      changed = true
+    }
+    if changed { try persist() }
+  }
   /// A file that finished downloading is kept even if the person paused the
   /// song meanwhile (a background transfer can complete while the Pause is
   /// handled, or before a relaunch recovers it): the audio is already on the
@@ -367,10 +381,6 @@ public actor DownloadArchive {
     guard let index = records.firstIndex(where: { $0.id == id }) else { return }
     records[index].state = "failed"
     records[index].error = message
-    // A failure outranks a pause: the song shows its error and its retry
-    // mark, not a pause that hides them.
-    records[index].paused = nil
-    records[index].held = nil
     try persist()
   }
   public func prepareFileTransfer(

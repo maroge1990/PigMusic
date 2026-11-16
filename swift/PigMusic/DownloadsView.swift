@@ -94,8 +94,9 @@ private struct DownloadList: View {
       }
     }
     .toolbar {
-      Button("Clear finished") { Task { await downloads.clearFinished() } }
-        .disabled(!transfers.contains { $0.state == "ready" })
+      ClearFinishedButton(enabled: transfers.contains { $0.state == "ready" }) {
+        Task { await downloads.clearFinished() }
+      }
     }
     .task {
       await downloads.reload()
@@ -268,6 +269,7 @@ private struct TransferRow: View {
     case .pause: await downloads.pause(id: record.id)
     case .resume: await downloads.resume(id: record.id)
     case .retry:
+      await downloads.clearPause(ids: [record.id])
       try? await downloads.enqueue(
         [record.track], quality: record.quality, origin: record.effectiveOrigins.last ?? .direct)
     }

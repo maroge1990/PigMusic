@@ -132,7 +132,8 @@ public struct DownloadRecord: Codable, Sendable, Identifiable, Equatable {
   /// before (#127) without being held.
   public var held: Bool?
   /// Paused only while there is still something to fetch: a failed song
-  /// shows its failure (records saved before the fix may carry both).
+  /// shows its failure and retry mark (#232). The pause itself is kept, so an
+  /// automatic re-add stays paused; only Retry or Resume ends it.
   public var isPaused: Bool { paused == true && (state == "queued" || state == "downloading") }
   /// Held back from the Watch (see `held`); only a ready copy the Watch hasn't
   /// confirmed is.
@@ -185,6 +186,9 @@ public enum RequestSource {
 }
 
 public enum RequestStatus {
+  /// What the server's Clear finished removes: finished with or without a
+  /// file (server/queue_states.py FINISHED). Never a paused request.
+  public static let finished: Set<String> = ["completed", "downloaded", "failed", "cancelled"]
   public static func label(_ status: String) -> String {
     switch status {
     case "waiting_for_sources": "Waiting for a source"

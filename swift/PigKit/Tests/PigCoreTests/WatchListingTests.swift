@@ -388,9 +388,10 @@ private struct AnsweringCopies: DeviceCopySource {
     #expect(await sent() == ["after", "before", "phone"])
   }
 
-  /// Mark's device round: a song that failed while paused showed "Paused" and
-  /// hid its error. A failure now clears the pause and the hold, a record
-  /// saved with both reads as failed, and Retry starts the song.
+  /// Mark's device round (#232): a song that failed while paused showed
+  /// "Paused" and hid its error. A failed song now shows its failure and retry
+  /// mark; the pause is kept, so an automatic re-add (a followed playlist
+  /// refreshed) stays paused (Codex round 1), and only Retry starts it.
   @Test func aSongThatFailsWhilePausedShowsItsFailure() async throws {
     let root = folder()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -410,14 +411,20 @@ private struct AnsweringCopies: DeviceCopySource {
       TransferControl.watch(watch, onWatch: false, progress: nil)
         == TransferControl(.failed, tap: .retry))
     #expect(TransferControl.phone(phone, progress: nil) == TransferControl(.failed, tap: .retry))
-    // A record saved before the fix, failed and still paused, shows its failure.
-    var saved = phone
-    saved.paused = true
-    #expect(TransferControl.phone(saved, progress: nil) == TransferControl(.failed, tap: .retry))
-    // Retry starts it, unpaused.
+    // An automatic re-add keeps the person's pause.
+    try await archive.enqueue([try track("watch"), try track("phone")], quality: "aac")
+    let readded = try await record("watch")
+    #expect(readded.isPaused && readded.held == true)
+    #expect(try await record("phone").isPaused)
+    // Their Retry ends it and starts the song.
+    try await archive.fail(id: "watch", message: "The server could not prepare this song.")
+    try await archive.clearPause(ids: ["watch"])
     try await archive.enqueue([try track("watch")], quality: "aac")
     let retried = try await record("watch")
     #expect(retried.state == "queued" && retried.paused == nil && retried.held == nil)
+    // Retry acts only on failed songs: a queued pause stays.
+    try await archive.clearPause(ids: ["phone"])
+    #expect(try await record("phone").isPaused)
   }
 
   /// D-113: the background hand-off (copies asked for in one go, ready ones

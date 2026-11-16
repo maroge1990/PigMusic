@@ -385,6 +385,11 @@ import PigDomain
     await reload()
     resume(automatic: true)
   }
+  /// The person's Retry (#232): ends a pause kept through the failure, so
+  /// adding the songs again starts them.
+  public func clearPause(ids: Set<String>) async {
+    try? await archive.clearPause(ids: ids)
+  }
   /// Stops work for an internal change without recording a Pause (#65).
   private func interrupt() async {
     await stopWorker()
