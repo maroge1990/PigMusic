@@ -388,6 +388,38 @@ private struct AnsweringCopies: DeviceCopySource {
     #expect(await sent() == ["after", "before", "phone"])
   }
 
+  /// Mark's device round: a song that failed while paused showed "Paused" and
+  /// hid its error. A failure now clears the pause and the hold, a record
+  /// saved with both reads as failed, and Retry starts the song.
+  @Test func aSongThatFailsWhilePausedShowsItsFailure() async throws {
+    let root = folder()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let archive = try DownloadArchive(directory: root)
+    try await archive.enqueue(try ["watch", "phone"].map(track), quality: "aac")
+    func record(_ id: String) async throws -> DownloadRecord {
+      try #require(await archive.snapshot().first { $0.id == id })
+    }
+    try await archive.pauseForWatch(ids: ["watch"])
+    try await archive.setPaused(id: "phone", true)
+    try await archive.fail(id: "watch", message: "The server could not prepare this song.")
+    try await archive.fail(id: "phone", message: "The server could not prepare this song.")
+    let watch = try await record("watch")
+    let phone = try await record("phone")
+    #expect(!watch.isPaused && !watch.isHeld && !phone.isPaused)
+    #expect(
+      TransferControl.watch(watch, onWatch: false, progress: nil)
+        == TransferControl(.failed, tap: .retry))
+    #expect(TransferControl.phone(phone, progress: nil) == TransferControl(.failed, tap: .retry))
+    // A record saved before the fix, failed and still paused, shows its failure.
+    var saved = phone
+    saved.paused = true
+    #expect(TransferControl.phone(saved, progress: nil) == TransferControl(.failed, tap: .retry))
+    // Retry starts it, unpaused.
+    try await archive.enqueue([try track("watch")], quality: "aac")
+    let retried = try await record("watch")
+    #expect(retried.state == "queued" && retried.paused == nil && retried.held == nil)
+  }
+
   /// D-113: the background hand-off (copies asked for in one go, ready ones
   /// queued for the background downloader, one the server no longer answers
   /// for left queued, a pass whose request fails) never takes a song off the

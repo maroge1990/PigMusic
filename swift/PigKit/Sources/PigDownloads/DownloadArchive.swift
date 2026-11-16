@@ -78,8 +78,9 @@ public actor DownloadArchive {
         var replacement = DownloadRecord(track: track, quality: quality)
         replacement.origins = old.origins
         // Adding the song again (an album, a retry) keeps the person's pause,
-        // including a ready Watch copy they held back (D-109).
-        if old.state != "ready" {
+        // including a ready Watch copy they held back (D-109). A failed song
+        // has no pause to keep: retrying it starts it.
+        if old.state != "ready" && old.state != "failed" {
           replacement.paused = old.paused
           replacement.held = old.held
         } else if old.isHeld {
@@ -366,6 +367,10 @@ public actor DownloadArchive {
     guard let index = records.firstIndex(where: { $0.id == id }) else { return }
     records[index].state = "failed"
     records[index].error = message
+    // A failure outranks a pause: the song shows its error and its retry
+    // mark, not a pause that hides them.
+    records[index].paused = nil
+    records[index].held = nil
     try persist()
   }
   public func prepareFileTransfer(

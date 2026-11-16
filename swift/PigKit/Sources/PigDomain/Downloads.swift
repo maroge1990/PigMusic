@@ -131,7 +131,9 @@ public struct DownloadRecord: Codable, Sendable, Identifiable, Equatable {
   /// there. Kept apart from `paused`, which a ready song may carry over from
   /// before (#127) without being held.
   public var held: Bool?
-  public var isPaused: Bool { paused == true && state != "ready" }
+  /// Paused only while there is still something to fetch: a failed song
+  /// shows its failure (records saved before the fix may carry both).
+  public var isPaused: Bool { paused == true && (state == "queued" || state == "downloading") }
   /// Held back from the Watch (see `held`); only a ready copy the Watch hasn't
   /// confirmed is.
   public var isHeld: Bool { held == true && state == "ready" && !delivered }
