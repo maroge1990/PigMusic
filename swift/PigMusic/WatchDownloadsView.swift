@@ -69,10 +69,14 @@ struct WatchDownloadsView: View {
         }.disabled(!records.contains { onWatch($0, watch: watch) && $0.cleared != true })
       }
     }
-    .confirmationDialog("Remove all music from Apple Watch?", isPresented: $clearing) {
+    // A centred alert, not Undo: it removes every song (D-114).
+    .alert("Remove all songs from Apple Watch?", isPresented: $clearing) {
+      Button("Cancel", role: .cancel) {}
       if let watch = model.watch {
         Button("Remove all", role: .destructive) { Task { await watch.removeAll() } }
       }
+    } message: {
+      Text("This can't be undone.")
     }
   }
   private func attention(_ watch: WatchPhoneController, records: [DownloadRecord])

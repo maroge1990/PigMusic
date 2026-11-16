@@ -101,8 +101,12 @@ private struct DownloadList: View {
       await downloads.reload()
       budget = Int(downloads.budgetBytes / (1024 * 1024 * 1024))
     }
-    .confirmationDialog("Remove all downloads from this iPhone?", isPresented: $clearing) {
+    // A centred alert, not Undo: it removes every song (D-114).
+    .alert("Remove all songs from this iPhone?", isPresented: $clearing) {
+      Button("Cancel", role: .cancel) {}
       Button("Remove all", role: .destructive) { Task { await downloads.clear() } }
+    } message: {
+      Text("This can't be undone.")
     }
   }
   /// An album's mark (D-110): pause, resume or retry these songs.
