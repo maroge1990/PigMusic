@@ -34,6 +34,7 @@ Each lesson cites the commit that introduced it; read the commit message for the
 - WatchConnectivity reply handlers must not inherit main-actor isolation; that trapped at runtime. (`5925486`)
 - In the foreground the phone's bridge checks the Watch link and archive every 30 s as a safety net; downloads, receipts, link state changes, the 45 s batch deferral and every library sync publish on their own (#178).
 - Watch AAC copies download through their own background URL session, so preparation continues while the phone is locked; leaving the foreground suspends only server polling. (`8988f40`)
+- Pausing a Watch song never touches the manifest (D-109, #228). A song still being prepared pauses its preparation (`paused`); a song ready on the iPhone but not yet on the Watch is held (`DownloadRecord.held`): `WatchDelivery.audio` skips its audio and each publish cancels a queued transfer of it, while `WatchListing` lists it exactly as before, so the Watch keeps whatever it already has. Resuming forgets its send mark, so it goes at once. The hold is kept apart from `paused`, which old ready records may still carry.
 - Sent playlists are subscriptions, so an emptied playlist keeps following and refills. Songs removed from a followed playlist on the Watch are remembered per playlist until the song leaves the playlist or it is sent again. (`8988f40`, `b318f71`)
 
 ## Server device copies

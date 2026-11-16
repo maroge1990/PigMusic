@@ -36,17 +36,22 @@ public enum WatchDelivery {
   /// confirmed applying) goes at once; any other song, from the published
   /// manifest or `ahead` of it, waits on the Watch for its manifest, so only
   /// `holdLimit` songs and `holdBytes` of those are on their way at a time.
+  ///
+  /// `paused`: songs (by id) the person paused while they waited for the
+  /// Watch (D-109). Their audio doesn't go, nor count against the budget,
+  /// until resumed; they stay in the manifest, which this doesn't touch.
   public static func audio(
     songs: [CompanionSong], ahead: [CompanionSong] = [], receipt: CompanionReceipt,
-    committed: Set<String>? = nil, inFlight: Set<String>, hasFile: (String) -> Bool,
-    due: (String) -> Bool
+    committed: Set<String>? = nil, inFlight: Set<String>, paused: Set<String> = [],
+    hasFile: (String) -> Bool, due: (String) -> Bool
   ) -> Audio {
     var plan = Audio(send: [], budgetFull: false)
     var remaining = receipt.budgetBytes - receipt.usedBytes
     var held = 0
     var heldBytes: Int64 = 0
     let candidates = songs.map { ($0, false) } + ahead.map { ($0, true) }
-    for (song, isAhead) in candidates where receipt.ready[song.id] != song.checksum {
+    for (song, isAhead) in candidates
+    where receipt.ready[song.id] != song.checksum && !paused.contains(song.id) {
       guard song.bytes <= remaining else {
         plan.budgetFull = true
         continue
@@ -71,6 +76,12 @@ public enum WatchDelivery {
       if isAhead { plan.ahead.append(song) } else { plan.send.append(song) }
     }
     return plan
+  }
+
+  /// Whether a queued transfer must be cancelled because the person paused
+  /// its song (D-109): only audio of a paused song; a manifest always stays.
+  public static func cancels(_ envelope: CompanionEnvelope, paused: Set<String>) -> Bool {
+    envelope.kind == "audio" && envelope.file.map { paused.contains($0.songId) } == true
   }
 
   /// Manifest files that can go: older than three versions before `revision`

@@ -78,7 +78,10 @@ struct WatchDownloadsView: View {
   private func attention(_ watch: WatchPhoneController, records: [DownloadRecord])
     -> WatchAttention?
   {
-    let waiting = records.filter { $0.state == "ready" && !onWatch($0, watch: watch) }.map(\.id)
+    // A song the person paused isn't waiting for the Watch (D-109).
+    let waiting = records.filter {
+      $0.state == "ready" && !$0.isHeld && !onWatch($0, watch: watch)
+    }.map(\.id)
     return WatchAttention(
       activated: watch.link?.activated == true, error: watch.link?.error,
       missingSince: missingSince,
@@ -123,14 +126,12 @@ struct WatchDownloadsView: View {
         artwork: group.artwork, control: album, noun: group.noun
       ) { tap, ids in
         let records = group.records.filter { ids.contains($0.id) }
-        Task {
-          for record in records { await act(tap, on: record, watch: watch) }
-        }
+        Task { await act(tap, on: records, watch: watch) }
       }
     }
   }
-  /// A song, whose mark is its control (D-109). Only the iPhone's preparation
-  /// of its copy pauses; a song waiting for the Watch has nothing to tap.
+  /// A song, whose mark is its control (D-109). Any song not yet on the Watch
+  /// pauses, including one waiting for the Watch, whose audio is held back.
   private func transferRow(_ record: DownloadRecord, watch: WatchPhoneController) -> some View {
     HStack(spacing: 4) {
       VStack(alignment: .leading, spacing: 2) {
@@ -141,7 +142,7 @@ struct WatchDownloadsView: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .accessibilityElement(children: .combine)
       TransferMarkButton(control(record, watch: watch)) { tap in
-        Task { await act(tap, on: record, watch: watch) }
+        Task { await act(tap, on: [record], watch: watch) }
       }
     }
     .swipeActions {
@@ -159,19 +160,21 @@ struct WatchDownloadsView: View {
       }
     }
   }
-  private func act(_ tap: TransferTap, on record: DownloadRecord, watch: WatchPhoneController)
+  private func act(_ tap: TransferTap, on records: [DownloadRecord], watch: WatchPhoneController)
     async
   {
     switch tap {
-    case .pause: await watch.downloads?.pause(id: record.id)
-    case .resume: await watch.downloads?.resume(id: record.id)
+    case .pause: await watch.pause(records.map(\.id))
+    case .resume: await watch.resume(records.map(\.id))
     case .retry:
-      await watch.enqueue([record.track], origin: record.effectiveOrigins.last ?? .direct)
+      for record in records {
+        await watch.enqueue([record.track], origin: record.effectiveOrigins.last ?? .direct)
+      }
     }
   }
   private func status(_ record: DownloadRecord, watch: WatchPhoneController) -> String {
     if onWatch(record, watch: watch) { return "On Watch" }
-    if record.isPaused { return "Paused" }
+    if record.isPaused || record.isHeld { return "Paused" }
     return switch record.state {
     case "ready": "Waiting for Watch"
     case "failed": "Failed"

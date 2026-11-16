@@ -426,6 +426,45 @@ import UIKit
     }
     await publish()
   }
+  /// The person's pause on Watch songs not yet on the Watch (D-109). A song
+  /// still being prepared pauses its preparation; a song ready on the iPhone
+  /// is held back: its audio isn't handed to the Watch, and the next publish
+  /// cancels a transfer already queued. Either way it stays in the manifest,
+  /// so pausing never deletes anything on the Watch.
+  func pause(_ ids: [String]) async {
+    guard let downloads else { return }
+    var holding: Set<String> = []
+    for id in ids {
+      guard let record = downloads.records.first(where: { $0.id == id }) else { continue }
+      if record.state == "ready" {
+        holding.insert(id)
+      } else {
+        await downloads.pause(id: id)
+      }
+    }
+    guard !holding.isEmpty else { return }
+    try? await downloads.archive.setHeld(ids: holding, true)
+    await downloads.reload()
+    await publish()
+  }
+  /// The person's Resume: a held song's audio goes out as normal, at once.
+  func resume(_ ids: [String]) async {
+    guard let downloads else { return }
+    var releasing: Set<String> = []
+    for id in ids {
+      guard let record = downloads.records.first(where: { $0.id == id }) else { continue }
+      if record.held == true {
+        releasing.insert(id)
+        if let checksum = record.checksum { sent.forget("audio:\(id):\(checksum)") }
+      } else {
+        await downloads.resume(id: id)
+      }
+    }
+    guard !releasing.isEmpty else { return }
+    try? await downloads.archive.setHeld(ids: releasing, false)
+    await downloads.reload()
+    await publish()
+  }
   private func subscribe(_ id: String, name: String?) {
     guard subscriptions[id] != name ?? "" else { return }
     subscriptions[id] = name ?? ""
@@ -779,6 +818,18 @@ import UIKit
     }
     // The Watch link took this version: an earlier failure no longer applies.
     publishSucceeded()
+    // Songs the person paused while they waited for the Watch (D-109): still
+    // listed above, so the Watch keeps whatever it has, but their audio is
+    // held back, and a transfer already queued for one is cancelled (also
+    // one a publish racing the pause queued).
+    let paused = Set(listing.records.filter(\.isHeld).map(\.id))
+    if !paused.isEmpty {
+      link?.cancelTransfers { data in
+        guard let envelope = try? JSONDecoder().decode(CompanionEnvelope.self, from: data)
+        else { return false }
+        return WatchDelivery.cancels(envelope, paused: paused)
+      }
+    }
     let outstanding = (link?.outstanding ?? []).compactMap {
       try? JSONDecoder().decode(CompanionEnvelope.self, from: $0)
     }
@@ -813,7 +864,7 @@ import UIKit
     let audio = WatchDelivery.audio(
       songs: songs, ahead: ahead, receipt: known, committed: committed,
       inFlight: Set(outstanding.compactMap { $0.file.map { "\($0.songId):\($0.checksum)" } }),
-      hasFile: { files[$0] != nil }, due: due)
+      paused: paused, hasFile: { files[$0] != nil }, due: due)
     if audio.budgetFull {
       failPublish("Watch storage budget is full. Remove Watch songs before adding more.")
     }

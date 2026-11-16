@@ -47,15 +47,16 @@ public struct TransferControl: Equatable, Sendable {
     }
   }
 
-  /// A song sent to Apple Watch. Only the iPhone's preparation of its copy
-  /// can be paused; once ready it waits for the Watch, which can't.
+  /// A song sent to Apple Watch. Every song not yet on the Watch pauses
+  /// (D-109): one still being prepared on the iPhone, and one waiting for the
+  /// Watch, whose audio is then held back (`DownloadRecord.held`).
   public static func watch(_ record: DownloadRecord, onWatch: Bool, progress: Double?)
     -> TransferControl
   {
     if onWatch { return TransferControl(.done, tap: nil) }
-    if record.isPaused { return TransferControl(.paused, tap: .resume) }
+    if record.isPaused || record.isHeld { return TransferControl(.paused, tap: .resume) }
     return switch record.state {
-    case "ready": TransferControl(.waiting, tap: nil)
+    case "ready": TransferControl(.waiting, tap: .pause)
     case "failed": TransferControl(.failed, tap: .retry)
     case "downloading": TransferControl(.downloading(clamp(progress)), tap: .pause)
     default: TransferControl(.waiting, tap: .pause)

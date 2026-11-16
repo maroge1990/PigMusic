@@ -249,6 +249,76 @@ import Testing
     #expect(await listed(reopened).songs.map(\.id) == ["b"])
   }
 
+  /// D-109: pausing songs waiting for the Watch holds back their audio only.
+  /// The manifest is the same paused or not, so the Watch deletes nothing:
+  /// neither a song it already holds, confirmed or not, nor one on its way.
+  @Test func pausingASongWaitingForTheWatchNeverDropsItFromTheManifest() async throws {
+    let root = folder()
+    let watchRoot = folder()
+    defer {
+      try? FileManager.default.removeItem(at: root)
+      try? FileManager.default.removeItem(at: watchRoot)
+    }
+    let archive = try await archive(root, ["a", "b", "c"])
+    let published = await listed(archive).songs
+    #expect(published.map(\.id) == ["a", "b", "c"])
+    // The Watch applies the manifest and receives a and b; the iPhone has
+    // settled a's hand-over (its copy went) but not yet b's.
+    let watch = try CompanionArchive(directory: watchRoot)
+    let first = CompanionContext(revision: 1, account: "one")
+    try await watch.apply(first)
+    try await watch.apply(CompanionManifest(context: first, songs: published))
+    for id in ["a", "b"] {
+      let ticket = CompanionFile(context: first, songId: id, checksum: checksum(id))
+      let incoming = folder()
+      try payload(id).write(to: incoming)
+      try await watch.accept(incoming, ticket: ticket)
+    }
+    let all = ["a": checksum("a"), "b": checksum("b"), "c": checksum("c")]
+    try await archive.settleHandOver(
+      listed: all, ready: ["a": checksum("a")], applied: true)
+    // Mark pauses the whole album.
+    try await archive.setHeld(ids: ["a", "b", "c"], true)
+    let records = await archive.snapshot()
+    func record(_ id: String) throws -> DownloadRecord {
+      try #require(records.first { $0.id == id })
+    }
+    #expect(try record("a").delivered && record("a").held == nil)
+    #expect(try record("b").isHeld && record("c").isHeld)
+    // The manifest is unchanged, and the Watch keeps everything it holds.
+    let paused = await listed(archive, earlier: published)
+    #expect(paused.songs == published)
+    let second = CompanionContext(revision: 2, account: "one")
+    try await watch.apply(second)
+    try await watch.apply(CompanionManifest(context: second, songs: paused.songs))
+    #expect(await watch.receipt().ready == ["a": checksum("a"), "b": checksum("b")])
+    // Only c's audio was still to go, and it is held back.
+    let held = Set(records.filter(\.isHeld).map(\.id))
+    let plan = WatchDelivery.audio(
+      songs: paused.songs, receipt: await watch.receipt(), inFlight: [], paused: held,
+      hasFile: { _ in true }, due: { _ in true })
+    #expect(plan.send.isEmpty && plan.ahead.isEmpty)
+    // The Watch confirms b: its hand-over goes ahead, and the hold ends.
+    try await archive.settleHandOver(
+      listed: all, ready: ["a": checksum("a"), "b": checksum("b")], applied: true)
+    let b = try #require(await archive.snapshot().first { $0.id == "b" })
+    #expect(b.delivered && b.held == nil)
+    // Resumed, c goes out as normal; the listing never changed.
+    try await archive.setHeld(ids: ["c"], false)
+    #expect(await archive.snapshot().allSatisfy { !$0.isHeld })
+    #expect(await listed(archive, earlier: published).songs == published)
+    let resumed = WatchDelivery.audio(
+      songs: published, receipt: await watch.receipt(), inFlight: [], hasFile: { _ in true },
+      due: { _ in true })
+    #expect(resumed.send.map(\.id) == ["c"])
+    // Added again in another quality while held, its new copy stays paused.
+    try await archive.setHeld(ids: ["c"], true)
+    try await archive.enqueue([try track("c")], quality: "original")
+    let readded = try #require(await archive.snapshot().first { $0.id == "c" })
+    #expect(readded.isPaused)
+    #expect(await listed(archive, earlier: published).songs == published)
+  }
+
   @Test func recordsSavedBeforeTheWatchFieldsStillLoad() throws {
     let json = #"{"track":{"id":"a","title":"Song","artist":"Artist"},"quality":"aac","state":"queued","bytes":0,"total":0}"#
     let record = try LibraryCodec.decoder().decode(DownloadRecord.self, from: Data(json.utf8))

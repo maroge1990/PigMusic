@@ -46,13 +46,49 @@ struct TransferMarksTests {
     #expect(TransferControl(.done, tap: nil).label == nil)
   }
 
-  @Test func aWatchSongWaitingForTheWatchCantBePaused() {
+  /// TestFlight 1012: most Watch transfers wait for the Watch, ready on the
+  /// iPhone, and their clock mark did nothing, so Mark couldn't pause them.
+  @Test func aWatchSongWaitingForTheWatchPausesAndResumes() {
     #expect(
       TransferControl.watch(record("a", state: "ready"), onWatch: false, progress: nil)
-        == TransferControl(.waiting, tap: nil))
+        == TransferControl(.waiting, tap: .pause))
+    var held = record("a", state: "ready")
+    held.fileName = "a.m4a"
+    held.checksum = "c-a"
+    held.held = true
+    #expect(held.isHeld)
+    #expect(
+      TransferControl.watch(held, onWatch: false, progress: nil)
+        == TransferControl(.paused, tap: .resume))
+    // A ready song's leftover #127 pause flag is no hold.
+    #expect(
+      TransferControl.watch(record("a", state: "ready", paused: true), onWatch: false, progress: nil)
+        == TransferControl(.waiting, tap: .pause))
+    // On the Watch (or confirmed there), nothing is left to pause.
+    #expect(
+      TransferControl.watch(held, onWatch: true, progress: nil)
+        == TransferControl(.done, tap: nil))
+    var delivered = held
+    delivered.fileName = nil
+    #expect(!delivered.isHeld)
     #expect(
       TransferControl.watch(record("a", state: "ready"), onWatch: true, progress: nil)
         == TransferControl(.done, tap: nil))
+    // An album of songs waiting for the Watch pauses them all, then resumes them.
+    let waiting = TransferGroupControl(
+      ["a", "b"].map {
+        ($0, TransferControl.watch(record($0, state: "ready"), onWatch: false, progress: nil))
+      })
+    #expect(waiting.tap == .pause)
+    #expect(waiting.ids == ["a", "b"])
+    let paused = TransferGroupControl([
+      ("a", TransferControl.watch(held, onWatch: false, progress: nil)),
+      ("b", TransferControl.watch(held, onWatch: false, progress: nil)),
+      ("c", TransferControl.watch(record("c", state: "ready"), onWatch: true, progress: nil)),
+    ])
+    #expect(paused.mark == .paused)
+    #expect(paused.tap == .resume)
+    #expect(paused.ids == ["a", "b"])
     #expect(
       TransferControl.watch(record("a"), onWatch: false, progress: nil)
         == TransferControl(.waiting, tap: .pause))
@@ -129,7 +165,7 @@ struct TransferMarksTests {
       ("a", TransferControl(.paused, tap: .resume)),
       ("b", TransferControl(.paused, tap: .resume)),
       ("c", TransferControl(.done, tap: nil)),
-      // Waiting for the Watch: nothing to pause, so the album counts as paused.
+      // A step with nothing to pause: the album counts as paused.
       ("d", TransferControl(.waiting, tap: nil)),
     ])
     #expect(paused.mark == .paused)

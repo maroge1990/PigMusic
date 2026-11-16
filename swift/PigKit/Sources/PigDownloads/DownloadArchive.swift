@@ -77,8 +77,13 @@ public actor DownloadArchive {
         let old = records[index]
         var replacement = DownloadRecord(track: track, quality: quality)
         replacement.origins = old.origins
-        // Adding the song again (an album, a retry) keeps the person's pause.
-        if old.state != "ready" { replacement.paused = old.paused }
+        // Adding the song again (an album, a retry) keeps the person's pause,
+        // including a ready Watch copy they held back (D-109).
+        if old.state != "ready" {
+          replacement.paused = old.paused
+        } else if old.isHeld {
+          replacement.paused = true
+        }
         // The Watch keeps listing a copy it may hold (#218).
         if old.delivered {
           replacement.watchChecksum = old.checksum
@@ -169,6 +174,8 @@ public actor DownloadArchive {
           leaving.append(name)
         }
         records[index].fileName = nil
+        // On the Watch: nothing is left to hold back.
+        records[index].held = nil
       } else if plan.refetch[record.id] == record.checksum, record.delivered {
         var fresh = DownloadRecord(track: record.track, quality: record.quality)
         fresh.origins = record.origins
@@ -291,6 +298,21 @@ public actor DownloadArchive {
     if paused && !["queued", "downloading"].contains(records[index].state) { return }
     records[index].paused = paused ? true : nil
     try persist()
+  }
+  /// The person's pause on Watch songs ready on the iPhone but not yet on the
+  /// Watch (D-109): their audio isn't handed to the Watch until they resume
+  /// them. Only the transfer step reads it; the Watch's listing doesn't, so it
+  /// never removes a song from the manifest. Saved with the list.
+  public func setHeld(ids: Set<String>, _ held: Bool) throws {
+    var changed = false
+    for index in records.indices where ids.contains(records[index].id) {
+      if held && (records[index].state != "ready" || records[index].delivered) { continue }
+      let value: Bool? = held ? true : nil
+      guard records[index].held != value else { continue }
+      records[index].held = value
+      changed = true
+    }
+    if changed { try persist() }
   }
   /// A file that finished downloading is kept even if the person paused the
   /// song meanwhile (a background transfer can complete while the Pause is

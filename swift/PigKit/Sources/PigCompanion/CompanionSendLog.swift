@@ -17,6 +17,9 @@ public struct CompanionSendLog: Sendable, Equatable {
   public mutating func forgetManifests() {
     sent = sent.filter { key, _ in !key.hasPrefix("manifest:") }
   }
+  /// A song the person resumed (D-109): its audio goes at once, not ten
+  /// minutes after the transfer their pause cancelled.
+  public mutating func forget(_ key: String) { sent[key] = nil }
   /// Another account, a newer Watch revision or a reset: everything goes again.
   public mutating func reset() { sent = [:] }
 }

@@ -116,4 +116,46 @@ struct WatchDeliveryTests {
       files, current: current, revision: 12, retained: [7])
     #expect(stale == [manifest(5), manifest(8)])
   }
+
+  /// D-109 (TestFlight 1012): a song waiting for the Watch couldn't be
+  /// paused. Paused, its audio isn't handed to WatchConnectivity, from the
+  /// published manifest or ahead of it, and leaves the budget to the others;
+  /// a queued transfer of it is cancelled. Resumed, it goes as normal.
+  @Test func aPausedSongsAudioIsHeldBackUntilResumed() {
+    let songs = [song("a"), song("b"), song("c", bytes: 30)]
+    let receipt = CompanionReceipt(context: context, ready: [:], usedBytes: 0, budgetBytes: 40)
+    let paused = WatchDelivery.audio(
+      songs: songs, ahead: [song("d")], receipt: receipt, inFlight: [], paused: ["c", "d"],
+      hasFile: { _ in true }, due: { _ in true })
+    #expect(paused.send.map(\.id) == ["a", "b"])
+    #expect(paused.ahead.isEmpty)
+    #expect(!paused.budgetFull)
+    let resumed = WatchDelivery.audio(
+      songs: songs, ahead: [song("d")], receipt: receipt, inFlight: [], paused: ["d"],
+      hasFile: { _ in true }, due: { _ in true })
+    #expect(resumed.send.map(\.id) == ["a", "b"])
+    // c no longer fits beside a and b: it waits for room, as any song does.
+    #expect(resumed.budgetFull)
+    let room = CompanionReceipt(context: context, ready: [:], usedBytes: 0, budgetBytes: 100)
+    let all = WatchDelivery.audio(
+      songs: songs, ahead: [song("d")], receipt: room, inFlight: [], hasFile: { _ in true },
+      due: { _ in true })
+    #expect(all.send.map(\.id) == ["a", "b", "c"])
+    #expect(all.ahead.map(\.id) == ["d"])
+    // Only a paused song's audio is cancelled; its manifest transfer stays.
+    func audio(_ id: String) -> CompanionEnvelope {
+      CompanionEnvelope(
+        kind: "audio", context: context,
+        file: CompanionFile(context: context, songId: id, checksum: "c-" + id))
+    }
+    #expect(WatchDelivery.cancels(audio("c"), paused: ["c"]))
+    #expect(!WatchDelivery.cancels(audio("a"), paused: ["c"]))
+    #expect(!WatchDelivery.cancels(CompanionEnvelope(kind: "manifest", context: context), paused: ["c"]))
+    // Resuming forgets the cancelled send, so the audio goes at once.
+    var log = CompanionSendLog()
+    log.mark("audio:c:c-c")
+    #expect(!log.due("audio:c:c-c"))
+    log.forget("audio:c:c-c")
+    #expect(log.due("audio:c:c-c"))
+  }
 }

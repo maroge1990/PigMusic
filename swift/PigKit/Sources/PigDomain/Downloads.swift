@@ -68,7 +68,16 @@ public struct DownloadRecord: Codable, Sendable, Identifiable, Equatable {
   /// with the records; cleared once the new copy is ready.
   public var watchChecksum: String?
   public var watchBytes: Int64?
+  /// The person paused a Watch song whose copy is ready on the iPhone but not
+  /// yet on the Watch (D-109): its audio is held back until they resume it.
+  /// It stays in the Watch's manifest, so holding it never deletes anything
+  /// there. Kept apart from `paused`, which a ready song may carry over from
+  /// before (#127) without being held.
+  public var held: Bool?
   public var isPaused: Bool { paused == true && state != "ready" }
+  /// Held back from the Watch (see `held`); only a ready copy the Watch hasn't
+  /// confirmed is.
+  public var isHeld: Bool { held == true && state == "ready" && !delivered }
   public var id: String { track.id }
   public var effectiveOrigins: [DownloadOrigin] { origins ?? [.direct] }
   public init(track: Track, quality: String) {
