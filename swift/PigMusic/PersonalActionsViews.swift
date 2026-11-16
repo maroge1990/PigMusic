@@ -240,7 +240,7 @@ struct RequestsView: View {
       .onChange(of: model.requestsRevision) { Task { await load(reset: true) } }
   }
   private static let cancellable: Set<String> = [
-    "waiting_for_sources", "searching", "downloading", "validating",
+    "waiting_for_sources", "searching", "downloading", "validating", "paused",
   ]
   private static func control(_ item: RequestGroupItem) -> TransferControl {
     TransferControl.server(status: item.status, progress: item.requestProgress)
