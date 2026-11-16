@@ -16,6 +16,62 @@ public struct DeviceCopy: Codable, Sendable {
 public protocol DeviceCopySource: Sendable {
   func deviceCopy(trackId: String, quality: String, create: Bool) async throws -> DeviceCopy
   func copyRequest(trackId: String, quality: String) async throws -> URLRequest
+  /// Asks the server to prepare these copies, in one request (#219, D-113):
+  /// it converts them on its own and reports each one's state. Songs it
+  /// doesn't answer for (not in the person's library, or unavailable) are
+  /// left out. A failure of the request throws.
+  func deviceCopies(trackIds: [String], quality: String) async throws -> [String: DeviceCopy]
+}
+extension DeviceCopySource {
+  /// One request per song, for a source without a batch request.
+  public func deviceCopies(trackIds: [String], quality: String) async throws -> [String: DeviceCopy]
+  {
+    var copies: [String: DeviceCopy] = [:]
+    for id in trackIds {
+      try Task.checkCancellation()
+      copies[id] = try await deviceCopy(trackId: id, quality: quality, create: true)
+    }
+    return copies
+  }
+}
+/// Many copies asked for at once (#219, D-113), a request per `size` songs.
+public enum DeviceCopyBatch {
+  /// Songs per request; the server takes up to 100.
+  public static let size = 50
+  /// Asks for each song's copy at its own quality, `size` songs per request,
+  /// stopping at the first failure or once `isCancelled`. Returns the answers
+  /// so far and the songs whose request was answered (an answered song
+  /// missing from `copies` is unavailable); `failed` says a request failed.
+  @MainActor public static func ask(
+    _ wanted: [(id: String, quality: String)], source: any DeviceCopySource,
+    isCancelled: () -> Bool = { false }
+  ) async -> (copies: [String: DeviceCopy], answered: Set<String>, failed: Bool) {
+    var copies: [String: DeviceCopy] = [:]
+    var answered: Set<String> = []
+    var order: [String] = []
+    var groups: [String: [String]] = [:]
+    for (id, quality) in wanted {
+      if groups[quality] == nil { order.append(quality) }
+      groups[quality, default: []].append(id)
+    }
+    for quality in order {
+      let ids = groups[quality] ?? []
+      for start in stride(from: 0, to: ids.count, by: size) {
+        guard !isCancelled(), !Task.isCancelled else { return (copies, answered, true) }
+        let chunk = Array(ids[start..<min(start + size, ids.count)])
+        do {
+          let answer = try await source.deviceCopies(trackIds: chunk, quality: quality)
+          for id in chunk {
+            if let copy = answer[id] { copies[id] = copy }
+          }
+          answered.formUnion(chunk)
+        } catch {
+          return (copies, answered, true)
+        }
+      }
+    }
+    return (copies, answered, false)
+  }
 }
 public struct RetainedDownload: Codable, Sendable, Equatable {
   public var quality: String

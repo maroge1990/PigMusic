@@ -60,7 +60,7 @@ import PigDomain
     /// The pass belongs to the controller like the worker: a Pause, a
     /// removal, the foreground or a reconcile cancels it and awaits it.
     public func handOffToBackground(
-      limit: Int = 64, isCancelled: @escaping @MainActor () -> Bool
+      limit: Int = BackgroundHandOff.askLimit, isCancelled: @escaping @MainActor () -> Bool
     ) async -> BackgroundHandOff.Outcome? {
       guard let background else { return nil }
       // A launch for a background refresh opened the session just now (#223).
@@ -262,10 +262,11 @@ import PigDomain
       }
     }
   }
-  /// Asks the server to start preparing these copies, one request at a
-  /// time, until the worker that asked stops (a pause, a removal, a new run).
-  /// Only a head start: the first failure (a lost session, an unreachable
-  /// server) ends it, and each copy's own turn asks again and reports it.
+  /// Asks the server to start preparing these copies, fifty to a request
+  /// (#219, D-113), until the worker that asked stops (a pause, a removal, a
+  /// new run). The server then converts them on its own. Only a head start:
+  /// the first failure (a lost session, an unreachable server) ends it, and
+  /// each copy's own turn asks again and reports it.
   private func requestAhead(_ wanted: [(id: String, quality: String)], stamp: Int) {
     let previous = ahead
     let source = source
@@ -276,18 +277,13 @@ import PigDomain
       } onCancel: {
         previous?.cancel()
       }
-      for (id, quality) in wanted {
-        guard !Task.isCancelled, self?.generation == stamp else { return }
-        do {
-          _ = try await source.deviceCopy(trackId: id, quality: quality, create: true)
-        } catch {
-          return
-        }
-      }
+      _ = await DeviceCopyBatch.ask(
+        wanted, source: source, isCancelled: { self?.generation != stamp })
     }
   }
-  /// Copies asked for ahead of their turn, at most.
-  static let requestAhead = 32
+  /// Copies asked for ahead of their turn, at most: every song sent at once,
+  /// up to what the background session takes (#219).
+  static let requestAhead = BackgroundHandOff.askLimit
   private func foregroundTransfer(
     _ record: DownloadRecord, manifest: DeviceCopy, request: URLRequest, stamp: Int
   ) async throws {

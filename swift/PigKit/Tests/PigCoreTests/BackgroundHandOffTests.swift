@@ -40,6 +40,39 @@ private actor HeldCopies: DeviceCopySource {
     await withCheckedContinuation { gate = $0 }
     return try await inner.deviceCopy(trackId: trackId, quality: quality, create: create)
   }
+  /// The whole batch is one request, held as one.
+  func deviceCopies(trackIds: [String], quality: String) async throws -> [String: DeviceCopy] {
+    asked += 1
+    await withCheckedContinuation { gate = $0 }
+    var copies: [String: DeviceCopy] = [:]
+    for id in trackIds {
+      copies[id] = try await inner.deviceCopy(trackId: id, quality: quality, create: true)
+    }
+    return copies
+  }
+  func copyRequest(trackId: String, quality: String) async throws -> URLRequest {
+    try await inner.copyRequest(trackId: trackId, quality: quality)
+  }
+}
+/// The server's batch request (D-113): every song in one request, a
+/// request per fifty songs; never one request per song.
+private actor BatchCopies: DeviceCopySource {
+  var batches: [[String]] = []
+  var single = 0
+  let inner: ServerCopies
+  init(_ inner: ServerCopies) { self.inner = inner }
+  func deviceCopy(trackId: String, quality: String, create: Bool) async throws -> DeviceCopy {
+    single += 1
+    return try await inner.deviceCopy(trackId: trackId, quality: quality, create: create)
+  }
+  func deviceCopies(trackIds: [String], quality: String) async throws -> [String: DeviceCopy] {
+    batches.append(trackIds)
+    var copies: [String: DeviceCopy] = [:]
+    for id in trackIds where id != "gone" {
+      copies[id] = try await inner.deviceCopy(trackId: id, quality: quality, create: true)
+    }
+    return copies
+  }
   func copyRequest(trackId: String, quality: String) async throws -> URLRequest {
     try await inner.copyRequest(trackId: trackId, quality: quality)
   }
@@ -111,11 +144,12 @@ private actor HeldCopies: DeviceCopySource {
   @Test func aFailureOrTheLimitLeavesTheRestQueued() async throws {
     let source = ServerCopies(["a": "ready", "b": "down", "c": "ready"])
     let records = [try record("a"), try record("b"), try record("c")]
+    // All three go in one request now (D-113): its failure leaves them all.
     let failed = await BackgroundHandOff.run(
       records, source: source, limit: 10, isCancelled: { false }
     ) { _, _, _ in }
-    #expect(failed.handed == ["a"])
-    #expect(failed.waiting == ["b", "c"])
+    #expect(failed.handed.isEmpty)
+    #expect(failed.waiting == ["a", "b", "c"])
     #expect(failed.stopped)
     let limited = await BackgroundHandOff.run(
       [try record("a"), try record("c")], source: ServerCopies(["a": "ready", "c": "ready"]),
@@ -129,5 +163,29 @@ private actor HeldCopies: DeviceCopySource {
       [try record("a")], source: source, limit: 10, isCancelled: { true }
     ) { _, _, _ in }
     #expect(cancelled.handed.isEmpty && cancelled.waiting == ["a"] && cancelled.stopped)
+  }
+
+  /// D-113: the server is asked for every queued song in one go (a request
+  /// per fifty, never one per song), and every copy it has ready goes to the
+  /// background downloader in the same pass: 100 songs, not the 64 one pass
+  /// took before, one at a time. A song the server no longer answers for
+  /// stays queued without making the pass wait for it.
+  @Test func manySongsGoToTheBackgroundDownloaderInOneGo() async throws {
+    var states: [String: String] = [:]
+    for index in 0..<100 { states["s\(index)"] = "ready" }
+    states["s7"] = "preparing"
+    let source = BatchCopies(ServerCopies(states))
+    let records = try (0..<100).map { try record("s\($0)") } + [try record("gone")]
+    var handed: [String] = []
+    let outcome = await BackgroundHandOff.run(
+      records, source: source, limit: BackgroundHandOff.askLimit, isCancelled: { false }
+    ) { record, _, _ in handed.append(record.id) }
+    #expect(await source.batches.map(\.count) == [50, 50, 1])
+    #expect(await source.single == 0)
+    #expect(handed.count == 99 && !handed.contains("s7"))
+    #expect(outcome.handed == handed)
+    #expect(outcome.waiting == ["s7"])
+    #expect(outcome.unavailable == ["gone"])
+    #expect(!outcome.stopped)
   }
 }

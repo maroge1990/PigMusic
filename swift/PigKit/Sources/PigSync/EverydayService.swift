@@ -383,6 +383,31 @@ extension NativeService: DeviceCopySource {
     default: throw NativeFailure.unavailable("Device copy status is unavailable.")
     }
   }
+  /// Many copies in one request (#219, D-113). A server from before it
+  /// answers the path with 404 (403 for a member): one request per song then.
+  public func deviceCopies(trackIds: [String], quality: String) async throws -> [String: DeviceCopy]
+  {
+    switch try await client.request_copies_api_v1_device_copies_post(
+      .init(body: .json(.init(quality: quality == "aac" ? .aac : .original, track_ids: trackIds))))
+    {
+    case .ok(let value):
+      var copies: [String: DeviceCopy] = [:]
+      for answer in try value.body.json.copies {
+        guard let copy = answer.device_copy else { continue }
+        copies[answer.track_id] = try LibraryCodec.convert(copy, to: DeviceCopy.self)
+      }
+      return copies
+    case .unauthorized: throw NativeFailure.authentication
+    case .notFound, .forbidden:
+      var copies: [String: DeviceCopy] = [:]
+      for id in trackIds {
+        try Task.checkCancellation()
+        copies[id] = try await deviceCopy(trackId: id, quality: quality, create: true)
+      }
+      return copies
+    default: throw NativeFailure.unavailable("The server could not prepare these device copies.")
+    }
+  }
   public func copyRequest(trackId: String, quality: String) async throws -> URLRequest {
     guard let token = try await vault.read() else { throw NativeFailure.authentication }
     let segment = trackId.addingPercentEncoding(

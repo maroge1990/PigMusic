@@ -5,6 +5,26 @@ import PigDomain
 import PigDownloads
 import Testing
 
+/// The server's batch answer: these copies, any other song unanswered.
+private struct AnsweringCopies: DeviceCopySource {
+  let answers: [String: DeviceCopy]
+  let failing: Bool
+  init(_ answers: [String: DeviceCopy], failing: Bool) {
+    self.answers = answers
+    self.failing = failing
+  }
+  func deviceCopy(trackId: String, quality: String, create: Bool) async throws -> DeviceCopy {
+    throw URLError(.badServerResponse)
+  }
+  func deviceCopies(trackIds: [String], quality: String) async throws -> [String: DeviceCopy] {
+    if failing { throw URLError(.notConnectedToInternet) }
+    return answers.filter { trackIds.contains($0.key) }
+  }
+  func copyRequest(trackId: String, quality: String) async throws -> URLRequest {
+    URLRequest(url: URL(string: "https://server.invalid/" + trackId)!)
+  }
+}
+
 /// #218: the Watch deletes the audio of every song its manifest doesn't list.
 /// A publish that raced two hand-overs listed 5 of 97 songs, and the Watch
 /// deleted 92; the refetches that followed left those songs out again.
@@ -366,6 +386,42 @@ import Testing
     #expect(await sent() == ["phone"])
     try await archive.resumeForWatch(ids: ["before", "after"])
     #expect(await sent() == ["after", "before", "phone"])
+  }
+
+  /// D-113: the background hand-off (copies asked for in one go, ready ones
+  /// queued for the background downloader, one the server no longer answers
+  /// for left queued, a pass whose request fails) never takes a song off the
+  /// Watch's list, so the Watch deletes nothing because of it.
+  @Test func aBackgroundHandOffNeverShrinksTheWatchList() async throws {
+    let root = folder()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let archive = try await archive(root, ["a", "b", "c"])
+    try await archive.enqueue(try ["d", "e", "f"].map(track), quality: "aac")
+    let before = await listed(archive)
+    #expect(before.songs.map(\.id) == ["a", "b", "c"])
+    let answers = ["d": try copy("d"), "e": try preparing("e")]
+    for failing in [false, true] {
+      let source = AnsweringCopies(answers, failing: failing)
+      let outcome = await BackgroundHandOff.run(
+        await archive.snapshot(), source: source, limit: BackgroundHandOff.askLimit,
+        isCancelled: { false }
+      ) { record, copy, _ in
+        // What the background session does when a copy is handed to it.
+        try await archive.prepareFileTransfer(record, manifest: copy, budget: 1 << 30)
+      }
+      #expect(outcome.handed == (failing ? [] : ["d"]))
+      let after = await listed(archive, earlier: before.songs)
+      #expect(Set(before.songs).isSubset(of: Set(after.songs)))
+      #expect(await archive.snapshot().count == 6)
+    }
+  }
+  private func preparing(_ id: String) throws -> DeviceCopy {
+    var json =
+      try JSONSerialization.jsonObject(with: LibraryCodec.encoder().encode(copy(id)))
+      as! [String: Any]
+    json["state"] = "preparing"
+    return try LibraryCodec.decoder().decode(
+      DeviceCopy.self, from: JSONSerialization.data(withJSONObject: json))
   }
 
   @Test func recordsSavedBeforeTheWatchFieldsStillLoad() throws {
