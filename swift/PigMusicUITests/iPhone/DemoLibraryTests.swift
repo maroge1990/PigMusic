@@ -130,7 +130,18 @@ final class DemoLibraryTests: XCTestCase {
     app.buttons["More actions for First Light"].tap()
     checkSongMenu()
     // The quality is chosen in the Download submenu (D-106).
-    app.buttons["Download"].tap()
+    // The album page behind has its own Download button: take the one in
+    // the menu, lined up with the menu's other items.
+    let playNext = app.buttons["Play next"]
+    let downloads = app.buttons.matching(identifier: "Download")
+    let inMenu = downloads.allElementsBoundByIndex.first {
+      abs($0.frame.minX - playNext.frame.minX) < 1 && abs($0.frame.width - playNext.frame.width) < 1
+    }
+    guard let inMenu else {
+      print(app.debugDescription)
+      return XCTFail("No Download item in the song menu")
+    }
+    inMenu.tap()
     expect(app.buttons["Original"])
     expect(app.buttons["Smaller AAC copy"])
     dismissMenu()
