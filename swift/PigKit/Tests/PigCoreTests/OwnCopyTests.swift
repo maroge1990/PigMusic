@@ -206,6 +206,28 @@ struct OwnCopyTests {
     #expect(try await store.ownCopy(of: lone)?.id == "a150")
   }
 
+  /// Codex confirmation (high): the search index doesn't normalise as the
+  /// comparison does (NFKC: "Ｆｌｕｍｅ" is "flume"), so an artist or title
+  /// term could miss a copy the comparison takes as the same.
+  @Test func fullwidthCopiesAreCandidatesToo() async throws {
+    let store = try LibraryStore(path: ":memory:")
+    try await store.replace(
+      LibrarySnapshot(
+        revision: "one",
+        tracks: [
+          owned("w-1", "Holdin On", "Flume", album: "Skin"),
+          owned("w-2", "Holdin On", "Ｆｌｕｍｅ", album: "Skin"),
+          owned("w-3", "Ｎｅｖｅｒ Ｂｅ Ｌｉｋｅ Ｙｏｕ", "Flume", album: "Skin"),
+        ]))
+    // Two same-edition copies, one written in fullwidth: review, not a pick.
+    var twin = owned("catalogue:holdin", "Holdin On", "Flume", album: "Skin")
+    twin.explicitEdition = true
+    #expect(try await store.ownCopy(of: twin) == nil)
+    // A title only the comparison's normalisation matches.
+    let never = owned("catalogue:never", "Never Be Like You", "Flume")
+    #expect(try await store.ownCopy(of: never)?.id == "w-3")
+  }
+
   @Test func aLookupThatMayBeCutShortTakesNothing() async throws {
     let store = try LibraryStore(path: ":memory:")
     let tracks = (0..<501).map { index in

@@ -98,6 +98,16 @@ public actor LibraryStore {
       // resend unchanged artists: force one full resync.
       try db.execute(sql: "DELETE FROM metadata WHERE key='revision'")
     }
+    migrator.registerMigration("song-identity-v10") { db in
+      // Each song's title as `SongIdentity` compares it (#211).
+      try db.execute(sql: "ALTER TABLE tracks ADD COLUMN title_words TEXT")
+      try db.execute(sql: "ALTER TABLE tracks ADD COLUMN title_key TEXT")
+      try db.execute(sql: "CREATE INDEX tracks_title_words ON tracks(title_words)")
+      try db.execute(sql: "CREATE INDEX tracks_title_key ON tracks(title_key)")
+      for row in try Row.fetchAll(db, sql: "SELECT id, name FROM tracks") {
+        try LibraryStore.saveTitleKeys(id: row["id"], title: row["name"], db: db)
+      }
+    }
     try migrator.migrate(queue)
     database = queue
   }
@@ -191,37 +201,22 @@ public actor LibraryStore {
           return own
         }
       }
-      // Candidates: the same recording, and songs with every word of the
-      // edition-free title and of the lead artist, which every copy the
-      // server's matching could take has. Uniqueness and the server's order
-      // need all of them: a lookup that reaches its cap may have been cut
-      // short, and then nothing is taken.
+      // Candidates: every copy with the same title as either comparison
+      // needs it (`SongIdentity.sameEdition` in full, `same` without edition
+      // qualifiers; a shared recording counts only with one of them),
+      // normalised exactly as `SongIdentity` does (`saveTitleKeys`), not by
+      // the search index's tokenizer, so no copy it would match is missed.
+      // Uniqueness and the server's order need all of them: a lookup that
+      // reaches its cap may have been cut short, and then nothing is taken.
       let cap = 500
-      var rows: [Data] = []
-      if let recording = song.musicbrainzRecordingId, !recording.isEmpty {
-        let found = try Data.fetchAll(
-          db,
-          sql:
-            "SELECT payload FROM tracks WHERE json_extract(CAST(payload AS TEXT),'$.musicbrainz_recording_id')=? ORDER BY id LIMIT ?",
-          arguments: [recording, cap + 1])
-        guard found.count <= cap else { return nil }
-        rows += found
-      }
-      // Titles compare without edition qualifiers, so are looked up that way.
-      let words = SongIdentity.titleKey(song.title)
-      if !words.isEmpty {
-        let terms =
-          (words.map { "title : \"" + $0 + "\"" }
-          + SongIdentity.leadArtist(song.artist).map { "artist : \"" + $0 + "\"" })
-          .joined(separator: " AND ")
-        let found = try Data.fetchAll(
-          db,
-          sql:
-            "SELECT t.payload FROM tracks t JOIN track_search s ON t.rowid=s.rowid WHERE track_search MATCH ? ORDER BY t.id LIMIT ?",
-          arguments: [terms, cap + 1])
-        guard found.count <= cap else { return nil }
-        rows += found
-      }
+      let words = SongIdentity.words(song.title).joined(separator: " ")
+      guard !words.isEmpty else { return nil }
+      let key = SongIdentity.titleKey(song.title).joined(separator: " ")
+      let rows = try Data.fetchAll(
+        db,
+        sql: "SELECT payload FROM tracks WHERE title_words=? OR title_key=? ORDER BY id LIMIT ?",
+        arguments: [words, key, cap + 1])
+      guard rows.count <= cap else { return nil }
       // Each with its album, for the server's order among editions.
       let tracks = try rows.compactMap { try decode($0) }
       var albums: [String: Album] = [:]
@@ -534,6 +529,7 @@ public actor LibraryStore {
   private static func upsert(_ snapshot: LibrarySnapshot, db: Database) throws {
     for track in snapshot.tracks {
       try save(track, kind: .tracks, name: track.title, db: db)
+      try saveTitleKeys(id: track.id, title: track.title, db: db)
       try db.execute(
         sql: "DELETE FROM track_search WHERE rowid=(SELECT rowid FROM tracks WHERE id=?)",
         arguments: [track.id])
@@ -569,6 +565,19 @@ public actor LibraryStore {
       sql:
         "INSERT INTO metadata(key,value) VALUES ('revision',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
       arguments: [snapshot.revision])
+  }
+  /// A song's title as `SongIdentity` compares it, in full and without
+  /// edition qualifiers, for `ownCopy`'s candidate lookup (#211). Computed
+  /// here, not by SQLite's tokenizer, which doesn't normalise the same way
+  /// (NFKC: "Ｆｌｕｍｅ" is "flume"). If `SongIdentity.words` or `titleKey`
+  /// change, a migration must recompute them (as "song-identity-v10" does).
+  private static func saveTitleKeys(id: String, title: String, db: Database) throws {
+    try db.execute(
+      sql: "UPDATE tracks SET title_words=?, title_key=? WHERE id=?",
+      arguments: [
+        SongIdentity.words(title).joined(separator: " "),
+        SongIdentity.titleKey(title).joined(separator: " "), id,
+      ])
   }
   private static func save<T: Encodable & Identifiable>(
     _ value: T, kind: LibraryCollection, name: String, db: Database
