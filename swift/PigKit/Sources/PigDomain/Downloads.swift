@@ -193,7 +193,7 @@ public enum RequestStatus {
     switch status {
     case "waiting_for_sources": "Adding"
     case "searching": "Looking for a copy"
-    case "downloading": "Downloading to the server"
+    case "downloading": "Adding"
     case "validating": "Checking the file"
     case "importing": "Adding to the library"
     case "completed", "downloaded": "In your library"

@@ -682,6 +682,7 @@ private final class Raised: @unchecked Sendable {
 /// one it couldn't get "Couldn't add"; a copy to a device "Couldn't download".
 @Test func requestStatesUseTheAgreedWords() {
   #expect(RequestStatus.label("waiting_for_sources") == "Adding")
+  #expect(RequestStatus.label("downloading") == "Adding")
   #expect(RequestStatus.label("failed") == "Couldn't add")
   #expect(RequestStatus.label("completed") == "In your library")
   #expect(
