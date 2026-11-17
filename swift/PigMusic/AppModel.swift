@@ -1195,7 +1195,7 @@ enum PlayOrigin: Hashable {
   /// the next time the server answers. Nothing on screen waits for it.
   func requestLater(_ track: Track) {
     let stamp = account.generation
-    undo.schedule(Self.undoKey(request: track.id), label: "Requested " + track.title) {
+    undo.schedule(Self.undoKey(request: track.id), label: "Adding " + track.title) {
       [weak self] in
       // Only for the account that asked.
       guard let self, account.isCurrent(stamp), let store else { return false }
@@ -1265,7 +1265,7 @@ enum PlayOrigin: Hashable {
   func cancelRequestLater(_ item: RequestGroupItem, done: @escaping @MainActor (Bool) -> Void) {
     let stamp = account.generation
     undo.schedule(
-      Self.undoKey(cancelRequest: item.id), label: "Cancelled the request for " + item.title
+      Self.undoKey(cancelRequest: item.id), label: "Cancelled adding " + item.title
     ) { [weak self] in
       guard let self, account.isCurrent(stamp) else { return false }
       do {

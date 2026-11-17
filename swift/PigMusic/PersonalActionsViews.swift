@@ -65,19 +65,19 @@ struct SongActionsMenu: View {
         Task { await model.loadFavourite(track) }
       }
     case .addToLibrary:
-      Button("Add to my library", systemImage: "plus") {
+      Button("Add to library", systemImage: "plus") {
         Task { await addToLibrary(track) }
       }.disabled(!model.canMutate)
     case .requestMix:
-      Button("Add to my library", systemImage: "arrow.down.circle") {
+      Button("Add to library", systemImage: "plus") {
         Task { await request(track) }
       }.disabled(!model.canMutate)
     case .requested:
       // #206: the same mark as an album page's requested songs.
-      Button("Requested", systemImage: "clock") {}.disabled(true)
+      Button("Adding", systemImage: "clock") {}.disabled(true)
     case .request:
       // At once, with Undo; sent when the server can be reached (#206).
-      Button("Request song", systemImage: "arrow.down.circle") {
+      Button("Add to library", systemImage: "plus") {
         model.requestLater(track)
       }.disabled(!model.canRequest)
     case .download:
@@ -92,7 +92,7 @@ struct SongActionsMenu: View {
       }
     case .removeFromLibrary:
       // At once, with Undo (D-79, #214, D-108).
-      Button("Remove from library", systemImage: "minus.circle", role: .destructive) {
+      Button("Remove from library", systemImage: "trash", role: .destructive) {
         model.removeFromLibraryLater(track)
       }
     }
@@ -121,7 +121,7 @@ struct SongActionsMenu: View {
       if result.downloadsEnabled {
         model.confirmations += 1
       } else {
-        model.notify("Requested. Downloads are off on the server, so it will wait.")
+        model.notify("Adding. Downloads are off on the server, so it will wait.")
       }
     } catch is CancellationError {} catch { model.notify(error) }
   }

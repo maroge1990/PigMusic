@@ -453,16 +453,16 @@ struct SongRow: View {
       switch mark {
       case .ready: "On \(device)"
       case .pending: "Downloading to \(device)"
-      case .failed: "\(device) download failed"
+      case .failed: "Couldn't download to \(device)"
       case nil: nil
       }
     }
     return [label(copies.phone, "iPhone"), label(copies.watch, "Apple Watch")].compactMap { $0 }
   }
-  /// One mark per row, most local copy first: blank (not on the server), clock
-  /// (requested), faded cloud (on the server, not in your library), cloud (in
-  /// your library), progress ring then filled arrow (on this iPhone). A Watch
-  /// glyph sits beside it when the song is on, or going to, Apple Watch.
+  /// One mark per row, most local copy first (D-116): blank (not on the
+  /// server, or on it and streams), clock (adding), tick (in your library),
+  /// progress ring then filled arrow (on this iPhone). A Watch glyph sits
+  /// beside it when the song is on, or going to, Apple Watch.
   private var indicator: some View {
     let copies = copies
     return HStack(spacing: 4) {
@@ -497,26 +497,24 @@ struct SongRow: View {
       Image(systemName: "exclamationmark.circle").foregroundStyle(PigBrand.danger(scheme))
     case nil:
       switch state {
-      case "household_available":
-        Image(systemName: "cloud").foregroundStyle(.tertiary)
+      case "household_available", "not_in_library":
+        EmptyView()
       case "requested":
         Image(systemName: "clock").foregroundStyle(.secondary)
       case "failed":
         Image(systemName: "exclamationmark.circle").foregroundStyle(PigBrand.danger(scheme))
-      case "not_in_library":
-        EmptyView()
       default:
-        Image(systemName: "cloud").foregroundStyle(.secondary)
+        Image(systemName: "checkmark.circle.fill").foregroundStyle(PigBrand.accent(scheme))
       }
     }
   }
   private var stateLabel: String {
     switch state {
     case "household_available": "On the server, not in your library"
-    case "not_in_library": "Not downloaded"
-    case "requested": "Requested"
-    case "failed": "Request failed"
-    default: "In your library on the server"
+    case "not_in_library": "Not on the server"
+    case "requested": "Adding"
+    case "failed": "Couldn't add"
+    default: "In your library"
     }
   }
 }
@@ -801,7 +799,8 @@ struct UndoBar: View {
         Text(item.label).font(PigType.footnote.weight(.medium)).lineLimit(2)
           .foregroundStyle(PigBrand.onAccent(scheme))
         Spacer(minLength: 0)
-        Button("Undo") { model.undo.undo(item.id) }
+        Button("Undo", systemImage: "arrow.uturn.backward") { model.undo.undo(item.id) }
+          .labelStyle(.titleAndIcon)
           .font(PigType.footnote.weight(.bold))
           .foregroundStyle(PigBrand.onAccent(scheme))
           .frame(minHeight: 44)

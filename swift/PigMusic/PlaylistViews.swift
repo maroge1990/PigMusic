@@ -270,9 +270,9 @@ struct PlaylistView: View {
       }
       let done = [
         added > 0 ? "Added \(added) song\(added == 1 ? "" : "s") to your library." : nil,
-        queued > 0 ? "Requested \(queued) song\(queued == 1 ? "" : "s")." : nil,
+        queued > 0 ? "Adding \(queued) song\(queued == 1 ? "" : "s") to your library." : nil,
       ].compactMap { $0 }.joined(separator: " ")
-      message = .info(done.isEmpty ? "These songs are already requested." : done)
+      message = .info(done.isEmpty ? "These songs are already being added." : done)
       reloadAfterEdit = true
     } catch is CancellationError {} catch { message = .error(error.userMessage) }
   }

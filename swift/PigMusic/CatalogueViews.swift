@@ -678,25 +678,26 @@ struct CatalogueReleaseView: View {
       // The request is shown only by its mark: sending, then the song
       // states (clock = requested), or a warning that retries.
       if requesting {
-        ProgressView().frame(width: 40, height: 40).accessibilityLabel("Sending request")
+        ProgressView().frame(width: 40, height: 40).accessibilityLabel("Adding")
       } else if let requestFailure {
         RoundIcon(
-          label: "Request failed: \(requestFailure). Try again",
+          label:
+            "Couldn't add \(missing.count) song\(missing.count == 1 ? "" : "s"): \(requestFailure). Try again",
           systemImage: "exclamationmark.circle"
         ) { Task { await request(missing) } }
         .foregroundStyle(PigBrand.danger(scheme))
       } else if !missing.isEmpty {
-        RoundIcon(label: "Add or request album", systemImage: "plus") {
+        RoundIcon(label: "Add to library", systemImage: "plus") {
           Task { await request(missing) }
         }
         .disabled(!model.canMutate || missing.count > 500)
       } else if release.songs.contains(where: { $0.availability == "requested" }) {
-        RoundIconLabel(systemImage: "clock").accessibilityLabel("Requested")
+        RoundIconLabel(systemImage: "clock").accessibilityLabel("Adding")
       }
       Spacer()
     }.buttonStyle(.plain)
     if !release.songs.isEmpty && release.songs.allSatisfy({ $0.availability == "in_library" }) {
-      Text("Already in your library: nothing to request.")
+      Text("Already in your library.")
         .font(PigType.footnote).foregroundStyle(.secondary)
     }
     if let savedAlbum {

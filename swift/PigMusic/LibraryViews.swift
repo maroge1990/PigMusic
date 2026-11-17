@@ -293,8 +293,8 @@ struct AlbumView: View {
               Task { await requestMissing() }
             } label: {
               Label(
-                "Request \(missing.count) missing song\(missing.count == 1 ? "" : "s")",
-                systemImage: "arrow.down.circle")
+                "Add \(missing.count) song\(missing.count == 1 ? "" : "s") to library",
+                systemImage: "plus")
             }
             .buttonStyle(.pigSecondary)
             .disabled(requesting || !model.canMutate)
@@ -344,7 +344,8 @@ struct AlbumView: View {
     defer { requesting = false }
     do {
       let result = try await model.performPersonal { try await $0.requestMusic(missing) }
-      requestMessage = "Requested \(result.created) song\(result.created == 1 ? "" : "s")."
+      requestMessage =
+        "Adding \(result.created) song\(result.created == 1 ? "" : "s") to your library."
       release = nil
       await loadRelease()
     } catch is CancellationError {} catch { requestMessage = error.userMessage }
@@ -388,7 +389,7 @@ struct DownloadMenu: View {
         }
         if missingCount > 0, let addMissing, model.canMutate {
           Button(
-            "Add \(missingCount) missing song\(missingCount == 1 ? "" : "s") to server",
+            "Add \(missingCount) song\(missingCount == 1 ? "" : "s") to library",
             systemImage: "plus"
           ) {
             Task { await addMissing() }

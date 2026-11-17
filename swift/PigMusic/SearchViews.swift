@@ -456,13 +456,12 @@ private struct FoundResultsView: View {
     ) {
       thumb
     } trailing: {
-      // The same marks as songs: a cloud for your library, a faded one for
-      // the server; nothing for music not on it yet.
-      if mark == .library || mark == .server {
-        Image(systemName: "cloud").font(.system(size: markSize, weight: .semibold))
-          .foregroundStyle(
-            mark == .library ? PigBrand.accent(scheme) : PigBrand.secondary(scheme).opacity(0.5))
-          .accessibilityLabel(mark == .library ? "In your library" : "On the server")
+      // The same marks as songs (D-116): a tick for your library; nothing
+      // for music only on the server or not on it yet.
+      if mark == .library {
+        Image(systemName: "checkmark.circle.fill").font(.system(size: markSize, weight: .semibold))
+          .foregroundStyle(PigBrand.accent(scheme))
+          .accessibilityLabel("In your library")
       }
     }
   }
@@ -805,7 +804,7 @@ private struct AppleImportSheet: View {
             Text(AppleImport.summary(result))
           } else {
             if let choice {
-              Text("\(choice.onServer) on the server, \(choice.toDownload) to download")
+              Text("\(choice.onServer) on the server, \(choice.toDownload) not on the server yet")
             }
             if capped {
               Text(
@@ -831,17 +830,17 @@ private struct AppleImportSheet: View {
             Button("Add only", systemImage: "plus") { Task { await add(download: false) } }
               .disabled(!model.canMutate)
             if missing > 0 {
-              Button("Add and download \(songsLabel)", systemImage: "arrow.down.circle") {
+              Button("Also add \(songsLabel) to library", systemImage: "plus") {
                 confirming = true
               }
               .disabled(!model.canMutate)
               .confirmationDialog(
-                "Download \(songsLabel)?", isPresented: $confirming, titleVisibility: .visible
+                "Add \(songsLabel) to library?", isPresented: $confirming, titleVisibility: .visible
               ) {
-                Button("Add and download \(songsLabel)") { Task { await add(download: true) } }
+                Button("Add \(songsLabel) to library") { Task { await add(download: true) } }
               } message: {
                 Text(
-                  "PigMusic finds and downloads the songs that aren't on the server yet; they join the playlist once downloaded."
+                  "PigMusic finds the songs that aren't on the server yet and adds them to your library; they join the playlist once added."
                 )
               }
             }
@@ -1049,7 +1048,7 @@ private struct ShazamFoundView: View {
           close()
         }
         if case .server = state {
-          Button("Add to my library", systemImage: "plus") { Task { await add(track) } }
+          Button("Add to library", systemImage: "plus") { Task { await add(track) } }
             .buttonStyle(.pigSecondary)
             .disabled(adding || !model.canMutate)
         }
@@ -1059,10 +1058,10 @@ private struct ShazamFoundView: View {
         NavigationLink {
           AppleResultView(model: model, kind: "song", appleId: appleId, title: song.title)
         } label: {
-          Label("Open in the catalogue", systemImage: "music.note")
+          Label("Open in the catalogue", systemImage: "magnifyingglass")
         }
         .pigPrimaryAction().buttonBorderShape(.capsule)
-        Text("Request it from its catalogue page.").font(PigType.footnote)
+        Text("Add it to your library from its catalogue page.").font(PigType.footnote)
           .foregroundStyle(.secondary)
       } else {
         Text("Apple Music doesn't list this song, so PigMusic can't look it up.")
@@ -1102,8 +1101,8 @@ private struct ShazamFoundView: View {
 }
 
 /// The "Shazamed" list (D-70): songs identified in PigMusic, newest first,
-/// each marked like an Apple playlist song. "Download all missing" requests
-/// the ones not on the server only after the person confirms.
+/// each marked like an Apple playlist song. "Add N songs to library" asks
+/// the server for the ones not on it only after the person confirms.
 private struct ShazamInboxView: View {
   let model: AppModel
   @State private var states: ApplePlaylistStates?
@@ -1135,22 +1134,22 @@ private struct ShazamInboxView: View {
       } else {
         Section {
           if requesting {
-            ProgressView("Sending requests…")
+            ProgressView("Adding…")
           } else {
-            Button("Download all missing (\(missing.count))", systemImage: "arrow.down.circle") {
+            let songsLabel = "\(missing.count) song\(missing.count == 1 ? "" : "s")"
+            Button("Add \(songsLabel) to library", systemImage: "plus") {
               confirming = true
             }
             .disabled(missing.isEmpty || !model.canMutate)
             .confirmationDialog(
-              "Download \(missing.count) song\(missing.count == 1 ? "" : "s")?",
-              isPresented: $confirming, titleVisibility: .visible
+              "Add \(songsLabel) to library?", isPresented: $confirming, titleVisibility: .visible
             ) {
-              Button("Download \(missing.count) song\(missing.count == 1 ? "" : "s")") {
+              Button("Add \(songsLabel) to library") {
                 Task { await request(missing) }
               }
             } message: {
               Text(
-                "PigMusic finds and downloads the songs that aren't on the server yet. A song with no exact match in the catalogue is left out."
+                "PigMusic finds the songs that aren't on the server yet and adds them to your library. A song with no exact match in the catalogue is left out."
               )
             }
           }
@@ -1193,7 +1192,7 @@ private struct ShazamInboxView: View {
           .foregroundStyle(PigBrand.text(scheme))
         Text(song.artist).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
         if requested.contains(song.shazamId) {
-          Text("Requested").font(PigType.caption).foregroundStyle(.secondary)
+          Text("Adding").font(PigType.caption).foregroundStyle(.secondary)
         } else if let caption = ShazamStatus.caption(state) {
           Text(caption).font(PigType.caption).foregroundStyle(.secondary)
         }
@@ -1245,11 +1244,11 @@ private struct ShazamInboxView: View {
       let unmatched = outcome.unmatched.count
       message = .info(
         [
-          sent > 0 ? "Requested \(sent) song\(sent == 1 ? "" : "s")." : nil,
+          sent > 0 ? "Adding \(sent) song\(sent == 1 ? "" : "s") to your library." : nil,
           unmatched > 0
             ? "\(unmatched) had no exact match in the catalogue: open \(unmatched == 1 ? "it" : "them") to choose a version."
             : nil,
-          outcome.downloadsEnabled ? nil : "Server downloads are disabled; requests will wait.",
+          outcome.downloadsEnabled ? nil : "Downloads are off on the server, so they will wait.",
         ].compactMap { $0 }.joined(separator: " "))
     } catch is CancellationError {} catch { message = .error(error.userMessage) }
   }
