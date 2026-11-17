@@ -101,6 +101,9 @@ def main(argv=None):
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--only", choices=sorted(ui.APPS))
     parser.add_argument("--keep", action="store_true")
+    parser.add_argument(
+        "--appearance", choices=APPEARANCES, help="Only this one (default: both)"
+    )
     parser.add_argument("--out", type=Path, default=WORK / "screens")
     args = parser.parse_args(argv)
     kinds = [args.only] if args.only else ["iphone", "watch"]
@@ -136,7 +139,7 @@ def main(argv=None):
                 str(ui.WORK / "tls/ca.pem"),
             )
             ui.simctl("status_bar", devices["iphone"], "override", "--time", "9:41")
-            for appearance in APPEARANCES:
+            for appearance in [args.appearance] if args.appearance else APPEARANCES:
                 ui.simctl("ui", devices["iphone"], "appearance", appearance)
                 environment = {
                     **screens,
