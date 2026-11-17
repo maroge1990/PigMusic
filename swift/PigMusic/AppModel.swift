@@ -738,6 +738,7 @@ enum PlayOrigin: Hashable {
       artistCovers = [:]
     coverSwatches = [:]
       artworkRefresh += 1
+      homeLibraryChanged()
     }
     libraryRevision += 1
   }
@@ -749,10 +750,10 @@ enum PlayOrigin: Hashable {
   @ObservationIgnored private var homeLoadedAt: [HomeSection: Date] = [:]
   @ObservationIgnored private var homePreparingRetries = 0
   private static let homeFreshness: TimeInterval = 30 * 60
-  /// Library changes can change recommendations; the next Home visit refreshes them.
+  /// Library changes can change recommendations, mixes and Recently added
+  /// (and their covers); the next Home visit refreshes them.
   func homeLibraryChanged() {
-    homeLoadedAt[.recommended] = nil
-    homeLoadedAt[.mixes] = nil
+    for section in HomeSection.followsLibrary { homeLoadedAt[section] = nil }
   }
   /// Home's catalogue albums, fetched ahead one at a time with their
   /// recommended edition and its cover, so a tap opens like a library album.

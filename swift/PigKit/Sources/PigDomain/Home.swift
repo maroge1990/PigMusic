@@ -2,6 +2,12 @@ import Foundation
 
 public enum HomeSection: String, CaseIterable, Sendable {
   case recent, popular, recommended, mixes
+  /// The sections drawn from the person's library: a sync that changed the
+  /// library or its artwork makes the app's kept answer for them stale, so
+  /// the next Home visit asks again. Recently added is one of them (#168:
+  /// it kept placeholder covers for half an hour after the library had
+  /// them). Popular is the catalogue's chart and keeps its answer.
+  public static let followsLibrary: Set<HomeSection> = [.recent, .recommended, .mixes]
 }
 
 public struct DiscoveryItem: Codable, Sendable, Identifiable, Hashable {

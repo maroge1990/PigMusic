@@ -84,6 +84,24 @@ struct HomeTests {
       }
     }
   }
+  /// A sync that changed the library or its artwork makes Recently added
+  /// stale with the other library sections (#168); the chart keeps its answer.
+  @Test func recentlyAddedIsAskedForAgainWhenTheLibraryChanges() {
+    #expect(HomeSection.followsLibrary == [.recent, .recommended, .mixes])
+    #expect(!HomeSection.followsLibrary.contains(.popular))
+  }
+  /// A Recently added album the server has no stored cover for carries its
+  /// own artwork address, which the card asks for.
+  @Test func recentlyAddedCarriesAnAlbumsOwnArtworkAddress() async throws {
+    let id = "0123456789abcdef01234567"
+    let transport = HomeTransport(
+      json:
+        #"{"albums":[{"id":"\#(id)","title":"Sunrise","artist":"The Orchard","artist_id":"saved-artist","category":"albums","track_count":2,"cover_sha":null,"cover_url":"/api/v1/library-artwork/albums/\#(id)","date":"","year":"","musicbrainz_release_id":null,"edition":null,"codecs":[],"compilation":false,"server_state":"in_library"}],"revision":"v1"}"#
+    )
+    let album = try #require(try await service(transport).home(.recent).albums.first)
+    #expect(album.coverSha == nil)
+    #expect(album.libraryArtwork == LibraryArtwork(kind: .albums, id: id))
+  }
   @Test func preparedMixesKeepPrivatePlaybackIdentityAndNeverUseRemoteStreaming() async throws {
     let transport = HomeTransport(
       json:
