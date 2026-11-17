@@ -616,6 +616,12 @@ enum PlayOrigin: Hashable {
       let artworkBefore = try? await store?.artworkRevision()
       try await sync.refresh()
       guard account.isCurrent(stamp) else { return }
+      // No saved revision (first sign-in, or an update that asked for one
+      // full resync, #168): the whole library was read again.
+      if before == nil {
+        DiagnosticsLog.shared.record(
+          "sync", "full library resync: there was no saved revision (first sync or app update)")
+      }
       // Reloading redraws every open page and list, so it waits for a real
       // change. Reconnecting the live updates syncs often with none. Covers
       // reload only when the sync changed one.

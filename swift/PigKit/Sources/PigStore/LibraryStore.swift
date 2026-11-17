@@ -7,7 +7,13 @@ public actor LibraryStore {
   private let database: DatabaseQueue
   /// Library order ignores a leading "The", like the server's artist list.
   static let sortName = DatabaseCollation("sortname") { $0.sortingCompare($1) }
-  public init(path: String) throws {
+  /// The migration that asks for one full resync so saved songs, albums
+  /// and artists gain their cover address (#168).
+  static let coverAddressResync = "cover-addresses-v11"
+  public init(path: String) throws { try self.init(path: path, upTo: nil) }
+  /// `upTo` stops after the named migration: a store as an earlier build
+  /// left it, for tests.
+  init(path: String, upTo last: String?) throws {
     var configuration = Configuration()
     configuration.prepareDatabase { $0.add(collation: LibraryStore.sortName) }
     let queue = try DatabaseQueue(path: path, configuration: configuration)
@@ -108,7 +114,18 @@ public actor LibraryStore {
         try LibraryStore.saveTitleKeys(id: row["id"], title: row["name"], db: db)
       }
     }
-    try migrator.migrate(queue)
+    migrator.registerMigration(LibraryStore.coverAddressResync) { db in
+      // Songs, albums and artists gained `cover_url` (#168); a library synced
+      // before this build holds them without it, and the server will not
+      // resend unchanged items: force one full resync, as for portraits.
+      // Only the saved revision goes. The library stays as it is (on screen
+      // too) until a sync replaces it in one transaction; until a sync
+      // succeeds the revision stays missing, so offline, signed out or
+      // interrupted it is simply tried again. Downloads, the outboxes and
+      // everything cached are not touched.
+      try db.execute(sql: "DELETE FROM metadata WHERE key='revision'")
+    }
+    if let last { try migrator.migrate(queue, upTo: last) } else { try migrator.migrate(queue) }
     database = queue
   }
 

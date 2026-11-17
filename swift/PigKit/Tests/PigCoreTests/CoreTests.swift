@@ -1,10 +1,10 @@
 import Foundation
 import PigPlayback
-import PigStore
 import PigSync
 import Testing
 
 @testable import PigDomain
+@testable import PigStore
 
 @Test func queueKeepsRepeatedOccurrencesAndPreviousRestarts() {
   let song = Track(id: "same", title: "Song", artist: "Artist")
@@ -108,6 +108,89 @@ private actor FailedSource: LibrarySource {
   } catch NativeFailure.unavailable {}
   #expect(try await store.revision() == "valid")
   #expect(try await store.tracks().first?.title == "Kept")
+}
+
+private actor CountingSource: LibrarySource {
+  private(set) var bootstraps = 0
+  private(set) var deltas = 0
+  private var revision = 1
+  func bootstrap() async throws -> LibrarySnapshot {
+    bootstraps += 1
+    revision += 1
+    return .init(
+      revision: "r\(revision)",
+      tracks: [
+        try LibraryCodec.decoder().decode(
+          Track.self,
+          from: Data(
+            #"{"id":"a","title":"Kept","artist":"Artist","cover_url":"/api/v1/library-artwork/albums/0123456789abcdef01234567"}"#
+              .utf8))
+      ])
+  }
+  func changes(since: String) async throws -> LibraryDelta {
+    deltas += 1
+    return try LibraryCodec.decoder().decode(
+      LibraryDelta.self,
+      from: Data(
+        #"{"revision":"\#(since)","upserts":{"tracks":[],"albums":[],"artists":[],"playlists":[]},"deletes":{"tracks":[],"albums":[],"artists":[],"playlists":[]}}"#
+          .utf8))
+  }
+}
+
+/// A library saved by the build before cover addresses (#168) is read again
+/// in full exactly once: the saved library stays until the fresh one
+/// arrives, a failed resync is tried again, and nothing else is cleared.
+@Test func aLibrarySavedBeforeCoverAddressesIsReadAgainOnce() async throws {
+  let path = FileManager.default.temporaryDirectory
+    .appendingPathComponent(UUID().uuidString + ".sqlite").path
+  defer { try? FileManager.default.removeItem(atPath: path) }
+  do {
+    let old = try LibraryStore(path: path, upTo: "song-identity-v10")
+    try await old.replace(
+      .init(revision: "r1", tracks: [Track(id: "a", title: "Kept", artist: "Artist")]))
+    try await old.recordListen(
+      ListeningEvent(eventId: "one", trackId: "a", playedAt: 10, seconds: 30))
+    try await old.enqueueMutation(OfflineMutation(action: "create", name: "Run"))
+    try await old.cache(["a"], key: "queue")
+    #expect(try await old.revision() == "r1")
+  }
+  // The update: the revision is gone, the library and everything else stay.
+  var store = try LibraryStore(path: path)
+  #expect(try await store.revision() == nil)
+  #expect(try await store.tracks().map(\.title) == ["Kept"])
+  #expect(try await store.tracks().first?.libraryArtwork == nil)
+  // Offline: the resync fails, the library stays, and it is still owed.
+  do {
+    try await SyncCoordinator(source: FailedSource(), store: store).refresh()
+    Issue.record("Expected sync failure")
+  } catch NativeFailure.unavailable {}
+  #expect(try await store.revision() == nil)
+  #expect(try await store.tracks().map(\.title) == ["Kept"])
+  // The next launch tries again, and this time the server answers.
+  store = try LibraryStore(path: path)
+  #expect(try await store.revision() == nil)
+  let source = CountingSource()
+  try await SyncCoordinator(source: source, store: store).refresh()
+  #expect(await source.bootstraps == 1)
+  #expect(await source.deltas == 0)
+  #expect(try await store.revision() == "r2")
+  #expect(try await store.tracks().first?.libraryArtwork != nil)
+  #expect(try await store.pendingListens().map(\.eventId) == ["one"])
+  #expect(try await store.pendingMutations().map(\.mutation.action) == ["create"])
+  #expect(try await store.cached("queue", as: [String].self) == ["a"])
+  // Migrated: later launches and syncs only ask for changes.
+  store = try LibraryStore(path: path)
+  #expect(try await store.revision() == "r2")
+  try await SyncCoordinator(source: source, store: store).refresh()
+  #expect(await source.bootstraps == 1)
+  #expect(await source.deltas == 1)
+  // A store that never held the old form is not read twice either.
+  let fresh = try LibraryStore(path: ":memory:")
+  let first = CountingSource()
+  try await SyncCoordinator(source: first, store: fresh).refresh()
+  try await SyncCoordinator(source: first, store: fresh).refresh()
+  #expect(await first.bootstraps == 1)
+  #expect(await first.deltas == 1)
 }
 
 @Test func homePrefetchWaitsForUnconstrainedNetworksAndNormalPower() {
