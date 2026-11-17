@@ -1,6 +1,6 @@
 import { PlaylistPicker } from "./PlaylistPicker";
 import { useEffect, useState } from "react";
-import { Heart } from "lucide-react";
+import { Star } from "lucide-react";
 import { api } from "./api";
 import { songBody, type Song } from "./songs";
 /** Favourite and playlist actions for the playing song. The payload keeps the
@@ -47,7 +47,7 @@ export function PersonalSongActions({
             .catch((e) => setError(e.message))
         }
       >
-        <Heart size={18} fill={favourite ? "currentColor" : "none"} />
+        <Star size={18} fill={favourite ? "currentColor" : "none"} />
       </button>
       {!hidePlaylist && (
         <PlaylistPicker

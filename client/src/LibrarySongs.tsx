@@ -1,3 +1,4 @@
+import { ArrowUp, X } from "lucide-react";
 import { CollectionPages } from "./CollectionPages";
 import type { Entry, Playlist } from "./libraryTypes";
 import { SongRow } from "./SongRow";
@@ -68,6 +69,7 @@ export function LibrarySongs({
                         onClick={() => moveUp(playlist, entry)}
                       >
                         <span>Move up</span>
+                        <ArrowUp size={18} />
                       </button>
                       <button
                         role="menuitem"
@@ -75,6 +77,7 @@ export function LibrarySongs({
                         onClick={() => removeFromPlaylist(playlist, entry)}
                       >
                         <span>Remove from playlist</span>
+                        <X size={18} />
                       </button>
                     </>
                   )

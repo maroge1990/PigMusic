@@ -4,7 +4,8 @@ import {
   ChevronDown,
   CircleCheck,
   Disc3,
-  Heart,
+  ListChecks,
+  ListMusic,
   ShieldCheck,
   Upload,
   X,
@@ -359,13 +360,12 @@ export function AdminTools({ route }: { route: Route }) {
         <div className="migration-summary">
           <div className="inventory-name">
             <span className="inventory-icon">
-              <Heart size={20} />
+              <ListMusic size={20} />
             </span>
             <div>
               <strong>{migration.source_name}</strong>
               <span>
-                Apple Music inventory ·{" "}
-                {plural(migration.stats.tracks, "track")}
+                Apple Music inventory · {plural(migration.stats.tracks, "song")}
               </span>
             </div>
           </div>
@@ -391,8 +391,8 @@ export function AdminTools({ route }: { route: Route }) {
           <ShieldCheck size={19} />
           <p>
             Import every song in this export, or choose a smaller selection.
-            Already saved music is skipped. Requests use your download settings
-            and save into your SMB library.
+            Already saved music is skipped. Songs you add use your download
+            settings and save into your SMB library.
           </p>
         </div>
 
@@ -491,8 +491,8 @@ export function AdminTools({ route }: { route: Route }) {
                         {migrationTab === "compilations" ? albums[0].title : id}
                       </strong>
                       <span>
-                        {plural(albums.length, "release")} ·{" "}
-                        {plural(tracks.length, "track")}
+                        {plural(albums.length, "album")} ·{" "}
+                        {plural(tracks.length, "song")}
                         {saved > 0 && ` · ${saved} saved`}
                       </span>
                     </div>
@@ -517,7 +517,7 @@ export function AdminTools({ route }: { route: Route }) {
                           : toggleExpanded(id)
                       }
                     >
-                      <Heart size={13} />{" "}
+                      <ListChecks size={13} />{" "}
                       {allMissingSelected
                         ? "Selected"
                         : missing.length
@@ -546,8 +546,8 @@ export function AdminTools({ route }: { route: Route }) {
                             <div>
                               <strong>{album.title}</strong>
                               <span>
-                                {album.year || "Release"} ·{" "}
-                                {plural(album.track_count, "track")}
+                                {album.year || "Album"} ·{" "}
+                                {plural(album.track_count, "song")}
                               </span>
                             </div>
                             <button
@@ -632,7 +632,7 @@ export function AdminTools({ route }: { route: Route }) {
             }
             description={
               migration.stats.tracks
-                ? "Multi-artist releases will appear here when they are in your export."
+                ? "Multi-artist albums will appear here when they are in your export."
                 : "Import an Apple Music XML export to review what you want to retain."
             }
           />
@@ -641,12 +641,12 @@ export function AdminTools({ route }: { route: Route }) {
         <div className="migration-footer">
           <div>
             <span className="footer-icon">
-              <Heart size={18} />
+              <ListMusic size={18} />
             </span>
             <div>
               <strong>
                 {migration.stats.selected
-                  ? plural(migration.stats.selected, "track") + " selected"
+                  ? plural(migration.stats.selected, "song") + " selected"
                   : "No songs selected"}
               </strong>
               <span>
@@ -939,7 +939,7 @@ export function AdminTools({ route }: { route: Route }) {
                           Choose…
                         </option>
                         <option value="requested">
-                          Keep requested release
+                          Keep the album from your export
                         </option>
                         <option value="skip">Skip this song</option>
                       </select>
@@ -964,8 +964,8 @@ export function AdminTools({ route }: { route: Route }) {
               </button>
             </div>
             <p>
-              Requests are saved in the queue and downloaded when enabled in
-              Admin › Downloads.
+              Songs you add wait in the queue and download when enabled in Admin
+              › Downloads.
             </p>
           </section>
         </div>

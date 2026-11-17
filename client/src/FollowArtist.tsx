@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BellPlus, BellOff } from "lucide-react";
+import { Bell, BellOff } from "lucide-react";
 import { api } from "./api";
 
 /** Follow an artist's future albums into this person's library. */
@@ -49,7 +49,7 @@ export function FollowArtist({ id, name }: { id: string; name: string }) {
         disabled={busy}
         onClick={() => void toggle()}
       >
-        {following ? <BellOff size={16} /> : <BellPlus size={16} />}
+        {following ? <BellOff size={16} /> : <Bell size={16} />}
         {following ? "Following" : "Follow new albums"}
       </button>
       {message && <span role="status">{message}</span>}

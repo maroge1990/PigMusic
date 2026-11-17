@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { UndoBar } from "./UndoBar";
 import {
-  ArrowDownToLine,
+  CircleArrowDown,
   House,
   LibraryBig,
   Search,
@@ -53,7 +53,7 @@ const sections: { id: Section; label: string; icon: LucideIcon }[] = [
   { id: "home", label: "Home", icon: House },
   { id: "search", label: "Search", icon: Search },
   { id: "library", label: "Library", icon: LibraryBig },
-  { id: "downloads", label: "Downloads", icon: ArrowDownToLine },
+  { id: "downloads", label: "Downloads", icon: CircleArrowDown },
   { id: "account", label: "Account", icon: UserRound },
   // Administrator additions always follow everything a member sees.
   { id: "admin", label: "Admin", icon: ShieldCheck },

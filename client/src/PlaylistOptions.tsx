@@ -1,3 +1,4 @@
+import { Pencil, Trash2 } from "lucide-react";
 import type { Playlist } from "./libraryTypes";
 
 /** Rename or delete a playlist, below its songs. */
@@ -29,9 +30,13 @@ export function PlaylistOptions({
             maxLength={100}
           />
         </label>
-        <button type="submit">Rename</button>
+        <button type="submit">
+          <Pencil size={16} aria-hidden="true" /> Rename
+        </button>
       </form>
-      <button onClick={remove}>Delete playlist</button>
+      <button onClick={remove}>
+        <Trash2 size={16} aria-hidden="true" /> Delete playlist
+      </button>
     </details>
   );
 }
