@@ -674,16 +674,19 @@ private final class Raised: @unchecked Sendable {
 /// #209: the Downloads hub says how many songs each place holds.
 @Test func theDownloadsHubCountsSongsInEachPlace() {
   #expect(DownloadPlace.server.summary(songs: 0) == "0 songs on your server")
-  #expect(DownloadPlace.phone.summary(songs: 1) == "1 song on your phone")
-  #expect(DownloadPlace.watch.summary(songs: 2) == "2 songs on your watch")
+  #expect(DownloadPlace.phone.summary(songs: 1) == "1 song on your iPhone")
+  #expect(DownloadPlace.watch.summary(songs: 2) == "2 songs on your Apple Watch")
 }
 
 /// #246, D-115/D-117: a song the server is still getting reads "Adding", and
-/// one it couldn't get "Couldn't add".
+/// one it couldn't get "Couldn't add"; a copy to a device "Couldn't download".
 @Test func requestStatesUseTheAgreedWords() {
   #expect(RequestStatus.label("waiting_for_sources") == "Adding")
   #expect(RequestStatus.label("failed") == "Couldn't add")
   #expect(RequestStatus.label("completed") == "In your library")
+  #expect(
+    OfflineFailure.quota.localizedDescription
+      == "Storage limit reached on this device. Remove downloads or raise the storage limit.")
 }
 
 /// Codex round 1 on batch 13 (#209): with a song removed and waiting for its

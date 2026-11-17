@@ -10,7 +10,7 @@ extension NativeService {
     {
     case .ok: return
     case .unauthorized: throw NativeFailure.authentication
-    default: throw NativeFailure.unavailable("Unable to hide this edition. Try again.")
+    default: throw NativeFailure.unavailable("Couldn't hide this edition. Try again.")
     }
   }
   public func saveMix(_ id: String) async throws -> Playlist {
@@ -19,7 +19,7 @@ extension NativeService {
     {
     case .ok(let value): return try LibraryCodec.convert(value.body.json)
     case .unauthorized: throw NativeFailure.authentication
-    default: throw NativeFailure.unavailable("Unable to save this mix. Try again.")
+    default: throw NativeFailure.unavailable("Couldn't save this mix. Try again.")
     }
   }
   public func hideMixSong(_ trackId: String) async throws {
@@ -28,7 +28,7 @@ extension NativeService {
     {
     case .ok: return
     case .unauthorized: throw NativeFailure.authentication
-    default: throw NativeFailure.unavailable("Unable to hide this song. Try again.")
+    default: throw NativeFailure.unavailable("Couldn't hide this song. Try again.")
     }
   }
   public func radio(after: String?) async throws -> RadioBatch {
@@ -65,7 +65,7 @@ extension NativeService {
     {
     case .ok: return
     case .unauthorized: throw NativeFailure.authentication
-    default: throw NativeFailure.unavailable("Unable to update your radio. Try again.")
+    default: throw NativeFailure.unavailable("Couldn't update your radio. Try again.")
     }
   }
   public func applyMutation(_ mutation: OfflineMutation) async throws -> OfflineMutationReceipt {
@@ -87,7 +87,7 @@ extension NativeService {
     case .badRequest, .notFound, .unprocessableContent: throw MutationRejection.rejected
     default:
       throw NativeFailure.unavailable(
-        "Your edits are saved on this phone and will retry when the server is available.")
+        "Your edits are saved on this iPhone and will be sent when the server is available.")
     }
   }
 
@@ -97,7 +97,7 @@ extension NativeService {
     {
     case .ok(let value): return try LibraryCodec.convert(value.body.json)
     case .unauthorized: throw NativeFailure.authentication
-    default: throw NativeFailure.unavailable("Artist requests are unavailable.")
+    default: throw NativeFailure.unavailable("Artist monitoring is unavailable.")
     }
   }
   public func configureArtist(id: String, kinds: [String], monitor: Bool, request: Bool)
@@ -107,7 +107,7 @@ extension NativeService {
       guard
         let value = Components.Schemas.server__routes__personal__ArtistRequest.kindsPayloadPayload(
           rawValue: kind)
-      else { throw NativeFailure.unavailable("Choose a supported release type.") }
+      else { throw NativeFailure.unavailable("Choose a supported album type.") }
       return value
     }
     switch try await client.configure_artist_api_v1_artists__artist_id__acquisition_put(
@@ -119,7 +119,7 @@ extension NativeService {
     case .unauthorized: throw NativeFailure.authentication
     default:
       throw NativeFailure.unavailable(
-        "Artist settings were not confirmed. Refresh before trying again.")
+        "Couldn't confirm the artist settings. Refresh before trying again.")
     }
   }
   public func cancelArtist(id: String) async throws -> ArtistAcquisition {
@@ -129,7 +129,8 @@ extension NativeService {
     case .ok(let value): return try LibraryCodec.convert(value.body.json)
     case .unauthorized: throw NativeFailure.authentication
     default:
-      throw NativeFailure.unavailable("Cancellation was not confirmed. Refresh artist requests.")
+      throw NativeFailure.unavailable(
+        "Couldn't confirm the cancellation. Refresh before trying again.")
     }
   }
   public func cancelRequest(id: String) async throws -> CancelledRequest {
@@ -140,7 +141,7 @@ extension NativeService {
     case .unauthorized: throw NativeFailure.authentication
     default:
       throw NativeFailure.unavailable(
-        "Cancellation was not confirmed. Refresh requests before trying again.")
+        "Couldn't confirm the cancellation. Refresh before trying again.")
     }
   }
   public func retryRequest(id: String) async throws {
@@ -151,7 +152,7 @@ extension NativeService {
     case .unauthorized: throw NativeFailure.authentication
     default:
       throw NativeFailure.unavailable(
-        "Retry was not confirmed. Refresh requests before trying again.")
+        "Couldn't confirm the new attempt. Refresh before trying again.")
     }
   }
   /// Pause one unfinished request on the server (#228): nothing downloads it
@@ -164,7 +165,7 @@ extension NativeService {
     case .unauthorized: throw NativeFailure.authentication
     default:
       throw NativeFailure.unavailable(
-        "Pause was not confirmed. Refresh requests before trying again.")
+        "Couldn't confirm the pause. Refresh before trying again.")
     }
   }
   /// Resume one paused request (#228): it waits for a source again.
@@ -176,7 +177,7 @@ extension NativeService {
     case .unauthorized: throw NativeFailure.authentication
     default:
       throw NativeFailure.unavailable(
-        "Resume was not confirmed. Refresh requests before trying again.")
+        "Couldn't confirm resuming. Refresh before trying again.")
     }
   }
 
@@ -206,7 +207,7 @@ extension NativeService {
     {
     case .ok: return
     case .unauthorized: throw NativeFailure.authentication
-    default: throw NativeFailure.unavailable("Listening history will retry on the next connection.")
+    default: throw NativeFailure.unavailable("Listening history will be sent on the next connection.")
     }
   }
 
@@ -218,7 +219,7 @@ extension NativeService {
     case .unauthorized: throw NativeFailure.authentication
     default:
       throw NativeFailure.unavailable(
-        "The export could not be reviewed. Check the Apple Music XML file.")
+        "Couldn't read the export. Check the Apple Music XML file.")
     }
   }
 
@@ -376,7 +377,7 @@ extension NativeService: DeviceCopySource {
       {
       case .ok(let value): return try LibraryCodec.convert(value.body.json)
       case .unauthorized: throw NativeFailure.authentication
-      default: throw NativeFailure.unavailable("The server could not prepare this device copy.")
+      default: throw NativeFailure.unavailable("The server couldn't prepare this download. Try again.")
       }
     }
     switch try await client.copy_status_api_v1_tracks__track_id__copy_get(
@@ -410,7 +411,7 @@ extension NativeService: DeviceCopySource {
         copies[id] = try await deviceCopy(trackId: id, quality: quality, create: true)
       }
       return copies
-    default: throw NativeFailure.unavailable("The server could not prepare these device copies.")
+    default: throw NativeFailure.unavailable("The server couldn't prepare these downloads. Try again.")
     }
   }
   public func copyRequest(trackId: String, quality: String) async throws -> URLRequest {

@@ -163,8 +163,8 @@ public enum OfflineFailure: Error, LocalizedError, Sendable {
   public var errorDescription: String? {
     switch self {
     case .authentication: "The device session expired. Sign in again."
-    case .integrity: "The download did not match the server copy. Retry after refreshing."
-    case .quota: "The device download budget is full. Remove downloads or increase the budget."
+    case .integrity: "The download didn't match the server's copy. Refresh, then try again."
+    case .quota: "Storage limit reached on this device. Remove downloads or raise the storage limit."
     case .unsafeResponse: "The server did not return a safe audio download."
     case .cancelled: "Download cancelled."
     case .removal: "Couldn't remove these downloads."
@@ -211,9 +211,17 @@ public enum RequestStatus {
 /// Watch, each summed up on the hub by how many songs it holds.
 public enum DownloadPlace: String, Sendable, CaseIterable {
   case server, phone, watch
-  /// "1 song on your phone", "12 songs on your server".
+  /// "1 song on your iPhone", "12 songs on your server".
   public func summary(songs: Int) -> String {
-    "\(songs.formatted()) song\(songs == 1 ? "" : "s") on your \(rawValue)"
+    "\(songs.formatted()) song\(songs == 1 ? "" : "s") on your \(name)"
+  }
+  /// The place in words: "server", "iPhone", "Apple Watch".
+  public var name: String {
+    switch self {
+    case .server: "server"
+    case .phone: "iPhone"
+    case .watch: "Apple Watch"
+    }
   }
 }
 

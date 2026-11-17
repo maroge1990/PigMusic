@@ -24,8 +24,8 @@ public enum NativeFailure: Error, LocalizedError, Sendable, Equatable {
   public var errorDescription: String? {
     switch self {
     case .authentication: "Please sign in again. This device session is no longer available."
-    case .resync: "Your library needs a fresh sync."
-    case .changed: "Your library changed during sync. Please try again."
+    case .resync: "Your library needs a full refresh."
+    case .changed: "Your library changed while refreshing. Try again."
     case .unavailable(let message), .songUnavailable(let message): message
     case .invalidMediaURL: "The server returned an unsupported playback address."
     case .busyUnconfirmed:
@@ -43,7 +43,7 @@ public struct ServerBusy: LocalizedError, Sendable {
   public init() {}
   /// Shown where the request was made (Mark saw "PigSync.ServerBusy error 1").
   public var errorDescription: String? {
-    "Your server couldn't take the request just now. PigMusic will try again."
+    "Your server couldn't take that just now. PigMusic will try again."
   }
 }
 
@@ -195,7 +195,7 @@ public actor NativeService: LibrarySource {
       throw NativeFailure.unavailable(
         "The administrator needs to finish server setup, or the server is unavailable.")
     default:
-      throw NativeFailure.unavailable("Sign-in failed. Check the server address and try again.")
+      throw NativeFailure.unavailable("Couldn't sign in. Check the server address and try again.")
     }
   }
   public func me() async throws -> Person {
@@ -403,7 +403,7 @@ public actor NativeService: LibrarySource {
       throw NativeFailure.unavailable("Update the server to add Apple Music playlists.")
     default:
       throw NativeFailure.unavailable(
-        "Adding the playlist could not be confirmed. Check your playlists before trying again.")
+        "Couldn't confirm the playlist was added. Check your playlists before trying again.")
     }
   }
   public func artistArtwork(id: String, request: ArtworkRequest) async throws -> Data {
@@ -580,7 +580,7 @@ public actor NativeService: LibrarySource {
     case .unauthorized: throw NativeFailure.authentication
     default:
       throw NativeFailure.unavailable(
-        "The favourite change could not be confirmed. Refresh before trying again.")
+        "Couldn't confirm the favourite change. Refresh before trying again.")
     }
   }
   public func addMembership(trackIds: [String]) async throws -> Int {
@@ -596,11 +596,11 @@ public actor NativeService: LibrarySource {
     default: break
     }
     throw NativeFailure.unavailable(
-      "The library change could not be confirmed. Refresh before trying again.")
+      "Couldn't confirm the library change. Refresh before trying again.")
   }
   public func requestMusic(_ tracks: [Track]) async throws -> AcquisitionResult {
     guard !tracks.isEmpty, tracks.count <= 500 else {
-      throw NativeFailure.unavailable("Choose between one and 500 songs per request.")
+      throw NativeFailure.unavailable("Add between one and 500 songs at a time.")
     }
     switch try await client.request_tracks_api_v1_requests_post(
       .init(body: .json(.init(tracks: tracks.map(input)))))
@@ -618,7 +618,7 @@ public actor NativeService: LibrarySource {
       throw ServerBusy()
     default:
       throw NativeFailure.unavailable(
-        "The request could not be confirmed. Refresh Requests before trying again.")
+        "Couldn't confirm adding to your library. Refresh before trying again.")
     }
   }
   public func requests(offset: Int = 0, limit: Int = 200) async throws -> AcquisitionPage {
@@ -627,7 +627,7 @@ public actor NativeService: LibrarySource {
     {
     case .ok(let response): return try LibraryCodec.convert(response.body.json)
     case .unauthorized: throw NativeFailure.authentication
-    default: throw NativeFailure.unavailable("Your requests are unavailable. Try again shortly.")
+    default: throw NativeFailure.unavailable("Couldn't load the songs being added. Try again shortly.")
     }
   }
   /// Requests one per album request (lone songs alone), unfinished first.
@@ -637,7 +637,7 @@ public actor NativeService: LibrarySource {
     {
     case .ok(let response): return try LibraryCodec.convert(response.body.json)
     case .unauthorized: throw NativeFailure.authentication
-    default: throw NativeFailure.unavailable("Your requests are unavailable. Try again shortly.")
+    default: throw NativeFailure.unavailable("Couldn't load the songs being added. Try again shortly.")
     }
   }
   public func clearFinishedRequests() async throws -> Int {
@@ -646,7 +646,7 @@ public actor NativeService: LibrarySource {
     case .unauthorized: throw NativeFailure.authentication
     default:
       throw NativeFailure.unavailable(
-        "The request history change could not be confirmed. Refresh before trying again.")
+        "Couldn't confirm the finished songs were cleared. Refresh before trying again.")
     }
   }
 
@@ -664,7 +664,7 @@ public actor NativeService: LibrarySource {
         )
       case .unauthorized: throw NativeFailure.authentication
       case .conflict: return nil
-      default: throw NativeFailure.unavailable("Unable to sync songs.")
+      default: throw NativeFailure.unavailable("Couldn't refresh songs.")
       }
     }
     let albums = try await collection { cursor in
@@ -679,7 +679,7 @@ public actor NativeService: LibrarySource {
         )
       case .unauthorized: throw NativeFailure.authentication
       case .conflict: return nil
-      default: throw NativeFailure.unavailable("Unable to sync albums.")
+      default: throw NativeFailure.unavailable("Couldn't refresh albums.")
       }
     }
     let artists = try await collection { cursor in
@@ -694,7 +694,7 @@ public actor NativeService: LibrarySource {
         )
       case .unauthorized: throw NativeFailure.authentication
       case .conflict: return nil
-      default: throw NativeFailure.unavailable("Unable to sync artists.")
+      default: throw NativeFailure.unavailable("Couldn't refresh artists.")
       }
     }
     // Each collection is one revision; a later one may be newer. The delta
@@ -712,11 +712,11 @@ public actor NativeService: LibrarySource {
         case .ok(let detail): snapshot.playlists.append(try LibraryCodec.convert(detail.body.json))
         case .notFound: throw NativeFailure.changed
         case .unauthorized: throw NativeFailure.authentication
-        default: throw NativeFailure.unavailable("Unable to sync playlists.")
+        default: throw NativeFailure.unavailable("Couldn't refresh playlists.")
         }
       }
     case .unauthorized: throw NativeFailure.authentication
-    default: throw NativeFailure.unavailable("Unable to sync playlists.")
+    default: throw NativeFailure.unavailable("Couldn't refresh playlists.")
     }
     // Close the read/mutation window before publishing any bootstrap data.
     let delta = try await changes(since: snapshot.revision)
@@ -793,7 +793,7 @@ public actor NativeService: LibrarySource {
     case .ok(let success): return try LibraryCodec.convert(success.body.json)
     case .gone: throw NativeFailure.resync
     case .unauthorized: throw NativeFailure.authentication
-    default: throw NativeFailure.unavailable("Unable to refresh your library.")
+    default: throw NativeFailure.unavailable("Couldn't refresh your library.")
     }
   }
   /// A playback address on this server, or nil for anything else.
@@ -849,7 +849,7 @@ public actor NativeService: LibrarySource {
     case .unauthorized: throw NativeFailure.authentication
     case .notFound:
       throw NativeFailure.songUnavailable("This song is no longer available on the server.")
-    default: throw NativeFailure.unavailable("Unable to prepare this song for playback.")
+    default: throw NativeFailure.unavailable("Couldn't prepare this song for playback.")
     }
   }
   private func remoteInput(_ track: Track) -> Components.Schemas.TrackInput {
@@ -900,7 +900,7 @@ public actor NativeService: LibrarySource {
     case .unauthorized: throw NativeFailure.authentication
     case .conflict:
       throw NativeFailure.songUnavailable(
-        "Remote streaming is disabled. You can still play saved songs or request this song in Song actions."
+        "Remote streaming is disabled. You can still play saved songs or add this song to your library in Song actions."
       )
     case .notFound:
       throw NativeFailure.songUnavailable(

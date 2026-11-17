@@ -42,7 +42,7 @@ struct TransferMarksTests {
       TransferControl.phone(record("a", state: "ready", paused: true), progress: nil).mark == .done)
     #expect(TransferControl(.waiting, tap: .pause).label == "Pause")
     #expect(TransferControl(.paused, tap: .resume).label == "Resume")
-    #expect(TransferControl(.failed, tap: .retry).label == "Retry")
+    #expect(TransferControl(.failed, tap: .retry).label == "Try again")
     #expect(TransferControl(.done, tap: nil).label == nil)
   }
 
@@ -139,11 +139,11 @@ struct TransferMarksTests {
     #expect(album.mark == .failed)
     #expect(album.tap == .retry)
     #expect(album.ids == ["a", "c"])
-    #expect(album.label() == "Retry album")
+    #expect(album.label() == "Try again")
     #expect(album.progress == 0.375)
     #expect(
-      album.summary(done: "on your phone")
-        == "1 of 4 songs on your phone · 1 downloading · 2 failed")
+      album.summary(done: "on your iPhone")
+        == "1 of 4 songs on your iPhone · 1 downloading · 2 couldn't download")
   }
 
   @Test func anAlbumsMarkPausesWhatIsStillGoingThenResumesIt() {
@@ -182,7 +182,7 @@ struct TransferMarksTests {
     #expect(done.tap == nil)
     #expect(done.ids.isEmpty)
     #expect(done.label() == nil)
-    #expect(done.summary(done: "on your watch") == "2 of 2 songs on your watch")
+    #expect(done.summary(done: "on Apple Watch") == "2 of 2 songs on Apple Watch")
     let sending = TransferGroupControl([
       ("a", TransferControl(.waiting, tap: nil)), ("b", TransferControl(.done, tap: nil)),
     ])

@@ -316,10 +316,10 @@
           self.tasks[id] = nil
           try? await self.archive.fail(
             id: job.record.id,
-            message: "The downloaded file could not be retained. Check device storage.")
+            message: "Couldn't keep the downloaded file. Check device storage.")
           await self.onUpdate?(
             job.record.id, .quota,
-            "The downloaded file could not be retained. Check device storage.")
+            "Couldn't keep the downloaded file. Check device storage.")
         }
       }
     }
@@ -348,7 +348,7 @@
           try? FileManager.default.removeItem(at: self.path(id, ".resume"))
         }
         if self.suspending.contains(id) || cancelled { return }
-        let message = "Download interrupted. Retry when the network is available."
+        let message = "Download interrupted. Try again when the network is available."
         try? await self.archive.fail(id: job.record.id, message: message)
         await self.onUpdate?(job.record.id, nil, message)
       }

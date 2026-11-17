@@ -87,7 +87,7 @@ struct LibraryBootstrapTests {
       "/api/v1/library/tracks": [(200, page(["1"], revision: "r1", next: "c1"))],
       "/api/v1/library/tracks?c1": [busy, busy, busy],
     ])
-    await #expect(throws: NativeFailure.unavailable("Unable to sync songs.")) {
+    await #expect(throws: NativeFailure.unavailable("Couldn't refresh songs.")) {
       try await service(transport).bootstrap()
     }
   }

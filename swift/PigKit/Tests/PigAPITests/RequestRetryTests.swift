@@ -185,7 +185,7 @@ private final class RecoveringTransport: ClientTransport, @unchecked Sendable {
     #expect(await failure(500, Answer.serverError) == .serverError(requestID: "0123456789abcdef"))
     #expect(
       await failure(502, nil)
-        == .unavailable("The library change could not be confirmed. Refresh before trying again."))
+        == .unavailable("Couldn't confirm the library change. Refresh before trying again."))
   }
 
   @Test func theWordingIsTheSettledOne() {

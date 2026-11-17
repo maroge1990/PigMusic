@@ -26,13 +26,13 @@ public struct TransferControl: Equatable, Sendable {
     self.mark = mark
     self.tap = tap
   }
-  /// For VoiceOver: "Pause", "Resume" or "Retry".
+  /// For VoiceOver: "Pause", "Resume" or "Try again".
   public var label: String? { tap.map(Self.verb) }
   static func verb(_ tap: TransferTap) -> String {
     switch tap {
     case .pause: "Pause"
     case .resume: "Resume"
-    case .retry: "Retry"
+    case .retry: "Try again"
     }
   }
 
@@ -146,18 +146,19 @@ public struct TransferGroupControl: Equatable, Sendable {
       (mark, tap, self.ids) = (going > 0 ? .downloading(progress) : .waiting, nil, [])
     }
   }
-  /// For VoiceOver: "Pause album", "Resume playlist", "Retry album".
+  /// For VoiceOver: "Pause album", "Resume playlist", or "Try again" for
+  /// the failed songs.
   public func label(_ noun: String = "album") -> String? {
-    tap.map { TransferControl.verb($0) + " " + noun }
+    tap.map { $0 == .retry ? TransferControl.verb($0) : TransferControl.verb($0) + " " + noun }
   }
-  /// "2 of 5 songs on your phone · 1 downloading · 1 waiting", in the
+  /// "2 of 5 songs on your iPhone · 1 downloading · 1 waiting", in the
   /// words of the Server page's summary.
   public func summary(done place: String) -> String {
     var parts = ["\(done) of \(songs) song\(songs == 1 ? "" : "s") \(place)"]
     if going > 0 { parts.append("\(going) downloading") }
     if waiting > 0 { parts.append("\(waiting) waiting") }
     if paused > 0 { parts.append("\(paused) paused") }
-    if failed > 0 { parts.append("\(failed) failed") }
+    if failed > 0 { parts.append("\(failed) couldn't download") }
     return parts.joined(separator: " · ")
   }
 }

@@ -126,7 +126,7 @@ import PigStore
       } catch is MutationRejection {
         var rejected = item
         rejected.state = "rejected"
-        rejected.message = "The server could not apply this edit. Review its song or playlist."
+        rejected.message = "The server couldn't apply this edit. Review its song or playlist."
         try await store.updateMutation(rejected)
         blocked.insert(scope)
       } catch {

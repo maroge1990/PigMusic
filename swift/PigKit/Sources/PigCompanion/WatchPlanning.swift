@@ -187,9 +187,9 @@ public enum WatchAttention: Equatable, Sendable {
 
   public var text: String {
     switch self {
-    case .unreachable: "Can't reach your Watch"
-    case .notInstalled: "PigMusic isn't on your Watch"
-    case .openToFinish: "Open PigMusic on your Watch to finish"
+    case .unreachable: "Can't reach your Apple Watch"
+    case .notInstalled: "PigMusic isn't on your Apple Watch"
+    case .openToFinish: "Open PigMusic on your Apple Watch to finish"
     }
   }
 }

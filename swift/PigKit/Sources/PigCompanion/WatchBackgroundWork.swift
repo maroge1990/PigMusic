@@ -128,7 +128,7 @@ public struct WatchBackgroundWork: Codable, Sendable, Equatable {
   public func summary(now: Date = Date()) -> String {
     func time(_ date: Date) -> String { date.formatted(.iso8601) }
     var lines = [
-      "Limit: background work stops after \(Int(Self.quietLimit / 3600)) h without a new song on the Watch."
+      "Limit: background work stops after \(Int(Self.quietLimit / 3600)) h without a new song on Apple Watch."
     ]
     if let stoppedAt {
       lines.append(
@@ -141,7 +141,7 @@ public struct WatchBackgroundWork: Codable, Sendable, Equatable {
     } else {
       lines.append("The app is in the foreground.")
     }
-    if let lastReceived { lines.append("Last new song confirmed by the Watch: \(time(lastReceived)).") }
+    if let lastReceived { lines.append("Last new song confirmed by Apple Watch: \(time(lastReceived)).") }
     if events.isEmpty { lines.append("No background events yet.") }
     for event in events {
       lines.append("\(time(event.at)) \(Self.describe(event))")
@@ -152,11 +152,11 @@ public struct WatchBackgroundWork: Codable, Sendable, Equatable {
     let count = event.count ?? 0
     switch event.kind {
     case .left: return "app left the foreground"
-    case .received: return "Watch confirmed \(count) new songs"
+    case .received: return "Apple Watch confirmed \(count) new songs"
     case .queued:
       return "\(count) copies queued for background download, \(event.waiting ?? 0) still being prepared"
     case .finished: return "background download finished (\(count) copies ready on the iPhone)"
-    case .sent: return "\(count) songs handed to the Watch link"
+    case .sent: return "\(count) songs handed to the Apple Watch link"
     case .refreshAsked: return "background refresh asked of iOS"
     case .refreshRan: return "background refresh ran"
     case .stopped: return "stopped by the 2-hour limit"

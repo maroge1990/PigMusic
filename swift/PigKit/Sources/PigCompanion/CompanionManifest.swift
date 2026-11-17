@@ -109,10 +109,10 @@ public enum CompanionFailure: Error, LocalizedError {
   case stale, invalid, integrity, quota
   public var errorDescription: String? {
     switch self {
-    case .stale: "The phone changed this Watch library. Refresh transfers on your phone."
-    case .invalid: "The Watch transfer is not compatible with this app."
-    case .integrity: "The transferred audio failed verification. Retry from your phone."
-    case .quota: "Watch storage is full. Remove Watch downloads on your phone."
+    case .stale: "Your iPhone changed the songs for this Apple Watch. Refresh Apple Watch downloads on your iPhone."
+    case .invalid: "This Apple Watch app couldn't read what your iPhone sent."
+    case .integrity: "Couldn't verify a song sent to Apple Watch. Try again from your iPhone."
+    case .quota: "Apple Watch storage limit reached. Remove songs from Apple Watch on your iPhone."
     }
   }
 }

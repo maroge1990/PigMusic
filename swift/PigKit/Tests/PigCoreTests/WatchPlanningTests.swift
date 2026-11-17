@@ -132,9 +132,19 @@ struct WatchPlanningTests {
     #expect(attention(error: "failed", missing: 600, waited: 3600) == .unreachable)
     #expect(attention(missing: 600, waited: 3600) == .notInstalled)
     #expect(attention(missing: 60, waited: 3600) == .openToFinish)
-    #expect(WatchAttention.unreachable.text == "Can't reach your Watch")
-    #expect(WatchAttention.notInstalled.text == "PigMusic isn't on your Watch")
-    #expect(WatchAttention.openToFinish.text == "Open PigMusic on your Watch to finish")
+    #expect(WatchAttention.unreachable.text == "Can't reach your Apple Watch")
+    #expect(WatchAttention.notInstalled.text == "PigMusic isn't on your Apple Watch")
+    #expect(WatchAttention.openToFinish.text == "Open PigMusic on your Apple Watch to finish")
+  }
+  /// #246, D-117: Watch delivery errors name Apple Watch and iPhone, and a
+  /// failure reads "Couldn't … Try again".
+  @Test func watchDeliveryErrorsUseTheAgreedWords() {
+    #expect(
+      CompanionFailure.integrity.localizedDescription
+        == "Couldn't verify a song sent to Apple Watch. Try again from your iPhone.")
+    #expect(
+      CompanionFailure.quota.localizedDescription
+        == "Apple Watch storage limit reached. Remove songs from Apple Watch on your iPhone.")
   }
   @Test func theWatchAppCountsAsMissingOnlyOnceActivationSettled() {
     let start = Date(timeIntervalSince1970: 1_800_000_000)

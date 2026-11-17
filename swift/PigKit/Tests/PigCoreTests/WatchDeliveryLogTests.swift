@@ -31,7 +31,7 @@ struct WatchDeliveryLogTests {
     #expect(summary.contains("3 songs sent in the last 30 days, 2 arrived, 1 still on their way."))
     // Median of 90 s and 400 s is 245 s; the longest is 400 s.
     #expect(summary.contains("Send to arrival: median 4 min 5 s, longest 6 min 40 s."))
-    #expect(summary.contains("Handed to arrival on the Watch: median 3 min 10 s"))
+    #expect(summary.contains("Handed to arrival on Apple Watch: median 3 min 10 s"))
     #expect(summary.contains("Arrived while the iPhone app was in the background: 1 of 2."))
   }
 

@@ -82,7 +82,7 @@ public struct WatchDeliveryLog: Codable, Sendable, Equatable {
   public func summary() -> String {
     let all = Array(entries.values)
     let arrived = all.filter { $0.arrived != nil }
-    guard !all.isEmpty else { return "No songs sent to the Watch in the last 30 days." }
+    guard !all.isEmpty else { return "No songs sent to Apple Watch in the last 30 days." }
     var lines = [
       "\(all.count) songs sent in the last 30 days, \(arrived.count) arrived, "
         + "\(all.count - arrived.count) still on their way."
@@ -101,8 +101,8 @@ public struct WatchDeliveryLog: Codable, Sendable, Equatable {
     }
     let stages: [(String, KeyPath<Entry, Date?>, KeyPath<Entry, Date?>)] = [
       ("Send to copy ready on the iPhone", sentKey, \Entry.ready),
-      ("Copy ready to handed to the Watch link", \Entry.ready, \Entry.handed),
-      ("Handed to arrival on the Watch", \Entry.handed, \Entry.arrived),
+      ("Copy ready to handed to the Apple Watch link", \Entry.ready, \Entry.handed),
+      ("Handed to arrival on Apple Watch", \Entry.handed, \Entry.arrived),
     ]
     for (label, from, to) in stages {
       let values = spans(from, to)

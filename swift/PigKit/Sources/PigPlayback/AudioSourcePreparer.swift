@@ -7,7 +7,7 @@ public enum AudioSourceFailure: Error, LocalizedError, Equatable {
     switch self {
     case .invalidURL: "The audio source is not a secure media URL."
     case .busy: "Another audio source is being prepared."
-    case .storageLimit: "Release an earlier playback source before preparing another song."
+    case .storageLimit: "Free an earlier playback source before preparing another song."
     case .tooLarge: "This song exceeds the temporary playback storage limit."
     case .unavailable: "The audio source is unavailable. Try again or play a saved song."
     case .invalidBody: "The source did not return an audio file."

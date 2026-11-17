@@ -264,7 +264,7 @@ struct SongFailureTests {
   @Test func onlyASongsOwnFailurePassesOverIt() {
     #expect(NativeFailure.songUnavailable("gone").isSongUnavailable)
     #expect(NativeFailure.invalidMediaURL.isSongUnavailable)
-    let server = NativeFailure.unavailable("Unable to prepare this song for playback.")
+    let server = NativeFailure.unavailable("Couldn't prepare this song for playback.")
     #expect(!server.isSongUnavailable)
     #expect(!NativeFailure.authentication.isSongUnavailable)
     #expect(!URLError(.cannotConnectToHost).isSongUnavailable)

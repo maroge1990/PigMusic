@@ -59,6 +59,6 @@ public struct OfflineMutationReceipt: Codable, Sendable {
 public enum MutationRejection: Error, LocalizedError, Sendable {
   case rejected
   public var errorDescription: String? {
-    "The server rejected this edit. Review or discard it before continuing sync."
+    "The server refused this edit. Review or discard it to continue."
   }
 }
