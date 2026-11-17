@@ -30,9 +30,9 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 1. **Mark checks on his phone** (build 1094): the artwork (#168), batch B's notices (#245, #239), the song menu (#229), Watch background delivery
    with the phone locked (#219) then a diagnostics export the next day, #232 to #235, steps 17–18 of #184.
-3. **YouTube trial ends ~21 Nov** (#193): keep or remove, Mark's decision.
-4. **Retirement, 28 Nov** (#201): remove what batches 4, 6 and 8 replaced once #191's pass marks are met.
-5. **Live checks that close with use:** #130, #142, #185, #188, #144/#145, #16/#17/#20/#22/#23/#54/#63 (#95).
+2. **YouTube trial ends ~21 Nov** (#193): keep or remove, Mark's decision.
+3. **Retirement, 28 Nov** (#201): remove what batches 4, 6 and 8 replaced once #191's pass marks are met.
+4. **Live checks that close with use:** #130, #142, #185, #188, #144/#145, #16/#17/#20/#22/#23/#54/#63 (#95).
 
 ## Next
 
