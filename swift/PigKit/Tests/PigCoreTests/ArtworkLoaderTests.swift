@@ -157,4 +157,31 @@ private func png(size: Int = 8) throws -> Data {
     #expect(other?.sha != upper.sha)
     #expect(ArtworkLoader<Picture>.catalogueRequest(kind: "release", id: id, width: 300) == nil)
   }
+
+  /// Apple's album ids are numbers (#168: every Apple row in search drew a
+  /// placeholder because only UUIDs were asked for); the MusicBrainz kinds
+  /// keep their UUIDs, and nothing else names a request.
+  @Test func anAliasTakesOnlyAnIdOfItsKindsShape() throws {
+    let uuid = "8f1b3c1e-5a6b-4c7d-8e9f-0a1b2c3d4e5f"
+    let apple = ArtworkLoader<Picture>.catalogueRequest(
+      kind: "apple-album", id: "1109714933", width: 128)
+    #expect(apple != nil)
+    #expect(
+      apple != ArtworkLoader<Picture>.catalogueRequest(kind: "apple-album", id: "42", width: 128))
+    for id in ["", "0", "042", "12a", "-12", "1.5", " 12", "../12", "1234567890123456", uuid] {
+      #expect(
+        ArtworkLoader<Picture>.catalogueRequest(kind: "apple-album", id: id, width: 128) == nil,
+        "apple-album \(id)")
+    }
+    for kind in ["release", "release-group", "artist", "background", "logo"] {
+      #expect(ArtworkLoader<Picture>.catalogueRequest(kind: kind, id: uuid, width: 128) != nil)
+      for id in ["1109714933", "", "../" + uuid, uuid + "/x", "not-an-id"] {
+        #expect(
+          ArtworkLoader<Picture>.catalogueRequest(kind: kind, id: id, width: 128) == nil,
+          "\(kind) \(id)")
+      }
+    }
+    #expect(ArtworkAlias.accepts(kind: "apple-album", id: "123456789012345"))
+    #expect(!ArtworkAlias.accepts(kind: "release", id: "123456789012345"))
+  }
 }

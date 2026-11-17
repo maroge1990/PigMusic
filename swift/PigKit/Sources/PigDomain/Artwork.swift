@@ -27,3 +27,18 @@ public enum CatalogueArtworkKind: String, Sendable {
   /// the server, never from Apple directly.
   case appleAlbum = "apple-album"
 }
+
+/// The ids a server artwork alias takes. A request path is only ever built
+/// from an id of the shape the server issues for that kind.
+public enum ArtworkAlias {
+  /// Apple's album ids are numbers (as the server's route accepts them: no
+  /// leading zero, at most 15 digits); every MusicBrainz kind takes a UUID.
+  public static func accepts(kind: String, id: String) -> Bool {
+    guard kind == CatalogueArtworkKind.appleAlbum.rawValue else {
+      return UUID(uuidString: id) != nil
+    }
+    let digits = id.utf8
+    return (1...15).contains(digits.count) && digits.first != 48
+      && digits.allSatisfy { (48...57).contains($0) }
+  }
+}

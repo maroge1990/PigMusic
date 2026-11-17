@@ -24,8 +24,10 @@ import PigDomain
   }
 
   /// Catalogue artwork has no content hash on the client: it is keyed by its
-  /// alias (kind and id), hashed like a stored cover.
+  /// alias (kind and id), hashed like a stored cover. Nil for an id that is
+  /// not of the kind's shape (`ArtworkAlias`), so nothing is asked for it.
   public static func catalogueRequest(kind: String, id: String, width: Int) -> ArtworkRequest? {
+    guard ArtworkAlias.accepts(kind: kind, id: id) else { return nil }
     let sha = SHA256.hash(data: Data(("catalogue-\(kind):" + id.lowercased()).utf8)).map {
       String(format: "%02x", $0)
     }.joined()

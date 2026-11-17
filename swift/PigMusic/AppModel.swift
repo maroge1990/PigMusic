@@ -1392,9 +1392,10 @@ enum PlayOrigin: Hashable {
     _ kind: String, _ id: String, _ width: Int, retryAfter: [Duration] = [],
     fetch: @escaping @Sendable (NativeService, ArtworkRequest) async throws -> Data
   ) async -> UIImage? {
-    guard let service, images.cache != nil, UUID(uuidString: id) != nil else { return nil }
+    guard let service, images.cache != nil else { return nil }
     let stamp = account.generation
-    // Catalogue artwork has no content hash on the client: key it by its alias.
+    // Catalogue artwork has no content hash on the client: key it by its alias,
+    // which exists only for an id of the kind's shape (a UUID, or Apple's number).
     guard let request = ArtworkLoader<UIImage>.catalogueRequest(kind: kind, id: id, width: width)
     else { return nil }
     do {
