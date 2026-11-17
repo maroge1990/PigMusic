@@ -46,6 +46,27 @@ final class WatchDemoTests: XCTestCase {
     XCTAssertTrue(app.staticTexts["PigMusic"].exists, "The player opened instead")
   }
 
+  /// D-117 (#246): the storage page names Apple Watch and iPhone in full,
+  /// has a storage limit rather than a budget, and refreshes rather than
+  /// syncs.
+  func testStorageUsesTheAgreedWords() {
+    launchPlaying()
+    let storage = app.buttons["Storage"]
+    for _ in 0..<10 where !(storage.exists && storage.isHittable) { app.swipeUp() }
+    expect(storage)
+    storage.tap()
+    expect(
+      app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "songs on Apple Watch"))
+        .firstMatch)
+    let limit = app.descendants(matching: .any)
+      .matching(NSPredicate(format: "label BEGINSWITH %@", "Storage limit")).firstMatch
+    expect(limit)
+    let refresh = app.buttons["Refresh from iPhone"]
+    for _ in 0..<5 where !(refresh.exists && refresh.isHittable) { app.swipeUp() }
+    expect(refresh)
+    XCTAssertFalse(app.buttons["Sync with phone"].exists)
+  }
+
   /// The system player draws the clock at the top; a title of our own
   /// overlapped it.
   func testThePlayerHasNoTitleOverTheClock() {

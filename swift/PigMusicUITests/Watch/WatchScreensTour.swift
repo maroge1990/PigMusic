@@ -132,7 +132,7 @@ final class WatchScreensTour: XCTestCase {
     if open("Storage", as: "storage") {
       app.swipeUp()
       shoot("storage-lower")
-      if open("Watch budget", as: "budget-picker") { back() }
+      if open("Storage limit", as: "storage-limit-picker") { back() }
     }
   }
 }

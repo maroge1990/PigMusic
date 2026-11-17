@@ -78,7 +78,7 @@ final class ServerTests: XCTestCase {
     XCTAssertFalse(
       app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Apple Watch'")).firstMatch
         .exists, app.debugDescription)
-    XCTAssertFalse(app.staticTexts["Connect and refresh your phone library first."].exists)
+    XCTAssertFalse(app.staticTexts["Connect and refresh your library on iPhone first."].exists)
     expect(app.buttons["Download"])
   }
 

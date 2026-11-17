@@ -49,10 +49,11 @@ final class DemoLibraryTests: XCTestCase {
     XCTAssertEqual(pig.frame.midY, screen.midY, accuracy: 1)
   }
 
-  /// #210, #229: Request song in a song's ⋯ menu offers its Undo whole,
+  /// #210, #229: Add to library in a song's ⋯ menu offers its Undo whole,
   /// just above the mini player, and the Undo goes when its 10 s are up.
-  /// The menu leaves no sheet behind to float above.
-  func testRequestFromTheMenuShowsTheUndoAboveTheMiniPlayer() {
+  /// The menu leaves no sheet behind to float above. D-115 (#246): asking
+  /// the server for a song is "Add to library", never "Request song".
+  func testAddToLibraryFromTheMenuShowsTheUndoAboveTheMiniPlayer() {
     continueAfterFailure = false
     app.launchArguments = ["--demo", "--demo-play"]
     app.launch()
@@ -62,14 +63,16 @@ final class DemoLibraryTests: XCTestCase {
     expect(more)
     for _ in 0..<5 where !more.isHittable { app.swipeUp() }
     more.tap()
-    let request = app.buttons["Request song"]
+    let request = app.buttons["Add to library"]
     expect(request)
+    XCTAssertFalse(app.buttons["Request song"].exists)
+    XCTAssertFalse(app.buttons["Add to my library"].exists)
     // Not in the library: none of the library's own actions.
     XCTAssertFalse(app.buttons["Remove from library"].exists)
     request.tap()
     let undo = app.buttons["Undo"]
     expect(undo)
-    let label = app.staticTexts["Requested Chart Song 1"]
+    let label = app.staticTexts["Adding Chart Song 1"]
     expect(label)
     XCTAssertFalse(request.exists)
     let screen = app.windows.firstMatch.frame
@@ -158,7 +161,9 @@ final class DemoLibraryTests: XCTestCase {
     ] {
       XCTAssertTrue(app.buttons[action].exists, action, file: file, line: line)
     }
-    // A library song is never offered for request, and nothing is a sheet.
+    // A library song is never offered to the library again (D-115), and
+    // nothing is a sheet.
+    XCTAssertFalse(app.buttons["Add to library"].exists, file: file, line: line)
     XCTAssertFalse(app.buttons["Request song"].exists, file: file, line: line)
     XCTAssertFalse(app.navigationBars["Song actions"].exists, file: file, line: line)
   }
