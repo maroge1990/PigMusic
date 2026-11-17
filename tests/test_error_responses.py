@@ -28,6 +28,10 @@ from test_security import PASSWORD, protected
 ASYNC_PATH = "/api/v1/playlists"
 SYNC_PATH = "/api/v1/admin/queue"
 BUSY = {"detail": "The server is busy. Try again shortly.", "code": "server_busy"}
+UNCONFIRMED = {
+    "detail": "The server was busy. Check whether this was saved before trying again.",
+    "code": "busy_unconfirmed",
+}
 SECURITY_HEADERS = (
     "x-content-type-options",
     "referrer-policy",
@@ -130,6 +134,73 @@ def test_sqlite_busy_is_busy_too(tmp_path, monkeypatch):
         with fail(app, monkeypatch, ASYNC_PATH, error):
             answer = client.get(ASYNC_PATH)
         assert (answer.status_code, answer.json()) == (503, BUSY)
+
+
+def write(client, method, playlist):
+    if method == "POST":
+        return client.post(ASYNC_PATH, json={"name": "Second"})
+    address = f"{ASYNC_PATH}/{playlist['id']}"
+    if method == "PATCH":
+        return client.patch(
+            address, json={"revision": playlist["revision"], "name": "Renamed"}
+        )
+    return client.delete(address, params={"revision": playlist["revision"]})
+
+
+@pytest.mark.parametrize("method", ["POST", "PATCH", "DELETE"])
+def test_a_locked_database_behind_a_write_is_not_told_to_try_again(
+    tmp_path, monkeypatch, caplog, method
+):
+    # The write itself meets the lock here; the server still cannot know in
+    # general how far a change got, so no write is offered a blind retry.
+    with signed_in(tmp_path, monkeypatch) as (app, client):
+        playlist = client.post(ASYNC_PATH, json={"name": "First"}).json()
+        caplog.set_level(logging.INFO)
+        caplog.clear()
+
+        def locked(*args, **kwargs):
+            raise sqlite3.OperationalError("database is locked")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(Playlists, "create" if method == "POST" else "edit", locked)
+            answer = write(client, method, playlist)
+        assert answer.status_code == 503
+        assert answer.json() == UNCONFIRMED
+        assert "retry-after" not in answer.headers
+        identity = passed_through_the_stack(answer)
+        assert tracebacks(caplog) == []
+        (warning,) = [r for r in caplog.records if r.name == "pig_music.errors"]
+        assert warning.levelno == logging.WARNING
+        assert "unconfirmed" in warning.getMessage()
+        assert f"{method} {ASYNC_PATH}" in warning.getMessage()
+        assert identity in warning.getMessage()
+        # A read meeting the same lock keeps the answer that invites a retry.
+        with fail(app, monkeypatch, ASYNC_PATH, sqlite3.OperationalError("locked")):
+            read = client.get(ASYNC_PATH)
+        assert (read.status_code, read.json()) == (503, BUSY)
+        assert read.headers["retry-after"] == "2"
+        assert write(client, method, playlist).status_code == 200
+
+
+def test_a_playlist_saved_before_the_database_was_busy_is_not_made_twice(
+    tmp_path, monkeypatch
+):
+    # Playlists.create commits its INSERT, then reads the playlist back on
+    # another connection. A lock met by that read used to answer "try again",
+    # and the client that did had two playlists.
+    with signed_in(tmp_path, monkeypatch) as (app, client):
+
+        def locked(*args, **kwargs):
+            raise sqlite3.OperationalError("database is locked")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(Playlists, "detail", locked)
+            answer = client.post(ASYNC_PATH, json={"name": "Road"})
+        assert answer.status_code == 503
+        assert answer.json() == UNCONFIRMED
+        assert "retry-after" not in answer.headers
+        saved = client.get(ASYNC_PATH).json()["playlists"]
+        assert [p["name"] for p in saved] == ["Road"]
 
 
 @pytest.mark.parametrize("path", [ASYNC_PATH, SYNC_PATH])

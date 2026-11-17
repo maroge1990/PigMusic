@@ -1,7 +1,12 @@
 """What a client is told when a request fails for a reason of the server's.
 
 A busy database ("database is locked" once the busy timeout has passed) is
-worth trying again: 503 with `Retry-After` and the code `server_busy`.
+worth trying again, for a read: 503 with `Retry-After` and the code
+`server_busy`. For a write it is not that simple. The busy error can arrive
+after part of the change has committed (a playlist is inserted, then read
+back on another connection), so the server cannot say whether it was saved
+and only a read is safe to repeat blindly: anything but GET, HEAD and
+OPTIONS gets 503 with the code `busy_unconfirmed` and no `Retry-After`.
 Anything else unexpected will not get better by asking again: a 500 with
 the code `server_error` and the request's ID, which is the one in the
 timing log line and beside the traceback. The body never carries the
@@ -24,6 +29,7 @@ from .request_timing import REQUEST_ID
 log = logging.getLogger("pig_music.errors")
 
 RETRY_AFTER = 2
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 # A client that went away mid-request is not a fault of the server's:
 # Starlette raises the first when a body or a stream loses its reader, and
 # the other two come from the stream its function middleware relays through.
@@ -95,14 +101,28 @@ def install(app):
         if not busy(exc):
             # Disk full, a malformed database: not something to try again.
             raise exc
+        # A write may have committed some of its change before this.
+        safe = request.method in SAFE_METHODS
         log.warning(
-            "database busy: %s %s answered 503, request %s",
+            "database busy: %s %s answered 503 (%s), request %s",
             request.method,
             request.url.path,
+            "try again" if safe else "unconfirmed, may have been saved",
             request.scope.get(REQUEST_ID) or "",
         )
+        if safe:
+            return JSONResponse(
+                {
+                    "detail": "The server is busy. Try again shortly.",
+                    "code": "server_busy",
+                },
+                status_code=503,
+                headers={"Retry-After": str(RETRY_AFTER)},
+            )
         return JSONResponse(
-            {"detail": "The server is busy. Try again shortly.", "code": "server_busy"},
+            {
+                "detail": "The server was busy. Check whether this was saved before trying again.",
+                "code": "busy_unconfirmed",
+            },
             status_code=503,
-            headers={"Retry-After": str(RETRY_AFTER)},
         )
