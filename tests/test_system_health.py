@@ -213,3 +213,35 @@ def test_workers_show_the_error_class_only():
         },
         {"name": "source engine", "running": False},
     ]
+
+
+def test_a_relay_token_in_the_path_is_never_kept_or_logged(
+    tmp_path, monkeypatch, caplog
+):
+    """A relayed stream's path is its credential: an error while serving it
+    keeps the route's template, never the token."""
+    from server.remote import RemoteAudio
+
+    token = "relaytoken0123456789secret"
+
+    def broken(self, *args):
+        raise RuntimeError("relay failed")
+
+    monkeypatch.setattr(RemoteAudio, "relay", broken)
+    with signed_in(tmp_path, monkeypatch) as (app, client):
+        caplog.clear()
+        answer = client.get(f"/api/v1/remote-playback/streams/{token}?x=1")
+        assert answer.status_code == 500
+        [entry] = app.state.problems.snapshot()["errors"]
+        assert entry["path"] == "/api/v1/remote-playback/streams/{token}"
+        health = client.get(HEALTH)
+        assert health.status_code == 200
+        assert token not in json.dumps(app.state.problems.snapshot())
+        assert token not in health.text
+        assert all(token not in r.getMessage() for r in caplog.records)
+    # Without a matched route, request timing's redaction applies.
+    from server.errors import shown_path
+
+    assert shown_path({"path": f"/api/v1/remote-playback/streams/{token}"}) == (
+        "/api/v1/remote-playback/streams/[redacted]"
+    )

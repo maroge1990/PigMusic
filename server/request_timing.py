@@ -132,6 +132,14 @@ def describe(state):
     )
 
 
+def public_path(path):
+    """`path` as it may be logged or shown: a relayed stream's path is its
+    credential, so its token is replaced."""
+    if path.startswith("/api/v1/remote-playback/streams/"):
+        return "/api/v1/remote-playback/streams/[redacted]"
+    return path
+
+
 def always_logged(method, path):
     """Playback addresses are logged every time, as a baseline for the slow ones."""
     return method == "POST" and (
@@ -192,9 +200,7 @@ class RequestTiming:
         method, path = scope.get("method", ""), scope.get("path", "")
         if not path.startswith("/api/") or path == "/api/health":
             return
-        # A relayed stream's path is its credential.
-        if path.startswith("/api/v1/remote-playback/streams/"):
-            path = "/api/v1/remote-playback/streams/[redacted]"
+        path = public_path(path)
         # Anything a client can make up is folded away: an unknown method or
         # an unmatched path never becomes a key of its own.
         route = getattr(scope.get("route"), "path", None)

@@ -32,7 +32,7 @@ import anyio
 from fastapi.responses import JSONResponse
 from starlette.requests import ClientDisconnect
 
-from .request_timing import REQUEST_ID
+from .request_timing import REQUEST_ID, public_path
 
 log = logging.getLogger("pig_music.errors")
 
@@ -57,9 +57,11 @@ class Problems:
         self.busy_at = None
 
     def error(self, request_id, method, path, exc):
-        # The path only: the query string is not part of scope["path"], and
-        # is cut here too in case one is ever passed.
+        # Given by shown_path: a route template or a redacted path. The
+        # query string is cut here too in case one is ever passed.
         path = str(path).split("?", 1)[0]
+        if "{" not in path:  # Not a route template: redact it anyway.
+            path = public_path(path)
         entry = {
             "at": time.time(),
             "request_id": str(request_id or ""),
@@ -85,6 +87,16 @@ class Problems:
                 "errors": [dict(entry) for entry in reversed(self.errors)],
                 "busy": {"count": self.busy_count, "last_at": self.busy_at},
             }
+
+
+def shown_path(scope):
+    """The matched route's template ("/api/v1/remote-playback/streams/{token}"),
+    so no ID or credential in the path is kept; without a matched route, the
+    path with what request timing redacts redacted, and no query string."""
+    route = getattr(scope.get("route"), "path", None)
+    if isinstance(route, str) and route:
+        return route
+    return public_path(str(scope.get("path", "")).split("?", 1)[0])
 
 
 def busy(exc):
@@ -122,18 +134,17 @@ class ServerErrors:
             raise
         except Exception as exc:
             identity = scope.get(REQUEST_ID) or ""
+            path = shown_path(scope)
             log.error(
                 "unhandled error: %s %s %s, request %s",
                 scope.get("method", ""),
-                scope.get("path", ""),
+                path,
                 "failed after its response began" if started else "answered 500",
                 identity,
                 exc_info=exc,
             )
             try:
-                self.problems.error(
-                    identity, scope.get("method", ""), scope.get("path", ""), exc
-                )
+                self.problems.error(identity, scope.get("method", ""), path, exc)
             except Exception:
                 pass  # Never let the record keep the answer from being sent.
             if started:
@@ -168,7 +179,7 @@ def install(app):
         log.warning(
             "database busy: %s %s answered 503 (%s), request %s",
             request.method,
-            request.url.path,
+            shown_path(request.scope),
             "try again" if safe else "unconfirmed, may have been saved",
             request.scope.get(REQUEST_ID) or "",
         )
