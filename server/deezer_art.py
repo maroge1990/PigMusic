@@ -31,6 +31,12 @@ LINK = re.compile(
 IMAGE = re.compile(
     r"^/images/(cover|artist)/[0-9a-f]{32}/\d{2,4}x\d{2,4}-[0-9a-z-]+\.jpg$"
 )
+# Deezer's "no picture" image (a grey silhouette, a blank sleeve) has a real
+# address whose hash is the MD5 of nothing; older answers left the hash out.
+BLANK = "/d41d8cd98f00b204e9800998ecf8427e/"
+# Deezer pages of one artist or album that MusicBrainz may list: a duplicate
+# page often has no picture, so each is asked until one has.
+LINKS = 5
 ANSWER_LIMIT = 1_000_000
 # Deezer allows 50 requests in 5 s per address; stay well under it.
 SPACING = 0.15
@@ -51,6 +57,7 @@ def deezer_image(value):
         or url.port not in {None, 443}
         or not (host == "dzcdn.net" or host.endswith(".dzcdn.net"))
         or not IMAGE.match(url.path)
+        or BLANK in url.path
     ):
         raise ValueError("Untrusted artwork address")
     return urlunsplit(("https", url.netloc, url.path, "", ""))
@@ -136,7 +143,7 @@ class DeezerArt:
             )
         else:
             return None
-        for album_id in deezer_links(entity, "album")[:2]:
+        for album_id in deezer_links(entity, "album")[:LINKS]:
             found = picture(await self.api(client, "album/" + album_id), "cover_xl")
             if found:
                 return found
@@ -171,9 +178,14 @@ class DeezerArt:
             links = deezer_links(entity, "artist")
             if links:
                 # MusicBrainz names the artist exactly: no name guess after it.
-                return picture(
-                    await self.api(client, "artist/" + links[0]), "picture_xl"
-                )
+                # The first page listed can be an empty duplicate (Radiohead).
+                for link in links[:LINKS]:
+                    found = picture(
+                        await self.api(client, "artist/" + link), "picture_xl"
+                    )
+                    if found:
+                        return found
+                return None
             name = entity.get("name") or name
         wanted = normalise(name)
         if not wanted:

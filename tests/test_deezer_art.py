@@ -391,3 +391,131 @@ def test_a_deezer_outage_with_no_archive_cover_is_asked_again_soon(tmp_path):
         conn.execute("DELETE FROM documents WHERE name = ?", (key,))
     assert run(ask()) is None
     assert store.read_document(key)["retry_after"] > time.time() + 3600
+
+
+# --- #168: Deezer's "no picture" image has a real-looking address ----------
+
+# The hash is the MD5 of nothing: a grey silhouette, served as Radiohead's,
+# Coldplay's and Dua Lipa's photo.
+NOTHING = "d41d8cd98f00b204e9800998ecf8427e"
+NO_PHOTO = PHOTO.replace(HASH, NOTHING)
+NO_COVER = COVER.replace(HASH, NOTHING)
+
+
+def test_deezers_silhouette_is_no_photo_and_no_cover():
+    for blank in (NO_PHOTO, NO_COVER):
+        with pytest.raises(ValueError):
+            deezer_image(blank)
+    assert deezer_image(PHOTO) == PHOTO and deezer_image(COVER) == COVER
+    found, _ = cover_of(RELEASE_ENTITY, {"search/album": search(album(cover=NO_COVER))})
+    assert found is None
+    unlinked = {"artist/" + ARTIST: {"name": "Radiohead", "relations": []}}
+    sole = {
+        "search/artist": lambda r: {
+            "data": [{"name": "Radiohead", "picture_xl": NO_PHOTO}]
+        }
+    }
+    assert photo_of(unlinked, sole, name="Radiohead")[0] is None
+
+
+def test_each_deezer_page_musicbrainz_lists_is_asked_until_one_has_a_picture():
+    relations = [
+        {"url": {"resource": f"https://www.deezer.com/{kind}/{n}"}}
+        for kind in ("artist", "album")
+        for n in (1, 2, 3)
+    ]
+    linked = {"artist/" + ARTIST: {"name": "Radiohead", "relations": relations}}
+    # The first page is an empty duplicate; the third is never needed.
+    found, asked = photo_of(
+        linked,
+        {
+            "artist/1": lambda r: {"picture_xl": NO_PHOTO},
+            "artist/2": lambda r: {"picture_xl": PHOTO},
+            "artist/3": lambda r: {"picture_xl": PHOTO},
+        },
+        name="Radiohead",
+    )
+    assert found == PHOTO
+    assert asked == ["api.deezer.com/artist/1", "api.deezer.com/artist/2"]
+    # No page has one: no photo, and still no guess by name.
+    found, asked = photo_of(
+        linked,
+        {
+            **NAMESAKES,
+            **{f"artist/{n}": lambda r: {"picture_xl": NO_PHOTO} for n in (1, 2, 3)},
+        },
+        name="Radiohead",
+    )
+    assert found is None and len(asked) == 3
+    found, asked = cover_of(
+        {**RELEASE_ENTITY, "relations": relations},
+        {
+            "album/1": lambda r: album(cover=NO_COVER),
+            "album/2": lambda r: album(cover=NO_COVER),
+            "album/3": lambda r: album(),
+        },
+    )
+    assert found == COVER and asked[-1] == "api.deezer.com/album/3"
+
+
+def test_a_silhouette_goes_on_to_the_next_source_and_is_not_counted_as_deezer(
+    tmp_path,
+):
+    import time
+
+    from server.store import Store
+
+    (tmp_path / "media-settings.json").write_text(
+        json.dumps({"portraits": True}), encoding="utf-8"
+    )
+    store = Store(tmp_path)
+    linked = {
+        "artist/"
+        + ARTIST: {
+            "name": "Radiohead",
+            "relations": [{"url": {"resource": "https://www.deezer.com/artist/399"}}],
+        },
+        "release/" + RELEASE: RELEASE_ENTITY,
+    }
+    artwork = Artwork(store, Catalogue(linked))
+    portraits = Portraits(store, Catalogue(linked), artwork)
+    counted = []
+    artwork.counted = lambda kind, source: counted.append((kind, source))
+    grid = {"has": True}
+    asked = []
+
+    def handle(request):
+        asked.append(request.url.host)
+        if request.url.path.startswith("/artist/"):
+            return httpx.Response(200, json={"picture_xl": NO_PHOTO})
+        if request.url.host == "api.deezer.com":
+            return httpx.Response(200, json={"data": [album(cover=NO_COVER)]})
+        if request.url.host == "cdn-images.dzcdn.net":
+            return httpx.Response(200, content=image_bytes())  # The silhouette.
+        if request.url.host == "artists.artistgrid.cx":
+            names = "name\nRadiohead\n" if grid["has"] else "name\n"
+            return httpx.Response(200, content=names.encode())
+        return httpx.Response(200, content=image_bytes())
+
+    async def ask(work):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+            return await work(client)
+
+    assert run(ask(lambda c: artwork.front(c, "release", RELEASE))) == image_bytes()
+    found = run(ask(lambda c: portraits.get(c, "Radiohead", ARTIST)))
+    assert found is not None and found.is_file()
+    # The silhouette is never downloaded, and no image is put down to Deezer.
+    assert "cdn-images.dzcdn.net" not in asked
+    assert counted == [("cover", "cover-art-archive"), ("photo", "artistgrid")]
+    # No other source has a photo: an ordinary miss, asked again tomorrow.
+    found.unlink()
+    grid["has"] = False
+    with store.connect() as conn:
+        conn.execute("DELETE FROM documents WHERE name = 'artistgrid-index'")
+    assert run(ask(lambda c: portraits.get(c, "Radiohead", ARTIST))) is None
+    with store.connect() as conn:
+        (payload,) = conn.execute(
+            "SELECT payload FROM documents WHERE name LIKE 'portrait-missing:%'"
+        ).fetchone()
+    assert json.loads(payload)["retry_after"] > time.time() + 3600
+    assert len(counted) == 2
