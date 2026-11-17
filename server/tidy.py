@@ -549,15 +549,22 @@ class Tidy:
         if record.get("status") not in {"applying", "applied", "stopped"}:
             raise ValueError("Tidy-up not found.")
         # Everything Undo reads is read before it changes anything (#240):
-        # an unreadable step stops it here, never part-way.
+        # an unreadable step, its own or an unresolved one, stops it here,
+        # never part-way. What is still unresolved is not one of this
+        # tidy-up's steps, so undoing them leaves it as it is now.
+        steps = {"move": "organisation:", "removal": "removed:"}
         document_records.require_usable(
             self.store,
             [
                 *("organisation:" + m for m in record["moves"]),
                 *("removed:" + r for r in record["removals"]),
+                *(
+                    steps.get(u["kind"], "removed:") + u["id"]
+                    for u in record.get("unresolved", [])
+                ),
             ],
         )
-        records = self.records()
+        remaining = self.pending(record)
         try:
             for operation in reversed(record["moves"]):
                 if self.organisation.settle(operation) in {"completed", "undoing"}:
@@ -578,7 +585,6 @@ class Tidy:
                     (user_id, track_id),
                 ).rowcount:
                     bump(conn, user_id)
-        remaining = self.pending(record, records)
         if remaining:
             # What this tidy-up recorded is back, but not necessarily all of it.
             record.update(
@@ -752,7 +758,8 @@ class Tidy:
                     "removing",
                 }:
                     continue
-                track = step["track"]
+                # A removal may hold no song details (None).
+                track = step.get("track") or {}
                 state = (
                     "in Removed music"
                     if step["status"] == "removed"

@@ -301,6 +301,64 @@ def test_an_undo_whose_step_is_unreadable_stops_before_changing_anything(
     assert tidy.undo(identity)["status"] == "undone"
 
 
+def with_unresolved_removal(tmp_path, monkeypatch, removal):
+    """A healthy tidy-up that lists `removal` as unresolved."""
+    tidy, identity, operation, bad = recovered_with_malformed_records(
+        tmp_path, monkeypatch
+    )
+    record = tidy.store.read_document("tidy:" + identity)
+    record["unresolved"] = [{"kind": "removal", "id": removal["id"]}]
+    tidy.save(record)
+    put(tidy.store, {"removed:" + removal["id"]: json.dumps(removal)})
+    return tidy, identity
+
+
+def files(root):
+    return sorted(p.relative_to(root) for p in root.rglob("*") if p.is_file())
+
+
+def test_a_damaged_unresolved_removal_breaks_neither_history_nor_undo(
+    tmp_path, monkeypatch
+):
+    """Codex: a removal lacking its song details broke history, and Undo
+    after it had already put files back."""
+    damaged = {"id": "broken", "status": "removed", "track_id": "song"}
+    tidy, identity = with_unresolved_removal(tmp_path, monkeypatch, damaged)
+    (entry,) = tidy.history()
+    assert entry["id"] == identity and entry["unresolved"] == []
+    root = tmp_path / "music"
+    before = files(root)
+    with pytest.raises(ValueError):
+        tidy.undo(identity)
+    assert files(root) == before
+    assert tidy.store.read_document("tidy:" + identity)["status"] == "applying"
+    assert "removed:broken" in reported("trash")
+
+
+def test_an_older_removal_without_song_details_is_still_shown_and_undone_around(
+    tmp_path, monkeypatch
+):
+    # As every release wrote it, but the snapshot had no entry for the song
+    # and the fields later releases added are absent.
+    older = {
+        "id": "older",
+        "track_id": "song",
+        "track": None,
+        "root": str(tmp_path / "music"),
+        "original": "Artist/Album/Song.mp3",
+        "trash": ".pig-music-trash/older/Artist/Album/Song.mp3",
+        "sha256": "0" * 64,
+        "status": "removed",
+    }
+    tidy, identity = with_unresolved_removal(tmp_path, monkeypatch, older)
+    (entry,) = tidy.history()
+    assert [(u["id"], u["title"]) for u in entry["unresolved"]] == [("older", None)]
+    assert "older" in {r["id"] for r in tidy.recovery.list()}
+    # Undo puts back what it recorded and leaves the unresolved step listed.
+    assert tidy.undo(identity)["status"] == "stopped"
+    assert "removed:older" not in reported("trash")
+
+
 def test_problems_keep_the_latest_fifty_without_detail():
     for n in range(60):
         startup_problems.report("trash", f"removed:{n}", KeyError("/private/path"))

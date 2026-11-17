@@ -593,7 +593,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         """Operations that can be undone, newest first; `limit`/`offset` page
         them (#119)."""
         return [
-            {"id": r["id"], "title": r["track"]["title"], "status": r["status"]}
+            {"id": r["id"], "title": r["track"].get("title"), "status": r["status"]}
             for r in organisation.undoable(limit, offset)
         ]
 

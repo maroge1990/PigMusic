@@ -19,24 +19,72 @@ log = logging.getLogger("pig_music.records")
 AREAS = {"removed": "trash", "organisation": "organisation", "tidy": "tidy"}
 
 
+# The shape checks require what every release has written and its readers
+# use without a default; a field later releases added is checked only when
+# present, and its readers tolerate its absence.
+
+
 def _fields(record, kinds):
     for field, kind in kinds:
         if not isinstance(record[field], kind):
             raise TypeError(field)
 
 
-def _optional_lists(record, fields):
-    for field in fields:
-        if not isinstance(record.get(field, []), list):
+def _optional(record, kinds):
+    for field, kind in kinds:
+        if field in record and not isinstance(record[field], kind):
             raise TypeError(field)
 
 
+def _strings(values, field):
+    if not all(isinstance(value, str) for value in values):
+        raise TypeError(field)
+
+
+def _rows(values, size, field):
+    if not all(isinstance(row, list) and len(row) == size for row in values):
+        raise TypeError(field)
+
+
 def usable_removal(record):
-    _fields(record, (("id", str), ("status", str), ("track_id", str)))
+    _fields(
+        record,
+        (
+            ("id", str),
+            ("status", str),
+            ("track_id", str),
+            ("root", str),
+            ("original", str),
+            ("trash", str),
+            ("sha256", str),
+        ),
+    )
+    # The song as it was; None when the snapshot had no entry for it.
+    _optional(record, (("track", (dict, type(None))), ("memberships", list)))
+    # (user, song, added, source) rows, as library_members holds them.
+    _rows(record.get("memberships", []), 4, "memberships")
 
 
 def usable_operation(record):
-    _fields(record, (("id", str), ("status", str), ("track", dict)))
+    _fields(
+        record,
+        (
+            ("id", str),
+            ("status", str),
+            ("track_id", str),
+            ("track", dict),
+            ("root", str),
+            ("source", str),
+            ("destination", str),
+            ("backup", str),
+            ("stage", str),
+            ("before", str),
+        ),
+    )
+    # Written with "publishing", the step every later status follows.
+    if record["status"] not in {"preparing", "cancelled"}:
+        _fields(record, (("after", str),))
+    _optional(record, (("placed_from", dict),))
 
 
 def usable_tidy(record):
@@ -47,13 +95,18 @@ def usable_tidy(record):
             ("status", str),
             ("moves", list),
             ("removals", list),
+            ("memberships", list),
             ("time", (int, float)),
         ),
     )
-    _optional_lists(record, ("unresolved", "dismissed", "memberships"))
     record["title"], record["artist"]
-    set(record["moves"]), set(record["removals"])
+    _strings(record["moves"], "moves")
+    _strings(record["removals"], "removals")
+    _rows(record["memberships"], 2, "memberships")
+    _optional(record, (("unresolved", list), ("dismissed", list)))
     for item in record.get("unresolved", []):
+        if not isinstance(item, dict):
+            raise TypeError("unresolved")
         _fields(item, (("id", str), ("kind", str)))
 
 

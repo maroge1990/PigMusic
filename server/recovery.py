@@ -224,7 +224,11 @@ class Recovery:
             for name, payload in c.execute(
                 "SELECT name,payload FROM documents WHERE name >= 'excluded:' AND name < 'excluded;'"
             ).fetchall():
-                if json.loads(payload).get("removal_id") == record["id"]:
+                try:
+                    removal_id = json.loads(payload).get("removal_id")
+                except (ValueError, AttributeError):
+                    continue  # An unreadable exclusion is left as it is (#240).
+                if removal_id == record["id"]:
                     c.execute("DELETE FROM documents WHERE name=?", (name,))
 
     def settle(self, identity):
