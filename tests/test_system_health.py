@@ -5,6 +5,8 @@ keeps its newest unexpected errors and busy-database answers; the admin
 System page reads them all from GET /api/v1/admin/system/health."""
 
 import json
+
+import pytest
 import sqlite3
 from types import SimpleNamespace
 
@@ -95,6 +97,7 @@ def test_the_history_is_still_read_when_damaged(tmp_path):
     )
 
 
+@pytest.mark.server_error_expected
 def test_an_unexpected_error_is_kept_without_its_text_or_query(tmp_path, monkeypatch):
     secret = "SELECT * FROM users WHERE token='abc' /music/private.flac"
     with signed_in(tmp_path, monkeypatch) as (app, client):
@@ -215,6 +218,7 @@ def test_workers_show_the_error_class_only():
     ]
 
 
+@pytest.mark.server_error_expected
 def test_a_relay_token_in_the_path_is_never_kept_or_logged(
     tmp_path, monkeypatch, caplog
 ):
