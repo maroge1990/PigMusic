@@ -359,6 +359,41 @@ def test_an_older_removal_without_song_details_is_still_shown_and_undone_around(
     assert "removed:older" not in reported("trash")
 
 
+def test_a_tidy_up_whose_memberships_cannot_be_bound_is_set_aside_before_undo(
+    tmp_path, monkeypatch
+):
+    """Codex: a membership value SQLite cannot bind failed Undo after it had
+    already put files back."""
+    tidy, identity, operation, bad = recovered_with_malformed_records(
+        tmp_path, monkeypatch
+    )
+    record = tidy.store.read_document("tidy:" + identity)
+    record["memberships"] = [[{}, "song"]]
+    put(tidy.store, {"tidy:" + identity: json.dumps(record)})
+    root = tmp_path / "music"
+    before = files(root)
+    with pytest.raises(ValueError):
+        tidy.undo(identity)
+    assert files(root) == before
+    assert tidy.history() == []
+    assert "tidy:" + identity in reported("tidy")
+
+
+def test_a_removal_whose_memberships_cannot_be_bound_is_set_aside_before_restore(
+    tmp_path, monkeypatch
+):
+    store, root, path, track = setup(tmp_path, monkeypatch)
+    recovery = Recovery(store)
+    record = recovery.remove("saved")
+    record["memberships"] = [[{}, "saved", 1, "household-add"]]
+    put(store, {"removed:" + record["id"]: json.dumps(record)})
+    before = files(root)
+    with pytest.raises(ValueError):
+        recovery.restore(record["id"])
+    assert files(root) == before and not path.exists()
+    assert "removed:" + record["id"] in reported("trash")
+
+
 def test_problems_keep_the_latest_fifty_without_detail():
     for n in range(60):
         startup_problems.report("trash", f"removed:{n}", KeyError("/private/path"))

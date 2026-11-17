@@ -21,7 +21,11 @@ AREAS = {"removed": "trash", "organisation": "organisation", "tidy": "tidy"}
 
 # The shape checks require what every release has written and its readers
 # use without a default; a field later releases added is checked only when
-# present, and its readers tolerate its absence.
+# present, and its readers tolerate its absence. Every value a reader binds
+# into SQL or uses as a path is type-checked here, so a record either passes
+# whole or is set aside before anything acts on it.
+
+NUMBER = (int, float)
 
 
 def _fields(record, kinds):
@@ -41,9 +45,13 @@ def _strings(values, field):
         raise TypeError(field)
 
 
-def _rows(values, size, field):
-    if not all(isinstance(row, list) and len(row) == size for row in values):
-        raise TypeError(field)
+def _rows(values, kinds, field):
+    """Each value a list whose columns have the types in `kinds`."""
+    for row in values:
+        if not isinstance(row, list) or len(row) != len(kinds):
+            raise TypeError(field)
+        if not all(isinstance(v, kind) for v, kind in zip(row, kinds)):
+            raise TypeError(field)
 
 
 def usable_removal(record):
@@ -60,9 +68,26 @@ def usable_removal(record):
         ),
     )
     # The song as it was; None when the snapshot had no entry for it.
-    _optional(record, (("track", (dict, type(None))), ("memberships", list)))
+    _optional(
+        record,
+        (
+            ("track", (dict, type(None))),
+            ("memberships", list),
+            ("removed_at", NUMBER),
+            ("purged_at", (*NUMBER, type(None))),
+            # A purge's private folder name and its (device, inode).
+            ("quarantine", (str, type(None))),
+            ("quarantine_folder", (list, type(None))),
+            ("operation_id", (str, type(None))),
+        ),
+    )
     # (user, song, added, source) rows, as library_members holds them.
-    _rows(record.get("memberships", []), 4, "memberships")
+    _rows(record.get("memberships", []), (str, str, int, str), "memberships")
+    _rows(
+        [record["quarantine_folder"]] if record.get("quarantine_folder") else [],
+        (int, int),
+        "quarantine_folder",
+    )
 
 
 def usable_operation(record):
@@ -102,7 +127,8 @@ def usable_tidy(record):
     record["title"], record["artist"]
     _strings(record["moves"], "moves")
     _strings(record["removals"], "removals")
-    _rows(record["memberships"], 2, "memberships")
+    # (user, song) rows of library_members this tidy-up added.
+    _rows(record["memberships"], (str, str), "memberships")
     _optional(record, (("unresolved", list), ("dismissed", list)))
     for item in record.get("unresolved", []):
         if not isinstance(item, dict):
