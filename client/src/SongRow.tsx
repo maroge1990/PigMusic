@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   AudioLines,
-  Cloud,
   Disc3,
-  Download,
   Ellipsis,
-  Heart,
   ListEnd,
   ListStart,
+  Plus,
+  Star,
+  Trash2,
   UserRound,
 } from "lucide-react";
 import { StateBadge } from "./StateBadge";
@@ -102,37 +102,16 @@ export function SongRow({
       </button>
       <span className="song-state">
         {state === "saved" ? (
-          <span
-            className="state-badge icon-only song-cloud"
-            role="img"
-            aria-label="In your library on the server"
-            title="In your library on the server"
-          >
-            <Cloud size={20} />
-          </span>
+          <StateBadge state="library" iconOnly />
         ) : state === "pending" ? (
           <StateBadge state="requested" iconOnly />
         ) : (
           <button
-            aria-label={
-              state === "server" || song.cache_id
-                ? `Add ${song.title} to your library`
-                : `Download ${song.title} to your library`
-            }
-            title={
-              song.cache_id
-                ? "Prepared for this mix — add to your library to keep"
-                : state === "server"
-                  ? "On the server — add to your library"
-                  : "Not downloaded — download to the server"
-            }
+            aria-label={`Add ${song.title} to library`}
+            title="Add to library"
             onClick={() => void download()}
           >
-            {state === "server" ? (
-              <Cloud size={20} className="song-cloud-faded" />
-            ) : (
-              <Download size={20} />
-            )}
+            <Plus size={20} />
           </button>
         )}
       </span>
@@ -251,7 +230,7 @@ function SongMenu({
         <div className="song-menu-group">
           {item(
             favourite ? "Remove from favourites" : "Favourite",
-            <Heart size={18} fill={favourite ? "currentColor" : "none"} />,
+            <Star size={18} fill={favourite ? "currentColor" : "none"} />,
             () => {
               onError("");
               void api<{ favourited: boolean }>("/v1/favourites", {
@@ -295,13 +274,7 @@ function SongMenu({
           />
           {state !== "saved" &&
             state !== "pending" &&
-            item(
-              state === "server" || song.cache_id
-                ? "Add to my library"
-                : "Download to my library",
-              <Download size={18} />,
-              () => void download(),
-            )}
+            item("Add to library", <Plus size={18} />, () => void download())}
         </div>
         {(!onArtist || (!onAlbum && song.album)) && (
           <div className="song-menu-group">
@@ -331,7 +304,8 @@ function SongMenu({
             {children}
             {onRemove && state === "saved" && (
               <button role="menuitem" className="danger" onClick={onRemove}>
-                <span>Remove from my library</span>
+                <span>Remove from library</span>
+                <Trash2 size={18} />
               </button>
             )}
           </div>

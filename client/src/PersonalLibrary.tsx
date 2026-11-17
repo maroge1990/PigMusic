@@ -4,7 +4,7 @@ import { CatalogueBrowser } from "./CatalogueBrowser";
 import { Shuffle } from "lucide-react";
 import { shuffled } from "./shuffle";
 import { useEffect, useRef, useState } from "react";
-import { Play, ArrowLeft, Download } from "lucide-react";
+import { Play, ArrowLeft, Plus } from "lucide-react";
 import { api, apiFetch, detailOr, writeFailure } from "./api";
 import { defer, isPending } from "./deferred";
 import { offerUndo } from "./UndoBar";
@@ -562,12 +562,12 @@ export function PersonalLibrary({
               {albumRows && missing.length > 0 && (
                 <button
                   className="round-action"
-                  aria-label={`Download ${missing.length} missing songs`}
-                  title="Download missing songs"
+                  aria-label={`Add ${missing.length} ${missing.length === 1 ? "song" : "songs"} to library`}
+                  title={`Add ${missing.length} ${missing.length === 1 ? "song" : "songs"} to library`}
                   disabled={downloading}
                   onClick={() => void downloadMissing(missing)}
                 >
-                  <Download size={18} aria-hidden="true" />
+                  <Plus size={18} aria-hidden="true" />
                 </button>
               )}
             </div>

@@ -145,7 +145,7 @@ test("removing a song returns to the library's address", async ({ page }) => {
   await page
     .getByRole("button", { name: "More options for Von dutch" })
     .click();
-  await page.getByRole("menuitem", { name: "Remove from my library" }).click();
+  await page.getByRole("menuitem", { name: "Remove from library" }).click();
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "Remove" })
@@ -243,7 +243,7 @@ test("Undo puts a removed song back", async ({ page }) => {
   await page
     .getByRole("button", { name: "More options for Von dutch" })
     .click();
-  await page.getByRole("menuitem", { name: "Remove from my library" }).click();
+  await page.getByRole("menuitem", { name: "Remove from library" }).click();
   const dialog = page.getByRole("dialog");
   // Files someone else still wants stay on the server, and the dialog says so.
   await expect(dialog).toContainText(
@@ -288,7 +288,7 @@ test("cancelling a removal keeps the song", async ({ page }) => {
   await page
     .getByRole("button", { name: "More options for Von dutch" })
     .click();
-  await page.getByRole("menuitem", { name: "Remove from my library" }).click();
+  await page.getByRole("menuitem", { name: "Remove from library" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText(
     "1 music files will move to recoverable trash on the server.",

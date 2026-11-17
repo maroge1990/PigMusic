@@ -93,14 +93,16 @@ test("Downloads shows one card per request, with detail inside", async ({
   await expect(cards).toHaveCount(2);
   const meteora = cards.filter({ hasText: "Meteora" });
   await expect(meteora).toContainText(
-    "1 of 13 songs in your library · 11 waiting · 1 failed",
+    "1 of 13 songs in your library · 11 waiting · 1 couldn't be added",
   );
   await expect(meteora).toContainText("5 min ago");
   await expect(meteora.locator("summary .cover")).toHaveCount(1);
   await expect(meteora.getByText("Soulseek")).toBeHidden();
   await meteora.locator(":scope > summary").click();
   await expect(meteora).toContainText("In your library · Soulseek · FLAC");
-  await meteora.getByRole("button", { name: "Retry Meteora song 2" }).click();
+  await meteora
+    .getByRole("button", { name: "Try again: Meteora song 2" })
+    .click();
   await expect.poll(() => posted).toContain("retry m2");
   await page.getByRole("button", { name: "Clear finished" }).click();
   await expect.poll(() => posted).toContain("clear");

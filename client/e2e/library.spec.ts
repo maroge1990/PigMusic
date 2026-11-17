@@ -164,13 +164,13 @@ test("library and catalogue artist pages each link to the other", async ({
     .click();
   await expect(page).toHaveURL(/#\/library\/discography\/mb-1\?/);
   const brat = page.getByRole("button", { name: /Brat/ });
-  await expect(brat).toContainText("In library");
+  await expect(brat).toContainText("In your library");
   await expect(page.getByRole("button", { name: /Crash/ })).not.toContainText(
-    "In library",
+    "In your library",
   );
   await brat.click();
   await expect(
-    page.getByText("Already in your library: nothing to download."),
+    page.getByText("Already in your library: nothing to add."),
   ).toBeVisible();
   await page.getByRole("link", { name: "Open in your library" }).click();
   await expect(page).toHaveURL(new RegExp(`#/library/album/${album.id}$`));
@@ -294,11 +294,24 @@ test("a live release's songs are requested as live recordings", async ({
   expect(looked).toMatchObject({
     songs: [{ title: "Von dutch", duration: 180, recording_kind: ["live"] }],
   });
-  await page.getByRole("button", { name: "Download album" }).click();
+  // #246: a song not on the server offers Add to library with the plus.
+  const add = page.getByRole("button", {
+    name: "Add Von dutch to library",
+    exact: true,
+  });
+  await expect(add.locator("svg.lucide-plus")).toHaveCount(1);
+  await page
+    .getByRole("button", { name: "Add to library", exact: true })
+    .click();
   await expect.poll(() => requested).toBeTruthy();
   expect(requested).toMatchObject({
     tracks: [{ title: "Von dutch", recording_kind: ["live"] }],
   });
+  await expect(page.getByText("Adding 1 song to your library")).toBeVisible();
+  // While the server works on it the row shows the clock and "Adding".
+  await expect(
+    page.getByRole("img", { name: "Adding" }).locator("svg.lucide-clock"),
+  ).toHaveCount(1);
 });
 
 test("album tiles in the library name the artist", async ({ page }) => {

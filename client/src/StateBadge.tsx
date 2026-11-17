@@ -17,12 +17,15 @@ const defaults: Record<
     label: "In your library",
     icon: (size) => <CircleCheck size={size} />,
   },
-  requested: { label: "Requested", icon: (size) => <Clock size={size} /> },
+  requested: { label: "Adding", icon: (size) => <Clock size={size} /> },
   active: {
     label: "Downloading",
     icon: (size) => <LoaderCircle size={size} className="spin" />,
   },
-  failed: { label: "Failed", icon: (size) => <CircleAlert size={size} /> },
+  failed: {
+    label: "Couldn't add",
+    icon: (size) => <CircleAlert size={size} />,
+  },
   neutral: { label: "", icon: () => null },
 };
 

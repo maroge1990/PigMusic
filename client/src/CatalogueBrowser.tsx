@@ -12,9 +12,10 @@ import {
   ChevronRight,
   ArrowLeft,
   ArrowRight,
-  ArrowDown,
-  Check,
+  CircleCheck,
+  Layers,
   Play,
+  Plus,
   Shuffle,
 } from "lucide-react";
 import { Cover, catalogueCover } from "./Cover";
@@ -365,7 +366,7 @@ export function CatalogueBrowser({
           "",
           "#" + discoverUrl(artist, data.recommended_id || data.editions[0].id),
         );
-      } else setError("No release editions are available.");
+      } else setError("No editions of this album are available.");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -400,9 +401,12 @@ export function CatalogueBrowser({
       if (!response.ok)
         throw await writeFailure(
           response,
-          detailOr("Could not request this album. Please try again."),
+          detailOr("Couldn't add this album. Try again."),
         );
-      notify("Downloading to your library");
+      const adding = rows.filter((r) => r.state === "missing").length;
+      notify(
+        `Adding ${adding} ${adding === 1 ? "song" : "songs"} to your library`,
+      );
       setRows((old) =>
         old.map((r) =>
           r.state === "missing" ? { ...r, state: "pending" } : r,
@@ -477,13 +481,13 @@ export function CatalogueBrowser({
                 {formatDate(release.date)} {release.description}
               </>
             ) : (
-              "Albums first. Explore singles, EPs and other releases below."
+              "Albums first. Explore singles, EPs and more below."
             )
           }
         />
       )}
       {error && <InlineError>{error}</InlineError>}
-      {busy && <Loading>Loading release…</Loading>}
+      {busy && <Loading>Loading album…</Loading>}
       {choose ? (
         <>
           <SectionHeader title="Choose another edition" />
@@ -502,7 +506,7 @@ export function CatalogueBrowser({
                     formatDate(e.date),
                     e.country,
                     e.formats.join(" / "),
-                    `${e.track_count} tracks`,
+                    `${e.track_count} songs`,
                     e.description,
                   ]
                     .filter(Boolean)
@@ -518,7 +522,7 @@ export function CatalogueBrowser({
               disabled={busy}
               onClick={moreEditions}
             >
-              More editions
+              <Layers size={16} aria-hidden="true" /> More editions
             </button>
           )}
         </>
@@ -543,27 +547,28 @@ export function CatalogueBrowser({
             </button>
             <button
               className="round-action"
-              aria-label="Download album"
-              title="Download album"
+              aria-label="Add to library"
+              title="Add to library"
               disabled={busy || !rows.some((r) => r.state === "missing")}
               onClick={() => download()}
             >
-              <ArrowDown size={18} aria-hidden="true" />
+              <Plus size={18} aria-hidden="true" />
             </button>
             {group?.saved_album_id && (
               <a
                 className="secondary-button"
                 href={"#/library/album/" + group.saved_album_id}
               >
-                <Check size={16} aria-hidden="true" /> Open in your library
+                <CircleCheck size={16} aria-hidden="true" /> Open in your
+                library
               </a>
             )}
           </div>
           {rows.length > 0 && !rows.some((r) => r.state === "missing") && (
             <p className="muted">
               {rows.every((r) => r.state === "saved")
-                ? "Already in your library: nothing to download."
-                : "Nothing to download: every song is in your library, on the server or requested."}
+                ? "Already in your library: nothing to add."
+                : "Nothing to add: every song is in your library, on the server or being added."}
             </p>
           )}
           <div className="song-list">
@@ -587,7 +592,8 @@ export function CatalogueBrowser({
               className="secondary-button edition-switch"
               onClick={() => setChoose(true)}
             >
-              Choose another edition · {editionTotal} available
+              <Layers size={16} aria-hidden="true" /> Choose another edition ·{" "}
+              {editionTotal} available
             </button>
           )}
         </>
@@ -598,9 +604,7 @@ export function CatalogueBrowser({
           )}
           {
             <div className="section-title">
-              <h2>
-                {otherReleases ? "Singles, EPs & other releases" : "All albums"}
-              </h2>
+              <h2>{otherReleases ? "Singles, EPs and more" : "All albums"}</h2>
               {!otherReleases && groups.length > 0 && (
                 <div className="popular-pager">
                   <span aria-live="polite">
@@ -648,12 +652,12 @@ export function CatalogueBrowser({
             <div
               className="tab-list discography-tabs"
               role="tablist"
-              aria-label="Release types"
+              aria-label="Album types"
             >
               {[
                 ["single", "Singles"],
                 ["ep", "EPs"],
-                ["other", "Other releases"],
+                ["other", "Other"],
               ].map(([id, label]) => (
                 <button
                   role="tab"
@@ -683,7 +687,7 @@ export function CatalogueBrowser({
                 ? "Popular first"
                 : "Oldest first"}{" "}
             · {groups.length}
-            {total > groups.length ? ` of ${total}` : ""} releases
+            {total > groups.length ? ` of ${total}` : ""} albums
             {groupBusy ? " · loading…" : ""}
           </p>
           <div
@@ -724,8 +728,8 @@ export function CatalogueBrowser({
                     className="saved-icon discography-saved"
                     title={`${g.saved_songs ?? 0} of your songs`}
                   >
-                    <Check size={14} />
-                    In library
+                    <CircleCheck size={14} />
+                    In your library
                   </span>
                 ) : (
                   <ArrowRight size={16} />
@@ -741,9 +745,7 @@ export function CatalogueBrowser({
               setVisible(100);
             }}
           >
-            {otherReleases
-              ? "Back to artist albums"
-              : "Singles, EPs & other releases"}
+            {otherReleases ? "Back to artist albums" : "Singles, EPs and more"}
             <ArrowRight size={16} />
           </button>
           {otherReleases && groups.length < total && (
@@ -751,11 +753,11 @@ export function CatalogueBrowser({
               className="secondary-button"
               onClick={() => setVisible((n) => n + 100)}
             >
-              More releases
+              More albums
             </button>
           )}
           {!groupBusy && !groups.length && !error && (
-            <EmptyLine>No releases in this section.</EmptyLine>
+            <EmptyLine>No albums in this section.</EmptyLine>
           )}
         </>
       ) : null}
@@ -765,7 +767,7 @@ export function CatalogueBrowser({
         </section>
       )}
       {owner && !group && (
-        <OwnerPanel label="server downloads for this artist">
+        <OwnerPanel label="artist monitoring">
           <ArtistAcquisition id={artist.id} notify={notify} />
         </OwnerPanel>
       )}

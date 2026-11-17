@@ -252,7 +252,9 @@ test("an album download the proxy timed out on says it may have been requested",
     .getByRole("button", { name: `Find more by ${artist.name}` })
     .click();
   await page.getByRole("button", { name: /New Night/ }).click();
-  await page.getByRole("button", { name: "Download album" }).click();
+  await page
+    .getByRole("button", { name: "Add to library", exact: true })
+    .click();
   await expect(page.getByText(UNCONFIRMED)).toBeVisible();
   expect(requests).toBe(1);
 });

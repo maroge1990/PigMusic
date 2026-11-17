@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, RotateCw } from "lucide-react";
 import { api } from "./api";
 import { Cover, catalogueCover } from "./Cover";
 import { DownloadLog } from "./DownloadLog";
@@ -50,7 +50,7 @@ const PAGE = 50;
 
 // Plain-language request states; the server keeps its technical names.
 const labels: Record<string, [string, Phase]> = {
-  waiting_for_sources: ["Waiting for a source", "waiting"],
+  waiting_for_sources: ["Adding", "waiting"],
   searching: ["Looking for a copy", "active"],
   downloading: ["Downloading to the server", "active"],
   validating: ["Checking the file", "active"],
@@ -59,7 +59,7 @@ const labels: Record<string, [string, Phase]> = {
   downloaded: ["In your library", "done"],
   cancelled: ["Cancelled", "failed"],
   paused: ["Paused", "paused"],
-  failed: ["Couldn't get this song", "failed"],
+  failed: ["Couldn't add", "failed"],
 };
 
 const badge = {
@@ -79,7 +79,7 @@ function summary(group: Group) {
   const parts = [`${group.done} of ${group.songs} songs in your library`];
   if (group.active) parts.push(`${group.active} downloading`);
   if (group.waiting) parts.push(`${group.waiting} waiting`);
-  if (group.failed) parts.push(`${group.failed} failed`);
+  if (group.failed) parts.push(`${group.failed} couldn't be added`);
   if (group.paused) parts.push(`${group.paused} paused`);
   return parts.join(" · ");
 }
@@ -167,13 +167,13 @@ export function PersonalRequests() {
       {page && !page.total && (
         <Empty
           title="No downloads"
-          description="Songs and albums you download from Search or an artist page appear here until they reach your library."
+          description="Songs and albums you add from Search or an artist page appear here until they reach your library."
         />
       )}
       {page && page.total > 0 && (
         <>
           {(offset > 0 || page.next_offset !== null) && (
-            <nav className="collection-pages" aria-label="Request pages">
+            <nav className="collection-pages" aria-label="Download pages">
               <button
                 className="secondary-button"
                 disabled={busy || offset === 0}
@@ -291,12 +291,13 @@ export function PersonalRequests() {
                   <button
                     className="small-button"
                     disabled={busy}
-                    aria-label={`Retry ${failed.length === 1 ? failed[0].title : `${failed.length} songs from ${group.title}`}`}
+                    aria-label={`Try again: ${failed.length === 1 ? failed[0].title : `${failed.length} songs from ${group.title}`}`}
                     onClick={() => void retry(failed)}
                   >
+                    <RotateCw size={14} aria-hidden="true" />
                     {failed.length === 1
-                      ? "Retry"
-                      : `Retry ${failed.length} songs`}
+                      ? "Try again"
+                      : `Try again (${failed.length} songs)`}
                   </button>
                 )}
               </details>
@@ -313,8 +314,9 @@ export function PersonalRequests() {
                 Clear finished
               </button>
               <p className="muted">
-                Removes finished, failed and cancelled entries from this list.
-                Active downloads and music files are kept.
+                Removes finished and cancelled entries, and songs that couldn't
+                be added, from this list. Active downloads and music files are
+                kept.
               </p>
             </div>
           )}

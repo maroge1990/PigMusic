@@ -802,14 +802,6 @@
   }
 }
 
-/* Option C: cloud = in your library on the server; faded = on the server only. */
-.song-cloud {
-  color: var(--secondary);
-}
-.song-state .song-cloud-faded {
-  opacity: 0.45;
-}
-
 /* ---------- Glass (D-85) ---------- */
 /* The header nav is glass only as the floating phone dock. */
 @media (min-width: 601px) {

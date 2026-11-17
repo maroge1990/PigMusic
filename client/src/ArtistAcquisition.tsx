@@ -72,11 +72,16 @@ export function ArtistAcquisition({
         },
       );
       if (!r.ok)
-        throw await writeFailure(r, detailOr("Artist request unavailable."));
+        throw await writeFailure(
+          r,
+          detailOr("Couldn't save artist monitoring. Try again."),
+        );
       const d = await r.json();
       editing.current = false;
       setState(d);
-      notify(request ? "Artist request queued." : "Artist settings saved.");
+      notify(
+        request ? "Adding albums to your library" : "Artist settings saved.",
+      );
     } catch (e) {
       notify((e as Error).message);
       // It may have been saved: show the artist's settings as they are now.
@@ -90,7 +95,7 @@ export function ArtistAcquisition({
   }
   return (
     <details className="album-quality">
-      <summary>Artist download settings</summary>
+      <summary>Artist monitoring</summary>
       {["album", "single", "ep"].map((kind) => (
         <label className="download-option" key={kind}>
           <input
@@ -118,7 +123,7 @@ export function ArtistAcquisition({
             setState({ ...state, monitor: e.target.checked });
           }}
         />
-        Monitor new releases
+        Monitor new albums
       </label>
       <div className="release-actions">
         <button
@@ -137,13 +142,13 @@ export function ArtistAcquisition({
           }
           onClick={() => void save(true)}
         >
-          Download artist
+          Add albums to library
         </button>
       </div>
       {state.status !== "idle" && (
         <p>
           {state.status} · {state.done?.length || 0} of {state.total || 0}{" "}
-          releases · {state.created || 0} songs queued
+          albums · {state.created || 0} songs queued
         </p>
       )}
     </details>
