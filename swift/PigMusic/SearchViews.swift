@@ -1240,11 +1240,14 @@ private struct ShazamInboxView: View {
       }
       // Marked only when sent: an unmatched song stays missing.
       requested.formUnion(songs.map(\.shazamId).filter { !outcome.unmatched.contains($0) })
-      let sent = outcome.created + outcome.existing
+      let result = AcquisitionResult(
+        created: outcome.created, existing: outcome.existing, skipped: outcome.skipped,
+        downloadsEnabled: outcome.downloadsEnabled)
+      let matched = outcome.created + outcome.existing + outcome.skipped
       let unmatched = outcome.unmatched.count
       message = .info(
         [
-          sent > 0 ? "Adding \(sent) song\(sent == 1 ? "" : "s") to your library." : nil,
+          matched > 0 ? result.sentence : nil,
           unmatched > 0
             ? "\(unmatched) had no exact match in the catalogue: open \(unmatched == 1 ? "it" : "them") to choose a version."
             : nil,

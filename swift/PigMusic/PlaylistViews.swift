@@ -267,14 +267,23 @@ struct PlaylistView: View {
       if !household.isEmpty {
         added = try await model.performPersonal { try await $0.addMembership(trackIds: household) }
       }
-      var queued = 0
+      var created = 0
+      var existing = 0
+      var skipped = 0
+      var downloadsEnabled = true
       for batch in stride(from: 0, to: requested.count, by: 500) {
         let tracks = Array(requested[batch..<min(batch + 500, requested.count)])
-        queued += try await model.performPersonal { try await $0.requestMusic(tracks) }.created
+        let result = try await model.performPersonal { try await $0.requestMusic(tracks) }
+        created += result.created
+        existing += result.existing
+        skipped += result.skipped
+        downloadsEnabled = downloadsEnabled && result.downloadsEnabled
       }
+      let queued = AcquisitionResult(
+        created: created, existing: existing, skipped: skipped, downloadsEnabled: downloadsEnabled)
       let done = [
         added > 0 ? "Added \(added) song\(added == 1 ? "" : "s") to your library." : nil,
-        queued > 0 ? "Adding \(queued) song\(queued == 1 ? "" : "s") to your library." : nil,
+        requested.isEmpty ? nil : queued.sentence,
       ].compactMap { $0 }.joined(separator: " ")
       message = .info(done.isEmpty ? "These songs are already being added." : done)
       reloadAfterEdit = true

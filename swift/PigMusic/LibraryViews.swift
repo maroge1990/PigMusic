@@ -345,8 +345,7 @@ struct AlbumView: View {
     defer { requesting = false }
     do {
       let result = try await model.performPersonal { try await $0.requestMusic(missing) }
-      requestMessage =
-        "Adding \(result.created) song\(result.created == 1 ? "" : "s") to your library."
+      requestMessage = result.sentence
       release = nil
       await loadRelease()
     } catch is CancellationError {} catch { requestMessage = error.userMessage }
