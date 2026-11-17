@@ -1870,3 +1870,48 @@ def test_a_library_song_in_a_mix_shows_its_albums_cover_as_it_is_now(
     assert station[f"mix:{radio}:0"].cover_sha == sha
     # Editions are read, never rewritten.
     assert (stored(identity), stored(radio)) == before
+
+
+def test_a_library_album_without_a_cover_leaves_the_mix_entry_its_own_address(
+    tmp_path, monkeypatch
+):
+    """An album the library holds no cover for is addressed by its library
+    ID (`library-artwork/albums/<id>`), which iPhone builds already installed
+    cannot show; the entry's release address, which they can, must stay."""
+    release = "33333333-3333-4333-8333-333333333333"
+    old = "d" * 64
+    nas = tmp_path / "nas"
+    nas.mkdir()
+    for name in ("one.mp3", "two.mp3"):
+        (nas / name).write_bytes(b"fixture audio")
+    tagged = track(id="tagged", relative_path="one.mp3", musicbrainz_release_id=release)
+    plain = track(2, id="plain", relative_path="two.mp3")
+    (tmp_path / "library-snapshot.json").write_text(
+        json.dumps({"tracks": [tagged, plain]})
+    )
+    app, owner = protected(tmp_path, monkeypatch)
+    store = app.state.store
+    mixes = store.mixes
+    for song in (tagged, plain):
+        album = store.albums_by_id[store.index.album_by_track[song["id"]]]
+        assert not album.get("cover_sha")
+        assert album["cover_url"].startswith("/api/v1/library-artwork/albums/")
+    entries = [
+        tagged,
+        {**plain, "cover_sha": old, "cover_url": f"/api/v1/covers/{old}.jpg"},
+    ]
+    identity = ready(mixes, owner, entries)
+    radio = mixes.radio_edition(owner, mixes.day())
+    mixes.radio_update(radio, lambda p: p["tracks"].extend(entries))
+    kept = [
+        (None, "/api/v1/catalogue/artwork/release/" + release),
+        (old, f"/api/v1/covers/{old}.jpg"),
+    ]
+    rows = mixes.list(owner)["mixes"][0]["tracks"]
+    assert [r.library_track_id for r in rows] == ["tagged", "plain"]
+    assert [(r.cover_sha, r.cover_url) for r in rows] == kept
+    similar = {r.id: r for r in mixes.continuation(owner, [], [])["tracks"]}
+    assert [
+        (similar[f"mix:{radio}:{n}"].cover_sha, similar[f"mix:{radio}:{n}"].cover_url)
+        for n in (0, 1)
+    ] == kept

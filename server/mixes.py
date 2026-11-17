@@ -1511,9 +1511,14 @@ class Mixes:
         # A library song shows its album's cover as the library has it now:
         # the entry's own was frozen when the edition was published, often
         # before the cover was fetched (#168). The stored edition is untouched.
+        # Only a cover the library really holds (it has a hash): an album
+        # without one is addressed by its library ID, which iPhone builds
+        # before the next TestFlight cannot show, so the entry keeps its own.
         cover_url, cover_sha = (
             library_cover(self.store, match) if match else (None,) * 2
         )
+        if not cover_sha:
+            cover_url = None
         return TrackDTO(
             **{
                 **track,
