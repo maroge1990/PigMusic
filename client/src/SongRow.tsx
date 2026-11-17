@@ -23,6 +23,7 @@ import {
   goToArtist,
   requestSong,
   songBody,
+  withLibrary,
   type Song,
   type SongState,
 } from "./songs";
@@ -61,8 +62,16 @@ export function SongRow({
   async function download() {
     setError("");
     try {
-      await requestSong(song);
-      setState(state === "server" ? "saved" : "pending");
+      // The server's answer decides the mark, never the state before the tap:
+      // the tick shows only once the song is confirmed in your library.
+      const result = await requestSong(song);
+      if (result.created > 0) setState("pending");
+      else if (result.existing > 0 || result.skipped > 0) {
+        // Already on its way, already yours, or skipped: ask the library.
+        const [found] = await withLibrary([{ ...song, state: "missing" }]);
+        if (found.state === "saved") setState("saved");
+        else if (result.existing > 0) setState("pending");
+      }
     } catch (e) {
       setError((e as Error).message);
     }

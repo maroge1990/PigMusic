@@ -85,3 +85,65 @@ test("Remove from server shows a readable error for any answer", async ({
   await expect(alert).toContainText("Something went wrong");
   await expect(alert).not.toContainText("[object");
 });
+
+// #246 (Codex): the server's answer decides a row's mark after Add to
+// library. A skipped song keeps its Add button unless the library has it;
+// a song already on its way shows the clock until the library confirms it,
+// never the tick on trust.
+test("Add to library marks the row from the server's answer", async ({
+  page,
+}) => {
+  let looked = 0;
+  const household = album.tracks.map((t) => ({
+    ...t,
+    server_state: "household_available",
+  }));
+  await mockApi(page, {
+    answers: {
+      "/v1/albums/album-1": (route) =>
+        route.fulfill({ json: { ...album, tracks: household } }),
+      "/v1/requests": (route) => {
+        if (route.request().method() !== "POST")
+          return route.fulfill({
+            json: { items: [], next_offset: null, active: 0 },
+          });
+        const title = route.request().postDataJSON().tracks[0].title;
+        return route.fulfill({
+          json:
+            title === "Von dutch"
+              ? { created: 0, existing: 0, skipped: 1, downloads_enabled: true }
+              : {
+                  created: 0,
+                  existing: 1,
+                  skipped: 0,
+                  downloads_enabled: true,
+                },
+        });
+      },
+      "/v1/library/lookup": (route) => {
+        looked += 1;
+        return route.fulfill({ json: { tracks: [null] } });
+      },
+    },
+  });
+  await page.goto(`/#/library/album/${album.id}`);
+  const refused = page.locator(".song-row", { hasText: "Von dutch" });
+  await refused
+    .getByRole("button", { name: "Add Von dutch to library", exact: true })
+    .click();
+  await expect.poll(() => looked).toBe(1);
+  await expect(
+    refused.getByRole("button", { name: "Add Von dutch to library" }),
+  ).toBeVisible();
+  await expect(
+    refused.getByRole("img", { name: "In your library" }),
+  ).toHaveCount(0);
+  const joined = page.locator(".song-row", { hasText: "360" });
+  await joined
+    .getByRole("button", { name: "Add 360 to library", exact: true })
+    .click();
+  await expect(joined.getByRole("img", { name: "Adding" })).toBeVisible();
+  await expect(
+    joined.getByRole("img", { name: "In your library" }),
+  ).toHaveCount(0);
+});

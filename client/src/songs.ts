@@ -130,14 +130,19 @@ export function songBody(s: Song) {
   };
 }
 
-export async function requestSong(s: Song) {
-  await api("/v1/requests", {
+/** What the server did with an Add to library: new jobs, songs already
+ * on their way or now in your library, and songs it refused. */
+export type AddResult = { created: number; existing: number; skipped: number };
+
+export async function requestSong(s: Song): Promise<AddResult> {
+  const result = await api<AddResult>("/v1/requests", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tracks: [songBody(s)] }),
   });
   window.dispatchEvent(new Event("music-library-changed"));
   window.dispatchEvent(new Event("music-requests-changed"));
+  return result;
 }
 
 /** Mark catalogue songs that are already in this person's library. */
