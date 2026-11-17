@@ -12,6 +12,9 @@ import Observation
     public let id: String
     /// What happened, in a few words: "Removed from Road trip".
     public let label: String
+    /// When its Undo was first offered: the newer of it and a failed
+    /// action's notice shows in the place they share (#245).
+    public let since: ContinuousClock.Instant
   }
   /// Waiting for their Undo to run out, oldest first.
   public private(set) var items: [Item] = []
@@ -69,7 +72,7 @@ import Observation
   ) {
     guard actions[id] == nil, !sending.contains(id) else { return }
     actions[id] = commit
-    items.append(Item(id: id, label: label))
+    items.append(Item(id: id, label: label, since: .now))
     let wait = wait
     timers[id] = Task { [weak self] in
       do { try await Task.sleep(for: wait) } catch { return }

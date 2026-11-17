@@ -10,7 +10,7 @@ import SwiftUI
 /// SongMenu's (PigDomain); this draws them and runs them. A menu can't wait
 /// for anything while it opens, so what it needs is looked up before then
 /// (SongActionsLookup); results come as a haptic and failures as the app's
-/// message line.
+/// notice, on every page (#245).
 struct SongActionsMenu: View {
   let model: AppModel
   /// The song as its row or the player has it.
@@ -99,7 +99,7 @@ struct SongActionsMenu: View {
   }
   private func changeFavourite(_ track: Track) async {
     do { try await model.tapFavourite(track) } catch is CancellationError {} catch {
-      model.message = error.userMessage
+      model.notify(error)
     }
   }
   private func add(_ track: Track, to playlist: Playlist) async {
@@ -107,13 +107,13 @@ struct SongActionsMenu: View {
       try await model.saveEdit(
         OfflineMutation(action: "append", playlistId: playlist.id, track: track))
       model.confirmations += 1
-    } catch is CancellationError {} catch { model.message = error.userMessage }
+    } catch is CancellationError {} catch { model.notify(error) }
   }
   private func addToLibrary(_ track: Track) async {
     do {
       _ = try await model.performPersonal { try await $0.addMembership(trackIds: [track.id]) }
       model.confirmations += 1
-    } catch is CancellationError {} catch { model.message = error.userMessage }
+    } catch is CancellationError {} catch { model.notify(error) }
   }
   private func request(_ track: Track) async {
     do {
@@ -121,15 +121,15 @@ struct SongActionsMenu: View {
       if result.downloadsEnabled {
         model.confirmations += 1
       } else {
-        model.message = "Requested. Downloads are off on the server, so it will wait."
+        model.notify("Requested. Downloads are off on the server, so it will wait.")
       }
-    } catch is CancellationError {} catch { model.message = error.userMessage }
+    } catch is CancellationError {} catch { model.notify(error) }
   }
   /// D-103: a success tap, no text; a failure says why.
   private func sendToWatch(_ track: Track) async {
     switch await model.watch?.enqueue([track]) {
     case .sent: model.confirmations += 1
-    case .failed(let reason): model.message = reason
+    case .failed(let reason): model.notify(reason)
     case .superseded, nil: break
     }
   }

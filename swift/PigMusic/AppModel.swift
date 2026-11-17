@@ -33,6 +33,18 @@ enum PlayOrigin: Hashable {
     guard announcedUndo.insert(item.id).inserted else { return }
     UIAccessibility.post(notification: .announcement, argument: item.label + ". Undo is available.")
   }
+  /// A failed action's notice, shown in the Undo bar's place on every page
+  /// and sheet (#245).
+  let notices = ActionNotices()
+  /// Says what went wrong with an action, wherever the person is (#245): a
+  /// song menu's failure used to show only on the Library tab, Account, Now
+  /// Playing and download settings. VoiceOver hears it at once.
+  func notify(_ text: String, reference: String? = nil) {
+    notices.post(text, reference: reference)
+    UIAccessibility.post(notification: .announcement, argument: text)
+  }
+  /// `notify` with what `error` has to say.
+  func notify(_ error: any Error) { notify(error.userMessage) }
   /// Rises when something the person asked for is done (a favourite, a song
   /// queued): the phone answers with a success tap (#183).
   var confirmations = 0
@@ -340,7 +352,7 @@ enum PlayOrigin: Hashable {
         _ = await artwork(sha: sha, width: 512)
         _ = await artwork(sha: sha, width: 256)
       }
-    } catch { message = error.userMessage }
+    } catch { notify(error) }
   }
   func cachePreferences() async { try? await store?.cache(preferences, key: "preferences") }
   /// Local preference choices, so the latest wins over slower saves and syncs.
@@ -1184,7 +1196,7 @@ enum PlayOrigin: Hashable {
       do {
         try await RequestOutbox.add(track, to: store)
       } catch {
-        if account.isCurrent(stamp) { message = error.userMessage }
+        if account.isCurrent(stamp) { notify(error) }
         return false
       }
       guard account.isCurrent(stamp) else { return false }
@@ -1830,7 +1842,7 @@ enum PlayOrigin: Hashable {
       do {
         _ = try await performPersonal { try await $0.removeFromLibrary(ids: [id]) }
       } catch {
-        if account.isCurrent(stamp) { message = error.userMessage }
+        if account.isCurrent(stamp) { notify(error) }
         return false
       }
       guard account.isCurrent(stamp) else { return false }
@@ -1887,6 +1899,7 @@ enum PlayOrigin: Hashable {
     // The ended account's waiting actions are dropped, never sent with the
     // next account's sign-in (Codex).
     undo.discardAll()
+    notices.clear()
     removals = PlaylistRemovalLedger()
     appliedEdits = []
     hiddenMixSongs = []

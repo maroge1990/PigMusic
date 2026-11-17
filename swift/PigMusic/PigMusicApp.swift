@@ -133,8 +133,20 @@ private struct AppHaptics: ViewModifier {
       .sensoryFeedback(trigger: model.message) { _, now in
         now == nil ? nil : SensoryFeedback.error
       }
+      .modifier(NoticeHaptic(model: model))
   }
   private var downloading: Bool { model.downloads?.running ?? false }
+}
+
+/// The error haptic for a failed action's notice (#245), apart so
+/// AppHaptics type-checks fast.
+private struct NoticeHaptic: ViewModifier {
+  let model: AppModel
+  func body(content: Content) -> some View {
+    content.sensoryFeedback(trigger: model.notices.current?.id) { _, now in
+      now == nil ? nil : SensoryFeedback.error
+    }
+  }
 }
 
 struct SignInView: View {

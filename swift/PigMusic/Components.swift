@@ -780,14 +780,17 @@ struct StatusMessage: Equatable {
 
 /// The latest action waiting for its Undo (D-79, #183): what happened and an
 /// Undo button, on a solid brand surface so it is seen at once (#210).
-/// VoiceOver hears each action once, wherever its bar first shows.
+/// VoiceOver hears each action once, wherever its bar first shows. A failed
+/// action's notice (#245) shows in the same place, the newer of the two
+/// replacing the older; a tap hides it.
 struct UndoBar: View {
   let model: AppModel
   @Environment(\.colorScheme) private var scheme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   var body: some View {
-    if let item = model.undo.items.last {
-      HStack(spacing: 12) {
+    switch model.notices.shown(over: model.undo.items.last) {
+    case .undo(let item):
+      bar {
         Text(item.label).font(PigType.footnote.weight(.medium)).lineLimit(2)
           .foregroundStyle(PigBrand.onAccent(scheme))
         Spacer(minLength: 0)
@@ -797,14 +800,40 @@ struct UndoBar: View {
           .frame(minHeight: 44)
           .accessibilityHint("Puts back " + item.label.lowercased())
       }
+      .id(item.id)
+      .transition(transition)
+      .onAppear { model.announceUndo(item) }
+    case .notice(let notice):
+      Button {
+        model.notices.dismiss(notice.id)
+      } label: {
+        bar {
+          Image(systemName: "exclamationmark.circle").accessibilityHidden(true)
+          Text(notice.text).font(PigType.footnote.weight(.medium)).lineLimit(3)
+            .multilineTextAlignment(.leading)
+          Spacer(minLength: 0)
+        }
+        .foregroundStyle(PigBrand.onAccent(scheme))
+      }
+      .buttonStyle(.plain)
+      .accessibilityHint("Hides this message")
+      .id("notice-\(notice.id)")
+      .transition(transition)
+    case nil:
+      EmptyView()
+    }
+  }
+  private func bar(@ViewBuilder _ content: () -> some View) -> some View {
+    HStack(spacing: 12) { content() }
+      .frame(minHeight: 44)
       .padding(.horizontal, 16).padding(.vertical, 4)
       .background(PigBrand.accent(scheme), in: RoundedRectangle(cornerRadius: 14))
+      .contentShape(RoundedRectangle(cornerRadius: 14))
       .shadow(color: .black.opacity(0.2), radius: 10, y: 3)
       .padding(.horizontal, 16).padding(.bottom, 8)
-      .id(item.id)
-      .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
-      .onAppear { model.announceUndo(item) }
-    }
+  }
+  private var transition: AnyTransition {
+    reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity)
   }
 }
 
@@ -844,6 +873,7 @@ struct UndoBar: View {
 /// The app's one Undo bar in the overlay window (#210). It slides between the
 /// places UndoPlacement gives over 0.3 s; with Reduce Motion it fades out of
 /// one place and into the next instead. The action's 10 s run on throughout.
+/// A failed action's notice (#245) uses the same place and motion.
 struct UndoOverlay: View {
   let model: AppModel
   /// Reports the bar's frame, so the window passes every other touch through.
@@ -877,13 +907,21 @@ struct UndoOverlay: View {
         .transition(.opacity)
       }
       .ignoresSafeArea()
-      .animation(curve, value: model.undo.items.last?.id)
+      .animation(curve, value: shownID)
       .animation(curve, value: slot)
       .animation(reduceMotion ? nil : curve, value: bottom)
     }
     .preferredColorScheme(
       model.preferences.appearance == "dark"
         ? .dark : (model.preferences.appearance == "light" ? .light : nil))
+  }
+  /// What the bar shows, so a change of it animates.
+  private var shownID: String? {
+    switch model.notices.shown(over: model.undo.items.last) {
+    case .undo(let item): item.id
+    case .notice(let notice): "notice-\(notice.id)"
+    case nil: nil
+    }
   }
 }
 
