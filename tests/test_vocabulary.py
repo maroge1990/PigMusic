@@ -62,6 +62,9 @@ RETIRED_LUCIDE = {
 ALLOWED = {
     # Brand names and system terms.
     "PigSync",
+    # Key names inside Apple Music's library XML, read on import.
+    "Tracks",
+    "Track ID",
 }
 
 STRING = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
