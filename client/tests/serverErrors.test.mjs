@@ -181,6 +181,28 @@ test("a server fault shows its reference and is not retried", async () => {
   );
 });
 
+test("a write the proxy gave up on may have been saved; other proxy failures are busy", async () => {
+  const calls = answer(() => new Response("Gateway timeout", { status: 504 }));
+  const error = await failure(
+    api("/v1/playlists", { method: "POST", body: "{}" }),
+  );
+  assert.equal(calls.length, 1, "never re-sent");
+  assert.equal(error.kind, "unconfirmed");
+  assert.equal(
+    error.message,
+    "The server was busy, so this may or may not have been saved. Check before trying again.",
+  );
+  assert.ok(events.includes("music-library-changed"));
+  for (const status of [502, 429, 503]) {
+    events.length = 0;
+    const sent = answer(() => new Response("unavailable", { status }));
+    const busyWrite = await failure(api("/v1/playlists", { method: "DELETE" }));
+    assert.equal(sent.length, 1);
+    assert.equal(busyWrite.kind, "busy", `status ${status}`);
+    assert.deepEqual(events, []);
+  }
+});
+
 test("a refused request keeps the server's own message", async () => {
   answer(() => json(409, { code: "conflict", detail: "Already there." }));
   const error = await failure(api("/v1/me"));

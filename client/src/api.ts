@@ -111,8 +111,14 @@ export const UNCONFIRMED_MESSAGE =
 export const SERVER_ERROR_MESSAGE =
   "That didn't work: something went wrong on the server.";
 
-export function failureKind(status: number, code?: unknown): FailureKind {
+export function failureKind(
+  status: number,
+  code?: unknown,
+  write = false,
+): FailureKind {
   if (status === 503 && code === "busy_unconfirmed") return "unconfirmed";
+  // The proxy gave up waiting; the server may still have saved the write.
+  if (status === 504 && write) return "unconfirmed";
   if (
     (status === 503 && (code === "server_busy" || !code)) ||
     status === 429 ||
@@ -167,13 +173,20 @@ const accountErrors: Record<string, string> = {
 
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await apiFetch("/api" + path, options);
-  if (!response.ok) throw await responseError(response);
+  if (!response.ok)
+    throw await responseError(
+      response,
+      !isRead(options?.method?.toUpperCase() || "GET"),
+    );
   return response.json();
 }
 
 /** Turns a failed response into the error a view shows: the server's own
  * message, or one of the server-condition messages (#239). */
-export async function responseError(response: Response): Promise<ApiError> {
+export async function responseError(
+  response: Response,
+  write = false,
+): Promise<ApiError> {
   let message = "Something went wrong. Please try again.";
   let code = "request_failed";
   let details: Record<string, unknown> = {};
@@ -188,7 +201,7 @@ export async function responseError(response: Response): Promise<ApiError> {
   } catch {
     /* Keep a readable response for non-JSON failures. */
   }
-  const kind = failureKind(response.status, details.code);
+  const kind = failureKind(response.status, details.code, write);
   if (kind === "busy") message = accountErrors[code] || BUSY_MESSAGE;
   else if (kind === "unconfirmed") message = UNCONFIRMED_MESSAGE;
   else if (kind === "server") {
@@ -337,8 +350,9 @@ async function fetchRetrying(path: string, options?: RequestInit) {
 }
 
 /** The server was busy while handling a write and cannot say whether it was
- * saved: the code is only sent for writes. */
+ * saved (the code is only sent for writes), or the proxy gave up waiting. */
 async function unconfirmedWrite(response: Response) {
+  if (response.status === 504) return true;
   if (response.status !== 503) return false;
   try {
     return (await response.clone().json())?.code === "busy_unconfirmed";
