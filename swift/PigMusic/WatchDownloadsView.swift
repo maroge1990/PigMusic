@@ -129,7 +129,7 @@ struct WatchDownloadsView: View {
       TransferGroupLabel(
         model: model, title: group.title,
         subtitle: group.lead + " · " + album.summary(done: "on Apple Watch"),
-        artwork: group.artwork, control: album, noun: group.noun
+        artwork: group.artwork, control: album, place: .watch, noun: group.noun
       ) { tap, ids in
         let records = group.records.filter { ids.contains($0.id) }
         Task { await act(tap, on: records, watch: watch) }
@@ -147,7 +147,7 @@ struct WatchDownloadsView: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .accessibilityElement(children: .combine)
-      TransferMarkButton(control(record, watch: watch)) { tap in
+      TransferMarkButton(control(record, watch: watch), on: .watch) { tap in
         Task { await act(tap, on: [record], watch: watch) }
       }
     }

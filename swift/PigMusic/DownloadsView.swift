@@ -53,7 +53,7 @@ private struct DownloadList: View {
               TransferGroupLabel(
                 model: model, title: group.title,
                 subtitle: group.lead + " · " + control.summary(done: "on this iPhone"),
-                artwork: group.artwork, control: control, noun: group.noun
+                artwork: group.artwork, control: control, place: .phone, noun: group.noun
               ) { tap, ids in act(tap, on: group.records.filter { ids.contains($0.id) }) }
             }
           }
@@ -227,7 +227,9 @@ private struct TransferRow: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .accessibilityElement(children: .combine)
       .accessibilityValue(stateLabel)
-      TransferMarkButton(TransferControl.phone(record, progress: downloads.progress[record.id])) {
+      TransferMarkButton(
+        TransferControl.phone(record, progress: downloads.progress[record.id]), on: .phone
+      ) {
         tap in
         Task { await Self.act(tap, on: record, downloads: downloads) }
       }
@@ -326,6 +328,9 @@ extension DownloadGrouping {
 /// it never also opens or taps its row. One that does nothing is only shown.
 struct TransferMarkButton: View {
   let mark: TransferMark
+  /// Which Downloads page: a finished song is a filled download arrow on
+  /// This iPhone and a tick elsewhere (D-116).
+  let place: DownloadPlace
   let tap: TransferTap?
   let label: String?
   let action: () -> Void
@@ -347,24 +352,27 @@ struct TransferMarkButton: View {
     }
   }
   @ViewBuilder private var image: some View {
-    switch mark {
-    case .waiting:
-      Image(systemName: "clock").foregroundStyle(.secondary)
-    case .downloading(let share):
+    if case .downloading(let share) = mark {
       ProgressView(value: share).progressViewStyle(.circular)
         .controlSize(.small).tint(PigBrand.accent(scheme))
-    case .paused:
-      Image(systemName: "pause.circle").foregroundStyle(.secondary)
-    case .failed:
-      Image(systemName: "exclamationmark.circle").foregroundStyle(PigBrand.danger(scheme))
-    case .done:
-      Image(systemName: "checkmark.circle.fill").foregroundStyle(PigBrand.accent(scheme))
+    } else if let symbol = mark.symbol(on: place) {
+      Image(systemName: symbol).foregroundStyle(colour)
+    }
+  }
+  private var colour: Color {
+    switch mark {
+    case .failed: PigBrand.danger(scheme)
+    case .done: PigBrand.accent(scheme)
+    default: .secondary
     }
   }
 }
 extension TransferMarkButton {
-  init(_ control: TransferControl, action: @escaping (TransferTap) -> Void) {
-    self.init(mark: control.mark, tap: control.tap, label: control.label) {
+  init(
+    _ control: TransferControl, on place: DownloadPlace,
+    action: @escaping (TransferTap) -> Void
+  ) {
+    self.init(mark: control.mark, place: place, tap: control.tap, label: control.label) {
       if let tap = control.tap { action(tap) }
     }
   }
@@ -379,6 +387,7 @@ struct TransferGroupLabel: View {
   let subtitle: String
   let artwork: AppModel.ArtworkSource?
   let control: TransferGroupControl
+  let place: DownloadPlace
   /// "album", "playlist" or "song", for VoiceOver.
   let noun: String
   /// The server's own measure of the group, where it has one.
@@ -397,7 +406,9 @@ struct TransferGroupLabel: View {
         }
       }
       .accessibilityElement(children: .combine)
-      TransferMarkButton(mark: control.mark, tap: control.tap, label: control.label(noun)) {
+      TransferMarkButton(
+        mark: control.mark, place: place, tap: control.tap, label: control.label(noun)
+      ) {
         if let tap = control.tap { action(tap, control.ids) }
       }
       .disabled(disabled)

@@ -207,7 +207,7 @@ struct RequestsView: View {
               TransferGroupLabel(
                 model: model, title: group.title, subtitle: group.artist + " · " + group.summary,
                 artwork: group.releaseId.map { .release($0) },
-                control: TransferGroupControl(items.map { ($0.id, Self.control($0)) }),
+                control: TransferGroupControl(items.map { ($0.id, Self.control($0)) }), place: .server,
                 noun: group.songs == 1 ? "song" : "album", progress: group.progress,
                 disabled: loading || !model.canMutate
               ) { tap, ids in Task { await act(tap, ids: ids) } }
@@ -256,7 +256,7 @@ struct RequestsView: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .accessibilityElement(children: .combine)
-      TransferMarkButton(Self.control(item)) { tap in Task { await act(tap, ids: [item.id]) } }
+      TransferMarkButton(Self.control(item), on: .server) { tap in Task { await act(tap, ids: [item.id]) } }
         .disabled(loading || !model.canMutate)
     }
   }
