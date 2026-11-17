@@ -3,9 +3,13 @@ checked as data, without FFmpeg or a server."""
 
 from collections import Counter
 
-from scripts import serve_showcase_server as showcase
+import pytest
+
 from server.library import build_library
 from server.matching import LibraryIndex
+
+# The image's test run ships only some of scripts/; this one is a Mac tool.
+showcase = pytest.importorskip("scripts.serve_showcase_server")
 
 
 def test_the_library_plan_fills_every_collection():
