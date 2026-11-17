@@ -1341,6 +1341,36 @@ enum PlayOrigin: Hashable {
       throw error
     }
   }
+  /// Like `cachedCatalogue(key:conditional:)`, but only the server's own
+  /// answer (a new body, or a `304` that validates the saved copy): a failed
+  /// read throws instead of returning the saved copy, which may be older
+  /// than a change the server couldn't confirm (#246).
+  func freshCatalogue<T: Codable & Sendable>(
+    key: String,
+    conditional load:
+      @escaping @Sendable (NativeService, _ etag: String?) async throws ->
+      Conditional<T>
+  ) async throws -> T {
+    let stamp = account.generation
+    let result: T
+    if let database = store {
+      result = try await readCatalogue { service in
+        try await ConditionalCatalogue(store: database).load(key: key) {
+          try await load(service, $0)
+        }
+      }
+    } else {
+      result = try await readCatalogue { service in
+        guard case .fresh(let value, _) = try await load(service, nil) else {
+          throw NativeFailure.unavailable("This page is unavailable. Try again shortly.")
+        }
+        return value
+      }
+    }
+    try account.check(stamp)
+    remember(result, key: key)
+    return result
+  }
   /// The last catalogue answer for a key, so a revisited page draws at once.
   /// Pages still refresh it through `cachedCatalogue`.
   func peekCatalogue<T: Sendable>(key: String, as type: T.Type = T.self) -> T? {

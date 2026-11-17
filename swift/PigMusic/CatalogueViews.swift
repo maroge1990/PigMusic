@@ -687,10 +687,12 @@ struct CatalogueReleaseView: View {
       if requesting {
         ProgressView().frame(width: 40, height: 40).accessibilityLabel("Adding")
       } else if requestUnconfirmed {
+        // Stays, with Add hidden, until the server itself answers (#246):
+        // a failed read or a saved copy may predate the add.
         RoundIcon(label: "Couldn't confirm adding. Refresh", systemImage: "arrow.clockwise") {
-          requestUnconfirmed = false
           Task { await load() }
         }
+        .disabled(loading)
       } else if let requestFailure {
         RoundIcon(
           label:
@@ -753,9 +755,17 @@ struct CatalogueReleaseView: View {
     defer { loading = false }
     if release == nil { release = await model.storedCatalogue(key: "release:" + releaseId) }
     do {
-      release = try await model.cachedCatalogue(
-        key: "release:" + releaseId,
-        conditional: { try await $0.catalogueRelease(releaseId: releaseId, etag: $1) })
+      if requestUnconfirmed {
+        // Only the server's own answer settles an unconfirmed add.
+        release = try await model.freshCatalogue(
+          key: "release:" + releaseId,
+          conditional: { try await $0.catalogueRelease(releaseId: releaseId, etag: $1) })
+        requestUnconfirmed = false
+      } else {
+        release = try await model.cachedCatalogue(
+          key: "release:" + releaseId,
+          conditional: { try await $0.catalogueRelease(releaseId: releaseId, etag: $1) })
+      }
     } catch is CancellationError {} catch { self.error = error.userMessage }
   }
 }
