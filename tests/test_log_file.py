@@ -2,6 +2,7 @@
 so a container restart no longer loses it. Runs in a child process: applying a
 logging config would otherwise change logging for later tests."""
 
+import re
 import subprocess
 import sys
 import textwrap
@@ -89,3 +90,21 @@ def test_a_log_folder_that_cannot_be_written_falls_back_to_the_console(
     (unopenable / "logs/pig-music.log").mkdir(parents=True)
     assert runtime.log_config(unopenable) == packaged
     assert "log file" in capsys.readouterr().err
+
+
+def test_console_lines_carry_the_time_like_the_log_file(tmp_path):
+    done = run(
+        tmp_path,
+        """
+        import logging, logging.config, json, sys
+        from pathlib import Path
+        import server.runtime as runtime
+        path = runtime.log_config(Path(sys.argv[1]))
+        logging.config.dictConfig(json.loads(path.read_text()))
+        logging.getLogger("pig_music.workers").warning("console line")
+        """,
+    )
+    stamp = r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} WARNING pig_music.workers: "
+    assert re.search(stamp + "console line", done.stderr), done.stderr
+    file = (tmp_path / "logs" / "pig-music.log").read_text()
+    assert re.search(stamp + "console line", file)

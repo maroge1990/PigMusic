@@ -6,8 +6,8 @@
     "health": {"()": "server.auth_logging.HealthCheckFilter"}
   },
   "formatters": {
-    "default": {"format": "%(levelname)s: %(message)s"},
-    "access": {"format": "%(levelname)s: %(message)s"}
+    "default": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"},
+    "access": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"}
   },
   "handlers": {
     "default": {"class": "logging.StreamHandler", "formatter": "default", "filters": ["credentials"], "stream": "ext://sys.stderr"},
