@@ -98,7 +98,7 @@ class ArtistJobs:
         with self.lock:
             state = self.state(identity)
             if state.get("status") in {"queued", "running"} and request:
-                raise ValueError("This artist already has a request running.")
+                raise ValueError("Albums by this artist are already being added.")
             starting = (
                 monitor
                 and not request
@@ -312,7 +312,7 @@ class ArtistJobs:
                             identity,
                             state.get("generation"),
                             status="failed",
-                            error="Artist lookup unavailable. Retry this request.",
+                            error="Couldn't look up this artist. Try again.",
                             checked_at=time.time(),
                         )
             try:

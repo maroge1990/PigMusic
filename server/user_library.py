@@ -127,7 +127,7 @@ def _present(job):
         min(1, (job.get("received_bytes") or 0) / total) if active and total else None
     )
     if job.get("error"):
-        job["error"] = "Acquisition failed. Retry or ask your administrator."
+        job["error"] = "Couldn't add. Try again or ask your administrator."
     return job
 
 
@@ -1202,9 +1202,9 @@ class UserLibrary:
                 "SELECT status,payload FROM queue WHERE id=?", (request_id,)
             ).fetchone()
             if not row or user_id not in json.loads(row[1]).get("requested_by", []):
-                raise LookupError("Request not found")
+                raise LookupError("Not found in Downloads")
             if row[0] not in CANCELLABLE:
-                raise ValueError("Only active requests can be cancelled")
+                raise ValueError("Only songs still being added can be cancelled")
             payload = json.loads(row[1])
             payload["requested_by"] = [
                 identity for identity in payload["requested_by"] if identity != user_id
@@ -1240,8 +1240,10 @@ class UserLibrary:
                 (request_id, user_id),
             ).fetchone()
         if not mine:
-            raise LookupError("Request not found")
-        raise ValueError("Only failed or cancelled requests can be retried")
+            raise LookupError("Not found in Downloads")
+        raise ValueError(
+            "Only songs that couldn't be added or were cancelled can be tried again"
+        )
 
     def pause_request(self, user_id, request_id):
         """Pause one of this person's unfinished requests (#228, D-109).
@@ -1267,8 +1269,8 @@ class UserLibrary:
                 "SELECT 1 FROM queue WHERE id=? AND " + _MINE, (request_id, user_id)
             ).fetchone()
         if not mine:
-            raise LookupError("Request not found")
-        raise ValueError("Only unfinished requests can be paused")
+            raise LookupError("Not found in Downloads")
+        raise ValueError("Only songs still being added can be paused")
 
     def resume_request(self, user_id, request_id):
         """Resume one of this person's paused requests (#228): it waits for a
@@ -1287,8 +1289,8 @@ class UserLibrary:
                 "SELECT 1 FROM queue WHERE id=? AND " + _MINE, (request_id, user_id)
             ).fetchone()
         if not mine:
-            raise LookupError("Request not found")
-        raise ValueError("Only paused requests can be resumed")
+            raise LookupError("Not found in Downloads")
+        raise ValueError("Only paused songs can be resumed")
 
     def request_log(self, user_id, request_id):
         """This person's request told step by step (#197)."""
@@ -1300,7 +1302,7 @@ class UserLibrary:
                 (request_id, user_id),
             ).fetchone()
         if not row:
-            raise LookupError("Request not found")
+            raise LookupError("Not found in Downloads")
         return {
             "id": request_id,
             "status": row[1],
@@ -1309,7 +1311,7 @@ class UserLibrary:
 
     def queue(self, user_id, offset=0, limit=200):
         if offset < 0 or not 1 <= limit <= 200:
-            raise ValueError("Invalid request page bounds")
+            raise ValueError("Invalid page bounds")
         with self.store.connect() as conn:
             total = conn.execute(
                 "SELECT count(*) FROM queue WHERE " + _MINE, (user_id,)
@@ -1350,7 +1352,7 @@ class UserLibrary:
         newest, of its jobs) unless the jobs name different recordings.
         """
         if offset < 0 or not 1 <= limit <= 100:
-            raise ValueError("Invalid request page bounds")
+            raise ValueError("Invalid page bounds")
         # One read: counts, pages and groups all come from the same snapshot.
         with self.store.connect() as conn:
             records = conn.execute(

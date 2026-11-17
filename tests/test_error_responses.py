@@ -279,7 +279,10 @@ def test_not_found_and_invalid_requests_answer_as_before(tmp_path, monkeypatch):
     with signed_in(tmp_path, monkeypatch) as (app, client):
         missing = client.get(SYNC_PATH + "/nothing/log")
         assert missing.status_code == 404
-        assert missing.json() == {"detail": "Request not found", "code": "not_found"}
+        assert missing.json() == {
+            "detail": "Not found in Downloads",
+            "code": "not_found",
+        }
         unmatched = client.get("/api/v1/nowhere")
         assert unmatched.status_code == 404
         assert unmatched.json() == {"detail": "Not Found", "code": "not_found"}

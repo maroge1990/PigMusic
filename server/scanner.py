@@ -312,7 +312,7 @@ class LibraryScanner:
                         self.report(status="scanning", files=len(tracks))
             if directory_errors or old and not tracks:
                 raise ValueError(
-                    "The music folder could not be read completely. The previous index is retained."
+                    "Couldn't read the whole music folder. The previous index is kept."
                 )
             present = {t["relative_path"] for t in tracks}
             missing = [

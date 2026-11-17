@@ -1214,7 +1214,9 @@ class Store:
                     (request_id,),
                 )
                 if not result.rowcount:
-                    raise ValueError("Only failed or cancelled requests can be retried")
+                    raise ValueError(
+                        "Only songs that couldn't be added or were cancelled can be tried again"
+                    )
         return self.queue()
 
     def album_key(self, track):
@@ -1613,10 +1615,10 @@ class Store:
 
     def decide(self, track_id: str, decision: str):
         if decision not in {"requested", "skip"}:
-            raise ValueError("Choose the requested release or skip this song.")
+            raise ValueError("Choose the album from your export or skip this song.")
         tracks = [t for a in self.migration()["albums"] for t in a["tracks"]]
         if not any(t["id"] == track_id and t["status"] == "review" for t in tracks):
-            raise ValueError("This track does not need a version decision.")
+            raise ValueError("This song does not need a version decision.")
         with self.connect() as conn:
             conn.execute(
                 "INSERT INTO migration_decisions VALUES (?,?) ON CONFLICT(track_id) DO UPDATE SET decision=excluded.decision",
@@ -2028,7 +2030,7 @@ class Store:
                 "SELECT payload,status FROM queue WHERE id=?", (request_id,)
             ).fetchone()
         if not row:
-            raise LookupError("Request not found")
+            raise LookupError("Not found in Downloads")
         return {
             "id": request_id,
             "status": row[1],
@@ -2066,7 +2068,7 @@ class Store:
                 (request_id,),
             )
             if not result.rowcount:
-                raise ValueError("Only waiting requests can be cancelled.")
+                raise ValueError("Only waiting songs can be cancelled.")
         return self.queue()
 
     def update_selection(self, ids: list[str], selected: bool):
@@ -2078,7 +2080,7 @@ class Store:
             if t["status"] != "downloaded"
         }
         if not set(ids).issubset(eligible):
-            raise ValueError("Selection contains unknown or already downloaded tracks.")
+            raise ValueError("Selection contains unknown or already saved songs.")
         with self.connect() as conn:
             if selected:
                 conn.executemany(

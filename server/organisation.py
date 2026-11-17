@@ -237,7 +237,7 @@ class Organisation:
                     row["tags_differ"] = False
         return {
             "items": rows,
-            "note": "Existing album folders and release identities are retained. Tags use the current library metadata. Originals are preserved for recovery.",
+            "note": "Existing album folders and album identities are retained. Tags use the current library metadata. Originals are preserved for recovery.",
         }
 
     def check(self, ids, tags=False):

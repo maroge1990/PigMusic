@@ -22,7 +22,7 @@ def parse_apple(raw: bytes) -> dict:
             "Choose a valid Apple Music XML library or playlist export."
         ) from exc
     if not isinstance(data, dict) or not isinstance(data.get("Tracks"), dict):
-        raise ValueError("This file does not contain an Apple Music track inventory.")
+        raise ValueError("This file does not contain an Apple Music song inventory.")
     result, ignored = [], 0
     for key, track in data["Tracks"].items():
         if (
@@ -57,7 +57,7 @@ def parse_apple(raw: bytes) -> dict:
             }
         )
     if not result:
-        raise ValueError("This export contains no music tracks to review.")
+        raise ValueError("This export contains no songs to review.")
     by_source = {t["source_track_id"]: t["id"] for t in result}
     for key, raw_track in data["Tracks"].items():
         if (

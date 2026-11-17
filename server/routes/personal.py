@@ -681,35 +681,35 @@ def personal_router(store, artist_jobs, recovery, mixes=None):
         try:
             return await run(users.cancel_request, identity(request), request_id)
         except LookupError:
-            raise HTTPException(404, "Request not found")
+            raise HTTPException(404, "Not found in Downloads")
 
     @router.post("/requests/{request_id}/retry", response_model=RetriedDTO)
     async def retry_request(request_id: str, request: Request):
         try:
             return await run(users.retry_request, identity(request), request_id)
         except LookupError:
-            raise HTTPException(404, "Request not found")
+            raise HTTPException(404, "Not found in Downloads")
 
     @router.post("/requests/{request_id}/pause", response_model=PausedDTO)
     async def pause_request(request_id: str, request: Request):
         try:
             return await run(users.pause_request, identity(request), request_id)
         except LookupError:
-            raise HTTPException(404, "Request not found")
+            raise HTTPException(404, "Not found in Downloads")
 
     @router.post("/requests/{request_id}/resume", response_model=ResumedDTO)
     async def resume_request(request_id: str, request: Request):
         try:
             return await run(users.resume_request, identity(request), request_id)
         except LookupError:
-            raise HTTPException(404, "Request not found")
+            raise HTTPException(404, "Not found in Downloads")
 
     @router.get("/requests/{request_id}/log", response_model=DownloadLogDTO)
     async def request_log(request_id: str, request: Request):
         try:
             return await run(users.request_log, identity(request), request_id)
         except LookupError:
-            raise HTTPException(404, "Request not found")
+            raise HTTPException(404, "Not found in Downloads")
 
     @router.get("/requests/groups", response_model=RequestGroupList)
     async def request_groups(

@@ -1186,7 +1186,7 @@ class Downloader:
             self.state(
                 job["id"],
                 "failed",
-                error="Acquisition interrupted; existing music retained. Retry this request.",
+                error="Adding was interrupted; existing music kept. Try again.",
                 timings=timings.payload(),
             )
         finally:

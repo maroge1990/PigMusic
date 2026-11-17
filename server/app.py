@@ -926,9 +926,9 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                 None,
             )
             if not track:
-                raise HTTPException(404, "Song not found in this release.")
+                raise HTTPException(404, "Song not found on this album.")
         else:
-            raise HTTPException(400, "Choose a saved song or a release track.")
+            raise HTTPException(400, "Choose a saved song or a song from an album.")
         return {
             k: v
             for k, v in track.items()
@@ -1201,7 +1201,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         try:
             return store.request_log(request_id)
         except LookupError:
-            raise HTTPException(404, "Request not found")
+            raise HTTPException(404, "Not found in Downloads")
 
     class QueueEntry(BaseModel):
         id: str = Field(max_length=200)
@@ -1564,7 +1564,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             raise HTTPException(422, "Choose a song to play.")
         track = await catalogue_track(body.release_id, body.track_id, body.recording_id)
         if track is None:
-            raise HTTPException(404, "Song not found in this release.")
+            raise HTTPException(404, "Song not found on this album.")
         if track.get("saved_id"):
             # SQLite plus a NAS resolve and stat: off the loop (LOOP1).
             return await asyncio.to_thread(playback_saved, track["saved_id"])
@@ -1716,7 +1716,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         except (ValueError, KeyError, TypeError):
             raise HTTPException(
                 404,
-                "No reliable remote stream matched this release. You can still download it.",
+                "No reliable remote stream matched this album. You can still add it to your library.",
             )
         url = found.get("url") or security.sign_url(
             "/api/v1/remote-playback/streams/" + found["relay"],

@@ -266,7 +266,7 @@ test("System says what broke and why without the container log (#241)", async ({
                 at: 1_790_000_001,
                 area: "tidy",
                 sentence:
-                  "A saved tidy task could not be resumed and was set aside.",
+                  "Couldn't resume a saved tidy task, so it was set aside.",
               },
             ],
           },
@@ -294,7 +294,7 @@ test("System says what broke and why without the container log (#241)", async ({
     "The database was too busy to answer 3 times since the server started.",
   );
   await expect(health).toContainText(
-    "A saved tidy task could not be resumed and was set aside.",
+    "Couldn't resume a saved tidy task, so it was set aside.",
   );
   await expect(health).not.toContainText("No problems since");
   await expect(health).not.toContainText("OperationalError");

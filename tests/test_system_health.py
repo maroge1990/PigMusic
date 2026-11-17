@@ -187,7 +187,7 @@ def test_the_health_report_is_for_the_owner_only(tmp_path, monkeypatch):
             {
                 "at": 5,
                 "area": "tidy",
-                "sentence": "A saved tidy task could not be resumed and was set aside.",
+                "sentence": "Couldn't resume a saved tidy task, so it was set aside.",
             }
         ]
         assert "/music" not in answer.text

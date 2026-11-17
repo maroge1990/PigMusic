@@ -96,7 +96,7 @@ class DeviceCopies:
                 digest = checksum(path)
                 if source_stamp(path.stat()) != source_stamp(stat):
                     raise ValueError(
-                        "The source changed. Request it again after scanning."
+                        "The source changed. Download it again after scanning."
                     )
                 self.store.write_document(
                     name, {"stamp": list(source_stamp(stat)), "sha256": digest}

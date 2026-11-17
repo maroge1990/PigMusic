@@ -106,7 +106,7 @@ def device_copy_router(copies):
             raise HTTPException(404, "File unavailable")
         except (ValueError, OSError, subprocess.SubprocessError):
             raise HTTPException(
-                503, "Device copy unavailable. Retry or ask the administrator."
+                503, "Couldn't download. Try again or ask the administrator."
             )
 
     @router.post("/{track_id}/copy", response_model=DeviceCopyDTO)

@@ -215,7 +215,7 @@ class Security:
                             playback=not asking,
                         )
                 except (LookupError, AttributeError):
-                    raise HTTPException(404, "Track not found")
+                    raise HTTPException(404, "Song not found")
                 request.state.user = person
                 request.state.session = session
                 return person
@@ -242,7 +242,7 @@ class Security:
             with phase("auth-media"):
                 denied = await asyncio.to_thread(media_denied)
             if denied:
-                raise HTTPException(404, "Track not found")
+                raise HTTPException(404, "Song not found")
             scoped = True
         if person["role"] != "owner" and request.url.path.startswith(
             ("/api/v1/covers/", "/api/v1/library-artwork/", "/api/v1/artwork/")

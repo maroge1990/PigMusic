@@ -273,7 +273,7 @@ def test_member_retry_requeues_only_own_failed_or_cancelled(tmp_path, monkeypatc
         for key in ("completed", "downloaded", "downloading", "waiting_for_sources"):
             response = client.post(f"/api/v1/requests/{key}/retry")
             assert response.status_code == 400
-            assert "failed or cancelled" in response.json()["detail"]
+            assert "couldn't be added or were cancelled" in response.json()["detail"]
         for key in ("theirs", "missing"):
             assert client.post(f"/api/v1/requests/{key}/retry").status_code == 404
         assert status("theirs") == "failed"

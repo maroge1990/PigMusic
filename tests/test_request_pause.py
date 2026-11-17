@@ -59,7 +59,7 @@ def test_member_pauses_and_resumes_only_own_unfinished_requests(tmp_path, monkey
         for key in ("completed", "downloaded", "failed", "cancelled"):
             response = client.post(f"/api/v1/requests/{key}/pause")
             assert response.status_code == 400
-            assert "unfinished" in response.json()["detail"]
+            assert "still being added" in response.json()["detail"]
             assert status(store, key) == key
             response = client.post(f"/api/v1/requests/{key}/resume")
             assert response.status_code == 400
@@ -93,7 +93,7 @@ def test_pausing_a_shared_request_pauses_the_one_job(tmp_path):
     assert status(store, "shared") == "paused"
     # Importing finishes on its own: its file has passed validation.
     insert(store, "importing", "importing", requested_by=[member])
-    with pytest.raises(ValueError, match="unfinished"):
+    with pytest.raises(ValueError, match="still being added"):
         store.user_libraries.pause_request(member, "importing")
     assert status(store, "importing") == "importing"
     # Either of them resumes it.

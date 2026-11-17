@@ -143,8 +143,7 @@ def startup_lines():
                     "at": problem.get("at"),
                     "area": area,
                     "sentence": (
-                        f"A saved {area} task could not be resumed"
-                        " and was set aside."
+                        f"Couldn't resume a saved {area} task," " so it was set aside."
                     ),
                 }
             )
