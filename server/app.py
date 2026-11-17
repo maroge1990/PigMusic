@@ -52,6 +52,7 @@ from .fanart import Fanart, best as best_fanart
 from .storage import download_root
 from .store import Store
 from .downloader import Downloader
+from .workers import WorkerStatus, supervise
 from .providers.runtime import Runtime as SourceRuntime
 from .routes.download_sources import download_sources_router
 from .catalogue import (
@@ -136,6 +137,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     playlists = Playlists(store)
     exporter = Exporter(store)
     artist_jobs = ArtistJobs(store, music_catalogue)
+    workers = WorkerStatus()
     recovery = Recovery(store)
     organisation = Organisation(store, recovery)
     tidy = Tidy(store, recovery, organisation)
@@ -209,9 +211,22 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                 resolver=EditionResolver(store, music_catalogue, artwork, client),
             )
             app.state.downloader = downloader
-            task = asyncio.create_task(downloader.run())
-            export_task = asyncio.create_task(exporter.run())
-            artist_task = asyncio.create_task(artist_jobs.run(client))
+            # Supervised (#236): an unexpected error is logged and the worker
+            # restarted, so these awaits cannot raise at shutdown.
+            task = asyncio.create_task(
+                supervise("downloads", downloader.run, downloader.stopping, workers)
+            )
+            export_task = asyncio.create_task(
+                supervise("exports", exporter.run, exporter.stopping, workers)
+            )
+            artist_task = asyncio.create_task(
+                supervise(
+                    "artists",
+                    lambda: artist_jobs.run(client),
+                    artist_jobs.stopping,
+                    workers,
+                )
+            )
             preload_task = asyncio.create_task(preload_library())
             if os.environ.get("PIG_MUSIC_PRELOAD", "true").lower() != "false":
                 warmer.start()
@@ -322,6 +337,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     app.state.mixes = mixes
     install_validation_redaction(app)
     app.state.store = store
+    app.state.workers = workers
     app.state.look_ahead = look_ahead
     app.state.source_runtime = source_runtime
     app.state.enrichment = enrichment
