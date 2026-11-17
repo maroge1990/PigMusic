@@ -42,13 +42,50 @@ import PigDomain
   public func memoryImage(_ request: ArtworkRequest) -> Image? {
     memory.object(forKey: request.filename as NSString)
   }
-  public func clearMemory() { memory.removeAllObjects() }
+  public func clearMemory() {
+    memory.removeAllObjects()
+    hashes = [:]
+  }
 
   /// The account ended: pending downloads stop and nothing it loaded stays.
   public func detach() {
     if let cache { Task { await cache.cancelPending() } }
     cache = nil
     memory.removeAllObjects()
+    hashes = [:]
+    for lookup in lookups.values { lookup.cancel() }
+    lookups = [:]
+  }
+
+  /// The stored hash each library artwork address answered with, so a tile
+  /// drawn again loads its cover by hash without asking the address again.
+  private var hashes: [LibraryArtwork: String] = [:]
+  private var lookups: [LibraryArtwork: Task<String, any Error>] = [:]
+
+  /// The stored hash behind a library album's or artist's own artwork
+  /// address, which the caller then loads like any stored cover (so the
+  /// image is cached under its hash, not its address). `resolve` asks the
+  /// server; tiles asking for the same address at once share one ask. "Not
+  /// available" (the server is still fetching the image) is asked about
+  /// again after each of `retryAfter`, as in `load`. Nil without a disk
+  /// cache or when `isCurrent` says the account changed.
+  public func hash(
+    of address: LibraryArtwork, retryAfter: [Duration] = [], isCurrent: () -> Bool,
+    resolve: @escaping @Sendable () async throws -> String
+  ) async throws -> String? {
+    guard cache != nil else { return nil }
+    if let known = hashes[address] { return known }
+    let found = try await asking(retryAfter, isCurrent: isCurrent) {
+      let lookup = self.lookups[address] ?? Task { try await resolve() }
+      self.lookups[address] = lookup
+      defer { if self.lookups[address] == lookup { self.lookups[address] = nil } }
+      return try await lookup.value
+    }
+    try Task.checkCancellation()
+    guard let found, isCurrent(), (try? ArtworkRequest(sha: found)) != nil else { return nil }
+    if hashes.count >= 512 { hashes = [:] }
+    hashes[address] = found
+    return found
   }
 
   /// The image for `request`: from memory, else the disk cache, else `fetch`.

@@ -131,7 +131,8 @@ struct SavedArtistThumb: View {
   let artist: Artist
   @State private var sha: String?
   var body: some View {
-    ArtworkThumb(model: model, source: sha.map { .stored($0) }, title: artist.name, circle: true)
+    ArtworkThumb(
+      model: model, source: artist.artworkSource(cover: sha), title: artist.name, circle: true)
       .task(id: artist.id) { sha = await model.artistCover(artist) }
   }
 }
@@ -156,7 +157,7 @@ struct SavedArtistView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: PigSpacing.page) {
         DetailHeader(
-          model: model, source: cover.map { .stored($0) }, eyebrow: "IN YOUR LIBRARY",
+          model: model, source: artist.artworkSource(cover: cover), eyebrow: "IN YOUR LIBRARY",
           title: artist.name,
           subtitle: artist.albumCount.map { "\($0) album\($0 == 1 ? "" : "s")" }, circle: true,
           tinted: true

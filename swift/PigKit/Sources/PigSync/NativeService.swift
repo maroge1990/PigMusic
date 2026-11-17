@@ -382,6 +382,11 @@ public actor NativeService: LibrarySource {
     return try await artworkTransport.fetch(
       request, alias: kind == .release ? .release(uuid) : .releaseGroup(uuid))
   }
+  /// The stored hash of a library album's or artist's own artwork (#168);
+  /// "not available" while the server is still fetching the image.
+  public func libraryArtworkHash(_ address: LibraryArtwork) async throws -> String {
+    try await artworkTransport.hash(of: .library(address))
+  }
   /// The artist's wide Fanart background; unavailable without a Fanart key.
   public func artistBackground(id: String, request: ArtworkRequest) async throws -> Data {
     guard let uuid = UUID(uuidString: id) else { throw ArtworkFailure.invalidRequest }

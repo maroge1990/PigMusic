@@ -90,6 +90,8 @@ struct ArtworkThumb: View {
 extension Track {
   var artworkSource: AppModel.ArtworkSource? {
     if let coverSha { return .stored(coverSha) }
+    // No stored cover yet: the album's own artwork address, when it has one.
+    if let libraryArtwork { return .library(libraryArtwork) }
     if let musicbrainzReleaseId, UUID(uuidString: musicbrainzReleaseId) != nil {
       return .release(musicbrainzReleaseId)
     }
@@ -103,9 +105,12 @@ extension Track {
 }
 
 extension Album {
-  /// Saved cover art, else the catalogue cover of an album that is still requested.
+  /// Saved cover art, else the album's own artwork address (the server is
+  /// still fetching its cover), else the catalogue cover of an album that is
+  /// still requested.
   var artworkSource: AppModel.ArtworkSource? {
     if let coverSha { return .stored(coverSha) }
+    if let libraryArtwork { return .library(libraryArtwork) }
     if let musicbrainzReleaseId, UUID(uuidString: musicbrainzReleaseId) != nil {
       return .release(musicbrainzReleaseId)
     }
@@ -114,6 +119,15 @@ extension Album {
   var subtitle: String {
     [artist, year?.text, trackCount.map { "\($0) song\($0 == 1 ? "" : "s")" }]
       .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+  }
+}
+
+extension Artist {
+  /// The cover the library chose for the artist (`AppModel.artistCover`),
+  /// else the artist's own artwork address while the server has no image.
+  func artworkSource(cover: String?) -> AppModel.ArtworkSource? {
+    if let cover { return .stored(cover) }
+    return libraryArtwork.map { .library($0) }
   }
 }
 
@@ -147,7 +161,7 @@ struct SavedArtistCard: View {
   @State private var sha: String?
   var body: some View {
     CollectionCard(
-      model: model, source: sha.map { .stored($0) }, title: artist.name,
+      model: model, source: artist.artworkSource(cover: sha), title: artist.name,
       caption: artist.albumCount.map { "\($0) album\($0 == 1 ? "" : "s")" }, circle: true
     )
     .task(id: "\(artist.id)|\(model.artworkRefresh)") { sha = await model.artistCover(artist) }

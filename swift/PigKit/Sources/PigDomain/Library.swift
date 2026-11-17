@@ -14,6 +14,9 @@ public struct Track: Codable, Sendable, Identifiable, Hashable {
   public var discNumber: Int?
   public var codec: String?
   public var coverSha: String?
+  /// The server's address for the cover; without a `coverSha` it can be the
+  /// album's own artwork address (`LibraryArtwork`).
+  public var coverUrl: String?
   public var sourceRevision: String?
   public var serverState: String?
   public var musicbrainzReleaseId: String?
@@ -55,6 +58,9 @@ public struct Album: Codable, Sendable, Identifiable, Hashable {
   public var category: String?
   public var trackCount: Int?
   public var coverSha: String?
+  /// The server's address for the cover; without a `coverSha` it can be the
+  /// album's own artwork address (`LibraryArtwork`).
+  public var coverUrl: String?
   public var year: MusicYear?
   public var duration: Double?
   public var tracks: [Track]?
@@ -71,6 +77,9 @@ public struct Artist: Codable, Sendable, Identifiable, Hashable {
   public var coverAlbumId: String?
   /// The server's image for the artist (a portrait, else an album cover).
   public var coverSha: String?
+  /// The server's address for that image; without a stored one it can be
+  /// the artist's own artwork address (`LibraryArtwork`).
+  public var coverUrl: String?
 }
 
 public struct PlaylistEntry: Codable, Sendable, Identifiable, Hashable {

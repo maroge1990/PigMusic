@@ -1341,6 +1341,9 @@ enum PlayOrigin: Hashable {
     case releaseGroup(String)
     case artist(String)
     case appleAlbum(Int)
+    /// A library album's or artist's own artwork, for one the server has no
+    /// stored image for yet (#168).
+    case library(LibraryArtwork)
   }
   /// How long a screen waits for a catalogue cover the server is still
   /// fetching (its first ask is answered "not available"): PigKit's
@@ -1370,8 +1373,31 @@ enum PlayOrigin: Hashable {
       return await catalogueImage("apple-album", String(id), width, retryAfter: retryAfter) {
         try await $0.catalogueArtwork(kind: .appleAlbum, id: String(id), request: $1)
       }
+    case .library(let address):
+      return await libraryImage(address, width, retryAfter: retryAfter)
     case nil: return nil
     }
+  }
+  /// A library album's or artist's own artwork: its address is resolved to
+  /// the stored hash (asked again on the same schedule while the server is
+  /// still fetching the image), then drawn and cached like any stored cover.
+  private func libraryImage(
+    _ address: LibraryArtwork, _ width: Int, retryAfter: [Duration]
+  ) async -> UIImage? {
+    guard let service, images.cache != nil else { return nil }
+    let stamp = account.generation
+    do {
+      guard
+        let sha = try await images.hash(
+          of: address, retryAfter: retryAfter,
+          isCurrent: { [account] in account.isCurrent(stamp) },
+          resolve: { try await service.libraryArtworkHash(address) })
+      else { return nil }
+      return await artwork(sha: sha, width: width)
+    } catch NativeFailure.authentication {
+      revoked(generation: stamp)
+      return nil
+    } catch { return nil }
   }
   func artistArtwork(id: String) async -> UIImage? { await artwork(.artist(id), width: 512) }
   /// Fanart background and logo for the full artist page; nil when unavailable.

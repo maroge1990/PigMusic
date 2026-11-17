@@ -38,6 +38,8 @@ final class ArtworkTransport: Sendable {
   enum Alias: Sendable {
     case artist(UUID), background(UUID), release(UUID), releaseGroup(UUID)
     case appleAlbum(Int)
+    /// A library album's or artist's own artwork (#168).
+    case library(LibraryArtwork)
     var path: String {
       switch self {
       case .artist(let id): "/api/v1/catalogue/artists/" + id.uuidString.lowercased() + "/artwork"
@@ -47,14 +49,24 @@ final class ArtworkTransport: Sendable {
       case .releaseGroup(let id):
         "/api/v1/catalogue/artwork/release-group/" + id.uuidString.lowercased()
       case .appleAlbum(let id): "/api/v1/catalogue/artwork/apple-album/\(id)"
+      case .library(let item): item.path
       }
     }
   }
   func fetch(_ artwork: ArtworkRequest, alias: Alias? = nil) async throws -> Data {
     let origin = try ServerAddress.validate(server.absoluteString)
     guard let alias else { return try await stored(artwork.sha, width: artwork.width, origin) }
-    // Resolve the alias without following it, then load only a same-origin stored
-    // image by hash through the native endpoint. Other redirects are refused.
+    return try await stored(try await hash(of: alias, origin), width: artwork.width, origin)
+  }
+  /// The stored hash an alias answers with; "not available" while the
+  /// server has no image for it yet.
+  func hash(of alias: Alias) async throws -> String {
+    try await hash(of: alias, try ServerAddress.validate(server.absoluteString))
+  }
+  private func hash(of alias: Alias, _ origin: URL) async throws -> String {
+    // Resolve the alias without following it; the caller then loads only a
+    // same-origin stored image by hash through the native endpoint. Other
+    // redirects are refused.
     var parts = URLComponents(url: origin, resolvingAgainstBaseURL: false)!
     parts.path = alias.path
     let (body, response) = try await send(parts.url!)
@@ -66,10 +78,8 @@ final class ArtworkTransport: Sendable {
       target.path.hasPrefix("/api/v1/covers/"), target.path.hasSuffix(".jpg")
     else { throw ArtworkFailure.unavailable }
     let sha = String(target.lastPathComponent.dropLast(4))
-    guard (try? ArtworkRequest(sha: sha, width: artwork.width)) != nil else {
-      throw ArtworkFailure.unavailable
-    }
-    return try await stored(sha, width: artwork.width, origin)
+    guard (try? ArtworkRequest(sha: sha)) != nil else { throw ArtworkFailure.unavailable }
+    return sha
   }
   /// An artist logo, which the server returns as PNG bytes rather than a redirect.
   func logo(artist id: UUID) async throws -> Data {

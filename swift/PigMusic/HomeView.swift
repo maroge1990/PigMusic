@@ -502,7 +502,8 @@ struct RewindArt: Hashable {
 extension AppModel {
   /// A Rewind cover as the library draws it (#216): a stored or catalogue
   /// cover as is; a library album's or artist's own address, or an album
-  /// with no usable address, through the library's own artwork for it.
+  /// with no usable address, through the library's own artwork for it, and
+  /// failing that the address itself (#168).
   func rewindArtwork(_ art: RewindArt) async -> ArtworkSource? {
     if let direct = RewindFigures.source(art.url) { return direct }
     var artistId = art.artist
@@ -515,10 +516,12 @@ extension AppModel {
       return source
     }
     if let release = art.release, UUID(uuidString: release) != nil { return .release(release) }
-    if let artistId, let artist = try? await store?.artist(id: artistId) {
-      return await artistCover(artist).map { .stored($0) }
+    if let artistId, let artist = try? await store?.artist(id: artistId),
+      let cover = await artistCover(artist)
+    {
+      return .stored(cover)
     }
-    return nil
+    return LibraryArtwork(coverUrl: art.url).map { .library($0) }
   }
 }
 

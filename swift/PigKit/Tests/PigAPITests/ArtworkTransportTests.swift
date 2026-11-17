@@ -121,7 +121,9 @@ private final class AliasProtocol: URLProtocol, @unchecked Sendable {
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
   override func startLoading() {
     Self.requests.append(request)
-    let alias = request.url!.path.hasPrefix("/api/v1/catalogue/")
+    let alias =
+      request.url!.path.hasPrefix("/api/v1/catalogue/")
+      || request.url!.path.hasPrefix("/api/v1/library-artwork/")
     client?.urlProtocol(
       self,
       didReceive: HTTPURLResponse(
@@ -167,6 +169,39 @@ private final class AliasProtocol: URLProtocol, @unchecked Sendable {
       AliasProtocol.location = location
       await #expect(throws: ArtworkFailure.unavailable) {
         try await transport().fetch(request, alias: .artist(release))
+      }
+      #expect(AliasProtocol.requests.count == 1)
+    }
+  }
+  /// A library album's or artist's own artwork address (#168) answers with
+  /// a redirect to the stored image; only its hash is taken, and only from a
+  /// same-origin stored-artwork target.
+  @Test func aLibraryArtworkAddressAnswersWithItsStoredHash() async throws {
+    let sha = String(repeating: "d", count: 64)
+    let id = "0123456789abcdef01234567"
+    for kind in LibraryArtwork.Kind.allCases {
+      let address = try #require(LibraryArtwork(kind: kind, id: id))
+      AliasProtocol.requests = []
+      AliasProtocol.location = "/api/v1/covers/\(sha).jpg?w=0"
+      #expect(try await transport().hash(of: .library(address)) == sha)
+      #expect(
+        AliasProtocol.requests.map(\.url!.path) == [
+          "/api/v1/library-artwork/\(kind.rawValue)/\(id)"
+        ])
+      #expect(AliasProtocol.requests.first?.url?.query == nil)
+      #expect(
+        AliasProtocol.requests.first?.value(forHTTPHeaderField: "Authorization")
+          == "Bearer disposable-device-token")
+    }
+    let address = try #require(LibraryArtwork(kind: .albums, id: id))
+    for location in [
+      "https://cdn.invalid/api/v1/covers/\(sha).jpg", "/api/other/\(sha).jpg",
+      "/api/v1/covers/not-a-hash.jpg",
+    ] {
+      AliasProtocol.requests = []
+      AliasProtocol.location = location
+      await #expect(throws: ArtworkFailure.unavailable) {
+        _ = try await transport().hash(of: .library(address))
       }
       #expect(AliasProtocol.requests.count == 1)
     }

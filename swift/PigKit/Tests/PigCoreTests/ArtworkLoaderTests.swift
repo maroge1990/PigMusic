@@ -227,6 +227,173 @@ private func png(size: Int = 8) throws -> Data {
     #expect(await waits.asked == [.seconds(2)])
   }
 
+  /// A library album or artist without a stored cover has its own artwork
+  /// address (#168). Only the server's own form names one: the fixed prefix,
+  /// the kind, and an id of the shape the server issues.
+  @Test func aLibraryArtworkAddressIsOnlyTheServersOwnForm() throws {
+    let id = "0123456789abcdef01234567"
+    let album = try #require(LibraryArtwork(coverUrl: "/api/v1/library-artwork/albums/" + id))
+    #expect(album.kind == .albums && album.id == id)
+    #expect(album.path == "/api/v1/library-artwork/albums/" + id)
+    let artist = try #require(
+      LibraryArtwork(coverUrl: "/api/v1/library-artwork/artists/" + id + "?portraits=1"))
+    #expect(artist.kind == .artists)
+    #expect(artist.path == "/api/v1/library-artwork/artists/" + id)
+    // An address saved before /api/v1 names the same item.
+    #expect(LibraryArtwork(coverUrl: "/api/library-artwork/albums/" + id + "?v=2") == album)
+    #expect(LibraryArtwork(kind: .albums, id: id) == album)
+    let sha = String(repeating: "a", count: 64)
+    for url in [
+      nil, "", "/api/v1/covers/\(sha).jpg", "/api/v1/library-artwork/albums/",
+      "/api/v1/library-artwork/albums/requested-" + id,
+      "/api/v1/library-artwork/albums/" + id.uppercased(),
+      "/api/v1/library-artwork/albums/" + id.dropLast(),
+      "/api/v1/library-artwork/albums/" + id + "0",
+      "/api/v1/library-artwork/albums/" + id + "/",
+      "/api/v1/library-artwork/albums/" + id + "/../../admin",
+      "/api/v1/library-artwork/albums/..%2F..%2Fadmin%2F" + id.prefix(6),
+      "/api/v1/library-artwork/playlists/" + id, "/api/v1/library-artwork/" + id,
+      "/api/v2/library-artwork/albums/" + id, "https://elsewhere.invalid/api/v1/library-artwork/albums/" + id,
+      " /api/v1/library-artwork/albums/" + id, "/api/v1/catalogue/artwork/release/" + id,
+    ] {
+      #expect(LibraryArtwork(coverUrl: url) == nil, "\(url ?? "nil")")
+    }
+    #expect(LibraryArtwork(kind: .artists, id: "../" + id.dropFirst(3)) == nil)
+  }
+
+  /// The address is used only without a stored hash, which always wins.
+  @Test func aStoredCoverWinsOverTheLibraryAddress() throws {
+    let id = "0123456789abcdef01234567"
+    let decoder = LibraryCodec.decoder()
+    let bare = try decoder.decode(
+      Album.self,
+      from: Data(
+        #"{"id":"\#(id)","title":"A","artist":"B","cover_url":"/api/v1/library-artwork/albums/\#(id)"}"#
+          .utf8))
+    #expect(bare.libraryArtwork == LibraryArtwork(kind: .albums, id: id))
+    // What the phone saves keeps the address for the next launch.
+    let saved = try decoder.decode(Album.self, from: LibraryCodec.encoder().encode(bare))
+    #expect(saved.libraryArtwork == bare.libraryArtwork)
+    var covered = bare
+    covered.coverSha = String(repeating: "a", count: 64)
+    #expect(covered.libraryArtwork == nil)
+    let song = try decoder.decode(
+      Track.self,
+      from: Data(
+        #"{"id":"t1","title":"A","artist":"B","cover_url":"/api/v1/library-artwork/albums/\#(id)"}"#
+          .utf8))
+    #expect(song.libraryArtwork == LibraryArtwork(kind: .albums, id: id))
+    let artist = try decoder.decode(
+      Artist.self,
+      from: Data(
+        #"{"id":"\#(id)","name":"B","cover_url":"/api/v1/library-artwork/artists/\#(id)?portraits=1"}"#
+          .utf8))
+    #expect(artist.libraryArtwork == LibraryArtwork(kind: .artists, id: id))
+    let stored = try decoder.decode(
+      Track.self,
+      from: Data(
+        #"{"id":"t2","title":"A","artist":"B","cover_url":"/api/v1/covers/\#(String(repeating: "a", count: 64)).jpg"}"#
+          .utf8))
+    #expect(stored.libraryArtwork == nil)
+  }
+
+  /// A library address is resolved to its stored hash, asked again on the
+  /// tile's schedule while the server is still fetching the image, and then
+  /// remembered so the tile drawn again asks nothing.
+  @Test func aLibraryAddressResolvesToItsStoredHash() async throws {
+    let (loader, root) = try makeLoader()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let address = try #require(LibraryArtwork(kind: .albums, id: "0123456789abcdef01234567"))
+    let sha = String(repeating: "9", count: 64)
+    let waits = Waits()
+    loader.sleep = { await waits.add($0) }
+    let asks = Fetches()
+    let found = try await loader.hash(
+      of: address, retryAfter: CoverRetry.waits, isCurrent: { true }
+    ) {
+      await asks.add()
+      if await asks.count < 3 { throw ArtworkFailure.unavailable }
+      return sha
+    }
+    #expect(found == sha)
+    #expect(await asks.count == 3)
+    #expect(await waits.asked == [.seconds(2), .seconds(6)])
+    let again = try await loader.hash(of: address, isCurrent: { true }) {
+      await asks.add()
+      return sha
+    }
+    #expect(again == sha)
+    #expect(await asks.count == 3)
+    // An image that never arrives: five more asks, then the miss stands.
+    let missing = try #require(LibraryArtwork(kind: .artists, id: "0123456789abcdef01234567"))
+    let never = Fetches()
+    await #expect(throws: ArtworkFailure.unavailable) {
+      _ = try await loader.hash(
+        of: missing, retryAfter: CoverRetry.waits, isCurrent: { true }
+      ) {
+        await never.add()
+        throw ArtworkFailure.unavailable
+      }
+    }
+    #expect(await never.count == 1 + 5)
+    // Anything but a stored hash is not an answer, and is not remembered.
+    let odd = try await loader.hash(of: missing, isCurrent: { true }) { "../etc" }
+    #expect(odd == nil)
+    // Signed out: nothing is asked.
+    loader.detach()
+    let detached = try await loader.hash(of: address, isCurrent: { true }) {
+      await asks.add()
+      return sha
+    }
+    #expect(detached == nil)
+    #expect(await asks.count == 3)
+  }
+
+  /// The tile left the screen while its library address was waiting to be
+  /// asked again: nothing more is asked.
+  @Test func aCancelledTileStopsAskingItsLibraryAddress() async throws {
+    let (loader, root) = try makeLoader()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let address = try #require(LibraryArtwork(kind: .albums, id: "0123456789abcdef01234567"))
+    let asks = Fetches()
+    let waits = Waits()
+    loader.sleep = {
+      await waits.add($0)
+      try await Task.sleep(for: .seconds(600))
+    }
+    let tile = Task { @MainActor in
+      try await loader.hash(
+        of: address, retryAfter: CoverRetry.waits, isCurrent: { true }
+      ) {
+        await asks.add()
+        throw ArtworkFailure.unavailable
+      }
+    }
+    while await waits.asked.isEmpty { try await Task.sleep(for: .milliseconds(2)) }
+    tile.cancel()
+    await #expect(throws: CancellationError.self) { _ = try await tile.value }
+    #expect(await asks.count == 1)
+  }
+
+  /// Rows of one album ask for the same address at once: one ask serves them.
+  @Test func tilesAskingTheSameLibraryAddressShareOneAsk() async throws {
+    let (loader, root) = try makeLoader()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let address = try #require(LibraryArtwork(kind: .albums, id: "0123456789abcdef01234567"))
+    let sha = String(repeating: "8", count: 64)
+    let asks = Fetches()
+    let resolve: @Sendable () async throws -> String = {
+      await asks.add()
+      try await Task.sleep(for: .milliseconds(40))
+      return sha
+    }
+    async let first = loader.hash(of: address, isCurrent: { true }, resolve: resolve)
+    async let second = loader.hash(of: address, isCurrent: { true }, resolve: resolve)
+    let both = try await [first, second]
+    #expect(both == [sha, sha])
+    #expect(await asks.count == 1)
+  }
+
   @Test func catalogueArtworkIsKeyedByItsAlias() throws {
     let id = "8F1B3C1E-5A6B-4C7D-8E9F-0A1B2C3D4E5F"
     let upper = try #require(
