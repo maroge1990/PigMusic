@@ -20,12 +20,18 @@ struct TransferMarksTests {
 
   /// #246, D-116: one mark for each state; a failed song shows the
   /// exclamation circle, not the retry arrows, and a waiting one the clock.
+  /// Done depends on the page: downloaded on this iPhone, in your library on
+  /// the Server page, the tick on Apple Watch.
   @Test func eachStateHasOneMark() {
-    #expect(TransferMark.waiting.symbol == "clock")
-    #expect(TransferMark.downloading(0.5).symbol == nil)
-    #expect(TransferMark.paused.symbol == "pause.circle")
-    #expect(TransferMark.failed.symbol == "exclamationmark.circle")
-    #expect(TransferMark.done.symbol == "checkmark.circle.fill")
+    for place in DownloadPlace.allCases {
+      #expect(TransferMark.waiting.symbol(on: place) == "clock")
+      #expect(TransferMark.downloading(0.5).symbol(on: place) == nil)
+      #expect(TransferMark.paused.symbol(on: place) == "pause.circle")
+      #expect(TransferMark.failed.symbol(on: place) == "exclamationmark.circle")
+    }
+    #expect(TransferMark.done.symbol(on: .phone) == "arrow.down.circle.fill")
+    #expect(TransferMark.done.symbol(on: .server) == "checkmark.circle.fill")
+    #expect(TransferMark.done.symbol(on: .watch) == "checkmark.circle.fill")
   }
 
   @Test func aPhoneSongsMarkPausesResumesAndRetries() {

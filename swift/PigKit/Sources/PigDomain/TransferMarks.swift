@@ -2,7 +2,7 @@ import Foundation
 
 /// The mark on the right of a transfer on the three Downloads pages (D-109):
 /// clock (waiting), progress ring, pause circle, exclamation circle (failed)
-/// or check.
+/// or the place's done mark.
 public enum TransferMark: Equatable, Sendable {
   case waiting
   /// The share done, 0 to 1.
@@ -11,15 +11,17 @@ public enum TransferMark: Equatable, Sendable {
   case failed
   case done
 
-  /// The mark's SF Symbol, one for each state (D-116); nil while
-  /// downloading, which draws a progress ring instead.
-  public var symbol: String? {
+  /// The mark's SF Symbol on `place`'s page, one for each state (D-116);
+  /// nil while downloading, which draws a progress ring instead. Done is
+  /// the filled down arrow on this iPhone (downloaded here) and the tick in
+  /// a circle on the Server page (in your library) and on Apple Watch.
+  public func symbol(on place: DownloadPlace) -> String? {
     switch self {
     case .waiting: "clock"
     case .downloading: nil
     case .paused: "pause.circle"
     case .failed: "exclamationmark.circle"
-    case .done: "checkmark.circle.fill"
+    case .done: place == .phone ? "arrow.down.circle.fill" : "checkmark.circle.fill"
     }
   }
 }
