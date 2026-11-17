@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import sys
@@ -35,7 +36,7 @@ from .request_timing import (
     watch_event_loop,
 )
 from .transport import public_origin
-from . import test_services
+from . import startup_problems, test_services
 from .enrichment import Enrichment
 from .image_cache import public_image
 from .routes.artwork import artwork_router
@@ -209,9 +210,20 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             app.state.http = client
             performance.start()
             enrichment.start()
-            await asyncio.to_thread(recovery.recover)
-            await asyncio.to_thread(organisation.recover)
-            await asyncio.to_thread(tidy.recover)
+            # A bad record is skipped inside each recovery (#240); should one
+            # still fail as a whole, it is reported and the server starts.
+            for area, recover in (
+                ("trash", recovery.recover),
+                ("organisation", organisation.recover),
+                ("tidy", tidy.recover),
+            ):
+                try:
+                    await asyncio.to_thread(recover)
+                except Exception as error:
+                    logging.getLogger("pig_music.startup").error(
+                        "Startup recovery (%s) failed", area, exc_info=error
+                    )
+                    startup_problems.report(area, "*", error)
             from .editions import EditionResolver
 
             downloader = Downloader(

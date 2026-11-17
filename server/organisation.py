@@ -13,6 +13,7 @@ from .media import saved_track, track_file
 from .exporter import Exporter, contained
 from .downloader import Downloader, safe_name
 from .scanner import inspect_file
+from .recovery import skipped, startup_records
 
 
 # Album placement a tidy-up retags onto a moved file.
@@ -498,32 +499,31 @@ class Organisation:
 
     @coordinated
     def recover(self):
-        with self.store.connect() as c:
-            records = [
-                json.loads(v)
-                for (v,) in c.execute(
-                    "SELECT payload FROM documents WHERE name >= 'organisation:' AND name < 'organisation;'"
-                )
-            ]
-        for record in records:
-            if record["status"] == "undoing":
-                try:
-                    self.undo(record["id"])
-                except (OSError, ValueError):
-                    pass
-                continue
-            if record["status"] not in {"preparing", "publishing"}:
-                continue
+        for name, record in startup_records(self.store, "organisation", "organisation"):
             try:
-                _, root = saved_track(self.store, record["track_id"])
-                self.recovery.check_mount(root)
-                if str(root.resolve()) != record["root"]:
-                    continue
-                with self.recovery.lock:
-                    self.finish(record, root)
+                self.recover_one(record)
+            except Exception as error:
+                skipped("organisation", name, error)
+        self.store.refresh_library()
+
+    def recover_one(self, record):
+        if record["status"] == "undoing":
+            try:
+                self.undo(record["id"])
             except (OSError, ValueError):
                 pass
-        self.store.refresh_library()
+            return
+        if record["status"] not in {"preparing", "publishing"}:
+            return
+        try:
+            _, root = saved_track(self.store, record["track_id"])
+            self.recovery.check_mount(root)
+            if str(root.resolve()) != record["root"]:
+                return
+            with self.recovery.lock:
+                self.finish(record, root)
+        except (OSError, ValueError):
+            pass
 
     def undoable(self, limit=None, offset=0):
         """Operations that can be undone, newest first."""

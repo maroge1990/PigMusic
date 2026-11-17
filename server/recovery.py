@@ -1,6 +1,7 @@
 """Hash-guarded, recoverable removal on the existing SMB filesystem."""
 
-import hashlib, json, os, stat, threading, time, uuid
+import hashlib, json, logging, os, stat, threading, time, uuid
+from . import startup_problems
 from .queue_states import PENDING, sql
 from .lifecycle import coordinated
 from pathlib import Path
@@ -9,6 +10,36 @@ from .library import identifier, normalise, load_json
 from .exporter import contained
 from .matching import exclusion_key, same_song
 from .storage import library_root, open_owned_folder, require_library_mount
+
+log = logging.getLogger(__name__)
+
+
+def skipped(area, name, error):
+    """Startup recovery could not settle one record (#240): it is left as it
+    is, logged once with its traceback and listed for the System page."""
+    log.error("Startup recovery (%s) skipped record %s", area, name, exc_info=error)
+    startup_problems.report(area, name, error)
+
+
+def startup_records(store, prefix, area=None):
+    """(document name, record) for each `prefix:` document, each parsed on its
+    own so one unreadable row does not lose the others. A row that is not a
+    JSON object is skipped, and reported under `area` when one is given."""
+    with store.connect() as c:
+        rows = c.execute(
+            "SELECT name,payload FROM documents WHERE name >= ? AND name < ?",
+            (prefix + ":", prefix + ";"),
+        ).fetchall()
+    for name, payload in rows:
+        try:
+            record = json.loads(payload)
+            if not isinstance(record, dict):
+                raise TypeError("record is not an object")
+        except Exception as error:
+            if area:
+                skipped(area, name, error)
+            continue
+        yield name, record
 
 
 class Recovery:
@@ -522,24 +553,30 @@ class Recovery:
 
     @coordinated
     def recover(self):
-        for record in self.list():
-            if record.get("quarantine") and not record.get("purged_at"):
-                try:
-                    _, root = saved_track(self.store, record["track_id"])
-                    self.check_mount(root)
-                    if str(root.resolve()) == record["root"]:
-                        contained(root, record["trash"])
-                        self.settle_purge(record, root.resolve())
-                except (OSError, ValueError, KeyError):
-                    pass
-                continue
-            if record["status"] != "removing":
-                continue
+        for name, record in startup_records(self.store, "removed", "trash"):
+            try:
+                self.recover_one(record)
+            except Exception as error:
+                skipped("trash", name, error)
+        self.store.refresh_library()
+
+    def recover_one(self, record):
+        if record.get("quarantine") and not record.get("purged_at"):
             try:
                 _, root = saved_track(self.store, record["track_id"])
                 self.check_mount(root)
                 if str(root.resolve()) == record["root"]:
-                    self.finish(record, root)
-            except (OSError, ValueError):
+                    contained(root, record["trash"])
+                    self.settle_purge(record, root.resolve())
+            except (OSError, ValueError, KeyError):
                 pass
-        self.store.refresh_library()
+            return
+        if record["status"] != "removing":
+            return
+        try:
+            _, root = saved_track(self.store, record["track_id"])
+            self.check_mount(root)
+            if str(root.resolve()) == record["root"]:
+                self.finish(record, root)
+        except (OSError, ValueError):
+            pass

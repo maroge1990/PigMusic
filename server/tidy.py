@@ -32,6 +32,7 @@ from .lifecycle import coordinated
 from .matching import compatible, primary_artist, strip_edition
 from .organisation import ALBUM_FIELDS, TAG_SUFFIXES, file_name
 from .quality import canonical_codec
+from .recovery import skipped, startup_records
 from .storage import library_root
 
 CATEGORIES = {"album", "soundtrack", "musical"}
@@ -50,6 +51,25 @@ def edition_title(album):
     if prefix and normalise(prefix[1]) == normalise(album.get("artist")):
         text = prefix[2]
     return normalise(strip_edition(text))
+
+
+def usable(record):
+    """Raises unless a tidy-up record has the fields startup recovery reads
+    across records (#240), so one bad record is skipped on its own."""
+    for field, kind in (
+        ("id", str),
+        ("status", str),
+        ("moves", list),
+        ("removals", list),
+    ):
+        if not isinstance(record[field], kind):
+            raise TypeError(field)
+    for field in ("unresolved", "dismissed"):
+        if not isinstance(record.get(field, []), list):
+            raise TypeError(field)
+    if record["status"] in {"applying", "stopped", "undone"}:
+        record["title"], record["artist"]
+    set(record["moves"]), set(record["removals"])
 
 
 def quality(track):
@@ -596,7 +616,15 @@ class Tidy:
         is listed as unresolved on each tidy-up of that album it could
         belong to, for the owner to include or set aside, and an undone
         tidy-up with any is reopened: Undo never reports it complete."""
-        records = self.records()
+        named = []
+        for name, record in startup_records(self.store, "tidy", "tidy"):
+            try:
+                usable(record)
+            except Exception as error:
+                skipped("tidy", name, error)
+                continue
+            named.append((name, record))
+        records = [r for _, r in named]
         moves = {m for r in records for m in r["moves"]}
         removals = {m for r in records for m in r["removals"]}
         older = [
@@ -614,69 +642,84 @@ class Tidy:
                 known.append({"kind": kind, "id": identity})
                 changed.add(record["id"])
 
-        for operation in self.organisation.history():
-            if (
-                "placed_from" not in operation
-                or operation["id"] in moves
-                or operation["status"] in {"cancelled", "undone"}
-            ):
-                continue
-            owners = [
-                r
-                for r in older
-                if r["title"] == operation["track"].get("album")
-                and r["artist"] == operation["track"].get("album_artist")
-            ]
-            proven = [r for r in owners if self.preceded(r, operation)]
-            if len(proven) == 1:
-                owner = proven[0]
-                owner["moves"].append(operation["id"])
-                owner.setdefault(
-                    "error", "Stopped part-way; a moved file was recovered for Undo."
-                )
-                if owner["status"] == "undone":
-                    owner.update(
-                        status="stopped",
-                        error="An earlier Undo missed a moved file; Undo again.",
-                    )
-                changed.add(owner["id"])
-            else:
-                for owner in owners:
-                    flag(owner, "move", operation["id"])
+        # Rows that cannot be read were reported by their own area's recovery.
+        for name, operation in startup_records(self.store, "organisation"):
+            try:
+                self.adopt(operation, older, moves, flag, changed)
+            except Exception as error:
+                skipped("tidy", name, error)
         excluded = set()
-        with self.store.connect() as conn:
-            for (payload,) in conn.execute(
-                "SELECT payload FROM documents WHERE name >= 'excluded:' AND name < 'excluded;'"
-            ):
-                excluded.add(json.loads(payload).get("removal_id"))
-        for removal in self.recovery.list():
-            # Tidy-ups never exclude a song from requests.
-            if (
-                removal["status"] not in {"removed", "removing"}
-                or removal["id"] in removals
-                or removal["id"] in excluded
-            ):
+        for name, exclusion in startup_records(self.store, "excluded", "tidy"):
+            excluded.add(exclusion.get("removal_id"))
+        for name, removal in startup_records(self.store, "removed"):
+            try:
+                # Tidy-ups never exclude a song from requests.
+                if (
+                    removal["status"] not in {"removed", "removing"}
+                    or removal["id"] in removals
+                    or removal["id"] in excluded
+                ):
+                    continue
+                track = removal.get("track") or {}
+                key = album_key(track.get("album"), track.get("album_artist"))
+                for owner in older:
+                    if album_key(owner["title"], owner["artist"]) == key:
+                        flag(owner, "removal", removal["id"])
+            except Exception as error:
+                skipped("tidy", name, error)
+        for name, record in named:
+            if not any(record is r for r in older):
                 continue
-            track = removal.get("track") or {}
-            key = album_key(track.get("album"), track.get("album_artist"))
-            for owner in older:
-                if album_key(owner["title"], owner["artist"]) == key:
-                    flag(owner, "removal", removal["id"])
-        for record in older:
-            if record["status"] == "applying":
-                record.update(
+            try:
+                if record["status"] == "applying":
+                    record.update(
+                        status="stopped",
+                        error=record.get("error") or "Interrupted by a restart.",
+                    )
+                    changed.add(record["id"])
+                if record["status"] == "undone" and self.pending(record, records):
+                    record.update(
+                        status="stopped",
+                        error="An earlier Undo may have missed changes; review them, then Undo again.",
+                    )
+                    changed.add(record["id"])
+                if record["id"] in changed:
+                    self.save(record)
+            except Exception as error:
+                skipped("tidy", name, error)
+
+    def adopt(self, operation, older, moves, flag, changed):
+        """An organisation move an earlier build ran for a tidy-up without
+        recording it: adopted by the one tidy-up it provably belongs to,
+        otherwise flagged as unresolved on each it could belong to."""
+        if (
+            "placed_from" not in operation
+            or operation["id"] in moves
+            or operation["status"] in {"cancelled", "undone"}
+        ):
+            return
+        owners = [
+            r
+            for r in older
+            if r["title"] == operation["track"].get("album")
+            and r["artist"] == operation["track"].get("album_artist")
+        ]
+        proven = [r for r in owners if self.preceded(r, operation)]
+        if len(proven) == 1:
+            owner = proven[0]
+            owner["moves"].append(operation["id"])
+            owner.setdefault(
+                "error", "Stopped part-way; a moved file was recovered for Undo."
+            )
+            if owner["status"] == "undone":
+                owner.update(
                     status="stopped",
-                    error=record.get("error") or "Interrupted by a restart.",
+                    error="An earlier Undo missed a moved file; Undo again.",
                 )
-                changed.add(record["id"])
-            if record["status"] == "undone" and self.pending(record, records):
-                record.update(
-                    status="stopped",
-                    error="An earlier Undo may have missed changes; review them, then Undo again.",
-                )
-                changed.add(record["id"])
-            if record["id"] in changed:
-                self.save(record)
+            changed.add(owner["id"])
+        else:
+            for owner in owners:
+                flag(owner, "move", operation["id"])
 
     def preceded(self, record, operation):
         """Whether `record`'s last recorded step removed the copy this move
