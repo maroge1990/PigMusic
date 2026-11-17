@@ -23,6 +23,7 @@ from .mix_cache import MixCache, MixDownloader, mix_key
 from .playlists import Playlists
 from .request_timing import phase
 from .api_models import TrackDTO
+from .user_library import library_cover
 
 log = logging.getLogger("pig_music.mixes")
 PASS_SECONDS = 240
@@ -1507,6 +1508,12 @@ class Mixes:
                 self.cache.file(mix_key(track), cached)
             except FileNotFoundError:
                 return None
+        # A library song shows its album's cover as the library has it now:
+        # the entry's own was frozen when the edition was published, often
+        # before the cover was fetched (#168). The stored edition is untouched.
+        cover_url, cover_sha = (
+            library_cover(self.store, match) if match else (None,) * 2
+        )
         return TrackDTO(
             **{
                 **track,
@@ -1518,11 +1525,13 @@ class Mixes:
                 ),
                 "library_track_id": library_id,
                 "available": True,
-                "cover_url": (
+                "cover_url": versioned(cover_url)
+                or (
                     f"/api/v1/catalogue/artwork/release/{track['musicbrainz_release_id']}"
                     if track.get("musicbrainz_release_id")
                     else versioned(track.get("cover_url"))
                 ),
+                "cover_sha": cover_sha or track.get("cover_sha"),
             }
         )
 

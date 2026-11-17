@@ -13,7 +13,7 @@ import threading
 import time
 import uuid
 from .api_models import ArtistDTO, AlbumDTO, TrackDTO, PlaylistDTO
-from .user_library import stored_cover_sha
+from .user_library import library_cover, stored_cover_sha
 
 MODELS = {
     "artists": ArtistDTO,
@@ -78,12 +78,12 @@ class NativeSync:
             album_id = self.store.index.album_by_track.get(raw["id"]) or raw.get(
                 "album_id"
             )
-            album = self.store.albums_by_id.get(album_id, {})
+            cover_url, cover_sha = library_cover(self.store, raw)
             raw = {
                 **track_dto(raw),
                 "album_id": album_id,
-                "cover_url": album.get("cover_url") or raw.get("cover_url"),
-                "cover_sha": stored_cover_sha(album) or raw.get("cover_sha"),
+                "cover_url": cover_url,
+                "cover_sha": cover_sha,
             }
         elif kind in ("albums", "artists"):
             raw = {**raw, "cover_sha": stored_cover_sha(raw)}

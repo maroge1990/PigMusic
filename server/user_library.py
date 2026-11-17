@@ -320,6 +320,19 @@ def stored_cover_sha(item):
     return match[1] if match else None
 
 
+def library_cover(store, track):
+    """(cover_url, cover_sha) of a household library song as its album stands
+    now. The one rule for it: the library sync and the mix rows both ask
+    here, so a song shows the same cover wherever it is listed (#168). Two
+    dictionary lookups; no database or file is read."""
+    album_id = store.index.album_by_track.get(track["id"]) or track.get("album_id")
+    album = store.albums_by_id.get(album_id, {})
+    return (
+        album.get("cover_url") or track.get("cover_url"),
+        stored_cover_sha(album) or track.get("cover_sha"),
+    )
+
+
 def add_pending(albums, household_albums, pending):
     """Show requested songs in the album they will join, with their state.
 

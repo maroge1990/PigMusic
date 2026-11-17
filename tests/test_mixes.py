@@ -1813,3 +1813,60 @@ def test_mix_passes_clean_the_cache_at_most_every_ten_minutes(tmp_path, monkeypa
     assert len(runs) == 3
     asyncio.run(passes(1))
     assert len(runs) == 3
+
+
+def test_a_library_song_in_a_mix_shows_its_albums_cover_as_it_is_now(
+    tmp_path, monkeypatch
+):
+    """#168: 0 of 167 mix rows had a usable cover although 161 of those songs
+    had one in the library sync minutes later. An edition keeps each entry's
+    cover as it was when published; the row now asks the library."""
+    from server.native_sync import NativeSync
+
+    nas = tmp_path / "nas"
+    nas.mkdir()
+    (nas / "song.mp3").write_bytes(b"fixture audio")
+    owned = track(id="owned", relative_path="song.mp3")
+    theirs = "c" * 64
+    stranger = track(2, cover_sha=theirs, cover_url=f"/api/v1/covers/{theirs}.jpg")
+    (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": [owned]}))
+    app, owner = protected(tmp_path, monkeypatch)
+    store = app.state.store
+    mixes = store.mixes
+    cached(mixes, stranger)
+    # Published while the album had no cover.
+    identity = ready(mixes, owner, [owned, stranger])
+    radio = mixes.radio_edition(owner, mixes.day())
+    mixes.radio_update(radio, lambda p: p["tracks"].extend([owned, stranger]))
+
+    def stored(edition):
+        with store.connect() as conn:
+            return json.loads(
+                conn.execute(
+                    "SELECT payload FROM mix_editions WHERE id=?", (edition,)
+                ).fetchone()[0]
+            )["tracks"]
+
+    before = stored(identity), stored(radio)
+    assert before[0][0].get("cover_sha") is None
+    # The library has the cover now (the scanner or the artwork fetch).
+    sha = "a" * 64
+    album = store.albums_by_id[store.index.album_by_track["owned"]]
+    album["cover_url"] = f"/api/v1/covers/{sha}.jpg"
+    rows = mixes.list(owner)["mixes"][0]["tracks"]
+    assert rows[0].library_track_id == "owned"
+    assert (rows[0].cover_sha, rows[0].cover_url) == (sha, album["cover_url"])
+    # The library sync says the same for the same song.
+    synced = NativeSync(store).dto("tracks", store.index.match(owned).track)
+    assert (synced["cover_sha"], synced["cover_url"]) == (sha, album["cover_url"])
+    # Not a library song: what the edition holds.
+    assert (rows[1].cover_sha, rows[1].cover_url) == (theirs, stranger["cover_url"])
+    # "Similar songs" and the radio read the same entries.
+    similar = {r.id: r for r in mixes.continuation(owner, [], [])["tracks"]}
+    assert similar[f"mix:{radio}:0"].cover_sha == sha
+    assert similar[f"mix:{radio}:0"].cover_url == album["cover_url"]
+    assert similar[f"mix:{radio}:1"].cover_sha == theirs
+    station = {r.id: r for r in mixes.radio_next(owner, f"mix:{radio}:-1")["tracks"]}
+    assert station[f"mix:{radio}:0"].cover_sha == sha
+    # Editions are read, never rewritten.
+    assert (stored(identity), stored(radio)) == before
