@@ -304,31 +304,77 @@ import UIKit
     static let demo = ProcessInfo.processInfo.arguments.contains("--demo")
     func loadDemo() async {
       guard let archive else { return }
-      let context = CompanionContext(revision: 1, account: "demo")
-      let titles = [
-        ("First Light", "The Orchard"),
-        ("A Very Long Song Title That Keeps On Going Past the Edge", "The Orchard"),
-        ("After the Rain", "Riverlight with a Long Featured Artist Name"),
+      // `--demo-big`: a library the size of a real one, for design review
+      // (scripts/simulator_showcase.py). Every sixth song has not arrived.
+      let big = ProcessInfo.processInfo.arguments.contains("--demo-big")
+      // Its own revision, so it replaces a small demo left in the archive.
+      let context = CompanionContext(revision: big ? 2 : 1, account: "demo")
+      // (title, artist, album, album artist)
+      var entries = [
+        ("First Light", "The Orchard", "Sunrise", "The Orchard"),
+        (
+          "A Very Long Song Title That Keeps On Going Past the Edge", "The Orchard", "Sunrise",
+          "The Orchard"
+        ),
+        (
+          "After the Rain", "Riverlight with a Long Featured Artist Name", "Sunrise", "The Orchard"
+        ),
       ]
+      if big {
+        let albums = [
+          ("Rumours", "Fleetwood Mac", 11), ("Tusk", "Fleetwood Mac", 8),
+          ("Back to Black", "Amy Winehouse", 10), ("Blue", "Joni Mitchell", 10),
+          ("The Miseducation of Lauryn Hill", "Lauryn Hill", 9),
+          ("Random Access Memories", "Daft Punk", 9), ("Currents", "Tame Impala", 8),
+          ("Hamilton (Original Broadway Cast Recording)", "Original Broadway Cast", 12),
+          ("abbey road", "the beatles", 7),
+        ]
+        entries = albums.flatMap { album, artist, count in
+          (1...count).map { ("\(album.split(separator: " ")[0]) Song \($0)", artist, album, artist) }
+        }
+        entries[3].0 = "A Very Long Song Title That Keeps On Going Past the Edge of the Watch"
+      }
       do {
         var songs: [CompanionSong] = []
         var files: [(URL, CompanionFile)] = []
-        for (number, (title, artist)) in titles.enumerated() {
+        for (number, (title, artist, album, albumArtist)) in entries.enumerated() {
+          var track = Track(
+            id: "demo-\(number)", title: title, artist: artist, album: album,
+            duration: big ? Double(150 + (number * 37) % 200) : 30)
+          track.albumArtist = albumArtist
+          track.trackNumber = number + 1
+          if big && number % 6 == 5 {
+            // A well-formed checksum whose audio never arrives.
+            let absent = String(repeating: "0", count: 60) + String(format: "%04x", number)
+            songs.append(CompanionSong(track: track, checksum: absent, bytes: 4_000_000))
+            continue
+          }
           let file = FileManager.default.temporaryDirectory.appendingPathComponent(
             "demo-\(number).m4a")
           try? FileManager.default.removeItem(at: file)
-          try Self.writeTone(to: file, frequency: 220 * Double(number + 2), seconds: 30)
+          try Self.writeTone(
+            to: file, frequency: big ? 220 + Double(number) * 7 : 220 * Double(number + 2),
+            seconds: big ? 4 : 30)
           let data = try Data(contentsOf: file)
           let checksum = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-          var track = Track(
-            id: "demo-\(number)", title: title, artist: artist, album: "Sunrise", duration: 30)
-          track.albumArtist = "The Orchard"
-          track.trackNumber = number + 1
           songs.append(CompanionSong(track: track, checksum: checksum, bytes: Int64(data.count)))
           files.append((file, CompanionFile(context: context, songId: track.id, checksum: checksum)))
         }
+        let ids = songs.map(\.id)
+        let collections =
+          big
+          ? [
+            CompanionCollection(
+              id: "favourites", name: "Favourites", songIds: Array(ids.prefix(14)),
+              favourites: true),
+            CompanionCollection(id: "run", name: "Morning run", songIds: Array(ids.dropFirst(10).prefix(25))),
+            CompanionCollection(
+              id: "long", name: "Songs for a very long drive up the coast",
+              songIds: Array(ids.suffix(18))),
+          ] : []
         try await archive.apply(context)
-        try await archive.apply(CompanionManifest(context: context, songs: songs))
+        try await archive.apply(
+          CompanionManifest(context: context, songs: songs, collections: collections))
         for (file, ticket) in files { try await archive.accept(file, ticket: ticket) }
       } catch {
         message = "Demo library: \(error.localizedDescription)"
