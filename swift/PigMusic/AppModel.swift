@@ -726,12 +726,6 @@ enum PlayOrigin: Hashable {
       message = nil
       syncFailed = true
     }
-    // A request notice from during this refresh, from its own send or one
-    // already running, is shown after the refresh's own message.
-    if let held = heldRequestNotice, account.isCurrent(stamp) {
-      heldRequestNotice = nil
-      message = held
-    }
     // A category chosen during this sync, changed or failed, loads now;
     // `syncing` stays set until this finishes, so a later choice joins it.
     while account.isCurrent(stamp), reloadGate.takePending() {
@@ -1218,40 +1212,38 @@ enum PlayOrigin: Hashable {
       return true
     }
   }
-  /// What a send said about a song left out or refused, kept while a
-  /// refresh runs: a refresh ends by setting `message`, which would clear it
-  /// (Codex confirmation rounds), so the refresh shows it again last.
-  @ObservationIgnored private var heldRequestNotice: String?
-  private func show(requestNotice: String) {
-    message = requestNotice
-    if syncing { heldRequestNotice = requestNotice }
-  }
   /// Sends the request outbox; a failure to reach the server keeps it for
-  /// the next refresh. A song left out or refused says so.
+  /// the next refresh. Songs left out or refused say so once per drain, in
+  /// the app's notice on every page (#245).
   func flushRequests() async {
     guard !flushingRequests, let store, let service, person != nil else { return }
     flushingRequests = true
-    defer { flushingRequests = false }
     let stamp = account.generation
+    var drained = RequestOutbox.Report()
+    var titles: [String: String] = [:]
+    defer {
+      flushingRequests = false
+      // Codex round 2: a song left out or refused says so.
+      if account.isCurrent(stamp), let notice = drained.notice(titles: titles) { notify(notice) }
+    }
     // A request made while one was sent goes in the next round.
     for _ in 0..<10 {
-      let titles = Dictionary(
-        (await RequestOutbox.pending(store)).map { ($0.id, $0.title) },
-        uniquingKeysWith: { first, _ in first })
+      for track in await RequestOutbox.pending(store) where titles[track.id] == nil {
+        titles[track.id] = track.title
+      }
       let report: RequestOutbox.Report
       do {
         report = try await RequestOutbox.send(
           store: store, isCurrent: { [account] in account.isCurrent(stamp) }
         ) { try await service.requestMusic($0) }
       } catch {
-        if account.isCurrent(stamp) { show(requestNotice: error.userMessage) }
+        if account.isCurrent(stamp) { notify(error) }
         return
       }
       guard account.isCurrent(stamp) else { return }
+      drained.absorb(report)
       requestedSongs.sent(report.requested)
       requestedSongs.refused(report.skipped + report.refused)
-      // Codex round 2: a song left out or refused says so.
-      if let notice = report.notice(titles: titles) { show(requestNotice: notice) }
       if !report.requested.isEmpty || !report.skipped.isEmpty || !report.refused.isEmpty {
         requestsRevision += 1
       }
@@ -1916,7 +1908,6 @@ enum PlayOrigin: Hashable {
     appliedEdits = []
     hiddenMixSongs = []
     requestedSongs = RequestMarks()
-    heldRequestNotice = nil
     similarIDs = []
     watch?.disconnect()
     // Stale for every operation still running; live updates stop.

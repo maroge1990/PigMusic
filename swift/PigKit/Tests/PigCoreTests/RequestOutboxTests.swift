@@ -64,6 +64,27 @@ private struct Offline: Error {}
     #expect(report.notice(titles: ["first": "First"]) == "No.")
   }
 
+  /// #245: one drain of the outbox says what was refused once, with how
+  /// many songs when several were.
+  @Test func severalRefusedSongsAreOneNotice() {
+    var drained = RequestOutbox.Report()
+    var first = RequestOutbox.Report()
+    first.refused = ["first"]
+    first.reason = "That didn't work: something went wrong on the server. Reference 01234567"
+    drained.absorb(first)
+    #expect(drained.notice(titles: [:]) == first.reason)
+    var second = RequestOutbox.Report()
+    second.refused = ["second"]
+    second.reason = "No."
+    drained.absorb(second)
+    #expect(drained.refused == ["first", "second"])
+    #expect(drained.notice(titles: [:]) == "2 songs could not be requested: No.")
+    var report = RequestOutbox.Report()
+    report.refused = ["first", "second", "third"]
+    report.reason = "No."
+    #expect(report.notice(titles: [:]) == "3 songs could not be requested: No.")
+  }
+
   @Test func offlineKeepsEveryRequestForTheNextTry() async throws {
     let (store, root) = try makeStore()
     defer { try? FileManager.default.removeItem(at: root) }

@@ -30,10 +30,23 @@ import PigStore
     public var downloadsEnabled = true
     public var stop: Stop = .done
     public init() {}
-    /// What to tell the person: a refusal's reason, or that a song was left
-    /// out (Codex round 2: nothing may vanish without a word).
+    /// Adds a later send's answers, so one drain of the outbox says what
+    /// happened once (#245); the latest reason and stop win.
+    public mutating func absorb(_ later: Report) {
+      requested += later.requested
+      skipped += later.skipped
+      refused += later.refused
+      reason = later.reason ?? reason
+      downloadsEnabled = downloadsEnabled && later.downloadsEnabled
+      stop = later.stop
+    }
+    /// What to tell the person: a refusal's reason, with how many songs
+    /// when several were refused (#245), or that a song was left out (Codex
+    /// round 2: nothing may vanish without a word).
     public func notice(titles: [String: String]) -> String? {
-      if let reason { return reason }
+      if let reason {
+        return refused.count > 1 ? "\(refused.count) songs could not be requested: \(reason)" : reason
+      }
       guard let id = skipped.first else { return nil }
       return
         "\(titles[id] ?? "That song") is excluded from this server's downloads, so it wasn't requested."
