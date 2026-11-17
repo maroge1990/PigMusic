@@ -110,10 +110,6 @@ enum PlayOrigin: Hashable {
   /// Each cover's colour (#199), computed once per cover and account.
   @ObservationIgnored private var coverSwatches: [String: CoverRGB?] = [:]
   @ObservationIgnored private var catalogueMemory = CatalogueMemory()
-  /// How many times each catalogue key was forgotten: a read that started
-  /// before a forget may carry the answer from before an unconfirmed change,
-  /// so it is neither kept nor shown (#246).
-  @ObservationIgnored private var catalogueForgets: [String: Int] = [:]
   @ObservationIgnored private(set) var service: NativeService?
   @ObservationIgnored private(set) var store: LibraryStore?
   @ObservationIgnored private var sync: SyncCoordinator?
@@ -1296,12 +1292,10 @@ enum PlayOrigin: Hashable {
     key: String, load: @Sendable (NativeService) async throws -> T
   ) async throws -> T {
     let stamp = account.generation
-    let forgets = catalogueForgets[key]
     let database = store
     do {
       let result = try await readCatalogue(load)
       try account.check(stamp)
-      try checkNotForgotten(key, since: forgets)
       remember(result, key: key)
       try? await database?.cache(result, key: "catalogue:" + key)
       return result
@@ -1330,7 +1324,6 @@ enum PlayOrigin: Hashable {
         return value
       }
     }
-    let forgets = catalogueForgets[key]
     do {
       let result = try await readCatalogue { service in
         try await ConditionalCatalogue(store: database).load(key: key) {
@@ -1338,11 +1331,6 @@ enum PlayOrigin: Hashable {
         }
       }
       try account.check(stamp)
-      if catalogueForgets[key] != forgets {
-        // It saved what it read before the forget: drop that again.
-        await forgetCatalogue(key: key, counting: false)
-      }
-      try checkNotForgotten(key, since: forgets)
       remember(result, key: key)
       return result
     } catch NativeFailure.authentication {
@@ -1364,7 +1352,6 @@ enum PlayOrigin: Hashable {
       Conditional<T>
   ) async throws -> T {
     let stamp = account.generation
-    let forgets = catalogueForgets[key]
     // No validator: a 304 could vouch for a saved copy read before a
     // concurrent load replaced it, so only a new body counts.
     let result: T = try await readCatalogue { service in
@@ -1374,7 +1361,6 @@ enum PlayOrigin: Hashable {
       return value
     }
     try account.check(stamp)
-    try checkNotForgotten(key, since: forgets)
     remember(result, key: key)
     if let database = store {
       try? await database.removeCached("catalogue-etag:" + key)
@@ -1385,16 +1371,10 @@ enum PlayOrigin: Hashable {
   /// Forgets a page's saved answer, in memory and on this device, after a
   /// change the server couldn't confirm: reopening the page then can't draw
   /// the answer from before the change (#246).
-  func forgetCatalogue(key: String, counting: Bool = true) async {
-    if counting { catalogueForgets[key, default: 0] += 1 }
+  func forgetCatalogue(key: String) async {
     catalogueMemory.forget(key)
     try? await store?.removeCached("catalogue-etag:" + key)
     try? await store?.removeCached("catalogue:" + key)
-  }
-  private func checkNotForgotten(_ key: String, since forgets: Int?) throws {
-    guard catalogueForgets[key] == forgets else {
-      throw NativeFailure.unavailable("This page is unavailable. Try again shortly.")
-    }
   }
   /// The last catalogue answer for a key, so a revisited page draws at once.
   /// Pages still refresh it through `cachedCatalogue`.
