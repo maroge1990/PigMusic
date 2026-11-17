@@ -87,16 +87,19 @@ import PigStore
       } catch NativeFailure.authentication {
         report.stop = .signedOut
         return report
-      } catch NativeFailure.unavailable(let message) {
-        // The server answered and said no: trying again would say no again.
-        // (A busy or restarting server throws ServerBusy and is kept.)
+      } catch let failure as NativeFailure where failure.refusesRequest {
+        // The server answered and said no, or failed in a way asking again
+        // won't mend (#239): trying again would fail again. (A busy or
+        // restarting server throws ServerBusy and is kept; so is a busy
+        // answer that can't confirm it was saved, as a request repeated is
+        // answered `existing`, never twice.)
         guard isCurrent() else {
           report.stop = .stale
           return report
         }
         try await remove(track.id, from: store)
         report.refused.append(track.id)
-        report.reason = message
+        report.reason = failure.errorDescription
       } catch {
         report.stop = isCurrent() ? .offline : .stale
         return report
@@ -108,6 +111,17 @@ import PigStore
   private static func remove(_ id: String, from store: LibraryStore) async throws {
     try await store.updateCached(key, as: [Track].self) { tracks in
       tracks = (tracks ?? []).filter { $0.id != id }
+    }
+  }
+}
+
+extension NativeFailure {
+  /// A request the outbox drops, with this as the reason: a refusal, or a
+  /// server error (#239).
+  fileprivate var refusesRequest: Bool {
+    switch self {
+    case .unavailable, .serverError: true
+    default: false
     }
   }
 }

@@ -15,6 +15,12 @@ public enum NativeFailure: Error, LocalizedError, Sendable, Equatable {
   /// matched, remote streaming off). Other songs may still play.
   case songUnavailable(String)
   case invalidMediaURL
+  /// The server was busy partway through a change (#239): it can't say
+  /// whether the change was saved, so it is never sent again blindly.
+  case busyUnconfirmed
+  /// Something unexpected went wrong on the server (#239); asking again
+  /// won't help. Its log knows the request by `requestID`.
+  case serverError(requestID: String?)
   public var errorDescription: String? {
     switch self {
     case .authentication: "Please sign in again. This device session is no longer available."
@@ -22,6 +28,11 @@ public enum NativeFailure: Error, LocalizedError, Sendable, Equatable {
     case .changed: "Your library changed during sync. Please try again."
     case .unavailable(let message), .songUnavailable(let message): message
     case .invalidMediaURL: "The server returned an unsupported playback address."
+    case .busyUnconfirmed:
+      "The server was busy, so this may or may not have been saved. Check before trying again."
+    case .serverError(let id?) where !id.isEmpty:
+      "That didn't work: something went wrong on the server. Reference \(id.prefix(8))"
+    case .serverError: "That didn't work: something went wrong on the server."
     }
   }
 }
@@ -33,6 +44,29 @@ public struct ServerBusy: LocalizedError, Sendable {
   /// Shown where the request was made (Mark saw "PigSync.ServerBusy error 1").
   public var errorDescription: String? {
     "Your server couldn't take the request just now. PigMusic will try again."
+  }
+}
+
+/// What a failed answer says beyond "not now" (#239). The server answers a
+/// busy read 503 `server_busy` (try again), a busy write 503
+/// `busy_unconfirmed` (it may have been saved) and anything unexpected 500
+/// `server_error` with the request's ID. A 429, 502, 504 or a 503 without a
+/// known code (a proxy, a restarting server) is plain busy.
+enum ServerAnswer {
+  /// A 503's code: a write the server can't confirm, or nil for plain busy.
+  static func unconfirmed(code: String?) -> NativeFailure? {
+    code == "busy_unconfirmed" ? .busyUnconfirmed : nil
+  }
+  /// An undocumented status: a 500 is a server error, with the request ID
+  /// its body gives (none from a proxy's page); nil for anything else.
+  static func serverError(status: Int, _ payload: UndocumentedPayload) async -> NativeFailure? {
+    guard status == 500 else { return nil }
+    struct Body: Decodable { let request_id: String? }
+    var id: String?
+    if let body = payload.body, let data = try? await Data(collecting: body, upTo: 64 * 1024) {
+      id = (try? JSONDecoder().decode(Body.self, from: data))?.request_id
+    }
+    return .serverError(requestID: id)
   }
 }
 
@@ -549,10 +583,14 @@ public actor NativeService: LibrarySource {
     {
     case .ok(let response): return try response.body.json.added
     case .unauthorized: throw NativeFailure.authentication
-    default:
-      throw NativeFailure.unavailable(
-        "The library change could not be confirmed. Refresh before trying again.")
+    case .serviceUnavailable(let answer):
+      if let failure = ServerAnswer.unconfirmed(code: try? answer.body.json.code) { throw failure }
+    case .undocumented(let status, let payload):
+      if let failure = await ServerAnswer.serverError(status: status, payload) { throw failure }
+    default: break
     }
+    throw NativeFailure.unavailable(
+      "The library change could not be confirmed. Refresh before trying again.")
   }
   public func requestMusic(_ tracks: [Track]) async throws -> AcquisitionResult {
     guard !tracks.isEmpty, tracks.count <= 500 else {
@@ -564,9 +602,14 @@ public actor NativeService: LibrarySource {
     case .ok(let response): return try LibraryCodec.convert(response.body.json)
     case .unauthorized: throw NativeFailure.authentication
     // Busy or restarting: the request outbox keeps it for the next try
-    // (Codex round 1 on #206).
-    case .tooManyRequests, .serviceUnavailable: throw ServerBusy()
-    case .undocumented(let status, _) where status >= 500: throw ServerBusy()
+    // (Codex round 1 on #206). A busy write the server can't confirm and a
+    // server error say so (#239).
+    case .tooManyRequests: throw ServerBusy()
+    case .serviceUnavailable(let answer):
+      throw ServerAnswer.unconfirmed(code: try? answer.body.json.code) ?? ServerBusy()
+    case .undocumented(let status, let payload) where status >= 500:
+      if let failure = await ServerAnswer.serverError(status: status, payload) { throw failure }
+      throw ServerBusy()
     default:
       throw NativeFailure.unavailable(
         "The request could not be confirmed. Refresh Requests before trying again.")

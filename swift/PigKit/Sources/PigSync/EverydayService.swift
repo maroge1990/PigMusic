@@ -336,8 +336,13 @@ extension NativeService {
     case .ok(let value): return try LibraryCodec.convert(value.body.json)
     case .unauthorized: throw NativeFailure.authentication
     case .conflict: throw NativeFailure.changed
-    default: throw NativeFailure.unavailable("Removal was not confirmed. Refresh your library.")
+    case .serviceUnavailable(let answer):
+      if let failure = ServerAnswer.unconfirmed(code: try? answer.body.json.code) { throw failure }
+    case .undocumented(let status, let payload):
+      if let failure = await ServerAnswer.serverError(status: status, payload) { throw failure }
+    default: break
     }
+    throw NativeFailure.unavailable("Removal was not confirmed. Refresh your library.")
   }
   /// Removes songs from the person's library in one step (#214): the
   /// server's preview is asked only for its confirmation token, never shown.

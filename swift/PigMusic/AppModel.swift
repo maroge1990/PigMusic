@@ -43,8 +43,15 @@ enum PlayOrigin: Hashable {
     notices.post(text, reference: reference)
     UIAccessibility.post(notification: .announcement, argument: text)
   }
-  /// `notify` with what `error` has to say.
-  func notify(_ error: any Error) { notify(error.userMessage) }
+  /// `notify` with what `error` has to say, and the request a server
+  /// error's log knows it by (#239).
+  func notify(_ error: any Error) {
+    if case .serverError(let id) = error as? NativeFailure {
+      notify(error.userMessage, reference: id)
+    } else {
+      notify(error.userMessage)
+    }
+  }
   /// Rises when something the person asked for is done (a favourite, a song
   /// queued): the phone answers with a success tap (#183).
   var confirmations = 0
@@ -921,6 +928,11 @@ enum PlayOrigin: Hashable {
     } catch NativeFailure.authentication {
       revoked(generation: stamp)
       throw NativeFailure.authentication
+    } catch NativeFailure.busyUnconfirmed {
+      // It may have been saved (#239): show what the server has now, and
+      // never send it again on the person's behalf.
+      if account.isCurrent(stamp) { await refresh(afterMutation: true) }
+      throw NativeFailure.busyUnconfirmed
     }
   }
 
