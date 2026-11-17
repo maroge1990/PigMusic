@@ -9,7 +9,13 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { api, apiFetch, updateArtworkRevision } from "./api";
+import {
+  api,
+  apiFetch,
+  isUnconfirmed,
+  updateArtworkRevision,
+  writeFailure,
+} from "./api";
 import { formatCount, formatDuration } from "./format";
 import { PageHeader, SectionHeader } from "./PageHeader";
 import { Cover } from "./Cover";
@@ -715,8 +721,9 @@ export function AdminTools({ route }: { route: Route }) {
           body,
           // Browsers refuse a keepalive body over 64 KB.
           keepalive: keepalive && body.length < 60_000,
-        }).then((r) => {
-          if (!r.ok) throw new Error("The queue couldn't be cleared.");
+        }).then(async (r) => {
+          if (!r.ok)
+            throw await writeFailure(r, "The queue couldn't be cleared.");
         }),
       );
       clearing = new Set(entries.map((e) => e.id));
@@ -734,7 +741,12 @@ export function AdminTools({ route }: { route: Route }) {
         (sent) => {
           if (sent) void api<Queue>("/v1/admin/queue").then(setQueue, () => {});
         },
-        (e: Error) => setError(e.message),
+        (e: Error) => {
+          setError(e.message);
+          // It may have been cleared: show the queue as it is now.
+          if (isUnconfirmed(e))
+            void api<Queue>("/v1/admin/queue").then(setQueue, () => {});
+        },
       );
       return;
     }

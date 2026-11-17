@@ -1,4 +1,4 @@
-import { apiFetch } from "./api";
+import { apiFetch, detailOr, isUnconfirmed, writeFailure } from "./api";
 import { useEffect, useRef, useState } from "react";
 import { InlineError } from "./EmptyState";
 
@@ -33,9 +33,9 @@ export function Organisation({ notify }: { notify: (s: string) => void }) {
   }
   const [job, setJob] = useState<Job | null>(null);
   const watching = useRef(false);
-  useEffect(() => {
-    void loadHistory(0);
-    // A job started earlier (or from another device) keeps showing its progress.
+  /** A job started earlier (or from another device, or by a write the
+   * server could not confirm) keeps showing its progress. */
+  function resume() {
     void apiFetch(JOB)
       .then((r) => (r.ok ? r.json() : null))
       .then((j: Job | null) => {
@@ -45,6 +45,15 @@ export function Organisation({ notify }: { notify: (s: string) => void }) {
         }
       })
       .catch(() => undefined);
+  }
+  /** After a write that may or may not have been saved (#239). */
+  function recheck() {
+    void loadHistory(0).catch(() => undefined);
+    resume();
+  }
+  useEffect(() => {
+    void loadHistory(0);
+    resume();
   }, []);
   useEffect(() => {
     if (!active(job)) return;
@@ -116,15 +125,13 @@ export function Organisation({ notify }: { notify: (s: string) => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ track_ids: selected, tags }),
       });
+      if (!r.ok) throw await writeFailure(r, detailOr("Organisation stopped."));
       const d = await r.json();
-      if (!r.ok)
-        throw new Error(
-          typeof d.detail === "string" ? d.detail : "Organisation stopped.",
-        );
       watching.current = true;
       setJob(d);
     } catch (e) {
       setError((e as Error).message);
+      if (isUnconfirmed(e)) recheck();
     } finally {
       setBusy(false);
     }
@@ -155,8 +162,15 @@ export function Organisation({ notify }: { notify: (s: string) => void }) {
             disabled={job?.status === "stopping"}
             onClick={() =>
               void apiFetch(JOB + "/stop", { method: "POST" })
-                .then((r) => r.json())
+                .then(async (r) => {
+                  if (!r.ok) throw await writeFailure(r);
+                  return r.json();
+                })
                 .then(setJob)
+                .catch((e) => {
+                  setError(e.message);
+                  if (isUnconfirmed(e)) recheck();
+                })
             }
           >
             Stop
@@ -254,13 +268,19 @@ export function Organisation({ notify }: { notify: (s: string) => void }) {
                   method: "POST",
                 },
               )
-                .then((r) => {
+                .then(async (r) => {
                   if (!r.ok)
-                    throw new Error("Undo stopped; original retained.");
+                    throw await writeFailure(
+                      r,
+                      "Undo stopped; original retained.",
+                    );
                   setHistory((old) => old.filter((v) => v.id !== item.id));
                   window.dispatchEvent(new Event("music-library-changed"));
                 })
-                .catch((e) => setError(e.message))
+                .catch((e) => {
+                  setError(e.message);
+                  if (isUnconfirmed(e)) recheck();
+                })
                 .finally(() => setBusy(false));
             }}
           >

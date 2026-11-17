@@ -1,4 +1,4 @@
-import { apiFetch } from "./api";
+import { apiFetch, detailOr, writeFailure } from "./api";
 import { songBody, type Song } from "./songs";
 
 /** Where a song's audio comes from, as the player plays it. */
@@ -32,13 +32,13 @@ export async function resolve(s: Song): Promise<Resolved> {
         recording_id: s.track_id ? undefined : s.recording_id,
       }),
     });
-    const body = await response.json();
     if (!response.ok)
-      throw new Error(
-        typeof body.detail === "string"
-          ? body.detail
-          : "This song can't be streamed right now.",
+      throw await writeFailure(
+        response,
+        detailOr("This song can't be streamed right now."),
+        false,
       );
+    const body = await response.json();
     return {
       url: body.url as string,
       source: body.source as string,
@@ -53,13 +53,13 @@ export async function resolve(s: Song): Promise<Resolved> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(songBody(s)),
   });
-  const body = await response.json();
   if (!response.ok)
-    throw new Error(
-      typeof body.detail === "string"
-        ? body.detail
-        : "This song can't be streamed right now.",
+    throw await writeFailure(
+      response,
+      detailOr("This song can't be streamed right now."),
+      false,
     );
+  const body = await response.json();
   return {
     url: body.url as string,
     source: body.source as string,
@@ -73,10 +73,12 @@ async function resolveSaved(id: string): Promise<Resolved> {
     "/api/v1/playback/" + encodeURIComponent(id) + "/url",
     { method: "POST" },
   );
-  const body = await response.json();
   if (!response.ok)
-    throw new Error(
-      typeof body.detail === "string" ? body.detail : "Playback unavailable.",
+    throw await writeFailure(
+      response,
+      detailOr("Playback unavailable."),
+      false,
     );
+  const body = await response.json();
   return { url: body.url as string, source: "Saved library", saved_id: id };
 }

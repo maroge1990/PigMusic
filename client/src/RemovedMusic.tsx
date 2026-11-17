@@ -1,4 +1,4 @@
-import { apiFetch } from "./api";
+import { apiFetch, isUnconfirmed, writeFailure } from "./api";
 import { formatCount, formatDateTime } from "./format";
 import { useEffect, useState } from "react";
 import { EmptyLine } from "./EmptyState";
@@ -48,13 +48,22 @@ export function RemovedMusic({ notify }: { notify: (s: string) => void }) {
           method: "POST",
         },
       );
-      if (!r.ok) throw new Error("Restore stopped. Check the library folder.");
+      if (!r.ok)
+        throw await writeFailure(
+          r,
+          "Restore stopped. Check the library folder.",
+        );
       await refresh();
       setPurge(null);
       window.dispatchEvent(new Event("music-library-changed"));
       notify("Song restored.");
     } catch (e) {
       notify((e as Error).message);
+      // It may have come back: show Trash as it is now.
+      if (isUnconfirmed(e)) {
+        setPurge(null);
+        void refresh().catch(() => {});
+      }
     } finally {
       setBusy(false);
     }
@@ -90,8 +99,12 @@ export function RemovedMusic({ notify }: { notify: (s: string) => void }) {
           fingerprint: plan.fingerprint,
         }),
       });
+      // Only the server's refusal (409) means nothing was deleted (#239).
       if (!r.ok)
-        throw new Error("Trash changed since the review. Nothing was deleted.");
+        throw await writeFailure(
+          r,
+          "Trash changed since the review. Nothing was deleted.",
+        );
       const d: { purged: number; kept: number } = await r.json();
       notify(
         `${d.purged} songs deleted for good` +
@@ -102,6 +115,8 @@ export function RemovedMusic({ notify }: { notify: (s: string) => void }) {
     } catch (e) {
       notify((e as Error).message);
       setPurge(null);
+      // Songs may have been deleted: show what Trash holds now.
+      if (isUnconfirmed(e)) void refresh().catch(() => {});
     } finally {
       setBusy(false);
     }

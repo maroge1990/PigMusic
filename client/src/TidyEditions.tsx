@@ -1,4 +1,4 @@
-import { apiFetch } from "./api";
+import { apiFetch, detailOr, writeFailure } from "./api";
 import { offerUndo } from "./UndoBar";
 import { useState } from "react";
 import { EmptyLine, InlineError } from "./EmptyState";
@@ -78,10 +78,11 @@ export function TidyEditions({ notify }: { notify: (s: string) => void }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
     });
-    if (!r.ok) {
-      const d = await r.json().catch(() => ({}));
-      throw new Error(d.detail || "Stopped. Check the library folder.");
-    }
+    if (!r.ok)
+      throw await writeFailure(
+        r,
+        detailOr("Stopped. Check the library folder."),
+      );
     return (await r.json().catch(() => null)) as { id?: string } | null;
   }
   async function tidy(album: Album) {

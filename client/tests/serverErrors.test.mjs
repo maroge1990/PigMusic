@@ -203,6 +203,36 @@ test("a write the proxy gave up on may have been saved; other proxy failures are
   }
 });
 
+test("a view's own wording for a write applies only to a refusal", async () => {
+  const { writeFailure, detailOr } = await import("../src/api.ts");
+  const own = "Trash changed since the review. Nothing was deleted.";
+  const refused = await writeFailure(
+    json(409, { detail: "Nothing was deleted: changed" }),
+    own,
+  );
+  assert.equal(refused.message, own);
+  const unsure = await writeFailure(unconfirmed(), own);
+  assert.equal(unsure.kind, "unconfirmed");
+  assert.notEqual(unsure.message, own);
+  const timedOut = await writeFailure(
+    new Response("<html>504</html>", { status: 504 }),
+    own,
+  );
+  assert.equal(timedOut.kind, "unconfirmed");
+  const fault = await writeFailure(
+    json(500, { code: "server_error", request_id: "abcdef1234" }),
+    own,
+  );
+  assert.match(fault.message, /Reference abcdef12$/);
+  const said = await writeFailure(
+    json(400, { detail: "Choose fewer songs." }),
+    detailOr("Could not save."),
+  );
+  assert.equal(said.message, "Choose fewer songs.");
+  const silent = await writeFailure(json(422, {}), detailOr("Could not save."));
+  assert.equal(silent.message, "Could not save.");
+});
+
 test("a refused request keeps the server's own message", async () => {
   answer(() => json(409, { code: "conflict", detail: "Already there." }));
   const error = await failure(api("/v1/me"));

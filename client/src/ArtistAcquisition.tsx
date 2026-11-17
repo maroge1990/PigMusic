@@ -1,4 +1,4 @@
-import { apiFetch } from "./api";
+import { apiFetch, detailOr, isUnconfirmed, writeFailure } from "./api";
 import { useEffect, useRef, useState } from "react";
 export function ArtistAcquisition({
   id,
@@ -71,13 +71,19 @@ export function ArtistAcquisition({
           }),
         },
       );
+      if (!r.ok)
+        throw await writeFailure(r, detailOr("Artist request unavailable."));
       const d = await r.json();
-      if (!r.ok) throw new Error(d.detail || "Artist request unavailable.");
       editing.current = false;
       setState(d);
       notify(request ? "Artist request queued." : "Artist settings saved.");
     } catch (e) {
       notify((e as Error).message);
+      // It may have been saved: show the artist's settings as they are now.
+      if (isUnconfirmed(e)) {
+        editing.current = false;
+        window.dispatchEvent(new Event("music-requests-changed"));
+      }
     } finally {
       setBusy(false);
     }

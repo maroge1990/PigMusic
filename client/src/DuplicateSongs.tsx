@@ -1,4 +1,4 @@
-import { apiFetch } from "./api";
+import { apiFetch, isUnconfirmed, writeFailure } from "./api";
 import { restoreFromTrash } from "./trashUndo";
 import { offerUndo } from "./UndoBar";
 import { useState } from "react";
@@ -42,8 +42,12 @@ export function DuplicateSongs({ notify }: { notify: (s: string) => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ track_ids: selected }),
       });
+      if (!r.ok)
+        throw await writeFailure(
+          r,
+          "Removal stopped. Check the library folder.",
+        );
       const d = await r.json();
-      if (!r.ok) throw new Error("Removal stopped. Check the library folder.");
       const message =
         `${d.removed} duplicates moved to Removed music` +
         (d.skipped ? `; ${d.skipped} left as they were.` : ".");
@@ -60,6 +64,8 @@ export function DuplicateSongs({ notify }: { notify: (s: string) => void }) {
       window.dispatchEvent(new Event("music-library-changed"));
       await review();
     } catch (e) {
+      // Some may have been moved: review what is left, keeping the message.
+      if (isUnconfirmed(e)) await review();
       setError((e as Error).message);
     } finally {
       setBusy(false);

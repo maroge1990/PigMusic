@@ -1,4 +1,4 @@
-import { apiFetch } from "./api";
+import { apiFetch, detailOr, isUnconfirmed, writeFailure } from "./api";
 import { useEffect, useState } from "react";
 type Settings = {
   portraits: boolean;
@@ -55,19 +55,24 @@ export function MediaSettings() {
           chart_region: settings.chart_region,
         }),
       });
-      const body = await response.json();
       if (!response.ok)
-        throw new Error(
-          typeof body.detail === "string"
-            ? body.detail
-            : "Could not save settings.",
+        throw await writeFailure(
+          response,
+          detailOr("Could not save settings."),
         );
+      const body = await response.json();
       setSettings(body);
       setKey("");
       setListenToken("");
       setMessage("Saved. Library artwork is preloaded in the background.");
     } catch (e) {
       setMessage((e as Error).message);
+      // It may have been saved: show the settings the server holds now.
+      if (isUnconfirmed(e))
+        void apiFetch("/api/v1/admin/settings/media")
+          .then((r) => (r.ok ? r.json() : null))
+          .then((now) => now && setSettings(now))
+          .catch(() => {});
     } finally {
       setBusy(false);
     }

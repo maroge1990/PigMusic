@@ -1,4 +1,4 @@
-import { apiFetch } from "./api";
+import { apiFetch, detailOr, isUnconfirmed, writeFailure } from "./api";
 import { useEffect, useState } from "react";
 import { formatCount, formatDateTime } from "./format";
 import { InlineError } from "./EmptyState";
@@ -50,11 +50,12 @@ export function LibraryScan({ refresh }: { refresh: () => void }) {
       const r = await apiFetch("/api/v1/admin/library/scan", {
         method: "POST",
       });
-      const value = await r.json();
-      if (!r.ok) throw new Error(value.detail || "Scan unavailable.");
-      setScan(value);
+      if (!r.ok) throw await writeFailure(r, detailOr("Scan unavailable."));
+      setScan(await r.json());
     } catch (e) {
       setError((e as Error).message);
+      // It may have started: show the scan as it is now.
+      if (isUnconfirmed(e)) window.dispatchEvent(new Event("music-admin-poll"));
     }
   }
   return (

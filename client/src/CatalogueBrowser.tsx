@@ -1,4 +1,10 @@
-import { apiFetch, peekCatalogue } from "./api";
+import {
+  apiFetch,
+  detailOr,
+  isUnconfirmed,
+  peekCatalogue,
+  writeFailure,
+} from "./api";
 import { useEffect, useRef, useState } from "react";
 import { formatDate } from "./format";
 import {
@@ -391,12 +397,10 @@ export function CatalogueBrowser({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tracks: rows.map(songBody) }),
       });
-      const result = await response.json();
       if (!response.ok)
-        throw new Error(
-          typeof result.detail === "string"
-            ? result.detail
-            : "Could not request this album. Please try again.",
+        throw await writeFailure(
+          response,
+          detailOr("Could not request this album. Please try again."),
         );
       notify("Downloading to your library");
       setRows((old) =>
@@ -408,6 +412,11 @@ export function CatalogueBrowser({
       window.dispatchEvent(new Event("music-requests-changed"));
     } catch (e) {
       setError((e as Error).message);
+      // It may have been requested: show each song's state as it is now.
+      if (isUnconfirmed(e))
+        void withLibrary(releaseSongs(release, artist.id))
+          .then(setRows)
+          .catch(() => {});
     } finally {
       setBusy(false);
     }

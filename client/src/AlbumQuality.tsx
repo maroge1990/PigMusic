@@ -1,4 +1,4 @@
-import { apiFetch } from "./api";
+import { apiFetch, detailOr, isUnconfirmed, writeFailure } from "./api";
 import { useEffect, useState } from "react";
 import { QualitySelect, qualityLabel } from "./QualitySelect";
 export function AlbumQuality({
@@ -39,13 +39,12 @@ export function AlbumQuality({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profile: profile || null }),
       });
-      const data = await response.json();
       if (!response.ok)
-        throw new Error(
-          typeof data.detail === "string"
-            ? data.detail
-            : "Quality preference unavailable.",
+        throw await writeFailure(
+          response,
+          detailOr("Quality preference unavailable."),
         );
+      const data = await response.json();
       const updated = await apiFetch(path).then((r) => r.json());
       setEffective(updated.effective_profile);
       notify(
@@ -53,6 +52,15 @@ export function AlbumQuality({
       );
     } catch (e) {
       setError((e as Error).message);
+      // It may have been saved: show the preference the server holds now.
+      if (isUnconfirmed(e))
+        void apiFetch(path)
+          .then((r) => r.json())
+          .then((now) => {
+            setProfile(now.profile || "");
+            setEffective(now.effective_profile);
+          })
+          .catch(() => {});
     } finally {
       setBusy(false);
     }

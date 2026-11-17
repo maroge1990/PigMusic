@@ -214,6 +214,28 @@ export async function responseError(
   return new ApiError(message, code, details, kind);
 }
 
+/** The error for a failed write sent with `apiFetch` (#239). Only a refusal
+ * (the server said no to this request) keeps the view's own wording; a busy
+ * server, an unconfirmed write or a server fault always says what happened.
+ * `refused` is the view's wording, or a function choosing it (undefined
+ * keeps the server's message). */
+export async function writeFailure(
+  response: Response,
+  refused?: string | ((error: ApiError) => string | undefined),
+  /** False for a POST that only reads (playback): a 504 is then busy. */
+  write = true,
+): Promise<ApiError> {
+  const error = await responseError(response, write);
+  if (error.kind !== "request" || refused === undefined) return error;
+  const wording = typeof refused === "string" ? refused : refused(error);
+  if (wording) error.message = wording;
+  return error;
+}
+
+/** A refusal shows the server's sentence, or `fallback` when it sent none. */
+export const detailOr = (fallback: string) => (error: ApiError) =>
+  typeof error.body.detail === "string" ? undefined : fallback;
+
 export function cachedLibrary<T>(): Promise<T> {
   const generation = sessionGeneration;
   libraryRead ||= api("/v1/library")

@@ -5,7 +5,7 @@ import { Shuffle } from "lucide-react";
 import { shuffled } from "./shuffle";
 import { useEffect, useRef, useState } from "react";
 import { Play, ArrowLeft, Download } from "lucide-react";
-import { api, apiFetch } from "./api";
+import { api, apiFetch, detailOr, writeFailure } from "./api";
 import { defer, isPending } from "./deferred";
 import { offerUndo } from "./UndoBar";
 import { formatCount } from "./format";
@@ -616,9 +616,9 @@ export function PersonalLibrary({
                     keepalive,
                   }).then(async (r) => {
                     if (!r.ok)
-                      throw new Error(
-                        (await r.json().catch(() => ({}))).detail ||
-                          "The playlist couldn't be deleted.",
+                      throw await writeFailure(
+                        r,
+                        detailOr("The playlist couldn't be deleted."),
                       );
                   }),
                 );
