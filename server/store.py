@@ -1688,6 +1688,11 @@ class Store:
                     ),
                 )
         created = existing = skipped = 0
+        # Songs that already had an unfinished job: the queue is reconciled
+        # for them once, after the last song, not once each (#237). Nothing
+        # below reads what a reconcile writes (quality target, claim token,
+        # an active state back to waiting).
+        joined = False
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             # Read both legacy and edition-aware exclusions once per batch.
@@ -1864,9 +1869,16 @@ class Store:
                             "updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=?",
                             (key, PAUSED),
                         )
-                    from .household_policy import HouseholdPolicy
+                    if preferred:
+                        # A one-off quality stands on the jobs made after
+                        # this one, as it always has: a reconcile at the end
+                        # would return those of another album to the
+                        # household's target.
+                        from .household_policy import HouseholdPolicy
 
-                    HouseholdPolicy(self).reconcile_pending(conn)
+                        HouseholdPolicy(self).reconcile_pending(conn)
+                    else:
+                        joined = True
                     existing += 1
                 elif prior:
                     conn.execute(
@@ -1880,6 +1892,10 @@ class Store:
                         (key, json.dumps(payload)),
                     )
                     created += 1
+            if joined:
+                from .household_policy import HouseholdPolicy
+
+                HouseholdPolicy(self).reconcile_pending(conn)
         return {
             "created": created,
             "existing": existing,
