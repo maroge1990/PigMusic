@@ -207,6 +207,114 @@ test("the owner's Admin overview shows the numbers to act on", async ({
   );
 });
 
+const quietHealth = {
+  started_at: 1_790_000_000,
+  previous_run: null,
+  restarts_last_day: 0,
+  workers: [{ name: "downloads", running: true, restarts: 0 }],
+  recent_errors: [],
+  busy: { count: 0, last_at: null },
+  startup_problems: [],
+};
+
+const serverHealth = (page: import("@playwright/test").Page) =>
+  page.locator(".system-panel").filter({
+    has: page.getByRole("heading", { name: "Server health" }),
+  });
+
+test("System says what broke and why without the container log (#241)", async ({
+  page,
+}) => {
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/admin/system/health": (route) =>
+        route.fulfill({
+          json: {
+            ...quietHealth,
+            previous_run: {
+              at: 1_789_990_000,
+              kind: "unexpected",
+              sentence:
+                "It ended unexpectedly (the container was killed: out of memory, power or a forced stop).",
+            },
+            restarts_last_day: 1,
+            workers: [
+              {
+                name: "downloads",
+                running: false,
+                restarts: 2,
+                last_error: "OperationalError",
+                last_error_at: 1_790_000_100,
+              },
+              { name: "source engine", running: true },
+            ],
+            recent_errors: [
+              {
+                at: 1_790_000_200,
+                request_id: "4f2a9c1b77d0e311",
+                method: "GET",
+                path: "/api/v1/playlists",
+                error: "RuntimeError",
+                sentence:
+                  "Something went wrong on the server while handling GET /api/v1/playlists.",
+              },
+            ],
+            busy: { count: 3, last_at: 1_790_000_300 },
+            startup_problems: [
+              {
+                at: 1_790_000_001,
+                area: "tidy",
+                sentence:
+                  "A saved tidy task could not be resumed and was set aside.",
+              },
+            ],
+          },
+        }),
+    },
+  });
+  await page.goto("/#/admin");
+  const health = serverHealth(page);
+  await expect(health).toContainText("Running since");
+  await expect(health).toContainText(
+    "It ended unexpectedly (the container was killed",
+  );
+  await expect(health).toContainText(
+    "The server had to restart once in the last day.",
+  );
+  await expect(health).toContainText(
+    "Restarting · restarted 2 times since the server started",
+  );
+  await expect(health).toContainText("Soulseek engine");
+  await expect(health).toContainText(
+    "Something went wrong on the server while handling GET /api/v1/playlists.",
+  );
+  await expect(health.locator("code")).toHaveText("4f2a9c1b77d0e311");
+  await expect(health).toContainText(
+    "The database was too busy to answer 3 times since the server started.",
+  );
+  await expect(health).toContainText(
+    "A saved tidy task could not be resumed and was set aside.",
+  );
+  await expect(health).not.toContainText("No problems since");
+  await expect(health).not.toContainText("OperationalError");
+});
+
+test("a quiet server says it has had no problems", async ({ page }) => {
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/admin/system/health": (route) =>
+        route.fulfill({ json: quietHealth }),
+    },
+  });
+  await page.goto("/#/admin");
+  const health = serverHealth(page);
+  await expect(health).toContainText("No problems since the server started.");
+  await expect(health).toContainText("Downloads");
+  await expect(health).not.toContainText("Recent problems");
+});
+
 test("members have no Admin section, even by address", async ({ page }) => {
   await mockApi(page, { role: "member" });
   await page.goto("/#/admin");

@@ -448,3 +448,10 @@
 .mix-editions li[data-status="failed"] em {
   color: var(--danger);
 }
+
+.server-health-problems code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: var(--type-caption);
+  color: var(--secondary);
+  overflow-wrap: anywhere;
+}
