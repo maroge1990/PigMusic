@@ -1,4 +1,5 @@
 import gc
+import logging
 import os
 import shutil
 import tempfile
@@ -30,6 +31,54 @@ def pytest_configure(config):
 
 def pytest_unconfigure(config):
     shutil.rmtree(getattr(config, "pig_music_data", ""), ignore_errors=True)
+
+
+class UnhandledErrors(logging.Handler):
+    """Collects what server.errors.ServerErrors logs for an error no route
+    handled: the line behind every bare 500 (#244)."""
+
+    def __init__(self):
+        super().__init__()
+        self.seen = []
+
+    def emit(self, record):
+        if record.getMessage().startswith("unhandled error"):
+            self.seen.append(record.getMessage())
+
+
+def guarded(item):
+    """Runs one phase of a test with the guard listening. A test that met an
+    unhandled server error fails, whatever it asserted, unless it is marked
+    `server_error_expected`: #235's KeyError was a 500 that no test saw."""
+    logger = logging.getLogger("pig_music.errors")
+    handler = UnhandledErrors()
+    logger.addHandler(handler)
+    try:
+        result = yield
+    finally:
+        logger.removeHandler(handler)
+    if handler.seen and not item.get_closest_marker("server_error_expected"):
+        raise AssertionError(
+            "The server answered an unhandled error during this test (mark it "
+            "server_error_expected if that is what it tests):\n"
+            + "\n".join(handler.seen)
+        )
+    return result
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_setup(item):
+    return (yield from guarded(item))
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item):
+    return (yield from guarded(item))
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_teardown(item, nextitem):
+    return (yield from guarded(item))
 
 
 @pytest.fixture(autouse=True)

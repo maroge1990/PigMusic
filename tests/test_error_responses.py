@@ -203,6 +203,7 @@ def test_a_playlist_saved_before_the_database_was_busy_is_not_made_twice(
         assert [p["name"] for p in saved] == ["Road"]
 
 
+@pytest.mark.server_error_expected
 @pytest.mark.parametrize("path", [ASYNC_PATH, SYNC_PATH])
 def test_a_coding_fault_answers_a_500_that_names_its_request_and_nothing_else(
     tmp_path, monkeypatch, caplog, path
@@ -237,6 +238,7 @@ def test_a_coding_fault_answers_a_500_that_names_its_request_and_nothing_else(
         assert client.get(path).status_code == 200
 
 
+@pytest.mark.server_error_expected
 def test_a_request_without_an_id_of_its_own_is_given_one(tmp_path, monkeypatch, caplog):
     with signed_in(tmp_path, monkeypatch) as (app, client):
         caplog.set_level(logging.INFO)
@@ -250,6 +252,7 @@ def test_a_request_without_an_id_of_its_own_is_given_one(tmp_path, monkeypatch, 
         assert "/mnt" not in answer.text
 
 
+@pytest.mark.server_error_expected
 @pytest.mark.parametrize("path", [ASYNC_PATH, SYNC_PATH])
 def test_a_full_disk_is_not_called_busy(tmp_path, monkeypatch, caplog, path):
     with signed_in(tmp_path, monkeypatch) as (app, client):
@@ -330,6 +333,7 @@ def call(app, scope=None):
     return sent, raised
 
 
+@pytest.mark.server_error_expected
 def test_an_error_before_the_response_is_answered_once_and_not_raised(caplog):
     async def app(scope, receive, send):
         raise KeyError("musicbrainz_release_id")
@@ -345,6 +349,7 @@ def test_an_error_before_the_response_is_answered_once_and_not_raised(caplog):
     assert "GET /api/v1/stream answered 500" in logged.getMessage()
 
 
+@pytest.mark.server_error_expected
 def test_an_error_after_the_response_began_is_logged_and_raised_not_answered(
     caplog,
 ):

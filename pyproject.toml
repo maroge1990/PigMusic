@@ -1,5 +1,8 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "server_error_expected: the test provokes the JSON 500 on purpose; the suite-wide unhandled-error guard (tests/conftest.py) lets it pass",
+]
 
 [tool.black]
 target-version = ["py313"]
