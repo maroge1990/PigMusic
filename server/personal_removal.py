@@ -6,6 +6,7 @@ import time
 import uuid
 from pathlib import Path
 
+from . import document_records
 from .queue_states import PENDING
 from .lifecycle import coordinated
 from .matching import same_song
@@ -192,8 +193,13 @@ class PersonalRemoval:
             raise ValueError(
                 "Undo expired. Ask the administrator to restore from Recovery."
             )
+        # Read before anything changes: an unreadable removal stops the
+        # Undo here, never part-way (#240).
+        document_records.require_usable(
+            self.store, ["removed:" + i for i in operation["recovery_ids"]]
+        )
         for recovery_id in operation["recovery_ids"]:
-            record = self.store.read_document("removed:" + recovery_id)
+            record = document_records.read(self.store, "removed:" + recovery_id)
             if record.get("status") == "removing":
                 self.recovery.check_mount(Path(record["root"]))
                 self.recovery.finish(record, Path(record["root"]))

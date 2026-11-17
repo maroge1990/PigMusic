@@ -13,7 +13,7 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import startup_problems
+from . import document_records
 from .migrations import migrate
 from .cover_store import CoverStore
 
@@ -40,23 +40,6 @@ from .matching import (
 )
 
 log = logging.getLogger("pig_music.library")
-
-# Removal records the library build could not read, reported once (#240).
-_unreadable_removals = set()
-_unreadable_lock = threading.Lock()
-
-
-def unreadable_removal(name, error):
-    """A removal record the library build or startup recovery cannot read
-    is left as it is and skipped, so it never stops the store opening or the
-    server starting (#240). Logged and listed for the System page once per
-    process, not on every rebuild."""
-    with _unreadable_lock:
-        if name in _unreadable_removals:
-            return
-        _unreadable_removals.add(name)
-    log.error("Skipped removal record %s", name, exc_info=error)
-    startup_problems.report("trash", name, error)
 
 
 # A download's publication rebuilds the library at most this long after it,
@@ -175,18 +158,12 @@ class Store:
         exported = {
             t["export_relative_path"] for t in extra if t.get("export_relative_path")
         }
-        with self.connect() as conn:
-            rows = conn.execute(
-                "SELECT name,payload FROM documents WHERE name >= 'removed:' AND name < 'removed;'"
-            ).fetchall()
-        removed = set()
-        for name, payload in rows:
-            try:
-                record = json.loads(payload)
-                if record.get("status") in {"removing", "removed"}:
-                    removed.add(record["track_id"])
-            except Exception as error:
-                unreadable_removal(name, error)
+        # An unreadable removal is skipped (and reported), never fatal (#240).
+        removed = {
+            record["track_id"]
+            for record in document_records.records(self, "removed")
+            if record["status"] in {"removing", "removed"}
+        }
         extra = [t for t in extra if t["id"] not in removed]
         retired = self.retired_files(retiring, {t["id"]: t for t in extra})
         anchors = self.read_document("album-edition-anchors")
@@ -1661,7 +1638,8 @@ class Store:
         return bool(
             conn.execute(
                 "SELECT 1 FROM documents WHERE name >= 'removed:' AND name < 'removed;' "
-                "AND json_extract(payload,'$.track_id')=? LIMIT 1",
+                "AND CASE WHEN json_valid(payload) THEN json_extract(payload,'$.track_id') END=? "
+                "LIMIT 1",
                 (identity,),
             ).fetchone()
         )
@@ -1673,10 +1651,9 @@ class Store:
         an administrator or a tidy-up made."""
         if not removal_id:
             return None
-        row = conn.execute(
-            "SELECT payload FROM documents WHERE name=?", ("removed:" + removal_id,)
-        ).fetchone()
-        operation_id = row and json.loads(row[0]).get("operation_id")
+        operation_id = document_records.read(conn, "removed:" + removal_id).get(
+            "operation_id"
+        )
         if not operation_id:
             return None
         row = conn.execute(

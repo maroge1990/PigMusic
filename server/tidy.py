@@ -32,7 +32,7 @@ from .lifecycle import coordinated
 from .matching import compatible, primary_artist, strip_edition
 from .organisation import ALBUM_FIELDS, TAG_SUFFIXES, file_name
 from .quality import canonical_codec
-from .recovery import skipped, startup_records
+from . import document_records
 from .storage import library_root
 
 CATEGORIES = {"album", "soundtrack", "musical"}
@@ -51,25 +51,6 @@ def edition_title(album):
     if prefix and normalise(prefix[1]) == normalise(album.get("artist")):
         text = prefix[2]
     return normalise(strip_edition(text))
-
-
-def usable(record):
-    """Raises unless a tidy-up record has the fields startup recovery reads
-    across records (#240), so one bad record is skipped on its own."""
-    for field, kind in (
-        ("id", str),
-        ("status", str),
-        ("moves", list),
-        ("removals", list),
-    ):
-        if not isinstance(record[field], kind):
-            raise TypeError(field)
-    for field in ("unresolved", "dismissed"):
-        if not isinstance(record.get(field, []), list):
-            raise TypeError(field)
-    if record["status"] in {"applying", "stopped", "undone"}:
-        record["title"], record["artist"]
-    set(record["moves"]), set(record["removals"])
 
 
 def quality(track):
@@ -563,10 +544,20 @@ class Tidy:
         settling any step a failure or restart interrupted first."""
         from .user_library import bump
 
-        record = self.store.read_document("tidy:" + identity)
+        record = document_records.read(self.store, "tidy:" + identity)
         # "applying" is a tidy-up a restart interrupted.
         if record.get("status") not in {"applying", "applied", "stopped"}:
             raise ValueError("Tidy-up not found.")
+        # Everything Undo reads is read before it changes anything (#240):
+        # an unreadable step stops it here, never part-way.
+        document_records.require_usable(
+            self.store,
+            [
+                *("organisation:" + m for m in record["moves"]),
+                *("removed:" + r for r in record["removals"]),
+            ],
+        )
+        records = self.records()
         try:
             for operation in reversed(record["moves"]):
                 if self.organisation.settle(operation) in {"completed", "undoing"}:
@@ -587,7 +578,7 @@ class Tidy:
                     (user_id, track_id),
                 ).rowcount:
                     bump(conn, user_id)
-        remaining = self.pending(record)
+        remaining = self.pending(record, records)
         if remaining:
             # What this tidy-up recorded is back, but not necessarily all of it.
             record.update(
@@ -616,14 +607,8 @@ class Tidy:
         is listed as unresolved on each tidy-up of that album it could
         belong to, for the owner to include or set aside, and an undone
         tidy-up with any is reopened: Undo never reports it complete."""
-        named = []
-        for name, record in startup_records(self.store, "tidy", "tidy"):
-            try:
-                usable(record)
-            except Exception as error:
-                skipped("tidy", name, error)
-                continue
-            named.append((name, record))
+        # Unreadable records are skipped and reported (#240).
+        named = document_records.rows(self.store, "tidy")
         records = [r for _, r in named]
         moves = {m for r in records for m in r["moves"]}
         removals = {m for r in records for m in r["removals"]}
@@ -642,16 +627,22 @@ class Tidy:
                 known.append({"kind": kind, "id": identity})
                 changed.add(record["id"])
 
-        # Rows that cannot be read were reported by their own area's recovery.
-        for name, operation in startup_records(self.store, "organisation"):
+        for name, operation in document_records.rows(self.store, "organisation"):
             try:
                 self.adopt(operation, older, moves, flag, changed)
             except Exception as error:
-                skipped("tidy", name, error)
+                document_records.report("tidy", name, error)
         excluded = set()
-        for name, exclusion in startup_records(self.store, "excluded", "tidy"):
-            excluded.add(exclusion.get("removal_id"))
-        for name, removal in startup_records(self.store, "removed"):
+        with self.store.connect() as conn:
+            exclusions = conn.execute(
+                "SELECT name,payload FROM documents WHERE name >= 'excluded:' AND name < 'excluded;'"
+            ).fetchall()
+        for name, payload in exclusions:
+            try:
+                excluded.add(json.loads(payload).get("removal_id"))
+            except Exception as error:
+                document_records.report("tidy", name, error)
+        for name, removal in document_records.rows(self.store, "removed"):
             try:
                 # Tidy-ups never exclude a song from requests.
                 if (
@@ -666,7 +657,7 @@ class Tidy:
                     if album_key(owner["title"], owner["artist"]) == key:
                         flag(owner, "removal", removal["id"])
             except Exception as error:
-                skipped("tidy", name, error)
+                document_records.report("tidy", name, error)
         for name, record in named:
             if not any(record is r for r in older):
                 continue
@@ -686,7 +677,7 @@ class Tidy:
                 if record["id"] in changed:
                     self.save(record)
             except Exception as error:
-                skipped("tidy", name, error)
+                document_records.report("tidy", name, error)
 
     def adopt(self, operation, older, moves, flag, changed):
         """An organisation move an earlier build ran for a tidy-up without
@@ -726,7 +717,7 @@ class Tidy:
         replaced: the earlier build's apply ran exactly that pair."""
         if not record["removals"]:
             return False
-        removal = self.store.read_document("removed:" + record["removals"][-1])
+        removal = document_records.read(self.store, "removed:" + record["removals"][-1])
         track, placed = removal.get("track") or {}, operation["track"]
         return (
             bool(removal)
@@ -744,7 +735,7 @@ class Tidy:
         found = []
         for item in record.get("unresolved", []):
             if item["kind"] == "move":
-                step = self.store.read_document("organisation:" + item["id"])
+                step = document_records.read(self.store, "organisation:" + item["id"])
                 if item["id"] in moves or step.get("status") in {
                     None,
                     "cancelled",
@@ -755,7 +746,7 @@ class Tidy:
                 where = (step.get("placed_from") or {}).get("album")
                 state = f"moved from {where} into {track.get('album')}"
             else:
-                step = self.store.read_document("removed:" + item["id"])
+                step = document_records.read(self.store, "removed:" + item["id"])
                 if item["id"] in removals or step.get("status") not in {
                     "removed",
                     "removing",
@@ -781,7 +772,7 @@ class Tidy:
     def resolve(self, identity, operation, include):
         """The owner's answer for an unresolved step: part of this tidy-up
         (Undo reverses it) or not (it is left as it is)."""
-        record = self.store.read_document("tidy:" + identity)
+        record = document_records.read(self.store, "tidy:" + identity)
         item = next(
             (u for u in self.pending(record) if u["id"] == operation),
             None,
@@ -797,13 +788,8 @@ class Tidy:
         return record
 
     def records(self):
-        with self.store.connect() as conn:
-            return [
-                json.loads(v)
-                for (v,) in conn.execute(
-                    "SELECT payload FROM documents WHERE name >= 'tidy:' AND name < 'tidy;'"
-                )
-            ]
+        # An unreadable record is skipped and reported (#240).
+        return document_records.records(self.store, "tidy")
 
     def history(self):
         records = self.records()

@@ -13,7 +13,7 @@ from .media import saved_track, track_file
 from .exporter import Exporter, contained
 from .downloader import Downloader, safe_name
 from .scanner import inspect_file
-from .recovery import skipped, startup_records
+from . import document_records
 
 
 # Album placement a tidy-up retags onto a moved file.
@@ -479,7 +479,7 @@ class Organisation:
         cancelled, a published one completed) and return its status; None
         when it never started."""
         with self.recovery.lock:
-            record = self.store.read_document("organisation:" + identity)
+            record = document_records.read(self.store, "organisation:" + identity)
             if not record:
                 return None
             if record["status"] == "preparing":
@@ -499,11 +499,12 @@ class Organisation:
 
     @coordinated
     def recover(self):
-        for name, record in startup_records(self.store, "organisation", "organisation"):
+        # One record that cannot be settled is left as it is (#240).
+        for name, record in document_records.rows(self.store, "organisation"):
             try:
                 self.recover_one(record)
             except Exception as error:
-                skipped("organisation", name, error)
+                document_records.report("organisation", name, error)
         self.store.refresh_library()
 
     def recover_one(self, record):
@@ -527,30 +528,22 @@ class Organisation:
 
     def undoable(self, limit=None, offset=0):
         """Operations that can be undone, newest first."""
-        with self.store.connect() as c:
-            return [
-                json.loads(v)
-                for (v,) in c.execute(
-                    "SELECT payload FROM documents WHERE name >= 'organisation:' AND name < 'organisation;' "
-                    "AND json_extract(payload,'$.status') IN ('completed','undoing') "
-                    "ORDER BY rowid DESC LIMIT ? OFFSET ?",
-                    (-1 if limit is None else limit, offset),
-                )
-            ]
+        # json_valid first: an unreadable record is still in the table.
+        return document_records.records(
+            self.store,
+            "organisation",
+            " AND CASE WHEN json_valid(payload) THEN json_extract(payload,'$.status') END "
+            "IN ('completed','undoing') ORDER BY rowid DESC LIMIT ? OFFSET ?",
+            (-1 if limit is None else limit, offset),
+        )
 
     def history(self):
-        with self.store.connect() as c:
-            return [
-                json.loads(v)
-                for (v,) in c.execute(
-                    "SELECT payload FROM documents WHERE name >= 'organisation:' AND name < 'organisation;'"
-                )
-            ]
+        return document_records.records(self.store, "organisation")
 
     @coordinated
     def undo(self, identity):
         with self.recovery.lock:
-            record = self.store.read_document("organisation:" + identity)
+            record = document_records.read(self.store, "organisation:" + identity)
             if record.get("status") not in {"completed", "undoing"}:
                 raise ValueError("Organisation record not found.")
             _, root = saved_track(self.store, record["track_id"])

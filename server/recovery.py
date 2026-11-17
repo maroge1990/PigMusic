@@ -1,7 +1,7 @@
 """Hash-guarded, recoverable removal on the existing SMB filesystem."""
 
-import hashlib, json, logging, os, stat, threading, time, uuid
-from . import startup_problems
+import hashlib, json, os, stat, threading, time, uuid
+from . import document_records
 from .queue_states import PENDING, sql
 from .lifecycle import coordinated
 from pathlib import Path
@@ -10,37 +10,6 @@ from .library import identifier, normalise, load_json
 from .exporter import contained
 from .matching import exclusion_key, same_song
 from .storage import library_root, open_owned_folder, require_library_mount
-from .store import unreadable_removal
-
-log = logging.getLogger(__name__)
-
-
-def skipped(area, name, error):
-    """Startup recovery could not settle one record (#240): it is left as it
-    is, logged once with its traceback and listed for the System page."""
-    log.error("Startup recovery (%s) skipped record %s", area, name, exc_info=error)
-    startup_problems.report(area, name, error)
-
-
-def startup_records(store, prefix, area=None):
-    """(document name, record) for each `prefix:` document, each parsed on its
-    own so one unreadable row does not lose the others. A row that is not a
-    JSON object is skipped, and reported under `area` when one is given."""
-    with store.connect() as c:
-        rows = c.execute(
-            "SELECT name,payload FROM documents WHERE name >= ? AND name < ?",
-            (prefix + ":", prefix + ";"),
-        ).fetchall()
-    for name, payload in rows:
-        try:
-            record = json.loads(payload)
-            if not isinstance(record, dict):
-                raise TypeError("record is not an object")
-        except Exception as error:
-            if area:
-                skipped(area, name, error)
-            continue
-        yield name, record
 
 
 class Recovery:
@@ -56,13 +25,8 @@ class Recovery:
             )
 
     def list(self):
-        with self.store.connect() as c:
-            return [
-                json.loads(v)
-                for (v,) in c.execute(
-                    "SELECT payload FROM documents WHERE name >= 'removed:' AND name < 'removed;'"
-                )
-            ]
+        # An unreadable record is skipped and reported (#240).
+        return document_records.records(self.store, "removed")
 
     def digest(self, path):
         h = hashlib.sha256()
@@ -210,7 +174,7 @@ class Recovery:
 
     def restore(self, identity):
         with self.lock:
-            record = self.store.read_document("removed:" + identity)
+            record = document_records.read(self.store, "removed:" + identity)
             if record.get("status") not in {"removed", "removing"}:
                 raise ValueError("Removed song not found.")
             if record.get("purged_at"):
@@ -270,7 +234,7 @@ class Recovery:
         filesystem that refuses the Trash link cannot keep the song removed;
         otherwise the removal is finished."""
         with self.lock:
-            record = self.store.read_document("removed:" + identity)
+            record = document_records.read(self.store, "removed:" + identity)
             if record.get("status") == "removing":
                 _, root = saved_track(self.store, record["track_id"])
                 self.check_mount(root)
@@ -361,7 +325,7 @@ class Recovery:
                 raise ValueError("Trash changed since the review; review it again.")
             purged, kept = 0, 0
             for item in plan["items"]:
-                record = self.store.read_document("removed:" + item["id"])
+                record = document_records.read(self.store, "removed:" + item["id"])
                 try:
                     _, root = saved_track(self.store, record["track_id"])
                     contained(root, record["trash"])  # No "..", no escape.
@@ -554,13 +518,12 @@ class Recovery:
 
     @coordinated
     def recover(self):
-        # A removal that is not a JSON object was already reported by the
-        # store when it opened; each is reported once per process.
-        for name, record in startup_records(self.store, "removed"):
+        # One record that cannot be settled is left as it is (#240).
+        for name, record in document_records.rows(self.store, "removed"):
             try:
                 self.recover_one(record)
             except Exception as error:
-                unreadable_removal(name, error)
+                document_records.report("trash", name, error)
         self.store.refresh_library()
 
     def recover_one(self, record):

@@ -11,6 +11,8 @@ import re
 import time
 from urllib.parse import urlsplit
 
+from . import document_records
+
 from .queue_states import (
     ACTIVE,
     CANCELLABLE,
@@ -1146,12 +1148,11 @@ class UserLibrary:
                 for t in a["tracks"]
                 if t.get("available", True)
             }
+            # An unreadable removal is skipped and reported (#240).
             removing = {
-                json.loads(raw)["track_id"]
-                for (raw,) in conn.execute(
-                    "SELECT payload FROM documents WHERE name >= 'removed:' AND name < 'removed;'"
-                )
-                if json.loads(raw).get("status") in {"removing", "removed"}
+                record["track_id"]
+                for record in document_records.records(conn, "removed")
+                if record["status"] in {"removing", "removed"}
             }
             available -= removing
             if not set(track_ids).issubset(available):

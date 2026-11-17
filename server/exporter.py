@@ -20,6 +20,7 @@ from pathlib import Path
 
 from .downloader import safe_name
 from .library import load_json, normalise
+from . import document_records
 from .storage import library_root
 
 
@@ -244,11 +245,9 @@ class Exporter:
         ).fetchone()
         if not row or json.loads(row[0]).get("sha256") != track["sha256"]:
             return False
-        for (raw,) in conn.execute(
-            "SELECT payload FROM documents WHERE name >= 'removed:' AND name < 'removed;'"
-        ):
-            value = json.loads(raw)
-            if value.get("track_id") == track["id"] and value.get("status") in {
+        # An unreadable removal is skipped and reported (#240).
+        for value in document_records.records(conn, "removed"):
+            if value["track_id"] == track["id"] and value["status"] in {
                 "removing",
                 "removed",
             }:
@@ -263,11 +262,9 @@ class Exporter:
         so its missing file never holds up the rest."""
         with self.store.connect() as conn:
             removed = {
-                json.loads(v)["track_id"]
-                for (v,) in conn.execute(
-                    "SELECT payload FROM documents WHERE name >= 'removed:' AND name < 'removed;'"
-                )
-                if json.loads(v).get("status") in {"removing", "removed"}
+                record["track_id"]
+                for record in document_records.records(conn, "removed")
+                if record["status"] in {"removing", "removed"}
             }
             return [
                 track

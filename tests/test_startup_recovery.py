@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server import startup_problems
-from server import store as store_module
+from server import document_records
 from server.app import create_app
 from server.organisation import Organisation
 from server.recovery import Recovery
@@ -21,10 +21,10 @@ from test_tidy import legacy, library
 @pytest.fixture(autouse=True)
 def fresh_problems():
     startup_problems.clear()
-    store_module._unreadable_removals.clear()
+    document_records.clear()
     yield
     startup_problems.clear()
-    store_module._unreadable_removals.clear()
+    document_records.clear()
 
 
 def put(store, rows):
@@ -176,11 +176,13 @@ def test_tidy_recovery_skips_a_malformed_record(tmp_path, monkeypatch):
     entry = store.read_document("tidy:" + identity)
     assert entry["status"] == "stopped" and entry["error"]
     assert raw(store, bad | others) == bad | others
-    # Unreadable rows of other areas are reported by their own recovery.
-    assert reported("tidy") == set(bad) | {
+    assert reported("tidy") == set(bad)
+    # Unreadable rows of other areas are reported once, under their own area.
+    assert reported("organisation") == {
+        "organisation:not-json",
         "organisation:no-status",
-        "removed:no-status",
     }
+    assert reported("trash") == {"removed:not-json", "removed:no-status"}
 
 
 def malformed_everywhere(store):
@@ -195,13 +197,11 @@ def malformed_everywhere(store):
     return bad
 
 
-# Tidy recovery also reads removals: one without a status is skipped there too.
 TIDY_SKIPS = {
     "tidy:no-status",
     "tidy:wrong-type",
     "tidy:not-an-object",
     "tidy:not-json",
-    "removed:no-status",
 }
 
 
@@ -233,6 +233,72 @@ def test_the_server_starts_when_a_recovery_fails_as_a_whole(tmp_path, monkeypatc
     assert whole["error"] == "RuntimeError"
     # The recoveries after it still ran.
     assert reported("tidy") == TIDY_SKIPS
+
+
+def recovered_with_malformed_records(tmp_path, monkeypatch):
+    """An interrupted tidy-up, malformed records in every area, and a
+    restart's recovery: the malformed records stay where they are."""
+    tidy, identity, operation = interrupted_tidy(tmp_path, monkeypatch)
+    bad = malformed_everywhere(tidy.store)
+    tidy.recovery.recover()
+    tidy.organisation.recover()
+    tidy.recover()
+    assert raw(tidy.store, bad) == bad
+    return tidy, identity, operation, bad
+
+
+def test_lists_skip_malformed_records_after_a_restart(tmp_path, monkeypatch):
+    tidy, identity, operation, bad = recovered_with_malformed_records(
+        tmp_path, monkeypatch
+    )
+    ids = {name.split(":", 1)[1] for name in bad}
+    trash = tidy.recovery.list()
+    assert trash and not ids & {r["id"] for r in trash}
+    assert [r["id"] for r in tidy.history()] == [identity]
+    assert [r["id"] for r in tidy.organisation.undoable()] == [operation]
+    assert operation in {r["id"] for r in tidy.organisation.history()}
+    assert not ids & {r["id"] for r in tidy.organisation.history()}
+
+
+def test_a_healthy_tidy_up_undoes_next_to_malformed_records(tmp_path, monkeypatch):
+    tidy, identity, operation, bad = recovered_with_malformed_records(
+        tmp_path, monkeypatch
+    )
+    assert tidy.undo(identity)["status"] == "undone"
+    assert tidy.store.read_document("organisation:" + operation)["status"] == "undone"
+    assert tidy.history() == []
+    assert raw(tidy.store, bad) == bad
+
+
+def test_a_healthy_organisation_step_undoes_next_to_malformed_records(
+    tmp_path, monkeypatch
+):
+    tidy, identity, operation, bad = recovered_with_malformed_records(
+        tmp_path, monkeypatch
+    )
+    tidy.organisation.undo(operation)
+    assert tidy.store.read_document("organisation:" + operation)["status"] == "undone"
+    assert tidy.organisation.undoable() == []
+    assert raw(tidy.store, bad) == bad
+
+
+def test_an_undo_whose_step_is_unreadable_stops_before_changing_anything(
+    tmp_path, monkeypatch
+):
+    tidy, identity, operation, bad = recovered_with_malformed_records(
+        tmp_path, monkeypatch
+    )
+    step = tidy.store.read_document("organisation:" + operation)
+    root = tmp_path / "music"
+    before = sorted(p.relative_to(root) for p in root.rglob("*") if p.is_file())
+    put(tidy.store, {"organisation:" + operation: "{"})
+    with pytest.raises(ValueError):
+        tidy.undo(identity)
+    after = sorted(p.relative_to(root) for p in root.rglob("*") if p.is_file())
+    assert after == before
+    assert tidy.store.read_document("tidy:" + identity)["status"] != "undone"
+    put(tidy.store, {"organisation:" + operation: json.dumps(step)})
+    assert tidy.undo(identity)["status"] == "undone"
 
 
 def test_problems_keep_the_latest_fifty_without_detail():
