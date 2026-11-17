@@ -1693,6 +1693,12 @@ class Store:
         # below reads what a reconcile writes (quality target, claim token,
         # an active state back to waiting).
         joined = False
+        # Songs the household has, now in this person's library too: the
+        # library and queue are walked for them once as well (upgrades for
+        # the quality they want, then that reconcile). Nothing below reads
+        # an upgrade job (it has no song key, and its own kind of id) or
+        # the unassigned list; the membership itself is written at once.
+        taken_up = []
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             # Read both legacy and edition-aware exclusions once per batch.
@@ -1732,11 +1738,15 @@ class Store:
                             ).rowcount
                             if added:
                                 bump(conn, user_id)
-                                from .household_policy import HouseholdPolicy
+                                if preferred:
+                                    # As for a job joined, below.
+                                    from .household_policy import HouseholdPolicy
 
-                                HouseholdPolicy(self).membership_changed(
-                                    conn, [matched["id"]]
-                                )
+                                    HouseholdPolicy(self).membership_changed(
+                                        conn, [matched["id"]]
+                                    )
+                                else:
+                                    taken_up.append(matched["id"])
                                 # Back in their library: the request is met,
                                 # not left out (#211). The iPhone reads a
                                 # skipped song as excluded from downloads.
@@ -1892,10 +1902,14 @@ class Store:
                         (key, json.dumps(payload)),
                     )
                     created += 1
-            if joined:
+            if taken_up or joined:
                 from .household_policy import HouseholdPolicy
 
-                HouseholdPolicy(self).reconcile_pending(conn)
+                if taken_up:
+                    # Ends with the reconcile a joined job needs.
+                    HouseholdPolicy(self).membership_changed(conn, taken_up)
+                else:
+                    HouseholdPolicy(self).reconcile_pending(conn)
         return {
             "created": created,
             "existing": existing,

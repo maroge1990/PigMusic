@@ -90,9 +90,21 @@ def by_title(store, title):
         )
 
 
-def seeded(directory):
-    """A queue with every kind of job a repeated request can meet. Bob wants
-    lossless, so a job of Alice's that he joins takes a new target."""
+def have(i):
+    """A song the household has, as the library holds it."""
+    return {
+        **song(f"Have {i}", 40 + i, status=None),
+        "id": f"have-{i}",
+        "relative_path": f"Example/Studio/Have {i}.mp3",
+        "codec": "mp3",
+        "bitrate": 128,
+    }
+
+
+def household(directory, songs):
+    """A store whose library holds `songs`, and two people."""
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "library-snapshot.json").write_text(json.dumps({"tracks": songs}))
     store = Store(directory)
     auth = Auth(store)
     owner = auth.create_owner("mark", PASSWORD)
@@ -102,10 +114,69 @@ def seeded(directory):
         )["id"]
         for name in ("alice", "bob")
     )
+    return store, alice, bob
+
+
+def test_songs_the_household_has_are_taken_up_once_per_request(tmp_path, monkeypatch):
+    """Adding a playlist of music already on the server walked the whole
+    library and queue (`membership_changed`) once per song."""
+    store, alice, bob = household(tmp_path, [have(i) for i in range(30)])
+    calls = []
+    changed = HouseholdPolicy.membership_changed
+
+    def counted(self, conn, track_ids):
+        calls.append(list(track_ids))
+        return changed(self, conn, track_ids)
+
+    monkeypatch.setattr(HouseholdPolicy, "membership_changed", counted)
+    reconciles = count_reconciles(monkeypatch)
+    wanted = [song(f"Have {i}", 40 + i, status="downloaded") for i in range(30)]
+    # One the household already has beside one already queued: still one pass.
+    store.submit_catalogue([song("Queued")], user_id=alice)
+    result = store.submit_catalogue(
+        [*wanted, song("Queued")], user_id=bob, resume_paused=True
+    )
+    assert result == {
+        "created": 0,
+        "existing": 31,
+        "skipped": 0,
+        "downloads_enabled": False,
+    }
+    assert calls == [[f"have-{i}" for i in range(30)]]
+    assert len(reconciles) == 1
+    assert all(store.user_libraries.contains(bob, f"have-{i}") for i in range(30))
+
+
+def seeded(directory):
+    """A queue with every kind of job a repeated request can meet, and a
+    library of songs the household has. Bob wants lossless, so a job of
+    Alice's that he joins takes a new target, and a song he takes up is
+    queued for an upgrade."""
+    store, alice, bob = household(directory, [have(i) for i in range(5)])
     with store.connect() as conn:
         conn.execute(
             "INSERT INTO quality_preferences VALUES (?,?,?,?)",
             (bob, "system", "*", "lossless"),
+        )
+        for user, track in ((alice, 0), (alice, 1), (bob, 3)):
+            conn.execute(
+                "INSERT INTO library_members VALUES (?,?,0,'household-add')",
+                (user, f"have-{track}"),
+            )
+        # An upgrade of Alice's already under way for a song Bob takes up.
+        conn.execute(
+            "INSERT INTO queue(id,payload,status) VALUES ('upgrade',?,'downloading')",
+            (
+                json.dumps(
+                    {
+                        **song("Have 1", 41, status=None),
+                        "library_track_id": "have-1",
+                        "quality_profile": "mp3_320",
+                        "requested_by": [alice],
+                        "source": "x",
+                    }
+                ),
+            ),
         )
     store.submit_catalogue(
         [song(f"Mine {i}", i) for i in range(3)] + [song("Paused mine", 10)],
@@ -138,10 +209,14 @@ def submission():
     edition = "22222222-2222-4222-8222-222222222222"
     return [
         song("New 0", 30),
+        song("Have 0", 40, status="downloaded"),
         song("Mine 0", 0),
         song("Theirs 0", 20),
         song("Paused mine", 10),
+        song("Have 3", 43, status="downloaded"),  # Already in his library.
         song("New 1", 31),
+        # The household has it, with an upgrade under way.
+        song("Have 1", 41, status="downloaded"),
         song("Theirs 1", 21),
         # The failed song asked for again without an edition, then as "only
         # this edition".
@@ -149,32 +224,62 @@ def submission():
         song("Failed", 12, explicit_edition=True, musicbrainz_release_id=edition),
         song("Paused theirs", 11),
         song("New 0", 30),  # Twice in one request.
+        song("Have 0", 40, status="downloaded"),  # And this one.
         song("Mine 1", 1),
+        song("Have 2", 42, status="downloaded"),
         song("Theirs 2", 22),
         song("Mine 2", 2),
-        # New after the last song that was already queued.
+        song("Have 4", 44, status="downloaded"),
+        # New after the last song that was already queued or in the library.
         song("New 2", 32),
     ]
 
 
 def rows(store, alice, bob):
-    """The queue without what differs between any two runs: timestamps, the
-    random claim token (kept as whether one was given) and the people's
-    random ids (named instead)."""
+    """The queue, who has which song, each person's library revision and the
+    unassigned songs, without what differs between any two runs: timestamps,
+    the random claim token (kept as whether one was given), the people's
+    random ids (named instead) and an upgrade job's id, which holds the time
+    (named by its song and target instead)."""
     result = {}
     with store.connect() as conn:
+        names = dict(conn.execute("SELECT id,username FROM users"))
+        assert names[alice] == "alice" and names[bob] == "bob"
         for key, status, raw in conn.execute("SELECT id,status,payload FROM queue"):
-            payload = json.loads(raw.replace(alice, "alice").replace(bob, "bob"))
+            for identity, name in names.items():
+                raw = raw.replace(identity, name)
+            payload = json.loads(raw)
             if "claim_token" in payload:
                 payload["claim_token"] = True
+            if key != "upgrade" and payload.get("library_track_id"):
+                key = "upgrade of {library_track_id} to {quality_profile}".format(
+                    **payload
+                )
+            assert key not in result
             result[key] = (status, payload)
+        result["members"] = sorted(
+            (names.get(user, "owner"), track, source)
+            for user, track, source in conn.execute(
+                "SELECT user_id,track_id,source FROM library_members"
+            )
+        )
+        result["revisions"] = sorted(
+            (names.get(user, "owner"), revision)
+            for user, revision in conn.execute(
+                "SELECT user_id,revision FROM membership_versions"
+            )
+        )
+        result["unassigned"] = sorted(
+            r[0] for r in conn.execute("SELECT track_id FROM unassigned_tracks")
+        )
     return result
 
 
-def test_one_reconcile_leaves_the_queue_as_one_per_song_did(tmp_path, monkeypatch):
+def test_one_pass_leaves_the_queue_as_one_per_song_did(tmp_path, monkeypatch):
     """The reference replays the same request one song at a time, so the
-    queue is reconciled after every song that was already queued, as it was
-    before #237. Only what a request computes across its songs is carried
+    queue is reconciled after every song that was already queued, and the
+    library and queue walked after every song the household already had, as
+    they were before #237. Only what a request computes across its songs is carried
     over: each song's scope (album or song) comes from the whole request."""
     for resume_paused in (True, False):
         tracks = submission()
@@ -200,7 +305,8 @@ def test_one_reconcile_leaves_the_queue_as_one_per_song_did(tmp_path, monkeypatc
                 expected["downloads_enabled"] = one["downloads_enabled"]
 
         assert result == expected
-        assert result["created"] >= 4 and result["existing"] >= 8
+        assert result["created"] >= 4 and result["existing"] >= 12
+        assert result["skipped"] == 2
         after = rows(batch, alice, bob)
         assert after == rows(reference, their_alice, their_bob)
         # The reconcile had work to do: Bob's target reached Alice's jobs.
@@ -211,3 +317,12 @@ def test_one_reconcile_leaves_the_queue_as_one_per_song_did(tmp_path, monkeypatc
         paused = after[by_title(batch, "Paused theirs")]
         assert paused[0] == ("waiting_for_sources" if resume_paused else "paused")
         assert paused[1]["quality_profile"] == "lossless"
+        # Taking up the household's songs had work to do too: an upgrade
+        # queued for each, and the one under way given Bob's target.
+        for track in (0, 2, 4):
+            upgrade = after[f"upgrade of have-{track} to lossless"]
+            assert upgrade[0] == "waiting_for_sources"
+            assert "bob" in upgrade[1]["requested_by"]
+        assert after["upgrade"][0] == "waiting_for_sources"
+        assert after["upgrade"][1]["quality_profile"] == "lossless"
+        assert ("bob", "have-1", "household-add") in after["members"]
