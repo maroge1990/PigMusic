@@ -81,7 +81,7 @@ public struct RequestGroup: Codable, Sendable, Identifiable {
   public var summary: String {
     if songs == 1, let item = items.first { return RequestStatus.label(item.status) }
     var parts = ["\(done) of \(songs) songs in your library"]
-    if active > 0 { parts.append("\(active) downloading") }
+    if active > 0 { parts.append("\(active) adding") }
     if waiting > 0 { parts.append("\(waiting) waiting") }
     if failed > 0 { parts.append("\(failed) couldn't add") }
     if let paused, paused > 0 { parts.append("\(paused) paused") }
