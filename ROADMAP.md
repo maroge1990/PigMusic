@@ -37,14 +37,14 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 ## Next
 
 From the 17 Nov review, in the suggested order (Mark confirms): **C, one vocabulary** (Mark chooses the words): #246. **D, one of each:**
-#247, #248, #249, #183, #250. **E, the plain screens:** #251, #252, #209, #255. Smaller: #242, #253, #256, #257, #258.
+#248, #249, #183, #250 (#247 parked by Mark, 18 Nov). **E, the plain screens:** #251, #252, #209, #255. Smaller: #242, #253, #256, #257, #258.
 
 Then: #226 (an unreadable download list or a source change must not empty the Watch), #230 and #231 (findings), #225
 (test workers' memory growth).
 
 ## Later
 
-#204 concerts on artist pages (Mark picks a provider and area) · #205 Music Haptics (if Apple allows a third-party
+#247 album and artist pages that look the same wherever you open them (parked by Mark, 18 Nov) · #204 concerts on artist pages (Mark picks a provider and area) · #205 Music Haptics (if Apple allows a third-party
 player) · #121 Apple Music playlists as your own, downloading the missing songs · #198 Mornye-Python as a lossless
 source (only if Monochrome fails) · #200 wrong-song check against YouTube audio (only if #193 is kept) · #173 part 2
 shared move journal (design for Mark first) · #96 the two library marker files · #46 remaining (AccountSession,
