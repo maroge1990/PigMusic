@@ -294,8 +294,14 @@ def test_asking_again_from_any_state(household, state, edition, requester, way):
     assert not twins, (twins, household.jobs(track(n)))
 
 
-# Then Retry of the earlier job, which finished without a file: Retry puts it
-# back to waiting whatever the second request made meanwhile.
+# Then Retry of the earlier job, which finished without a file. When asking
+# again made another job for the song meanwhile (the earlier job named another
+# release, or the new request's details give another id: a playlist names no
+# album artist or year, monitoring's duration is MusicBrainz's whole
+# milliseconds), Retry joins that job rather than queue a twin (#243); an
+# "only this edition" job is another thing. A person's own Cancel withdraws
+# them from the job, so their Retry finds nothing (404); only the
+# administrator's Retry reaches it.
 RETRIED = [
     (state, edition, requester, way, route)
     for state in ("failed", "cancelled")
@@ -304,41 +310,11 @@ RETRIED = [
     if way != "retry"
     for route in ("mine", "admin")
 ]
-RETRY_TWINS = (
-    "#244: Retry of a failed or cancelled job does not look for another "
-    "unfinished job for the song, which asking again made meanwhile"
-)
-
-
-def retry_twins(case):
-    state, edition, requester, way, route = case
-    # Asking again made a job under another id (the earlier job named another
-    # release, or the new request's details give another id: a playlist
-    # names no album artist or year, monitoring's duration is MusicBrainz's
-    # whole milliseconds); an "only this edition" job is another thing.
-    # A person's own Cancel withdraws them from the job, so their Retry
-    # finds nothing (404); only the administrator's Retry reaches it.
-    if edition == "edition" or (state == "cancelled" and route == "mine"):
-        return False
-    if way in {"playlist", "monitoring"}:
-        return True
-    return edition == "release" and way in {"song_no_release", "song_other_release"}
 
 
 @pytest.mark.parametrize(
     "state,edition,requester,way,route",
-    [
-        pytest.param(
-            *case,
-            id="-".join(case),
-            marks=(
-                [pytest.mark.xfail(strict=True, reason=RETRY_TWINS)]
-                if retry_twins(case)
-                else []
-            ),
-        )
-        for case in RETRIED
-    ],
+    [pytest.param(*case, id="-".join(case)) for case in RETRIED],
 )
 def test_retrying_the_earlier_job_after_asking_again(
     household, state, edition, requester, way, route

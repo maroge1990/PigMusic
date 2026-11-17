@@ -9,6 +9,7 @@ household library.
 import hashlib
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from server.app import create_app
@@ -375,3 +376,71 @@ def test_a_failed_request_asked_for_again_without_an_edition_is_queued(
         repeat = client.post("/api/v1/requests", json={"tracks": [plain]})
         assert repeat.status_code == 200, repeat.text
         assert len(statuses(store)) == 2
+
+
+def jobs(store):
+    """{id: status and payload fields} for every job."""
+    with store.connect() as conn:
+        rows = conn.execute("SELECT id,status,payload FROM queue").fetchall()
+    return {r[0]: {**json.loads(r[2]), "status": r[1]} for r in rows}
+
+
+@pytest.mark.parametrize("ended", ["failed", "cancelled"])
+@pytest.mark.parametrize("route", ["mine", "admin"])
+def test_retry_joins_the_job_asking_again_made(tmp_path, monkeypatch, route, ended):
+    # #243: a request naming a release fails (or the administrator cancels
+    # it); the song is asked for again with no release, which is a new job.
+    # Retry of the earlier job then put it back to waiting too: two
+    # unfinished jobs for one song, which could both publish it.
+    app, client, owner, member = household(tmp_path, monkeypatch, member=True)
+    token = app.state.auth.login("member", PASSWORD, "device", "phone", "ios", "x")
+    other = TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token["token"]},
+    )
+    with client:
+        store = app.state.store
+        hold_downloads(store, monkeypatch)
+        for asker in (client, other):
+            asked = asker.post("/api/v1/requests", json={"tracks": [song()]})
+            assert asked.status_code == 200, asked.text
+        (earlier,) = jobs(store)
+        if ended == "failed":
+            with store.connect() as conn:
+                conn.execute("UPDATE queue SET status='failed'")
+        else:
+            cancelled = client.post(f"/api/v1/admin/queue/{earlier}/cancel")
+            assert cancelled.status_code == 200, cancelled.text
+        plain = song()
+        del plain["musicbrainz_release_id"]
+        again = client.post("/api/v1/requests", json={"tracks": [plain]})
+        assert again.json()["created"] == 1, again.text
+        (later,) = set(jobs(store)) - {earlier}
+
+        retried = client.post(
+            {
+                "mine": f"/api/v1/requests/{earlier}/retry",
+                "admin": f"/api/v1/admin/queue/{earlier}/retry",
+            }[route]
+        )
+
+        assert retried.status_code == 200, retried.text
+        if route == "mine":
+            assert retried.json() == {"retried": True}
+        else:
+            listed = {i["id"]: i["status"] for i in retried.json()["items"]}
+            assert listed[later] == "waiting_for_sources", listed
+        state = jobs(store)
+        assert state[earlier]["status"] == ended, state
+        assert state[later]["status"] == "waiting_for_sources", state
+        # Whoever retried now belongs to the unfinished job, once, and has
+        # left the finished one.
+        moved = [owner] if route == "mine" else [owner, member]
+        assert state[later]["requested_by"] == moved, state
+        assert set(state[later]["request_scope"]) == set(moved), state
+        assert state[earlier]["requested_by"] == [
+            p for p in (owner, member) if p not in moved
+        ], state
+        mine = client.get("/api/v1/requests").json()["items"]
+        assert [i["id"] for i in mine] == [later], mine

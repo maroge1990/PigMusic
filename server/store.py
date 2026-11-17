@@ -57,6 +57,24 @@ STAGED_AUDIO = re.compile(
 )
 
 
+def join_member(payload, user_id, scope):
+    """Add a person to a queued job's payload as a repeat request does,
+    keeping the scope they already had there; True when it changed."""
+    beneficiaries = payload.get("requested_by", [])
+    scopes_by_user = payload.get("request_scope") or {}
+    if user_id in beneficiaries and user_id in scopes_by_user:
+        return False
+    payload["requested_by"] = [
+        *beneficiaries,
+        *([] if user_id in beneficiaries else [user_id]),
+    ]
+    payload["request_scope"] = {
+        **scopes_by_user,
+        user_id: scopes_by_user.get(user_id, scope),
+    }
+    return True
+
+
 class Store:
     """Durable application state and revisioned projection of the music library."""
 
@@ -1113,15 +1131,81 @@ class Store:
             except (OSError, KeyError, ValueError):
                 continue  # Retry at startup or the next scheduler scan.
 
+    def retry_joining(self, conn, request_id, people):
+        """Retry of a failed or cancelled job when asking again meanwhile made
+        another unfinished job that delivers the song (#243): `people` leave
+        the old job (it keeps its finished state) and join that one, as a
+        repeat request joins, so two jobs never publish one song. Returns
+        the joined job's id, or None when there is none and the old job is
+        to be queued again. Runs inside the caller's transaction."""
+        row = conn.execute(
+            "SELECT payload FROM queue WHERE id=? AND status IN " + sql(RETRYABLE),
+            (request_id,),
+        ).fetchone()
+        if not row:
+            return None
+        old = json.loads(row[0])
+        intent = request_intent(old)
+        key = old.get("song_key") or list(song_key(intent))
+        twin = next(
+            (
+                (other_id, payload)
+                for other_id, raw in conn.execute(
+                    "SELECT id,payload FROM queue WHERE id<>? AND status IN "
+                    + sql(PENDING)
+                    + " AND json_extract(payload,'$.song_key')=json(?) "
+                    "ORDER BY created_at,id",
+                    (request_id, json.dumps(key)),
+                )
+                # "Only this edition" joins only that edition asked for as such.
+                if delivers(payload := json.loads(raw), intent)
+            ),
+            None,
+        )
+        if not twin:
+            return None
+        twin_id, joined = twin
+        scopes = old.get("request_scope") or {}
+        moved = False
+        for person in people:
+            scope = scopes.get(person) or ["song"]
+            moved = join_member(joined, person, scope) or moved
+        leaving = set(people)
+        old["requested_by"] = [
+            p for p in old.get("requested_by", []) if p not in leaving
+        ]
+        if "request_scope" in old:
+            old["request_scope"] = {p: s for p, s in scopes.items() if p not in leaving}
+        conn.execute(
+            "UPDATE queue SET payload=? WHERE id=?", (json.dumps(old), request_id)
+        )
+        if moved:
+            conn.execute(
+                "UPDATE queue SET payload=? WHERE id=?",
+                (json.dumps(joined), twin_id),
+            )
+            # Its members decide a job's quality target, as after a join.
+            from .household_policy import HouseholdPolicy
+
+            HouseholdPolicy(self).reconcile_pending(conn)
+        return twin_id
+
     def retry_request(self, request_id):
         with self.connect() as conn:
-            result = conn.execute(
-                "UPDATE queue SET status='waiting_for_sources',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN "
-                + sql(RETRYABLE),
-                (request_id,),
-            )
-            if not result.rowcount:
-                raise ValueError("Only failed or cancelled requests can be retried")
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT payload FROM queue WHERE id=?", (request_id,)
+            ).fetchone()
+            people = json.loads(row[0]).get("requested_by", []) if row else []
+            # Everyone on the job joins the other one; the job stays as it is.
+            if not self.retry_joining(conn, request_id, people):
+                result = conn.execute(
+                    "UPDATE queue SET status='waiting_for_sources',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN "
+                    + sql(RETRYABLE),
+                    (request_id,),
+                )
+                if not result.rowcount:
+                    raise ValueError("Only failed or cancelled requests can be retried")
         return self.queue()
 
     def album_key(self, track):
@@ -1855,20 +1939,7 @@ class Store:
                 if prior and prior[0] not in {"cancelled", "failed"}:
                     if user_id:
                         previous = json.loads(prior[1])
-                        beneficiaries = previous.get("requested_by", [])
-                        scopes_by_user = previous.get("request_scope") or {}
-                        if (
-                            user_id not in beneficiaries
-                            or user_id not in scopes_by_user
-                        ):
-                            previous["requested_by"] = [
-                                *beneficiaries,
-                                *([] if user_id in beneficiaries else [user_id]),
-                            ]
-                            previous["request_scope"] = {
-                                **scopes_by_user,
-                                user_id: scopes_by_user.get(user_id, scope),
-                            }
+                        if join_member(previous, user_id, scope):
                             conn.execute(
                                 "UPDATE queue SET payload=? WHERE id=?",
                                 (json.dumps(previous), key),

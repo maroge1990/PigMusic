@@ -1220,6 +1220,12 @@ class UserLibrary:
         """Requeue one of this person's failed or cancelled requests."""
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            # Asking again meanwhile made another unfinished job for the
+            # song: this person joins it rather than queue a twin (#243).
+            if conn.execute(
+                "SELECT 1 FROM queue WHERE id=? AND " + _MINE, (request_id, user_id)
+            ).fetchone() and self.store.retry_joining(conn, request_id, [user_id]):
+                return {"retried": True}
             result = conn.execute(
                 "UPDATE queue SET status='waiting_for_sources',updated_at=CURRENT_TIMESTAMP "
                 "WHERE id=? AND status IN " + sql(RETRYABLE) + " AND EXISTS "
