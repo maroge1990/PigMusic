@@ -166,3 +166,161 @@ def test_only_a_failing_readiness_check_reaches_the_access_log():
     assert keep(access(READY, 404))
     assert keep(access(READY + "/more", 200))
     assert not keep(access("/api/health", 200))
+
+
+def blocking(original, release, calls, only_ready_threads=False):
+    """`original`, waiting on `release` first; `calls` gets each thread name."""
+
+    def blocked(*args, **kwargs):
+        name = threading.current_thread().name
+        if only_ready_threads and not name.startswith("ready"):
+            return original(*args, **kwargs)
+        calls.append(name)
+        release.wait(30)
+        return original(*args, **kwargs)
+
+    return blocked
+
+
+def free_thread_soon(client):
+    """Whether the shared pool runs a job promptly, asked on the app's loop."""
+
+    async def ask():
+        await asyncio.wait_for(asyncio.to_thread(lambda: None), timeout=1)
+        return True
+
+    return client.portal.call(ask)
+
+
+def test_a_hung_storage_check_is_not_started_again_or_on_the_shared_pool(
+    tmp_path, monkeypatch
+):
+    """Codex on 05b98d6: each poll left one more shared thread blocked on an
+    unresponsive mount until no endpoint had a thread to run on."""
+    monkeypatch.setattr(server_app, "READY_TIMEOUT", 1, raising=False)
+    app = create_app(tmp_path)
+    release, calls = threading.Event(), []
+    with TestClient(app, client=LOCAL) as client:
+        try:
+            monkeypatch.setattr(
+                server_app,
+                "download_root",
+                blocking(server_app.download_root, release, calls),
+            )
+            assert client.get(READY).json()["checks"]["storage"] is False
+            began = time.monotonic()
+            for _ in range(20):
+                response = client.get(READY)
+                # Storage alone never makes the server unavailable.
+                assert response.status_code == 200
+                assert response.json()["checks"] == {**ALL_OK, "storage": False}
+            # Not waited for again while the first call is still out.
+            assert time.monotonic() - began < 1
+            assert len(calls) == 1 and calls[0].startswith("ready")
+            assert app.state.ready_checks.outstanding() == ["storage"]
+            assert free_thread_soon(client)
+        finally:
+            release.set()
+        deadline = time.monotonic() + 5
+        while app.state.ready_checks.outstanding():
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        assert client.get(READY).json() == {"status": "ok", "checks": ALL_OK}
+        assert len(calls) == 2
+
+
+def test_a_hung_database_check_is_not_started_again_or_on_the_shared_pool(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(server_app, "READY_TIMEOUT", 1, raising=False)
+    app = create_app(tmp_path)
+    release, calls = threading.Event(), []
+    store = app.state.store
+    with TestClient(app, client=LOCAL) as client:
+        try:
+            # Only the readiness read hangs; the app's own reads go on.
+            monkeypatch.setattr(
+                store,
+                "read_document",
+                blocking(store.read_document, release, calls, only_ready_threads=True),
+            )
+            first = client.get(READY)
+            assert first.status_code == 503
+            began = time.monotonic()
+            for _ in range(20):
+                response = client.get(READY)
+                assert response.status_code == 503
+                assert response.json() == {
+                    "status": "unavailable",
+                    "checks": {**ALL_OK, "database": False},
+                }
+            assert time.monotonic() - began < 1
+            assert len(calls) == 1
+            assert app.state.ready_checks.outstanding() == ["database"]
+            assert free_thread_soon(client)
+        finally:
+            release.set()
+        deadline = time.monotonic() + 5
+        while app.state.ready_checks.outstanding():
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        assert client.get(READY).json() == {"status": "ok", "checks": ALL_OK}
+
+
+def test_the_server_stops_while_a_readiness_check_is_still_hung(tmp_path, monkeypatch):
+    monkeypatch.setattr(server_app, "READY_TIMEOUT", 0.3, raising=False)
+    app = create_app(tmp_path)
+    release, calls = threading.Event(), []
+    try:
+        with TestClient(app, client=LOCAL) as client:
+            monkeypatch.setattr(
+                server_app,
+                "download_root",
+                blocking(server_app.download_root, release, calls),
+            )
+            assert client.get(READY).json()["checks"]["storage"] is False
+            checks = app.state.ready_checks
+            began = time.monotonic()
+        assert time.monotonic() - began < 2
+        assert calls and checks.outstanding() == ["storage"]
+        assert checks.executor is None
+    finally:
+        release.set()
+    # The same app started again has working checks.
+    monkeypatch.undo()
+    with TestClient(app, client=LOCAL) as client:
+        deadline = time.monotonic() + 5
+        while client.get(READY).json()["checks"] != ALL_OK:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+
+
+def test_a_readiness_check_that_raises_or_hangs_fails_and_runs_once_at_a_time():
+    from server.readiness import ReadinessChecks
+
+    async def scenario():
+        checks = ReadinessChecks()
+        release, calls = threading.Event(), []
+
+        def hang():
+            calls.append(1)
+            release.wait(30)
+
+        try:
+            assert await checks.passes("fine", lambda: None, timeout=1) is True
+            assert await checks.passes("broken", lambda: 1 / 0, timeout=1) is False
+            assert await checks.passes("slow", hang, timeout=0.2) is False
+            began = time.monotonic()
+            assert await checks.passes("slow", hang, timeout=5) is False
+            assert time.monotonic() - began < 0.5
+            assert len(calls) == 1 and checks.outstanding() == ["slow"]
+            # One hung check does not hold up another.
+            assert await checks.passes("fine", lambda: None, timeout=1) is True
+        finally:
+            release.set()
+        while checks.outstanding():
+            await asyncio.sleep(0.01)
+        assert await checks.passes("slow", lambda: None, timeout=1) is True
+        checks.close()
+
+    asyncio.run(scenario())

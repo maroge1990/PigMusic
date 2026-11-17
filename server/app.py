@@ -54,6 +54,7 @@ from .storage import download_root
 from .store import Store
 from .downloader import Downloader
 from .workers import WorkerStatus, supervise
+from .readiness import ReadinessChecks
 from .providers.runtime import Runtime as SourceRuntime
 from .routes.download_sources import download_sources_router
 from .catalogue import (
@@ -145,6 +146,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     exporter = Exporter(store)
     artist_jobs = ArtistJobs(store, music_catalogue)
     workers = WorkerStatus()
+    ready_checks = ReadinessChecks()
     recovery = Recovery(store)
     organisation = Organisation(store, recovery)
     tidy = Tidy(store, recovery, organisation)
@@ -250,6 +252,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             try:
                 yield
             finally:
+                ready_checks.close()
                 await device_copies.close()
                 # Signal every worker before waiting on any of them.
                 mixes.stopping.set()
@@ -345,6 +348,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     install_validation_redaction(app)
     app.state.store = store
     app.state.workers = workers
+    app.state.ready_checks = ready_checks
     app.state.look_ahead = look_ahead
     app.state.source_runtime = source_runtime
     app.state.enrichment = enrichment
@@ -445,21 +449,26 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         health check and the supervisor's watchdog; the guard answers only a
         direct local caller. /api/health below only shows it is reachable."""
 
-        async def within(function, *args):
+        async def free_thread():
             # On the shared pool nearly every endpoint uses: no free thread
-            # within the limit is itself the failure.
+            # within the limit is itself the failure. Nothing here can hang,
+            # so a call still queued at the limit runs later and returns.
             try:
                 await asyncio.wait_for(
-                    asyncio.to_thread(function, *args), timeout=READY_TIMEOUT
+                    asyncio.to_thread(lambda: None), timeout=READY_TIMEOUT
                 )
                 return True
             except Exception:
                 return False
 
+        # These two can hang (a locked database, an unresponsive mount), so
+        # they stay off the shared pool and are never started twice.
         thread_pool, database, storage = await asyncio.gather(
-            within(lambda: None),
-            within(store.read_document, "downloads"),
-            within(download_root, store),
+            free_thread(),
+            ready_checks.passes(
+                "database", store.read_document, "downloads", timeout=READY_TIMEOUT
+            ),
+            ready_checks.passes("storage", download_root, store, timeout=READY_TIMEOUT),
         )
         now = time.time()
         checks = {
