@@ -472,3 +472,84 @@ def test_background_covers_do_not_clear_the_queued_page_cover_deduplication(tmp_
     asyncio.run(run())
     assert duplicate_requests == [0]
     assert not w.cover_pending
+
+
+def test_home_cards_get_the_cover_and_photo_they_ask_for(tmp_path):
+    """#168: with Recommended ready, the first ask for all 9 of its artist
+    photos and album covers was a 404. Showing a feed prepared each album's
+    recommended edition (`release`) cover, but the card asks for the
+    release group's, and no recommended artist's photo was prepared."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from server.routes.home import home_router
+
+    G1 = "aaaaaaaa-1111-4111-8111-111111111111"
+    G2 = "aaaaaaaa-2222-4222-8222-222222222222"
+    G3 = "aaaaaaaa-3333-4333-8333-333333333333"
+
+    def item(kind, item_id, artist_id, **extra):
+        return {
+            "id": item_id,
+            "artist_id": artist_id,
+            "name": "Name",
+            "artist": "Artist",
+            "kind": kind,
+            **extra,
+        }
+
+    def feed(**lists):
+        return {
+            "artists": [],
+            "albums": [],
+            "songs": [],
+            "source": "Fixture",
+            "unavailable": False,
+            "state": "ready",
+            **lists,
+        }
+
+    class Feeds:
+        async def recommended(self, client, projection):
+            return feed(
+                artists=[item("artists", A, A), item("artists", B, B)],
+                # Albums and songs by artists who have no card of their own.
+                albums=[item("albums", G1, C), item("albums", G2, A)],
+                songs=[item("songs", "rec", D, release_id="song-release")],
+            )
+
+        async def popular(self, client):
+            # One album Recommended lists too.
+            return feed(albums=[item("albums", G2, A), item("albums", G3, C)])
+
+    w, calls, covers = warmer(tmp_path)
+
+    async def edition(group_id):
+        return group_id + "-edition"
+
+    w.warm_album = edition
+    app = FastAPI()
+    app.state.http = None
+    app.include_router(home_router(w.store, None, Feeds(), w))
+    with TestClient(app) as client:
+        for _ in range(2):  # Home is opened twice.
+            assert client.get("/api/v1/home/recommended").json()["state"] == "ready"
+            assert client.get("/api/v1/home/popular").json()["state"] == "ready"
+    asyncio.run(drain(w))
+    # The artists with a card, once each; not every artist the feed names.
+    assert calls == [(A, False), (B, False)]
+    # Each card's own cover first, then the edition its album page shows;
+    # nothing twice, although one album is in both feeds and both were
+    # shown twice.
+    assert covers == [
+        ("release-group", G1),
+        ("release-group", G2),
+        ("release", G1 + "-edition"),
+        ("release", G2 + "-edition"),
+        ("release-group", G3),
+        ("release", G3 + "-edition"),
+    ]
+    # A feed that lists nothing (still preparing, or all of it filtered out
+    # as owned) hands the warmer nothing.
+    assert w.prepare_feed(feed(state="preparing")) == 0
+    assert w.queue.empty()

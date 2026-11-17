@@ -28,6 +28,8 @@ COVER_BACKLOG = 240
 PAGE_COVER_BATCH = 24
 # A browsing session cannot indefinitely postpone Home and Library preparation.
 URGENT_BATCHES = 3
+# Artists of one Home feed whose pages are prepared.
+FEED_ARTISTS = 12
 
 # Lower numbers run first.
 SEARCH, HOME, LIBRARY = 0, 1, 2
@@ -62,6 +64,8 @@ class Warmer:
         # Called after each pass, e.g. to show portraits the pass fetched.
         self.after_pass = None
         self.albums = OrderedDict()
+        # Home cards' covers handed to the queue, by (kind, ID), and when.
+        self.cards = OrderedDict()
         self.queue = asyncio.PriorityQueue()
         self.pending = {}
         # Page covers queued and not yet fetched, so each waits only once.
@@ -336,7 +340,7 @@ class Warmer:
                 if item.get("artist_id")
             )
         )
-        for index, artist_id in enumerate(artists[:12]):
+        for index, artist_id in enumerate(artists[:FEED_ARTISTS]):
             self.submit(artist_id, full=index < 2, priority=HOME)
             # The covers are their own job, right after the first artist:
             # riding on its job, they were dropped whenever that artist was
@@ -361,6 +365,37 @@ class Warmer:
         except Exception:
             self.state["failures"] += 1
             return None
+
+    def prepare_feed(self, feed):
+        """Queue what a Home feed's cards ask for the moment it is shown
+        (#168): each album's release-group cover and each listed artist's
+        photo, then the album pages a tap opens. Only what the feed lists,
+        each once per ARTIST_REUSE; the one worker fetches them in turn."""
+        now = time.time()
+        covers = []
+        for album in feed.get("albums", []):
+            try:
+                item = ("release-group", mbid(album.get("id")))
+            except (ValueError, TypeError, AttributeError):
+                continue
+            if now - self.cards.get(item, 0) < ARTIST_REUSE:
+                continue
+            self.cards[item] = now
+            self.cards.move_to_end(item)
+            covers.append(item)
+        while len(self.cards) > 5000:
+            self.cards.popitem(last=False)
+        if covers:
+            self.queue_covers(covers)
+        # The photo is part of the artist's page; `submit` turns away an
+        # artist prepared recently or already waiting.
+        artists = dict.fromkeys(
+            a["artist_id"] for a in feed.get("artists", []) if a.get("artist_id")
+        )
+        for artist_id in list(artists)[:FEED_ARTISTS]:
+            self.submit(artist_id, priority=HOME)
+        self.prepare_albums(feed)
+        return len(covers)
 
     def prepare_albums(self, feed):
         """Queue a Home feed's album pages not prepared recently."""

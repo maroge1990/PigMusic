@@ -90,9 +90,11 @@ def home_router(store, catalogue, home=None, warmer=None):
     recommended_feeds = RecommendedFeeds(home)
 
     def prepared(feed, request=None):
-        # Albums shown on Home open at once: their pages are cached ahead.
+        # What the cards ask for (an album's release-group cover, an artist's
+        # photo) is fetched ahead of the first look (#168), and albums shown
+        # on Home open at once: their pages are cached ahead.
         if warmer is not None and isinstance(feed, dict):
-            warmer.prepare_albums(feed)
+            warmer.prepare_feed(feed)
         # Its songs a tap would stream are looked up now (#192); the two
         # feeds are one screen.
         user = getattr(request.state, "user", None) if request else None
