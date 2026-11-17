@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server import startup_problems
+from server import store as store_module
 from server.app import create_app
 from server.organisation import Organisation
 from server.recovery import Recovery
@@ -20,8 +21,10 @@ from test_tidy import legacy, library
 @pytest.fixture(autouse=True)
 def fresh_problems():
     startup_problems.clear()
+    store_module._unreadable_removals.clear()
     yield
     startup_problems.clear()
+    store_module._unreadable_removals.clear()
 
 
 def put(store, rows):
@@ -48,11 +51,8 @@ def malformed(prefix, wrong_type=None):
     rows = {f"{prefix}:no-status": json.dumps({"id": "no-status"})}
     if wrong_type:
         rows[f"{prefix}:wrong-type"] = json.dumps(wrong_type)
-    if prefix != "removed":
-        # The store reads every removal when it opens: a removal that is not
-        # a JSON object stops it before recovery runs (outside #240's scope).
-        rows[f"{prefix}:not-an-object"] = json.dumps(["no-status"])
-        rows[f"{prefix}:not-json"] = "{secret payload text"
+    rows[f"{prefix}:not-an-object"] = json.dumps(["no-status"])
+    rows[f"{prefix}:not-json"] = "{secret payload text"
     return rows
 
 
@@ -87,6 +87,30 @@ def test_trash_recovery_skips_a_malformed_record(tmp_path, monkeypatch):
     assert store.read_document("removed:" + record["id"])["status"] == "removed"
     assert raw(store, bad) == bad
     assert reported("trash") == set(bad)
+
+
+def test_the_store_opens_with_unreadable_removals_and_reports_them_once(
+    tmp_path, monkeypatch
+):
+    store, root, path, track = setup(tmp_path, monkeypatch)
+    record = Recovery(store).remove("saved")
+    bad = {
+        "removed:not-an-object": json.dumps(["saved"]),
+        "removed:not-json": "{secret payload text",
+        "removed:no-track": json.dumps({"id": "no-track", "status": "removed"}),
+        "removed:wrong-type": json.dumps({"status": "removed", "track_id": ["x"]}),
+    }
+    put(store, bad)
+    reopened = Store(store.directory)
+    reopened.refresh_library()
+    reopened.refresh_library()
+    # The good removal still keeps its song out of the library.
+    assert not reopened.library["albums"]
+    assert raw(reopened, bad) == bad
+    names = [p["record"] for p in startup_problems.snapshot()]
+    assert sorted(names) == sorted(bad)
+    assert all(p["area"] == "trash" for p in startup_problems.snapshot())
+    assert reopened.read_document("removed:" + record["id"])["status"] == "removed"
 
 
 def interrupted_tidy(tmp_path, monkeypatch):
@@ -143,6 +167,7 @@ def test_tidy_recovery_skips_a_malformed_record(tmp_path, monkeypatch):
     # Records of other areas that tidy recovery reads are malformed too.
     others = {
         "organisation:not-json": "{",
+        "removed:not-json": "{",
         "organisation:no-status": json.dumps({"id": "o", "placed_from": {}}),
         "removed:no-status": json.dumps({"id": "r"}),
     }
@@ -186,7 +211,7 @@ def test_the_server_starts_with_malformed_records(tmp_path):
     with TestClient(app) as client:
         assert client.get("/api/health").status_code == 200
     assert raw(app.state.store, bad) == bad
-    assert reported("trash") == {"removed:no-status"}
+    assert reported("trash") == {name for name in bad if name.startswith("removed:")}
     assert reported("organisation") == {
         name for name in bad if name.startswith("organisation:")
     }
@@ -203,8 +228,8 @@ def test_the_server_starts_when_a_recovery_fails_as_a_whole(tmp_path, monkeypatc
     monkeypatch.setattr(Recovery, "recover", broken)
     with TestClient(app) as client:
         assert client.get("/api/health").status_code == 200
-    assert reported("trash") == {"*"}
-    (whole,) = [p for p in startup_problems.snapshot() if p["area"] == "trash"]
+    assert "*" in reported("trash")
+    (whole,) = [p for p in startup_problems.snapshot() if p["record"] == "*"]
     assert whole["error"] == "RuntimeError"
     # The recoveries after it still ran.
     assert reported("tidy") == TIDY_SKIPS

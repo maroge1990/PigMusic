@@ -10,6 +10,7 @@ from .library import identifier, normalise, load_json
 from .exporter import contained
 from .matching import exclusion_key, same_song
 from .storage import library_root, open_owned_folder, require_library_mount
+from .store import unreadable_removal
 
 log = logging.getLogger(__name__)
 
@@ -553,11 +554,13 @@ class Recovery:
 
     @coordinated
     def recover(self):
-        for name, record in startup_records(self.store, "removed", "trash"):
+        # A removal that is not a JSON object was already reported by the
+        # store when it opened; each is reported once per process.
+        for name, record in startup_records(self.store, "removed"):
             try:
                 self.recover_one(record)
             except Exception as error:
-                skipped("trash", name, error)
+                unreadable_removal(name, error)
         self.store.refresh_library()
 
     def recover_one(self, record):

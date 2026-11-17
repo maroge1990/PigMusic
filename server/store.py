@@ -13,6 +13,7 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+from . import startup_problems
 from .migrations import migrate
 from .cover_store import CoverStore
 
@@ -39,6 +40,24 @@ from .matching import (
 )
 
 log = logging.getLogger("pig_music.library")
+
+# Removal records the library build could not read, reported once (#240).
+_unreadable_removals = set()
+_unreadable_lock = threading.Lock()
+
+
+def unreadable_removal(name, error):
+    """A removal record the library build or startup recovery cannot read
+    is left as it is and skipped, so it never stops the store opening or the
+    server starting (#240). Logged and listed for the System page once per
+    process, not on every rebuild."""
+    with _unreadable_lock:
+        if name in _unreadable_removals:
+            return
+        _unreadable_removals.add(name)
+    log.error("Skipped removal record %s", name, exc_info=error)
+    startup_problems.report("trash", name, error)
+
 
 # A download's publication rebuilds the library at most this long after it,
 # once for every publication (and export) in that time (#136).
@@ -157,13 +176,17 @@ class Store:
             t["export_relative_path"] for t in extra if t.get("export_relative_path")
         }
         with self.connect() as conn:
-            removed = {
-                json.loads(v)["track_id"]
-                for (v,) in conn.execute(
-                    "SELECT payload FROM documents WHERE name >= 'removed:' AND name < 'removed;'"
-                )
-                if json.loads(v).get("status") in {"removing", "removed"}
-            }
+            rows = conn.execute(
+                "SELECT name,payload FROM documents WHERE name >= 'removed:' AND name < 'removed;'"
+            ).fetchall()
+        removed = set()
+        for name, payload in rows:
+            try:
+                record = json.loads(payload)
+                if record.get("status") in {"removing", "removed"}:
+                    removed.add(record["track_id"])
+            except Exception as error:
+                unreadable_removal(name, error)
         extra = [t for t in extra if t["id"] not in removed]
         retired = self.retired_files(retiring, {t["id"]: t for t in extra})
         anchors = self.read_document("album-edition-anchors")
