@@ -42,3 +42,15 @@ public enum ArtworkAlias {
       && digits.allSatisfy { (48...57).contains($0) }
   }
 }
+
+/// How long a tile keeps asking for a cover the server is still fetching
+/// (#168). The first ask for an unfetched cover is answered "not available"
+/// while the server fetches it, which takes 5 to 9 s for one cover and up to
+/// a minute for a full grid; the tile asks again after each of these waits
+/// (2, 8, 23, 53 and 113 s after the first miss) and then stops. Only that
+/// answer is asked about again, and only while the tile's task is alive.
+public enum CoverRetry {
+  public static let waits: [Duration] = [
+    .seconds(2), .seconds(6), .seconds(15), .seconds(30), .seconds(60),
+  ]
+}

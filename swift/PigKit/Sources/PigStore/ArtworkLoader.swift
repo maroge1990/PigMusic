@@ -13,6 +13,10 @@ import PigDomain
   private let make: (CGImage) -> Image
   /// The account's encoded artwork on disk; nil when signed out.
   public var cache: ArtworkCache?
+  /// The wait between two asks for a cover the server is still fetching.
+  /// It throws when the task is cancelled, which ends the asking; tests
+  /// replace it to state the schedule without waiting for it.
+  public var sleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
 
   public init(
     countLimit: Int = 128, totalCostLimit: Int = 24 * 1024 * 1024,
@@ -55,9 +59,11 @@ import PigDomain
   ///
   /// `retryAfter`: a cover the server has not fetched yet answers "not
   /// available" while it fetches it (a catalogue alias on first ask); the
-  /// load asks again after each of these waits before giving up, so the
-  /// screen and the lock screen are not left with a placeholder for a
-  /// cover that arrives a moment later. Other failures are not retried.
+  /// load asks again after each of these waits (`CoverRetry.waits` on a
+  /// screen) before giving up, so the screen and the lock screen are not
+  /// left with a placeholder for a cover that arrives later. Other failures
+  /// are not retried, and a cancelled task (the tile left the screen) throws
+  /// `CancellationError` from its wait and asks no more.
   public func load(
     _ request: ArtworkRequest, stopsWhenCancelled: Bool, retryAfter: [Duration] = [],
     isCurrent: () -> Bool,
@@ -66,18 +72,10 @@ import PigDomain
     guard let cache else { return nil }
     let key = request.filename as NSString
     if let image = memory.object(forKey: key) { return image }
-    var waits = retryAfter[...]
-    let data: Data
-    while true {
-      do {
-        data = try await cache.data(for: request, fetch: fetch)
-        break
-      } catch ArtworkFailure.unavailable {
-        guard let wait = waits.popFirst() else { throw ArtworkFailure.unavailable }
-        try await Task.sleep(for: wait)
-        guard isCurrent() else { return nil }
-      }
+    let found = try await asking(retryAfter, isCurrent: isCurrent) {
+      try await cache.data(for: request, fetch: fetch)
     }
+    guard let data = found else { return nil }
     if stopsWhenCancelled { try Task.checkCancellation() }
     let width = request.width
     let decoded = try await Task.detached(priority: .utility) {
@@ -88,5 +86,24 @@ import PigDomain
     let image = make(decoded)
     memory.setObject(image, forKey: key, cost: decoded.bytesPerRow * decoded.height)
     return image
+  }
+
+  /// `attempt`, made again after each wait while its answer is "not
+  /// available"; the last such answer is thrown. Nil when the account
+  /// changed during a wait. A cancelled task stops at its wait.
+  private func asking<T: Sendable>(
+    _ waits: [Duration], isCurrent: () -> Bool, _ attempt: @MainActor () async throws -> T
+  ) async throws -> T? {
+    var waits = waits[...]
+    while true {
+      do {
+        return try await attempt()
+      } catch ArtworkFailure.unavailable {
+        guard let wait = waits.popFirst() else { throw ArtworkFailure.unavailable }
+        try await sleep(wait)
+        try Task.checkCancellation()
+        guard isCurrent() else { return nil }
+      }
+    }
   }
 }

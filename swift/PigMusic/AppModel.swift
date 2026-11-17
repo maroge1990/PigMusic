@@ -1343,11 +1343,12 @@ enum PlayOrigin: Hashable {
     case appleAlbum(Int)
   }
   /// How long a screen waits for a catalogue cover the server is still
-  /// fetching (its first ask is answered "not available"): the web client's
-  /// 2 s and 6 s looks again. The lock screen waits longer (`playerRetries`),
-  /// since a song plays for minutes and nothing else re-asks for it.
-  static let coverRetries: [Duration] = [.seconds(2), .seconds(6)]
-  static let playerRetries: [Duration] = [.seconds(2), .seconds(6), .seconds(20)]
+  /// fetching (its first ask is answered "not available"): PigKit's
+  /// `CoverRetry.waits`, for as long as the tile's task lives. The lock
+  /// screen waits as long (its own 2, 6 and 20 s were shorter), since a song
+  /// plays for minutes and nothing else re-asks for it.
+  static let coverRetries = CoverRetry.waits
+  static let playerRetries = CoverRetry.waits
   func artwork(
     _ source: ArtworkSource?, width: Int = 256, retryAfter: [Duration] = coverRetries
   ) async -> UIImage? {

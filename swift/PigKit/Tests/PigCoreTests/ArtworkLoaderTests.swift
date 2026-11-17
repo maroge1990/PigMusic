@@ -16,6 +16,11 @@ private actor Fetches {
   func add() { count += 1 }
 }
 
+private actor Waits {
+  private(set) var asked: [Duration] = []
+  func add(_ wait: Duration) { asked.append(wait) }
+}
+
 private func png(size: Int = 8) throws -> Data {
   let context = try #require(
     CGContext(
@@ -143,6 +148,83 @@ private func png(size: Int = 8) throws -> Data {
       }
     }
     #expect(await once.count == 1)
+  }
+
+  /// A tile on screen keeps asking for a cover the server is slow to fetch
+  /// (#168): 2, 6, 15, 30 and 60 s after each miss, then no more. A cover
+  /// that never arrives costs five asks beyond the first, so a grid of 24
+  /// makes 24 x 5 extra requests in all.
+  @Test func aSlowCoverIsAskedForOnTheLongSchedule() async throws {
+    #expect(
+      CoverRetry.waits == [.seconds(2), .seconds(6), .seconds(15), .seconds(30), .seconds(60)])
+    let (loader, root) = try makeLoader()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let waits = Waits()
+    loader.sleep = { await waits.add($0) }
+    let never = Fetches()
+    await #expect(throws: ArtworkFailure.unavailable) {
+      _ = try await loader.load(
+        try ArtworkRequest(sha: String(repeating: "1", count: 64)), stopsWhenCancelled: false,
+        retryAfter: CoverRetry.waits, isCurrent: { true }
+      ) { _ in
+        await never.add()
+        throw ArtworkFailure.unavailable
+      }
+    }
+    #expect(await waits.asked == CoverRetry.waits)
+    #expect(await never.count == 1 + 5)
+    // A cover that arrives late (after the old 2 s and 6 s) is still shown.
+    let late = Fetches()
+    let bytes = try png()
+    let image = try await loader.load(
+      try ArtworkRequest(sha: String(repeating: "2", count: 64)), stopsWhenCancelled: false,
+      retryAfter: CoverRetry.waits, isCurrent: { true }
+    ) { _ in
+      await late.add()
+      if await late.count < 4 { throw ArtworkFailure.unavailable }
+      return bytes
+    }
+    #expect(image != nil)
+    #expect(await late.count == 4)
+    // Only "not available" is asked about again.
+    let broken = Fetches()
+    await #expect(throws: ArtworkFailure.invalidImage) {
+      _ = try await loader.load(
+        try ArtworkRequest(sha: String(repeating: "3", count: 64)), stopsWhenCancelled: false,
+        retryAfter: CoverRetry.waits, isCurrent: { true }
+      ) { _ in
+        await broken.add()
+        throw ArtworkFailure.invalidImage
+      }
+    }
+    #expect(await broken.count == 1)
+  }
+
+  /// The tile left the screen: its task is cancelled, the wait ends at once
+  /// and nothing more is asked.
+  @Test func aCancelledTileStopsAsking() async throws {
+    let (loader, root) = try makeLoader()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let request = try ArtworkRequest(sha: String(repeating: "4", count: 64))
+    let fetches = Fetches()
+    let waits = Waits()
+    loader.sleep = {
+      await waits.add($0)
+      try await Task.sleep(for: .seconds(600))
+    }
+    let tile = Task { @MainActor in
+      try await loader.load(
+        request, stopsWhenCancelled: false, retryAfter: CoverRetry.waits, isCurrent: { true }
+      ) { _ in
+        await fetches.add()
+        throw ArtworkFailure.unavailable
+      } != nil
+    }
+    while await waits.asked.isEmpty { try await Task.sleep(for: .milliseconds(2)) }
+    tile.cancel()
+    await #expect(throws: CancellationError.self) { _ = try await tile.value }
+    #expect(await fetches.count == 1)
+    #expect(await waits.asked == [.seconds(2)])
   }
 
   @Test func catalogueArtworkIsKeyedByItsAlias() throws {
