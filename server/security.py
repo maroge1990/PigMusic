@@ -18,10 +18,27 @@ from fastapi import HTTPException, Request
 from .auth import AuthError, COOKIE, public_user, records
 from .request_timing import phase
 
+READY = "/api/health/ready"
+# A request that came through a proxy carries one of these; the Docker health
+# check and the supervisor's watchdog, inside the container, carry none.
+FORWARDED = ("forwarded", "x-forwarded-for", "x-real-ip", "cf-connecting-ip")
+
+
+def local_probe(request):
+    """A direct loopback connection, not one relayed by a proxy."""
+    client = request.scope.get("client")
+    return bool(
+        client
+        and client[0] in {"127.0.0.1", "::1"}
+        and not any(name in request.headers for name in FORWARDED)
+    )
+
+
 PUBLIC = frozenset(
     {
         ("GET", "/api/health"),
         ("HEAD", "/api/health"),
+        ("GET", READY),
         ("POST", "/api/v1/auth/login"),
         ("POST", "/api/v1/auth/device"),
         ("POST", "/api/v1/setup"),
@@ -111,6 +128,12 @@ class Security:
         if self.legacy_test:
             return None
         if request.url.path == "/api/health" and request.method in {"GET", "HEAD"}:
+            return None
+        if request.url.path == READY and request.method == "GET":
+            # The container's own probes only (#238): anyone else is told
+            # the path does not exist, signed in or not.
+            if not local_probe(request):
+                raise HTTPException(404, "Not found")
             return None
         if (request.method, request.url.path) in {
             ("GET", "/api/v1/setup/owner"),
