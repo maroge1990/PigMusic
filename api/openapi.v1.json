@@ -846,6 +846,24 @@
         "title": "Assignment",
         "type": "object"
       },
+      "BusyHealth": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "last_at": {
+            "nullable": true,
+            "title": "Last At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "BusyHealth",
+        "type": "object"
+      },
       "CancelledRequestDTO": {
         "properties": {
           "cancelled": {
@@ -3418,6 +3436,29 @@
         "title": "Preferences",
         "type": "object"
       },
+      "PreviousRun": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "number"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "sentence": {
+            "title": "Sentence",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "sentence"
+        ],
+        "title": "PreviousRun",
+        "type": "object"
+      },
       "QualityDTO": {
         "properties": {
           "household_default": {
@@ -3704,6 +3745,44 @@
           "revision"
         ],
         "title": "RecentAlbums",
+        "type": "object"
+      },
+      "RecentError": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "number"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "sentence": {
+            "title": "Sentence",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "request_id",
+          "method",
+          "path",
+          "error",
+          "sentence"
+        ],
+        "title": "RecentError",
         "type": "object"
       },
       "RecordedDTO": {
@@ -4864,6 +4943,79 @@
         "title": "SourceStatus",
         "type": "object"
       },
+      "StartupProblem": {
+        "properties": {
+          "area": {
+            "title": "Area",
+            "type": "string"
+          },
+          "at": {
+            "nullable": true,
+            "title": "At",
+            "type": "number"
+          },
+          "sentence": {
+            "title": "Sentence",
+            "type": "string"
+          }
+        },
+        "required": [
+          "area",
+          "sentence"
+        ],
+        "title": "StartupProblem",
+        "type": "object"
+      },
+      "SystemHealth": {
+        "properties": {
+          "busy": {
+            "$ref": "#/components/schemas/BusyHealth"
+          },
+          "previous_run": {
+            "$ref": "#/components/schemas/PreviousRun",
+            "nullable": true
+          },
+          "recent_errors": {
+            "items": {
+              "$ref": "#/components/schemas/RecentError"
+            },
+            "title": "Recent Errors",
+            "type": "array"
+          },
+          "restarts_last_day": {
+            "title": "Restarts Last Day",
+            "type": "integer"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "number"
+          },
+          "startup_problems": {
+            "items": {
+              "$ref": "#/components/schemas/StartupProblem"
+            },
+            "title": "Startup Problems",
+            "type": "array"
+          },
+          "workers": {
+            "items": {
+              "$ref": "#/components/schemas/WorkerHealth"
+            },
+            "title": "Workers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "started_at",
+          "restarts_last_day",
+          "workers",
+          "recent_errors",
+          "busy",
+          "startup_problems"
+        ],
+        "title": "SystemHealth",
+        "type": "object"
+      },
       "TidyRequest": {
         "properties": {
           "fingerprint": {
@@ -5294,6 +5446,39 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "WorkerHealth": {
+        "properties": {
+          "last_error": {
+            "nullable": true,
+            "title": "Last Error",
+            "type": "string"
+          },
+          "last_error_at": {
+            "nullable": true,
+            "title": "Last Error At",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "restarts": {
+            "nullable": true,
+            "title": "Restarts",
+            "type": "integer"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "running"
+        ],
+        "title": "WorkerHealth",
         "type": "object"
       },
       "server__routes__catalogue__catalogue_router___locals___ArtistRequest": {
@@ -11945,6 +12130,120 @@
           }
         ],
         "summary": "Soulseek Health"
+      }
+    },
+    "/api/v1/admin/system/health": {
+      "get": {
+        "description": "What broke and why, for the owner's System page (#241).",
+        "operationId": "system_health_api_v1_admin_system_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemHealth"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Request error"
+          }
+        },
+        "security": [
+          {
+            "deviceBearer": []
+          }
+        ],
+        "summary": "System Health"
       }
     },
     "/api/v1/admin/tracks/{track_id}/remove": {

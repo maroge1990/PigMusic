@@ -35,6 +35,16 @@ WATCHDOG_RESTART_LIMIT = 3
 WATCHDOG_RESTART_WINDOW = 3600
 WATCHDOG_REMINDER_SECONDS = 600
 RESTART_HISTORY_ENTRIES = 50
+# The history also says how each run of the server ended (#241): "start"
+# when it is started, then "stop" (asked to stop: a release or a container
+# stop), "exit" (it ended by itself), "watchdog" (ended for not answering),
+# or, found at the next start, "unexpected" (nothing was written: the
+# container was killed). Only "watchdog" entries count towards its limit.
+ENDINGS = ("stop", "exit", "watchdog", "unexpected")
+UNEXPECTED_END = (
+    "The previous run ended unexpectedly"
+    " (the container was killed: out of memory, power or a forced stop)"
+)
 
 
 def log_config(root):
@@ -126,8 +136,8 @@ def restart_history(path):
 
 
 def record_restart(path, at, kind, detail):
-    """Append {"at", "kind": "watchdog"|"exit", "detail"}, keeping the newest
-    entries. Never raises: returns whether the entry was written."""
+    """Append {"at", "kind": "start" or one of ENDINGS, "detail"}, keeping
+    the newest entries. Never raises: returns whether the entry was written."""
     try:
         path = Path(path)
         entries = restart_history(path)
@@ -139,6 +149,25 @@ def record_restart(path, at, kind, detail):
         return True
     except Exception:
         return False
+
+
+def record_start(path, at):
+    """Record that the server is starting. A newest entry that is a start
+    with nothing after it means the run before ended without a word: that
+    is recorded (and said) first."""
+    entries = restart_history(path)
+    if entries and entries[-1].get("kind") == "start":
+        say(UNEXPECTED_END)
+        record_restart(path, at, "unexpected", UNEXPECTED_END)
+    record_restart(path, at, "start", "Server started")
+
+
+def stop_reason(signum):
+    try:
+        name = signal.Signals(signum).name
+    except (TypeError, ValueError):
+        name = "a stop signal"
+    return f"Server was asked to stop ({name}): a release or a container stop"
 
 
 def exit_reason(code):
@@ -326,12 +355,15 @@ def main():
     server = None
     engine = None
     stopping = False
+    stop_signal = None
     probing = False
 
     def stop(signum, frame):
-        nonlocal stopping
+        nonlocal stopping, stop_signal
         first = not stopping
         stopping = True
+        if first and signum is not None:
+            stop_signal = signum
         for child in (engine, server):
             if child and child.poll() is None:
                 child.terminate()
@@ -345,7 +377,9 @@ def main():
     log = None
     try:
         root = Path(os.environ.get("PIG_MUSIC_DATA", "/data"))
+        history = root / "logs" / "restarts.json"
         engine, log = start_engine(root)
+        record_start(history, time.time())
         server = subprocess.Popen(
             [
                 sys.executable,
@@ -374,7 +408,6 @@ def main():
         backoff = ENGINE_BACKOFF_START
         started = time.monotonic()
         next_engine_check = 0
-        history = root / "logs" / "restarts.json"
         watchdog = Watchdog(
             (os.environ.get("PIG_MUSIC_WATCHDOG") or "restart").strip().lower(),
             started,
@@ -429,6 +462,8 @@ def main():
             reason = exit_reason(server.poll())
             say(reason)
             record_restart(history, time.time(), "exit", reason)
+        elif not failed:
+            record_restart(history, time.time(), "stop", stop_reason(stop_signal))
         stop(None, None)
         deadline = time.monotonic() + 25
         for child in (engine, server):

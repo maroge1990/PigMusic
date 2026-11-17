@@ -136,7 +136,8 @@ def test_a_server_silent_for_300_seconds_is_ended_and_the_restart_recorded(
     # Ten probes, 30 s apart, the first after the 180 s startup grace.
     assert run.probes == [180 + 30 * n for n in range(10)]
     assert run.server.returncode == 0  # terminated, not left to exit
-    [entry] = run.entries()
+    start, entry = run.entries()
+    assert start["kind"] == "start" and start["at"] == 1_000_000
     assert entry["kind"] == "watchdog" and entry["at"] == 1_000_000 + 450
     err = capsys.readouterr().err
     assert "Server has not answered for 300 s; restarting it" in err
@@ -244,7 +245,7 @@ def test_log_mode_reports_a_silent_server_without_ending_it(
     assert runtime.main() == 1
     assert len(run.probes) > 20
     # It outlived the silence and ended by itself: only that is recorded.
-    assert [entry["kind"] for entry in run.entries()] == ["exit"]
+    assert [entry["kind"] for entry in run.entries()] == ["start", "exit"]
 
 
 def test_off_mode_never_probes(tmp_path, monkeypatch):
@@ -325,7 +326,7 @@ def test_a_killed_server_says_which_signal_ended_it(tmp_path, monkeypatch, capsy
     assert runtime.main() == 1
     line = "Server was ended by signal 9 (SIGKILL: possibly out of memory)"
     assert line in capsys.readouterr().err
-    [entry] = run.entries()
+    _, entry = run.entries()
     assert entry["kind"] == "exit" and entry["detail"] == line
     assert runtime.exit_reason(3) == "Server exited with code 3"
     assert runtime.exit_reason(-15) == "Server was ended by signal 15 (SIGTERM)"
@@ -342,7 +343,8 @@ def test_a_stop_signal_during_a_probe_stops_at_once(tmp_path, monkeypatch, capsy
     assert runtime.main() == 0
     assert run.probes == [180] and run.clock[0] == 180
     assert run.server.returncode == 0
-    assert not run.history.exists()
+    # Recorded as asked to stop, not as a crash or a watchdog restart.
+    assert [entry["kind"] for entry in run.entries()] == ["start", "stop"]
     assert capsys.readouterr().err == ""
 
 

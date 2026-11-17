@@ -70,6 +70,7 @@ from .artwork import Artwork
 from .portraits import Portraits
 from .popularity import Popularity
 from .api_models import DownloadLogDTO
+from .system_health import SystemHealth, report as system_health_report
 from .artist_backgrounds import Backgrounds
 from .artist_logos import Logos
 from .home import HomeDiscovery
@@ -147,6 +148,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     exporter = Exporter(store)
     artist_jobs = ArtistJobs(store, music_catalogue)
     workers = WorkerStatus()
+    started_at = time.time()
     ready_checks = ReadinessChecks()
     recovery = Recovery(store)
     organisation = Organisation(store, recovery)
@@ -1324,6 +1326,19 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     async def admin_diagnostics():
         """Every recent request, each route's timing, stalls with stacks."""
         return request_diagnostics()
+
+    @app.get("/api/v1/admin/system/health", response_model=SystemHealth)
+    async def system_health():
+        """What broke and why, for the owner's System page (#241)."""
+        engine = await asyncio.to_thread(Soulseek(store).health)
+        return await asyncio.to_thread(
+            system_health_report,
+            started_at,
+            store.directory / "logs" / "restarts.json",
+            workers,
+            app.state.problems,
+            engine,
+        )
 
     @app.get("/api/v1/admin/warmer")
     def warmer_status():
