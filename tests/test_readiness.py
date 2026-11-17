@@ -134,7 +134,7 @@ def test_readiness_answers_only_a_direct_local_caller(tmp_path, monkeypatch):
         assert signed_in.status_code == 404
         assert "checks" not in signed_in.text
         assert client.post(READY, json={}).status_code == 405
-    with TestClient(app, client=("192.168.1.20", 50000)) as client:
+    with TestClient(app, client=("198.51.100.20", 50000)) as client:
         assert client.get(READY).status_code == 404
 
 
