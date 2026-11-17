@@ -158,6 +158,7 @@ def test_fanart_file_names_are_unchanged_by_the_shared_key_tag(tmp_path):
     assert background_target(store, artist).stem == identifier(
         "artist-background", artist, tag
     )
+    # v3 since #168: portraits saved before it are fetched again, on purpose.
     assert portrait_target(store, "Name", artist).stem == identifier(
-        "portrait-v2", artist + tag
+        "portrait-v3", artist + tag
     )

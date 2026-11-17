@@ -1,8 +1,10 @@
 """Display-only artwork enrichment; never writes tags or catalogue identity."""
 
 import asyncio
+from contextvars import ContextVar
 import io
 import json
+import logging
 import re
 import time
 from pathlib import PurePosixPath
@@ -17,6 +19,13 @@ from .images import save_image
 from .deezer_art import DeezerArt, DeezerRefused, deezer_image
 from .library import normalise, identifier
 from .matching import album_title, lead_artist, strip_edition, title_key
+
+
+log = logging.getLogger("pig_music.artwork")
+# Documents "image-source:<file name>": where each saved image came from.
+SOURCE = "image-source:"
+# Set by `front` for its caller, which saves the image: (source, address).
+supplied = ContextVar("artwork_supplied", default=None)
 
 
 def quoted(value):
@@ -78,6 +87,26 @@ class Artwork:
         performance = getattr(self.store, "performance", None)
         if performance is not None:
             performance.record("artwork-source", kind, source)
+
+    def remember_source(self, target, source, url):
+        self.store.write_document(
+            SOURCE + target.name,
+            {"source": source, "url": url, "saved": int(time.time())},
+        )
+
+    async def sourced(self, target, source, url):
+        """Record where a newly saved image came from (#168), so a source
+        found to be bad later can be traced without fetching everything
+        again. One document write when an image is saved; serving an image
+        never reads it. Never fails the save."""
+        try:
+            await settled(self.remember_source, target, source, url)
+        except Exception:
+            log.warning("Recording the source of %s failed", target.name)
+
+    def source(self, target):
+        """{"source", "url", "saved"} of a saved image; {} when unrecorded."""
+        return self.store.read_document(SOURCE + target.name)
 
     def target(self, album):
         return self.store.cover_dir / (
@@ -168,7 +197,7 @@ class Artwork:
                                 return None
                             kind = "release"
                     content = await self.front(client, kind, selected)
-                    await asyncio.to_thread(self.save, content, target)
+                    await self.keep(content, target)
                     return target
                 except httpx.HTTPStatusError as exc:
                     await self.missing(
@@ -228,7 +257,7 @@ class Artwork:
             async with self.slots:
                 try:
                     content = await self.front(client, kind, item_id)
-                    await asyncio.to_thread(self.save, content, target)
+                    await self.keep(content, target)
                     return target
                 except httpx.HTTPStatusError as exc:
                     # A cover that does not exist is asked for again tomorrow,
@@ -251,6 +280,7 @@ class Artwork:
     async def front(self, client, kind, item_id):
         """Deezer's cover first (#194), else the Cover Art Archive's."""
         unsure = False
+        supplied.set(None)
         try:
             url = await self.deezer.cover(client, kind, item_id)
             if url:
@@ -258,6 +288,7 @@ class Artwork:
                 # Decoded here, so a broken image still reaches the archive.
                 await asyncio.to_thread(self.check, content)
                 self.counted("cover", "deezer")
+                supplied.set(("deezer", url))
                 return content
         except (httpx.HTTPError, DeezerRefused):
             unsure = True  # Deezer (or MusicBrainz) may answer later.
@@ -285,20 +316,26 @@ class Artwork:
         Many tagged editions (regional pressings, reissues) have no scan of
         their own while the release group does. Never crosses release groups.
         """
+        url = f"https://coverartarchive.org/{kind}/{item_id}/front-500"
         try:
-            return await self.fetch(
-                client, f"https://coverartarchive.org/{kind}/{item_id}/front-500"
-            )
+            content = await self.fetch(client, url)
         except httpx.HTTPStatusError as exc:
             if kind != "release" or exc.response.status_code != 404:
                 raise
-        release = await self.catalogue.get(
-            client, "release/" + item_id, inc="release-groups"
-        )
-        group_id = mbid(release["release-group"]["id"])
-        return await self.fetch(
-            client, f"https://coverartarchive.org/release-group/{group_id}/front-500"
-        )
+            release = await self.catalogue.get(
+                client, "release/" + item_id, inc="release-groups"
+            )
+            group_id = mbid(release["release-group"]["id"])
+            url = f"https://coverartarchive.org/release-group/{group_id}/front-500"
+            content = await self.fetch(client, url)
+        supplied.set(("cover-art-archive", url))
+        return content
+
+    async def keep(self, content, target):
+        """Save the image `front` returned and record where it came from."""
+        await asyncio.to_thread(self.save, content, target)
+        if supplied.get():
+            await self.sourced(target, *supplied.get())
 
     async def artist(self, client, artist):
         albums = self.store.albums_by_id

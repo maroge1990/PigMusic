@@ -519,3 +519,89 @@ def test_a_silhouette_goes_on_to_the_next_source_and_is_not_counted_as_deezer(
         ).fetchone()
     assert json.loads(payload)["retry_after"] > time.time() + 3600
     assert len(counted) == 2
+
+
+def test_portraits_saved_before_the_silhouette_fix_are_fetched_again_when_asked_for(
+    tmp_path,
+):
+    """A saved image did not record its source, so a silhouette already saved
+    as a photo cannot be told from a real one. Portraits have a new key: an
+    old file is left where it is and no longer read, and the photo is fetched
+    again, once, when it is next asked for. New saves record their source."""
+    import hashlib
+
+    from server.fanart import key_tag
+    from server.library import identifier
+    from server.media import settings
+
+    (tmp_path / "media-settings.json").write_text(
+        json.dumps({"portraits": True}), encoding="utf-8"
+    )
+    asked = []
+
+    def handle(request):
+        asked.append(request.url.host + request.url.path)
+        if request.url.host == "musicbrainz.org":
+            if "/release/" in request.url.path:
+                return httpx.Response(200, json=RELEASE_ENTITY)
+            return httpx.Response(
+                200,
+                json={
+                    "name": "Radiohead",
+                    "relations": [
+                        {"url": {"resource": "https://www.deezer.com/artist/399"}}
+                    ],
+                },
+            )
+        if request.url.path == "/artist/399":
+            return httpx.Response(200, json={"picture_xl": PHOTO})
+        if request.url.host == "api.deezer.com":
+            return httpx.Response(200, json={"data": [album()]})
+        if request.url.host == "cdn-images.dzcdn.net":
+            return httpx.Response(200, content=image_bytes())
+        return httpx.Response(500)
+
+    app = create_app(tmp_path)
+    store = app.state.store
+
+    def portrait(generation):
+        name = identifier(generation, ARTIST + key_tag("")) + ".jpg"
+        return store.cover_dir / name
+
+    # As the server before this change left it: the silhouette under the old
+    # key, and the catalogue artist's saved answer naming that file.
+    old, new = portrait("portrait-v2"), portrait("portrait-v3")
+    Artwork.save(image_bytes(), old)
+    before = old.read_bytes()
+    tag = hashlib.sha256(
+        json.dumps(settings(store), sort_keys=True).encode()
+    ).hexdigest()[:12]
+    saved_answer = f"catalogue-artist-image:{ARTIST}:{tag}"
+    store.write_document(saved_answer, {"file": old.name})
+    url = f"/api/v1/catalogue/artists/{ARTIST}/artwork"
+    with TestClient(app) as client:
+        original = app.state.http
+        app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+        # The old file is not served; asking starts one fetch.
+        assert client.get(url).status_code == 404
+        client.portal.call(app.state.enrichment.queue.join)
+        assert "api.deezer.com/artist/399" in asked and new.is_file()
+        # Saved under the new key: served, and nothing is fetched.
+        fetched = len(asked)
+        assert client.get(url).status_code == 200
+        client.portal.call(app.state.enrichment.queue.join)
+        assert len(asked) == fetched
+        # Where each new image came from is on record.
+        cover = "/api/v1/catalogue/artwork/release/" + RELEASE
+        assert client.get(cover).status_code == 404
+        client.portal.call(app.state.enrichment.queue.join)
+        assert client.get(cover).status_code == 200
+        app.state.http = original
+    source = store.read_document("image-source:" + new.name)
+    assert (source["source"], source["url"]) == ("deezer", PHOTO)
+    cover_file = identifier("catalogue-artwork:release:" + RELEASE) + ".jpg"
+    source = store.read_document("image-source:" + cover_file)
+    assert (source["source"], source["url"]) == ("deezer", COVER)
+    # Nothing of the old generation was deleted or rewritten.
+    assert old.read_bytes() == before
+    assert store.read_document(saved_answer) == {"file": old.name}

@@ -19,6 +19,12 @@ from .library import identifier, normalise
 from .media import settings
 from .fanart import Fanart, key_tag
 
+# The generation of saved portraits. v3 (#168): Deezer's "no picture"
+# silhouette had been saved as some artists' photo, and a saved image did not
+# record its source, so every portrait is fetched again when next asked for.
+# Files of an earlier generation are left where they are and no longer read.
+PORTRAIT_KEY = "portrait-v3"
+
 
 class Portraits:
     def __init__(self, store, catalogue, artwork, fanart=None):
@@ -161,11 +167,12 @@ class Portraits:
                         raise ValueError("Portrait too large")
         await asyncio.to_thread(self.artwork.save, bytes(content), target)
         self.artwork.counted("photo", source)
+        await self.artwork.sourced(target, source, url)
         return target
 
 
 def portrait_target(store, name, artist_id=None):
     config = settings(store)
     provider = key_tag(config.get("fanart_key", ""))
-    key = identifier("portrait-v2", (artist_id or normalise(name)) + provider)
+    key = identifier(PORTRAIT_KEY, (artist_id or normalise(name)) + provider)
     return store.cover_dir / (key + ".jpg")

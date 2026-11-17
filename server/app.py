@@ -42,7 +42,7 @@ from .routes.artwork import artwork_router
 from .device_copies import DeviceCopies
 from .routes.device_copies import device_copy_router
 from .routes.household import household_router
-from .portraits import portrait_target
+from .portraits import PORTRAIT_KEY, portrait_target
 from .library_artwork import portraits_waiting
 from .tidy import Tidy
 from .artist_backgrounds import background_target
@@ -949,8 +949,13 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             )
 
     def image_config():
+        # The portrait generation is part of it: the catalogue artist's saved
+        # answer names a portrait file, and one from before a new generation
+        # must not be served (#168).
         return hashlib.sha256(
-            json.dumps(private_media_settings(store), sort_keys=True).encode()
+            (
+                json.dumps(private_media_settings(store), sort_keys=True) + PORTRAIT_KEY
+            ).encode()
         ).hexdigest()[:12]
 
     def library_image_key(kind, item):
@@ -1053,6 +1058,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             url = await search_routes.apple.cover_url(app.state.http, collection_id)
             content = await artwork.fetch(app.state.http, url, address=apple_artwork)
             await asyncio.to_thread(artwork.save, content, target)
+            await artwork.sourced(target, "apple", url)
             return target
         except (httpx.HTTPError, ValueError, KeyError, TypeError, OSError):
             return None
@@ -1087,6 +1093,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             content = await fanart.download(app.state.http, cover["url"])
             await asyncio.to_thread(artwork.save, content, target)
             artwork.counted("cover", "fanart")
+            await artwork.sourced(target, "fanart", cover["url"])
             return target
         except Exception:
             # Optional enrichment; the placeholder cover remains.
