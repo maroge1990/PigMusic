@@ -29,6 +29,9 @@ SLOW_MS = 1000
 CLIENT_ID = re.compile(r"[A-Za-z0-9_-]{8,64}")
 PHASE_NAME = re.compile(r"[a-z][a-z0-9-]{0,31}")
 MAX_PHASES = 24
+# Where the request's ID is kept on the ASGI scope, for an error handler that
+# runs outside this middleware, after the request's context has gone.
+REQUEST_ID = "pig_music.request_id"
 
 _trace = contextvars.ContextVar("pig_music_request_trace", default=None)
 
@@ -156,6 +159,7 @@ class RequestTiming:
                 break
         trace = Trace(given if CLIENT_ID.fullmatch(given) else secrets.token_hex(8))
         token = _trace.set(trace)
+        scope[REQUEST_ID] = trace.id
         status = None
         headers_ms = None
 

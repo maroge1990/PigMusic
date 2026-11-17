@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 from .auth import Auth
 from .auth_logging import install_validation_redaction
+from .errors import install as install_error_responses
 from .routes.auth import auth_router, set_cookie
 from .routes.personal import personal_router
 from .security import Security, audit_routes, legacy_test_enabled
@@ -341,6 +342,9 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     app.state.look_ahead = look_ahead
     app.state.source_runtime = source_runtime
     app.state.enrichment = enrichment
+    # Added first, so it is innermost: the 500 it sends for an unhandled error
+    # passes through every middleware below like any other response.
+    install_error_responses(app)
     app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.add_middleware(JsonBodyLimit)
 
