@@ -1,11 +1,13 @@
 """Supervise the web service and its private Soulseek engine in one container."""
 
+import http.client
 import json
 import os
 import signal
 import subprocess
 import sys
 import time
+import urllib.parse
 from pathlib import Path
 
 from .transport import proxy_trust
@@ -21,6 +23,18 @@ ENGINE_HEAP_MB = 512
 # survives restarts in the data folder; the container log is unchanged.
 LOG_FILE_BYTES = 5 * 1024 * 1024
 LOG_FILE_BACKUPS = 1
+# The watchdog (#238) asks the server whether it is ready every 30 s once it
+# has had 3 minutes to start. Ten probes in a row without any answer (300 s)
+# end the server, so Docker restarts the container; at most 3 times an hour.
+READY_URL = "http://127.0.0.1:8765/api/health/ready"
+WATCHDOG_GRACE = 180
+WATCHDOG_INTERVAL = 30
+WATCHDOG_PROBE_TIMEOUT = 10
+WATCHDOG_SILENT_SECONDS = 300
+WATCHDOG_RESTART_LIMIT = 3
+WATCHDOG_RESTART_WINDOW = 3600
+WATCHDOG_REMINDER_SECONDS = 600
+RESTART_HISTORY_ENTRIES = 50
 
 
 def log_config(root):
@@ -65,6 +79,146 @@ def _file_log_config(packaged, logs):
     path = logs / "logging.json"
     path.write_text(json.dumps(config, indent=2))
     return path
+
+
+def say(line):
+    print(line, file=sys.stderr, flush=True)
+
+
+def probe(url=READY_URL, timeout=WATCHDOG_PROBE_TIMEOUT):
+    """Ask the server whether it is ready: ("ok", []), ("degraded", [what it
+    reports as failing]) for any other HTTP answer, or ("silent", []) when it
+    does not answer at all (refused, reset or timed out)."""
+    target = urllib.parse.urlsplit(url)
+    connection = http.client.HTTPConnection(
+        target.hostname, target.port or 80, timeout=timeout
+    )
+    try:
+        connection.request("GET", target.path)
+        response = connection.getresponse()
+        if response.status == 200:
+            return "ok", []
+        try:
+            checks = json.loads(response.read(4096))["checks"]
+            failing = sorted(name for name, passed in checks.items() if not passed)
+        except Exception:
+            failing = []
+        return "degraded", failing or [f"HTTP {response.status}"]
+    except (OSError, http.client.HTTPException):
+        return "silent", []
+    finally:
+        connection.close()
+
+
+def restart_history(path):
+    """The entries of logs/restarts.json; anything unreadable is no history."""
+    try:
+        entries = json.loads(Path(path).read_text())
+        return [
+            entry
+            for entry in entries
+            if isinstance(entry, dict)
+            and isinstance(entry.get("at"), (int, float))
+            and not isinstance(entry.get("at"), bool)
+        ]
+    except Exception:
+        return []
+
+
+def record_restart(path, at, kind, detail):
+    """Append {"at", "kind": "watchdog"|"exit", "detail"}, keeping the newest
+    entries. The history is optional: an error writing it is ignored."""
+    try:
+        path = Path(path)
+        entries = restart_history(path)
+        entries.append({"at": at, "kind": kind, "detail": detail})
+        path.parent.mkdir(parents=True, exist_ok=True)
+        partial = path.with_name(path.name + ".part")
+        partial.write_text(json.dumps(entries[-RESTART_HISTORY_ENTRIES:], indent=1))
+        partial.replace(path)
+    except Exception:
+        pass
+
+
+def exit_reason(code):
+    if code is not None and code < 0:
+        try:
+            name = signal.Signals(-code).name
+        except ValueError:
+            name = "unknown"
+        if -code == signal.SIGKILL:
+            name += ": possibly out of memory"
+        return f"Server was ended by signal {-code} ({name})"
+    return f"Server exited with code {code}"
+
+
+class Watchdog:
+    """Decides what a probe's result means. `due` says when to probe;
+    `observe` takes the result and returns "restart" when the server should
+    be ended. It never sleeps, probes or ends anything itself."""
+
+    def __init__(self, mode, started, history, say=say):
+        self.mode = mode if mode in {"restart", "log", "off"} else "restart"
+        self.history = history
+        self.say = say
+        self.next_probe = started + WATCHDOG_GRACE
+        self.silent = 0
+        self.degraded = False
+        self.reminded = None
+
+    def due(self, now):
+        if self.mode == "off" or now < self.next_probe:
+            return False
+        self.next_probe = now + WATCHDOG_INTERVAL
+        return True
+
+    def observe(self, now, wall, state, failing=()):
+        """`now` is the monotonic clock, `wall` the time of day (the restart
+        history outlives this process)."""
+        if state != "silent":
+            self.silent = 0
+            self.reminded = None
+            if state == "ok" and self.degraded:
+                self.degraded = False
+                self.say("Server reports ok again")
+            elif state == "degraded" and not self.degraded:
+                self.degraded = True
+                self.say("Server reports unavailable: " + ", ".join(failing))
+            return None
+        self.silent += 1
+        if self.silent * WATCHDOG_INTERVAL < WATCHDOG_SILENT_SECONDS:
+            return None
+        unanswered = f"Server has not answered for {WATCHDOG_SILENT_SECONDS} s"
+        refusal = None
+        if self.mode == "log":
+            refusal = "not restarting it (PIG_MUSIC_WATCHDOG=log)"
+        else:
+            recent = [
+                entry
+                for entry in restart_history(self.history)
+                if entry.get("kind") == "watchdog"
+                and 0 <= wall - entry["at"] < WATCHDOG_RESTART_WINDOW
+            ]
+            if len(recent) >= WATCHDOG_RESTART_LIMIT:
+                refusal = (
+                    f"not restarting again: {WATCHDOG_RESTART_LIMIT} restarts"
+                    " in the last hour"
+                )
+        if refusal:
+            if (
+                self.reminded is None
+                or now - self.reminded >= WATCHDOG_REMINDER_SECONDS
+            ):
+                self.reminded = now
+                self.say(f"{unanswered}; {refusal}")
+            return None
+        self.say(f"{unanswered}; restarting it")
+        record_restart(self.history, wall, "watchdog", unanswered)
+        return "restart"
+
+
+class _Stopping(BaseException):
+    """Raised by the stop signal to leave a probe that is still waiting."""
 
 
 def start_engine(root):
@@ -165,13 +319,19 @@ def main():
     server = None
     engine = None
     stopping = False
+    probing = False
 
     def stop(signum, frame):
         nonlocal stopping
+        first = not stopping
         stopping = True
         for child in (engine, server):
             if child and child.poll() is None:
                 child.terminate()
+        # A probe can wait 10 s for a server that is not answering: the
+        # signal ends that wait, so stopping never queues behind it.
+        if probing and first and signum is not None:
+            raise _Stopping()
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
@@ -207,6 +367,13 @@ def main():
         backoff = ENGINE_BACKOFF_START
         started = time.monotonic()
         next_engine_check = 0
+        history = root / "logs" / "restarts.json"
+        watchdog = Watchdog(
+            os.environ.get("PIG_MUSIC_WATCHDOG", "restart").strip().lower(),
+            started,
+            history,
+        )
+        unanswered = False
         while not stopping and server.poll() is None:
             if engine and engine.poll() is not None:
                 if time.monotonic() - started >= ENGINE_HEALTHY_SECONDS:
@@ -231,8 +398,30 @@ def main():
                 started = time.monotonic()
                 if not engine:
                     next_engine_check = time.monotonic() + 5
+            if watchdog.due(time.monotonic()):
+                # Done here rather than on a thread: one probe holds the loop
+                # for at most its 10 s timeout, once every 30 s.
+                try:
+                    try:
+                        probing = True
+                        state, failing = probe()
+                    finally:
+                        probing = False
+                except _Stopping:
+                    continue
+                if (
+                    not stopping
+                    and watchdog.observe(time.monotonic(), time.time(), state, failing)
+                    == "restart"
+                ):
+                    unanswered = True
+                    break
             time.sleep(0.25)
         failed = not stopping
+        if failed and not unanswered:
+            reason = exit_reason(server.poll())
+            say(reason)
+            record_restart(history, time.time(), "exit", reason)
         stop(None, None)
         deadline = time.monotonic() + 25
         for child in (engine, server):
