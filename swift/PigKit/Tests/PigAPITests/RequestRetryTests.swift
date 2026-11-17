@@ -41,6 +41,27 @@ private enum Answer {
   static let serverError =
     #"{"detail":"Something went wrong on the server.","code":"server_error","request_id":"0123456789abcdef"}"#
   static let otherBusy = #"{"detail":"Restarting.","code":"restarting"}"#
+  static let proxyPage = "<html><body>500 Internal Server Error</body></html>"
+  static let otherError = #"{"detail":"Oops.","code":"something_else"}"#
+}
+
+/// A server that answers the first request with `first`, and every later
+/// one as accepted.
+private final class RecoveringTransport: ClientTransport, @unchecked Sendable {
+  let first: StatusTransport
+  private let lock = NSLock()
+  private var sent = 0
+  init(_ first: StatusTransport) { self.first = first }
+  func send(_ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String) async throws
+    -> (HTTPResponse, HTTPBody?)
+  {
+    let count = lock.withLock {
+      sent += 1
+      return sent
+    }
+    let answer = count == 1 ? first : StatusTransport(status: 200)
+    return try await answer.send(request, body: body, baseURL: baseURL, operationID: operationID)
+  }
 }
 
 /// Codex round 1 on #206: a server restart (5xx) or a rate limit must keep a
@@ -79,7 +100,7 @@ private enum Answer {
 
   @Test(arguments: [
     (429, nil), (502, nil), (503, Answer.busy), (503, Answer.otherBusy), (504, nil),
-    (503, Answer.unconfirmed),
+    (503, Answer.unconfirmed), (500, ""), (500, Answer.proxyPage), (500, Answer.otherError),
   ] as [(Int, String?)])
   func aServerThatCanAnswerLaterKeepsTheRequest(status: Int, body: String?) async throws {
     let (outcome, pending) = try await outcome(after: status, body: body)
@@ -92,6 +113,34 @@ private enum Answer {
     let (outcome, pending) = try await outcome(after: status)
     #expect(outcome.refused == ["song"] && outcome.stop == .done)
     #expect(pending.isEmpty)
+  }
+
+  /// Codex on #239: a 500 that isn't the server's own may never have
+  /// reached it; the request is kept and sent again once the server answers.
+  @Test(arguments: ["", Answer.proxyPage] as [String])
+  func aProxysServerErrorKeepsTheRequestUntilItIsSent(body: String) async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = try LibraryStore(path: root.appendingPathComponent("requests.sqlite").path)
+    let origin = URL(string: "https://fixture.invalid")!
+    let service = NativeService(
+      server: origin,
+      client: Client(
+        serverURL: origin,
+        transport: RecoveringTransport(StatusTransport(status: 500, body: body))),
+      vault: Tokens())
+    try await RequestOutbox.add(song, to: store)
+    let first = try await RequestOutbox.send(store: store, isCurrent: { true }) {
+      try await service.requestMusic($0)
+    }
+    #expect(first.stop == .offline && first.refused.isEmpty)
+    #expect(await RequestOutbox.pending(store).map(\.id) == ["song"])
+    let second = try await RequestOutbox.send(store: store, isCurrent: { true }) {
+      try await service.requestMusic($0)
+    }
+    #expect(second.requested == ["song"] && second.stop == .done)
+    #expect(await RequestOutbox.pending(store).isEmpty)
   }
 
   @Test func aServerErrorDropsTheRequestWithItsReference() async throws {
@@ -113,6 +162,7 @@ private enum Answer {
   @Test func eachBusyOrFailedAnswerIsToldApart() async {
     for (status, body) in [
       (429, nil), (502, nil), (504, nil), (503, Answer.busy), (503, Answer.otherBusy),
+      (500, ""), (500, Answer.proxyPage), (500, Answer.otherError),
     ] as [(Int, String?)] {
       #expect(await failure(status, body) is ServerBusy, "\(status) \(body ?? "")")
     }
@@ -120,7 +170,6 @@ private enum Answer {
     #expect(
       await failure(500, Answer.serverError) as? NativeFailure
         == .serverError(requestID: "0123456789abcdef"))
-    #expect(await failure(500, "") as? NativeFailure == .serverError(requestID: nil))
   }
 
   /// An interactive write says what happened rather than "not confirmed".

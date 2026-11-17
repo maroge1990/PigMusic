@@ -50,23 +50,29 @@ public struct ServerBusy: LocalizedError, Sendable {
 /// What a failed answer says beyond "not now" (#239). The server answers a
 /// busy read 503 `server_busy` (try again), a busy write 503
 /// `busy_unconfirmed` (it may have been saved) and anything unexpected 500
-/// `server_error` with the request's ID. A 429, 502, 504 or a 503 without a
-/// known code (a proxy, a restarting server) is plain busy.
+/// `server_error` with the request's ID. A 429, 502, 504, a 503 without a
+/// known code (a proxy, a restarting server) and a 500 that isn't the
+/// server's own (an empty or HTML answer from a proxy, which may never have
+/// reached it) are plain busy.
 enum ServerAnswer {
   /// A 503's code: a write the server can't confirm, or nil for plain busy.
   static func unconfirmed(code: String?) -> NativeFailure? {
     code == "busy_unconfirmed" ? .busyUnconfirmed : nil
   }
-  /// An undocumented status: a 500 is a server error, with the request ID
-  /// its body gives (none from a proxy's page); nil for anything else.
+  /// An undocumented status: the server's own 500 is a server error, with
+  /// the request ID it gives; nil for anything else.
   static func serverError(status: Int, _ payload: UndocumentedPayload) async -> NativeFailure? {
-    guard status == 500 else { return nil }
-    struct Body: Decodable { let request_id: String? }
-    var id: String?
-    if let body = payload.body, let data = try? await Data(collecting: body, upTo: 64 * 1024) {
-      id = (try? JSONDecoder().decode(Body.self, from: data))?.request_id
+    guard status == 500, let body = payload.body,
+      let data = try? await Data(collecting: body, upTo: 64 * 1024)
+    else { return nil }
+    struct Body: Decodable {
+      let code: String?
+      let request_id: String?
     }
-    return .serverError(requestID: id)
+    guard let answer = try? JSONDecoder().decode(Body.self, from: data),
+      answer.code == "server_error"
+    else { return nil }
+    return .serverError(requestID: answer.request_id)
   }
 }
 
