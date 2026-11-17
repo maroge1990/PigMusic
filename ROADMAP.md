@@ -5,19 +5,21 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 17 Nov 2026 (Melbourne), morning.*
+*Overwritten at the end of every session. 17 Nov 2026 (Melbourne), evening.*
 
-- **Live:** release `retry-20261117-v1`, server `5154afa`, healthy. **TestFlight:** 0.2.0 (1041) from `5154afa`.
-- **Batch 25 (device round on 1034):** a song that fails while paused shows its failure and retry mark, its pause
-  kept for automatic re-adds (#232); Remove all asks with a centred alert (#233, D-114); one Clear finished button,
-  pink only when there is something to clear (#234); a failed song asked for again from a playlist no longer answers
-  500, and ServerBusy is said in words (#235). Codex: one medium fixed and confirmed; nothing open.
-- **Waiting on Mark's device check:** #229 song menu, #219 Watch background delivery and battery figures, #232–#235.
-- **Decisions:** D-114 (Remove all alert). Next: D-115.
-- **Review, 17 Nov:** polish and resilience review of server, web, iPhone and Watch filed as #236–#253. The server
-  did not crash that morning (one 500, #235); the real gaps are workers that stop for good on one error (#236) and
-  a stuck server nothing restarts (#238). Mark has the report and picks the order.
-- **Mac:** about 15 GB free; Mark's PigTV project shares the simulators and runs `simctl shutdown all`, which can kill
+- **Live:** release `stayup-20261117-v1`, server `933e5b1`, healthy. **TestFlight:** 0.2.0 (1041) from `5154afa`.
+- **Batch A, stay up (server):** the download, export and artist workers restart after an unexpected error (#236);
+  a repeated request no longer holds the database for 13 to 15 s (#237, now under 1 s); a busy database answers
+  "try again" for reads only and anything unexpected answers a 500 that names its request (#239, server half);
+  `/api/health/ready`, reachable only from inside the container, feeds the Docker health check and a watchdog in
+  the supervisor that restarts a server that stops answering (#238). Codex: two rounds, one medium and one high
+  found, both fixed and confirmed. #236, #237 and #238 closed; left over in #256.
+- **Review, 17 Nov:** server, web, iPhone and Watch reviewed; findings are #236 to #256. The server did not crash
+  that morning (one 500, #235). `scripts/simulator_showcase.py` now photographs every iPhone and Watch screen
+  against a realistic test server (#254); what the pictures show is #255.
+- **Waiting on Mark's device check:** #229 song menu, #219 Watch background delivery and battery figures, #232 to #235.
+- **Decisions:** none new. Next: D-115.
+- **Mac:** about 17 GB free; Mark's PigTV project shares the simulators and runs `simctl shutdown all`, which can kill
   our tap-through runs.
 
 ## Now
@@ -30,9 +32,10 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Next
 
-From the 17 Nov review, in the suggested order (Mark confirms): **A, stay up:** #236, #238, #239, #237. **B, say what
-happened:** #241, #245, #244, #240. **C, one vocabulary** (Mark chooses the words): #246. **D, one of each:** #247,
-#248, #249, #183, #250. **E, the plain screens:** #251, #252, #209. Smaller: #242, #243, #253.
+From the 17 Nov review, in the suggested order (Mark confirms): **B, say what happened:** #241, #245, #244, #240,
+and the iPhone and web halves of #239. **C, one vocabulary** (Mark chooses the words): #246. **D, one of each:**
+#247, #248, #249, #183, #250. **E, the plain screens:** #251, #252, #209, #255. Artwork placeholders (#168) are the
+most visible flaw in the screenshots. Smaller: #242, #243, #253, #256.
 
 Then: #226 (an unreadable download list or a source change must not empty the Watch), #230 and #231 (findings), #225
 (test workers' memory growth).
