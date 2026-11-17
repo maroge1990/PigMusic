@@ -40,7 +40,8 @@ struct LibraryView: View {
         "Can't reach your library",
         line: "Music on this iPhone still plays. Check your connection and try again."
       ) {
-        Button("Try again") { Task { await model.refresh() } }.pigPrimaryAction()
+        Button("Try again", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
+          .pigPrimaryAction()
       }
     } else {
       PigQuietState("Your library is empty", line: nil) {
@@ -152,7 +153,7 @@ struct LibraryView: View {
       NavigationLink {
         PlaylistToolsView(model: model)
       } label: {
-        Label("New or imported playlist", systemImage: "plus.circle")
+        Label("New or imported playlist", systemImage: "plus")
       }.padding(.vertical, 4)
       LazyVStack(spacing: 0) {
         ForEach(model.playlists) { playlist in
@@ -379,7 +380,7 @@ struct DownloadMenu: View {
         Button("Download", systemImage: "arrow.down.circle") {
           Task { await model.download(tracks, origin: origin) }
         }
-        Button("Download smaller copies", systemImage: "arrow.down.circle.dotted") {
+        Button("Download smaller copies", systemImage: "arrow.down.circle") {
           Task { await model.download(tracks, quality: "aac", origin: origin) }
         }
         if model.watch?.supported == true {
@@ -396,7 +397,7 @@ struct DownloadMenu: View {
           }
         }
       } label: {
-        RoundIconLabel(systemImage: sent ? "checkmark" : "arrow.down")
+        RoundIconLabel(systemImage: sent ? "checkmark" : "arrow.down.circle")
       }
       .buttonStyle(.plain)
       // One VoiceOver stop named "Download" (#97): a Menu wraps its label in a
@@ -450,7 +451,8 @@ struct AccountView: View {
       }
       Section("Library") {
         LabeledContent("Songs in your library", value: model.songCount.formatted())
-        Button("Refresh library") { Task { await model.refresh() } }.disabled(model.syncing)
+        Button("Refresh library", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
+          .disabled(model.syncing)
       }
       Section {
         Toggle(
@@ -693,7 +695,7 @@ struct NowPlayingView: View {
       StatusText(error, kind: .error)
         .multilineTextAlignment(.center)
       HStack {
-        Button("Retry") { player.retry() }
+        Button("Try again", systemImage: "arrow.clockwise") { player.retry() }
         Button("Skip song") { player.skip() }
         if player.seamlessEnabled {
           Button("Use streaming") { player.retry(streaming: true) }
@@ -744,9 +746,11 @@ private struct UpNextRow: View {
         }
       }.buttonStyle(.plain).accessibilityHint("Plays from this song")
       Menu {
-        Button("Move earlier") { model.player.moveUpcoming(item.id, by: -1) }
-        Button("Move later") { model.player.moveUpcoming(item.id, by: 1) }
-        Button("Remove from queue", role: .destructive) { model.player.removeUpcoming(item.id) }
+        Button("Move earlier", systemImage: "arrow.up") { model.player.moveUpcoming(item.id, by: -1) }
+        Button("Move later", systemImage: "arrow.down") { model.player.moveUpcoming(item.id, by: 1) }
+        Button("Remove from queue", systemImage: "xmark", role: .destructive) {
+          model.player.removeUpcoming(item.id)
+        }
       } label: {
         Image(systemName: "ellipsis").frame(minWidth: moreWidth, minHeight: 44)
       }.accessibilityLabel("Queue actions for \(item.track.title)")

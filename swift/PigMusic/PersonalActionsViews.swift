@@ -198,7 +198,7 @@ struct RequestsView: View {
                 songRow(item)
                   .swipeActions {
                     if Self.cancellable.contains(item.status) {
-                      Button("Cancel", role: .destructive) { cancel(item) }
+                      Button("Cancel", systemImage: "xmark", role: .destructive) { cancel(item) }
                     }
                   }
               }

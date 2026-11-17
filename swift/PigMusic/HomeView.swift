@@ -215,7 +215,9 @@ struct HomeView: View {
           ProgressView("Finding music…")
         } else if let error = model.homeErrors[section] {
           StatusText(error, kind: .error)
-          Button("Try again") { Task { await model.refreshHome(force: true) } }
+          Button("Try again", systemImage: "arrow.clockwise") {
+            Task { await model.refreshHome(force: true) }
+          }
             .buttonStyle(.pigSecondary)
         } else if let feed {
           Text(message(section, feed)).font(PigType.footnote).foregroundStyle(.secondary)
@@ -285,7 +287,9 @@ struct MixDetailView: View {
           SongRow(model: model, track: track.actionTrack) { model.play(tracks, at: index) }
             .swipeActions {
               // At once, with Undo (D-79): sent when the Undo runs out.
-              Button("Hide", role: .destructive) { model.hideLater(track, from: mix) }
+              Button("Hide", systemImage: "eye.slash", role: .destructive) {
+                model.hideLater(track, from: mix)
+              }
             }
         }
       }
@@ -293,7 +297,7 @@ struct MixDetailView: View {
       .toolbar {
         ToolbarItem(placement: .topBarTrailing) {
           Menu {
-            Button("Hide this edition", role: .destructive) {
+            Button("Hide this edition", systemImage: "eye.slash", role: .destructive) {
               saving = true
               Task {
                 do {
@@ -304,7 +308,7 @@ struct MixDetailView: View {
               }
             }.disabled(saving)
           } label: {
-            Image(systemName: "ellipsis.circle").accessibilityLabel("Mix options")
+            Image(systemName: "ellipsis").accessibilityLabel("Mix options")
           }
         }
       }
@@ -573,7 +577,7 @@ struct RewindCard: View {
           Text("Rewind").font(PigType.subhead.weight(.semibold))
             .foregroundStyle(PigBrand.text(scheme))
         } icon: {
-          Image(systemName: "arrow.counterclockwise").foregroundStyle(PigBrand.accent(scheme))
+          Image(systemName: "clock.arrow.circlepath").foregroundStyle(PigBrand.accent(scheme))
         }
         Spacer()
         Text("This week").font(PigType.footnote).foregroundStyle(PigBrand.secondary(scheme))

@@ -46,12 +46,12 @@ struct WatchDownloadsView: View {
           if watch.link?.error != nil
             || records.contains(where: { $0.state == "failed" && !onWatch($0, watch: watch) })
           {
-            Button("Retry") { Task { await watch.retry() } }
+            Button("Try again", systemImage: "arrow.clockwise") { Task { await watch.retry() } }
           }
           if let error = watch.message {
             StatusText(error, kind: .error)
           }
-          Button("Remove all", role: .destructive) { clearing = true }
+          Button("Remove all", systemImage: "minus.circle", role: .destructive) { clearing = true }
             .disabled(records.isEmpty)
         }
       }
@@ -154,7 +154,7 @@ struct WatchDownloadsView: View {
     .swipeActions {
       if !onWatch(record, watch: watch) {
         // At once, with Undo (D-79), like the iPhone's own downloads.
-        Button("Cancel", role: .destructive) {
+        Button("Cancel", systemImage: "xmark", role: .destructive) {
           let id = record.id
           model.undo.schedule(
             AppModel.undoKey(watchTransfer: id), label: "Cancelled " + record.track.title

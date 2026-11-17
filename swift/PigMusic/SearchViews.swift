@@ -926,7 +926,7 @@ private struct ShazamListenView: View {
           ShazamFoundView(model: model, song: found, close: close) { attempt += 1 }
         } else if let failure {
           PigQuietState("No song found", line: failure.message) {
-            Button("Try again") { attempt += 1 }.pigPrimaryAction()
+            Button("Try again", systemImage: "arrow.clockwise") { attempt += 1 }.pigPrimaryAction()
           }.frame(maxHeight: .infinity)
         } else {
           VStack(spacing: 16) {

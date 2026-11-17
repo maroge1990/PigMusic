@@ -35,7 +35,7 @@ struct PendingEditsView: View {
               PlaylistView(model: model, playlist: playlist)
             }
           }
-          Button("Discard this change", role: .destructive) {
+          Button("Discard this change", systemImage: "xmark", role: .destructive) {
             Task { await model.discardEdit(pending.id) }
           }.disabled(loading)
         }

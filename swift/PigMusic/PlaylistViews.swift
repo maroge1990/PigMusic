@@ -184,7 +184,7 @@ struct PlaylistView: View {
               .font(PigType.footnote.weight(.semibold))
           }
         } else if model.pendingEdits.contains(where: { $0.mutation.playlistId == playlist.id }) {
-          Label("Changes not sent yet", systemImage: "clock.arrow.circlepath")
+          Label("Changes not sent yet", systemImage: "clock")
             .font(PigType.footnote).foregroundStyle(.secondary)
         }
       }.listRowSeparator(.hidden).listRowBackground(Color.clear)
@@ -193,7 +193,7 @@ struct PlaylistView: View {
           SongRow(model: model, track: row.entry.playbackTrack) { model.play(songs, at: index) }
             .swipeActions {
               // At once, with Undo (D-79): sent when the Undo runs out.
-              Button("Remove", role: .destructive) {
+              Button("Remove", systemImage: "xmark", role: .destructive) {
                 model.removeLater(at: row.position, from: playlist)
               }
               .disabled(locked)
@@ -214,13 +214,17 @@ struct PlaylistView: View {
           HStack {
             TextField("Name", text: $name).submitLabel(.done)
               .onSubmit { Task { await edit(name: name) } }
-            Button("Rename") { Task { await edit(name: name) } }.buttonStyle(.pigSecondary)
+            Button("Rename", systemImage: "pencil") { Task { await edit(name: name) } }
+              .buttonStyle(.pigSecondary)
               .disabled(locked || name.isEmpty || name == playlist.name)
           }
           // Anchored to its button, so it opens there rather than at the top.
-          Button("Delete playlist", role: .destructive) { deleting = true }.disabled(locked)
+          Button("Delete playlist", systemImage: "trash", role: .destructive) { deleting = true }
+            .disabled(locked)
             .confirmationDialog("Delete \(playlist.name)?", isPresented: $deleting) {
-              Button("Delete playlist", role: .destructive) { Task { await delete() } }
+              Button("Delete playlist", systemImage: "trash", role: .destructive) {
+                Task { await delete() }
+              }
             }
         }.listRowSeparator(.hidden).listRowBackground(Color.clear)
       }

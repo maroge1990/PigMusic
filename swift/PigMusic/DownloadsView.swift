@@ -59,9 +59,11 @@ private struct DownloadList: View {
           }
           if transfers.contains(where: { $0.state != "ready" }) {
             if downloads.running || downloads.records.contains(where: { $0.state == "downloading" }) {
-              Button("Pause downloads") { Task { await downloads.pause() } }
+              Button("Pause downloads", systemImage: "pause.circle") {
+                Task { await downloads.pause() }
+              }
             } else {
-              Button("Resume downloads") { downloads.resume() }
+              Button("Resume downloads", systemImage: "arrow.down.circle") { downloads.resume() }
             }
           }
         }
@@ -89,7 +91,7 @@ private struct DownloadList: View {
         if let message = model.message {
           StatusText(message)
         }
-        Button("Remove all", role: .destructive) { clearing = true }
+        Button("Remove all", systemImage: "minus.circle", role: .destructive) { clearing = true }
           .disabled(downloads.records.isEmpty)
       }
     }
@@ -150,7 +152,9 @@ struct DeviceGroupsSection: View {
             ForEach(records) { record in
               songRow(group, record)
                 .swipeActions {
-                  Button("Remove", role: .destructive) { remove(group, records: [record]) }
+                  Button("Remove", systemImage: "minus.circle", role: .destructive) {
+                    remove(group, records: [record])
+                  }
                 }
             }
           } label: {
@@ -159,7 +163,9 @@ struct DeviceGroupsSection: View {
             }
           }
           .swipeActions {
-            Button("Remove", role: .destructive) { remove(group, records: group.records) }
+            Button("Remove", systemImage: "minus.circle", role: .destructive) {
+              remove(group, records: group.records)
+            }
           }
         }
       }
@@ -228,7 +234,7 @@ private struct TransferRow: View {
     }
     .swipeActions {
       if record.state != "ready" {
-        Button("Cancel", role: .destructive) { cancel() }
+        Button("Cancel", systemImage: "xmark", role: .destructive) { cancel() }
       }
       pauseButton.tint(PigBrand.secondary(scheme))
     }
@@ -252,11 +258,11 @@ private struct TransferRow: View {
   }
   @ViewBuilder private var pauseButton: some View {
     if record.isPaused {
-      Button("Resume", systemImage: "play.fill") {
+      Button("Resume", systemImage: "arrow.down.circle") {
         Task { await downloads.resume(id: record.id) }
       }
     } else if ["queued", "downloading"].contains(record.state) {
-      Button("Pause", systemImage: "pause.fill") {
+      Button("Pause", systemImage: "pause.circle") {
         Task { await downloads.pause(id: record.id) }
       }
     }
@@ -350,7 +356,7 @@ struct TransferMarkButton: View {
     case .paused:
       Image(systemName: "pause.circle").foregroundStyle(.secondary)
     case .failed:
-      Image(systemName: "exclamationmark.arrow.circlepath").foregroundStyle(PigBrand.danger(scheme))
+      Image(systemName: "exclamationmark.circle").foregroundStyle(PigBrand.danger(scheme))
     case .done:
       Image(systemName: "checkmark.circle.fill").foregroundStyle(PigBrand.accent(scheme))
     }

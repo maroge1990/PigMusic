@@ -48,7 +48,7 @@ private struct WatchReadiness: View {
     VStack(alignment: .leading, spacing: 2) {
       Label(
         complete ? "Ready for your run" : "Almost ready",
-        systemImage: complete ? "checkmark.circle.fill" : "hourglass"
+        systemImage: complete ? "checkmark.circle.fill" : "clock"
       ).font(.headline)
       Text(complete ? "\(total) songs" : "\(ready.count) of \(total) songs on Watch")
         .font(PigType.footnote)
@@ -310,7 +310,7 @@ private struct WatchSongs: View {
           model.undo.undo(item.id)
         } label: {
           VStack(alignment: .leading) {
-            Text("Undo").font(PigType.headline)
+            Label("Undo", systemImage: "arrow.uturn.backward").font(PigType.headline)
             Text(item.label).font(PigType.caption).foregroundStyle(.secondary).lineLimit(2)
           }
         }
@@ -344,7 +344,7 @@ private struct WatchSongs: View {
           .disabled(!ready)
           .swipeActions {
             // At once, with Undo (D-79): sent when the Undo runs out.
-            Button("Remove", role: .destructive) {
+            Button("Remove", systemImage: "minus.circle", role: .destructive) {
               model.undo.schedule(WatchModel.undoKey(id), label: "Removed " + song.track.title) {
                 await model.send("remove", songIds: [id])
                 return true
@@ -416,7 +416,7 @@ private struct WatchPlaybackDetails: View {
       Slider(value: $model.volume, in: 0...1).accessibilityLabel("PigMusic level")
       if let error = model.playback.error ?? model.message {
         Text(error).font(PigType.footnote).foregroundStyle(PigBrand.danger(scheme))
-        Button("Retry playback") { Task { await model.retry() } }
+        Button("Try again", systemImage: "arrow.clockwise") { Task { await model.retry() } }
       }
     }.pigBrandedCanvas().navigationTitle("Controls")
   }
