@@ -24,7 +24,7 @@ export function friendlyRequestError(error: string): string {
   );
   if (unreachable.length) {
     const names = [...new Set(unreachable.map((p) => p.name))].join(", ");
-    return `${names} couldn't be reached or the download failed. Try again later.`;
+    return `${names} couldn't be reached or couldn't send the song. Try again later.`;
   }
   return error;
 }

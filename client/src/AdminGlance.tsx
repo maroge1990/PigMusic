@@ -54,7 +54,7 @@ export function AdminGlance({
       href: "#/admin/downloads",
     },
     {
-      label: "Failed requests",
+      label: "Couldn't add",
       value: items.filter((i) => i.status === "failed").length,
       href: "#/admin/downloads",
       warn: true,

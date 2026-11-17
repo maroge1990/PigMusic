@@ -77,11 +77,11 @@ export function QueueView({
         }
       />
       {!queue ? (
-        <Loading>Loading requests…</Loading>
+        <Loading>Loading downloads…</Loading>
       ) : !queue.items.length ? (
         <Empty
           title="Ready when you are"
-          description="Submit music from your migration inventory to add requests here."
+          description="Submit music from your migration inventory to add songs here."
         />
       ) : (
         queue.items.map((item) => (
@@ -100,7 +100,7 @@ export function QueueView({
                     downloading: "Downloading",
                     validating: "Checking audio and tags",
                     completed: "Downloaded and imported",
-                    failed: "Failed",
+                    failed: "Couldn't add",
                     cancelled: "Cancelled",
                     paused: "Paused",
                   } as Record<string, string>
@@ -130,7 +130,7 @@ export function QueueView({
                 disabled={busy}
                 onClick={() => queueAction(item.id, "retry")}
               >
-                Retry
+                Try again
               </button>
             ) : (
               item.status !== "completed" && (

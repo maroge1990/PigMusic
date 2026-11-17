@@ -79,7 +79,7 @@ export function ServerHealth() {
                     {health.recent_errors.map((error) => (
                       <li key={error.request_id + error.at}>
                         {formatDateTime(error.at)}: {error.sentence}{" "}
-                        <code title="Request ID">{error.request_id}</code>
+                        <code title="Reference">{error.request_id}</code>
                       </li>
                     ))}
                   </ul>

@@ -42,7 +42,7 @@ export function InvitePanel({
       await navigator.clipboard.writeText(url as string);
       setStatus("Link copied");
     } catch {
-      setStatus("Copy failed. Select the link and copy it manually.");
+      setStatus("Couldn't copy. Select the link and copy it manually.");
     }
   }
   async function share() {
@@ -57,9 +57,7 @@ export function InvitePanel({
       <h3>Invite {name}</h3>
       {url ? (
         <>
-          <p>
-            Have them scan this with their phone camera, or send them the link.
-          </p>
+          <p>Have them scan this with their camera, or send them the link.</p>
           <QrCode url={url} label={`Invite QR code for ${name}`} />
           <label>
             Invite link

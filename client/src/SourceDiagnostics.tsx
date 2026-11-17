@@ -37,7 +37,9 @@ export function SourceDiagnostics() {
       await refresh();
     } catch (error) {
       setMessage(
-        error instanceof Error ? error.message : "Source check failed",
+        error instanceof Error
+          ? error.message
+          : "Couldn't check this source. Try again.",
       );
       await refresh().catch(() => {});
     } finally {
@@ -49,8 +51,8 @@ export function SourceDiagnostics() {
       <summary>Source diagnostics</summary>
       <p>
         Metadata checks do not download audio. Audio is marked verified only
-        after a complete recording passes validation. Temporary source failures
-        allow other sources to continue.
+        after a complete recording passes validation. When a source is
+        unavailable for a while, other sources continue.
       </p>
       {sources.map((source) => (
         <div className="source-diagnostic" key={source.id}>
@@ -67,12 +69,12 @@ export function SourceDiagnostics() {
             {source.last_transfer === "verified"
               ? "Last audio transfer verified"
               : source.last_transfer === "failed"
-                ? "Last audio transfer failed"
+                ? "Last audio transfer didn't finish"
                 : "Audio transfer not verified"}
           </p>
           {source.reason && <p>{source.reason}</p>}
           {!!source.next_retry_at && (
-            <p>Retry after {formatDateTime(source.next_retry_at)}</p>
+            <p>Tries again after {formatDateTime(source.next_retry_at)}</p>
           )}
           <button
             disabled={busy || !source.configured}

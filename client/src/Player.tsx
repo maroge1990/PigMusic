@@ -522,7 +522,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         .then(() => setError(""))
         .catch(() =>
           setError(
-            "Audio could not start. Try another browser or download this song.",
+            "Couldn't start the audio. Try another browser or add this song to your library.",
           ),
         );
   }
@@ -640,7 +640,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           onError={() => {
             if (song?.url)
               setError(
-                "This audio stream could not be played. The provider or format may be unavailable.",
+                "Couldn't play this audio stream. The provider or format may be unavailable.",
               );
           }}
         />

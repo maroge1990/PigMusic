@@ -58,7 +58,7 @@ export function MediaSettings() {
       if (!response.ok)
         throw await writeFailure(
           response,
-          detailOr("Could not save settings."),
+          detailOr("Couldn't save settings. Try again."),
         );
       const body = await response.json();
       setSettings(body);

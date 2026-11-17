@@ -35,7 +35,7 @@ export function RemovalDialog({
         .filter((i) => !i.delete_file)
         .map((i) => (
           <p key={i.track_id}>
-            Kept for {i.kept_for.join(", ") || "another pending request"}.
+            Kept for {i.kept_for.join(", ") || "a song still being added"}.
           </p>
         ))}
       <button onClick={cancel}>Cancel</button>

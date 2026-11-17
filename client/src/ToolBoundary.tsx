@@ -13,7 +13,7 @@ export class ToolBoundary extends Component<
     if (this.state.failed)
       return (
         <section className="system-panel" role="alert">
-          <p>These tools could not load. Reload to open the current version.</p>
+          <p>Couldn't load these tools. Reload to open the current version.</p>
           <button
             className="secondary-button"
             onClick={() => window.location.reload()}

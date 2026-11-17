@@ -234,8 +234,8 @@ test("#155: loading is announced, with one ellipsis", async ({ page }) => {
   });
   await page.goto("/#/admin/downloads");
   await expect(
-    page.getByRole("status").filter({ hasText: "Loading requests" }),
-  ).toHaveText("Loading requests…");
+    page.getByRole("status").filter({ hasText: "Loading downloads" }),
+  ).toHaveText("Loading downloads…");
 });
 
 test("#155: empty lines look the same; errors use the inline error", async ({

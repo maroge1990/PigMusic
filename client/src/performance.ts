@@ -82,7 +82,7 @@ export function performanceRows(report: PerformanceReport): Row[] {
       basis: `${formatCount(downloads.mix.completed)} of ${formatCount(downloads.mix.completed + downloads.mix.failed)}`,
     },
     {
-      name: "Library requests completed",
+      name: "Library additions completed",
       value: downloads.library.completion,
       target: targets.library_downloads_completed,
       basis: `${formatCount(downloads.library.completed)} of ${formatCount(downloads.library.completed + downloads.library.failed)}`,

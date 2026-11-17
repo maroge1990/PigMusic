@@ -159,8 +159,8 @@ export function ArtistHero({
           {!discovered && (
             <p>
               {artist.album_count}{" "}
-              {artist.album_count === 1 ? "release" : "releases"} <span>·</span>{" "}
-              {artist.track_count} saved tracks
+              {artist.album_count === 1 ? "album" : "albums"} <span>·</span>{" "}
+              {artist.track_count} saved songs
             </p>
           )}
           {!discovered && <StateBadge state="library" />}

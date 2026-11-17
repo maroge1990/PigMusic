@@ -81,7 +81,7 @@ export function SystemStatus({
                 ? formatDateTime(library.snapshot.captured_at)
                 : "Not yet"}
             </dd>
-            <dt>Indexed tracks</dt>
+            <dt>Indexed songs</dt>
             <dd>{library ? formatCount(library.stats.tracks) : ""}</dd>
             <dt>Tag read issues</dt>
             <dd>{library?.snapshot.read_failures?.length || 0}</dd>

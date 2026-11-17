@@ -48,7 +48,7 @@ test("each parity number is judged against its target (#191)", () => {
   assert.equal(rows["Mix downloads completed"].basis, "263 of 553");
   assert.equal(verdict(rows["Covers left as placeholders"]), "Meets target");
   // No data is not a verdict.
-  assert.equal(verdict(rows["Library requests completed"]), "");
+  assert.equal(verdict(rows["Library additions completed"]), "");
   assert.equal(verdict(rows["Library artists with a photo"]), "");
   assert.equal(shown(0.3235), "32.4%");
   assert.equal(shown(1200, true), "1.2 s");

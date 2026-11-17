@@ -161,7 +161,7 @@ test("the owner's Admin overview shows the numbers to act on", async ({
   await expect(tile("Queued or downloading")).toContainText(
     "Downloads are paused",
   );
-  await expect(tile("Failed requests")).toContainText("1");
+  await expect(tile("Couldn't add")).toContainText("1");
   await expect(tile("Albums awaiting an owner")).toContainText("2");
   await expect(tile("People")).toContainText("2");
   await expect(tile("Artist pages ready")).toContainText("12");
@@ -386,7 +386,7 @@ test("Admin follows the shell's event stream without a timer", async ({
   await expect(tile("Queued or downloading")).not.toContainText(
     "Downloads are paused",
   );
-  await expect(tile("Failed requests")).toContainText("2");
+  await expect(tile("Couldn't add")).toContainText("2");
   expect(queueCalls).toBe(1);
 });
 
