@@ -44,7 +44,7 @@ import PigDomain
   }
   public func clearMemory() {
     memory.removeAllObjects()
-    hashes = [:]
+    forgetAddresses()
   }
 
   /// The account ended: pending downloads stop and nothing it loaded stays.
@@ -52,10 +52,25 @@ import PigDomain
     if let cache { Task { await cache.cancelPending() } }
     cache = nil
     memory.removeAllObjects()
-    hashes = [:]
     for lookup in lookups.values { lookup.cancel() }
+    forgetAddresses()
+  }
+
+  /// The library's artwork changed (a sync replaced a cover or the server
+  /// made a new portrait): what each library address resolved to is no
+  /// longer known, so the next tile asks the server again. A lookup already
+  /// under way is left to finish for the tiles waiting on it, but it is not
+  /// joined by new ones and its answer, which may be the old hash, is not
+  /// remembered (`addressGeneration`). Images are kept: they are cached by
+  /// their stored hash, which names their bytes.
+  public func forgetAddresses() {
+    addressGeneration += 1
+    hashes = [:]
     lookups = [:]
   }
+  /// Counts `forgetAddresses`; an answer is remembered only if none
+  /// happened while it was being found.
+  private var addressGeneration = 0
 
   /// The stored hash each library artwork address answered with, so a tile
   /// drawn again loads its cover by hash without asking the address again.
@@ -75,6 +90,7 @@ import PigDomain
   ) async throws -> String? {
     guard cache != nil else { return nil }
     if let known = hashes[address] { return known }
+    let generation = addressGeneration
     let found = try await asking(retryAfter, isCurrent: isCurrent) {
       let lookup = self.lookups[address] ?? Task { try await resolve() }
       self.lookups[address] = lookup
@@ -83,6 +99,9 @@ import PigDomain
     }
     try Task.checkCancellation()
     guard let found, isCurrent(), (try? ArtworkRequest(sha: found)) != nil else { return nil }
+    // Found before the artwork changed: good for this tile, which is
+    // redrawn and asks again, but not remembered for the next.
+    guard generation == addressGeneration else { return found }
     if hashes.count >= 512 { hashes = [:] }
     hashes[address] = found
     return found

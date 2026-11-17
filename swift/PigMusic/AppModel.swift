@@ -744,6 +744,8 @@ enum PlayOrigin: Hashable {
       artistCovers = [:]
     coverSwatches = [:]
       artworkRefresh += 1
+      // What a library address resolved to may be the old cover's hash.
+      images.forgetAddresses()
       homeLibraryChanged()
     }
     libraryRevision += 1

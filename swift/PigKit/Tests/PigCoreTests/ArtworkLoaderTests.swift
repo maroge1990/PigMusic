@@ -16,6 +16,11 @@ private actor Fetches {
   func add() { count += 1 }
 }
 
+private actor Gate {
+  private(set) var open = false
+  func release() { open = true }
+}
+
 private actor Waits {
   private(set) var asked: [Duration] = []
   func add(_ wait: Duration) { asked.append(wait) }
@@ -392,6 +397,95 @@ private func png(size: Int = 8) throws -> Data {
     let both = try await [first, second]
     #expect(both == [sha, sha])
     #expect(await asks.count == 1)
+  }
+
+  /// The server replaced a cover or made a new portrait: an address that
+  /// resolved to the old hash is asked again and gives the new one.
+  @Test func aChangedCoverIsResolvedAgainAfterArtworkChanges() async throws {
+    let (loader, root) = try makeLoader()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let address = try #require(LibraryArtwork(kind: .artists, id: "0123456789abcdef01234567"))
+    let old = String(repeating: "a", count: 64)
+    let new = String(repeating: "b", count: 64)
+    let asks = Fetches()
+    let resolve: @Sendable () async throws -> String = {
+      await asks.add()
+      return await asks.count == 1 ? old : new
+    }
+    #expect(try await loader.hash(of: address, isCurrent: { true }, resolve: resolve) == old)
+    #expect(try await loader.hash(of: address, isCurrent: { true }, resolve: resolve) == old)
+    #expect(await asks.count == 1)
+    loader.forgetAddresses()
+    #expect(try await loader.hash(of: address, isCurrent: { true }, resolve: resolve) == new)
+    #expect(await asks.count == 2)
+    #expect(try await loader.hash(of: address, isCurrent: { true }, resolve: resolve) == new)
+    #expect(await asks.count == 2)
+  }
+
+  /// A lookup that began before the artwork changed may carry the old hash:
+  /// it is not remembered, and a tile asking afterwards starts its own.
+  @Test func aLookupFromBeforeTheChangeIsNotRemembered() async throws {
+    let (loader, root) = try makeLoader()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let address = try #require(LibraryArtwork(kind: .albums, id: "0123456789abcdef01234567"))
+    let old = String(repeating: "a", count: 64)
+    let new = String(repeating: "b", count: 64)
+    let asks = Fetches()
+    let gate = Gate()
+    let early = Task { @MainActor in
+      try await loader.hash(of: address, isCurrent: { true }) {
+        await asks.add()
+        while await !gate.open { try await Task.sleep(for: .milliseconds(2)) }
+        return old
+      }
+    }
+    while await asks.count == 0 { try await Task.sleep(for: .milliseconds(2)) }
+    loader.forgetAddresses()
+    // Asked while the old lookup is still out: not joined to it.
+    let during = Task { @MainActor in
+      try await loader.hash(of: address, isCurrent: { true }) {
+        await asks.add()
+        return new
+      }
+    }
+    for _ in 0..<100 where await asks.count < 2 { try await Task.sleep(for: .milliseconds(2)) }
+    #expect(await asks.count == 2)
+    await gate.release()
+    #expect(try await during.value == new)
+    #expect(try await early.value == old)
+    // The old answer, arriving last, did not replace the new one.
+    let after = try await loader.hash(of: address, isCurrent: { true }) {
+      await asks.add()
+      return new
+    }
+    #expect(after == new)
+    #expect(await asks.count == 2)
+  }
+
+  /// Images are cached by their stored hash, which names their bytes:
+  /// forgetting what the addresses resolved to keeps them.
+  @Test func forgettingAddressesKeepsTheImages() async throws {
+    let (loader, root) = try makeLoader()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let request = try ArtworkRequest(sha: String(repeating: "6", count: 64))
+    let bytes = try png()
+    let fetches = Fetches()
+    let first = try await loader.load(request, stopsWhenCancelled: true, isCurrent: { true }) {
+      _ in
+      await fetches.add()
+      return bytes
+    }
+    loader.forgetAddresses()
+    #expect(loader.cache != nil)
+    #expect(loader.memoryImage(request) === first)
+    loader.clearMemory()  // Not even memory: the disk cache still answers.
+    let again = try await loader.load(request, stopsWhenCancelled: true, isCurrent: { true }) {
+      _ in
+      await fetches.add()
+      return bytes
+    }
+    #expect(again != nil)
+    #expect(await fetches.count == 1)
   }
 
   @Test func catalogueArtworkIsKeyedByItsAlias() throws {
