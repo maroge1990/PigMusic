@@ -29,7 +29,7 @@ struct ArtistAcquisitionView: View {
         Section("Progress") {
           Text(RequestStatus.label(state.status))
           Text(
-            "\(state.done.count) of \(state.total) albums reviewed · \(state.created) added"
+            "\(state.done.count) of \(state.total) albums reviewed · \(state.created) song\(state.created == 1 ? "" : "s") being added"
           )
           if let error = state.error { StatusText(error, kind: .error) }
         }
