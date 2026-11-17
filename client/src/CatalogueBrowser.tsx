@@ -32,7 +32,13 @@ import type { Discography } from "./discography";
 import { SongRow } from "./SongRow";
 import { usePlayer } from "./Player";
 import { shuffled } from "./shuffle";
-import { songBody, withLibrary, type Song as Row } from "./songs";
+import {
+  songBody,
+  withLibrary,
+  type AddResult,
+  type Song as Row,
+} from "./songs";
+import type { Track } from "./types";
 import { EmptyLine, InlineError, Loading } from "./EmptyState";
 
 function releaseSongs(release: Release, artistId: string): Row[] {
@@ -47,8 +53,22 @@ function releaseSongs(release: Release, artistId: string): Row[] {
     year: t.year,
     track_number: t.track_number,
     disc_number: t.disc_number,
-    cover,
-    state: pending(t) ? "pending" : "missing",
+    cover: t.saved_track?.cover_url || cover,
+    // The server says where each song stands (CatalogueTrackDTO).
+    state:
+      t.server_state === "in_library" && t.saved_track
+        ? "saved"
+        : t.server_state === "household_available" && t.household_track
+          ? "server"
+          : pending(t)
+            ? "pending"
+            : "missing",
+    saved:
+      t.server_state === "in_library" ? t.saved_track || undefined : undefined,
+    server:
+      t.server_state === "household_available"
+        ? t.household_track || undefined
+        : undefined,
     release_id: release.id,
     track_id: t.id,
     recording_id: t.musicbrainz_recording_id,
@@ -87,7 +107,14 @@ type Song = {
   track_number: number;
   status: string;
   presence_note: string;
-  download_status?: string;
+  server_state?:
+    | "not_in_library"
+    | "household_available"
+    | "requested"
+    | "in_library"
+    | "failed";
+  saved_track?: Track | null;
+  household_track?: Track | null;
   received_bytes?: number;
   total_bytes?: number;
   musicbrainz_recording_id?: string;
@@ -104,15 +131,19 @@ type Release = {
   description: string;
   tracks: Song[];
 };
-// Request states still in progress on the server.
-const pending = (song: { download_status?: string }) =>
-  [
-    "waiting_for_sources",
-    "searching",
-    "downloading",
-    "validating",
-    "importing",
-  ].includes(song.download_status || "");
+// A song the server is still adding for you.
+const pending = (song: { server_state?: string }) =>
+  song.server_state === "requested";
+const songs = (n: number) => `${n} ${n === 1 ? "song" : "songs"}`;
+/** The confirmation for an Add to library, from the server's counts; the
+ * iPhone words it the same way. */
+function addedMessage(result: AddResult) {
+  const adding = result.created + result.existing;
+  const parts = [];
+  if (adding > 0) parts.push(`Adding ${songs(adding)} to your library.`);
+  if (result.skipped > 0) parts.push(`Skipped ${songs(result.skipped)}.`);
+  return parts.join(" ") || "Already in your library.";
+}
 export function CatalogueBrowser({
   artist,
   close,
@@ -396,22 +427,21 @@ export function CatalogueBrowser({
       const response = await apiFetch("/api/v1/requests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tracks: rows.map(songBody) }),
+        // Songs already yours would come back as skipped: send the rest.
+        body: JSON.stringify({
+          tracks: rows.filter((r) => r.state !== "saved").map(songBody),
+        }),
       });
       if (!response.ok)
         throw await writeFailure(
           response,
           detailOr("Couldn't add this album. Try again."),
         );
-      const adding = rows.filter((r) => r.state === "missing").length;
-      notify(
-        `Adding ${adding} ${adding === 1 ? "song" : "songs"} to your library`,
-      );
-      setRows((old) =>
-        old.map((r) =>
-          r.state === "missing" ? { ...r, state: "pending" } : r,
-        ),
-      );
+      notify(addedMessage((await response.json()) as AddResult));
+      // Each song's state as the server now has it, not a guess.
+      await request<Release>(`releases/${release.id}`)
+        .then(setRelease)
+        .catch(() => {});
       window.dispatchEvent(new Event("music-library-changed"));
       window.dispatchEvent(new Event("music-requests-changed"));
     } catch (e) {

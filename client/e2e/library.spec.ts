@@ -263,7 +263,8 @@ test("a live release's songs are requested as live recordings", async ({
             title: "Concert Night",
             artist: artist.name,
             artist_id: "mb-1",
-            tracks: [live],
+            // Once added, the server reports the song as on its way.
+            tracks: [requested ? { ...live, server_state: "requested" } : live],
           },
         }),
       // The studio "Von dutch" is in the library: the lookup must be told
@@ -367,7 +368,6 @@ test("a catalogue album with pending songs backs off its checks", async ({
                 track_number: 1,
                 disc_number: 1,
                 server_state: "requested",
-                download_status: "searching",
               },
             ],
           },
@@ -388,4 +388,100 @@ test("a catalogue album with pending songs backs off its checks", async ({
   expect(reads - first).toBeGreaterThan(2);
   // Every 3 s would be 20 checks a minute.
   expect(reads - first).toBeLessThanOrEqual(8);
+});
+
+// #246 (Codex): a catalogue album shows each song as the server has it
+// (server_state), sends only songs that aren't yours yet, and confirms from
+// the server's counts: an already queued song is being added, a refused
+// one is named, and the rows are read again afterwards.
+test("adding a catalogue album confirms what the server did", async ({
+  page,
+}) => {
+  let reads = 0;
+  let sent: { title: string }[] = [];
+  const song = (id: string, title: string, n: number) => ({
+    id,
+    title,
+    artist: artist.name,
+    duration: 180,
+    track_number: n,
+    disc_number: 1,
+  });
+  await mockApi(page, {
+    answers: {
+      "/v1/catalogue/releases/r-mix": (route) => {
+        reads += 1;
+        return route.fulfill({
+          json: {
+            id: "r-mix",
+            title: "Mixed album",
+            artist: artist.name,
+            artist_id: "mb-1",
+            tracks: [
+              {
+                ...song("c1", "Queued song", 1),
+                server_state: "requested",
+              },
+              {
+                ...song("c2", "Skipped song", 2),
+                server_state: "not_in_library",
+              },
+              {
+                ...song("c3", "Mine already", 3),
+                server_state: "in_library",
+                saved_track: {
+                  ...album.tracks[0],
+                  id: "t9",
+                  title: "Mine already",
+                },
+              },
+            ],
+          },
+        });
+      },
+      "/v1/library/lookup": (route) =>
+        route.fulfill({
+          json: {
+            tracks: route
+              .request()
+              .postDataJSON()
+              .songs.map(() => null),
+          },
+        }),
+      "/v1/requests": (route) => {
+        if (route.request().method() !== "POST")
+          return route.fulfill({
+            json: { items: [], next_offset: null, active: 0 },
+          });
+        sent = route.request().postDataJSON().tracks;
+        return route.fulfill({
+          json: {
+            created: 0,
+            existing: 1,
+            skipped: 1,
+            downloads_enabled: true,
+          },
+        });
+      },
+    },
+  });
+  await page.goto(
+    `/#/library/discography/mb-1?name=${encodeURIComponent(artist.name)}&release=r-mix`,
+  );
+  const row = (title: string) => page.locator(".song-row", { hasText: title });
+  await expect(
+    row("Queued song").getByRole("img", { name: "Adding" }),
+  ).toBeVisible();
+  await expect(
+    row("Mine already").getByRole("img", { name: "In your library" }),
+  ).toBeVisible();
+  const before = reads;
+  await page
+    .getByRole("button", { name: "Add to library", exact: true })
+    .click();
+  await expect(
+    page.getByText("Adding 1 song to your library. Skipped 1 song."),
+  ).toBeVisible();
+  expect(sent.map((t) => t.title)).toEqual(["Queued song", "Skipped song"]);
+  await expect.poll(() => reads).toBeGreaterThan(before);
 });
