@@ -253,25 +253,61 @@ def test_off_mode_never_probes(tmp_path, monkeypatch):
     assert runtime.main() == 1
     assert run.probes == []
     assert not runtime.Watchdog("off", 0, tmp_path / "none.json").due(10_000)
-    # Anything else is the default.
-    assert runtime.Watchdog("maybe", 0, tmp_path / "none.json").mode == "restart"
 
 
-@pytest.mark.parametrize("damage", ["corrupt", "not a list", "a folder"])
+def test_an_unknown_watchdog_setting_is_named_and_means_restart(tmp_path, monkeypatch):
+    said = []
+    dog = runtime.Watchdog("maybe", 0, tmp_path / "none.json", say=said.append)
+    assert dog.mode == "restart"
+    assert said == [
+        "PIG_MUSIC_WATCHDOG=maybe is not restart, log or off; using restart"
+    ]
+    for known in ("restart", "log", "off"):
+        runtime.Watchdog(known, 0, tmp_path / "none.json", say=said.append)
+    assert len(said) == 1
+    # Set but empty is the default, without a remark.
+    monkeypatch.setenv("PIG_MUSIC_WATCHDOG", "")
+    run = Supervised(tmp_path, monkeypatch, FakeProcess(lifetime=None), silent)
+    assert runtime.main() == 1
+    assert len(run.probes) == 10
+
+
+@pytest.mark.parametrize("damage", ["corrupt", "not a list"])
 def test_an_unreadable_restart_history_is_no_history(tmp_path, damage):
     dog, said, history = watchdog(tmp_path)
     history.parent.mkdir()
     if damage == "corrupt":
         history.write_text("{not json")
-    elif damage == "not a list":
-        history.write_text('{"at": "yesterday"}')
     else:
-        history.mkdir()
+        history.write_text('{"at": "yesterday"}')
     assert runtime.restart_history(history) == []
-    # Still restarts, and a history that cannot be written is not an error.
+    # It can be written, so the restart goes ahead and replaces it.
     assert observe(dog, [("silent", [])] * 10)[-1] == "restart"
-    if damage != "a folder":
-        assert [e["kind"] for e in json.loads(history.read_text())] == ["watchdog"]
+    assert [e["kind"] for e in json.loads(history.read_text())] == ["watchdog"]
+
+
+def test_no_restart_when_the_history_cannot_be_written(tmp_path, monkeypatch, capsys):
+    """Without a written entry the hourly limit has no memory, and the restart
+    could repeat every few minutes for ever."""
+    dog, said, history = watchdog(tmp_path)
+    history.mkdir(parents=True)  # a folder where the file belongs
+    assert observe(dog, [("silent", [])] * 31, start=0) == [None] * 31
+    line = (
+        "Server has not answered for 300 s; "
+        "not restarting it: logs/restarts.json cannot be written"
+    )
+    # At 270 s and 600 s later, not at every probe.
+    assert said == [line, line]
+    # Writable again: the next silent probe restarts.
+    history.rmdir()
+    assert dog.observe(930, 1_000_930, "silent") == "restart"
+    assert [e["kind"] for e in json.loads(history.read_text())] == ["watchdog"]
+    # The server ending by itself is still reported when it cannot be recorded.
+    history.unlink()
+    history.mkdir()
+    Supervised(tmp_path, monkeypatch, FakeProcess(lifetime=5), silent)
+    assert runtime.main() == 1
+    assert "Server exited with code 1" in capsys.readouterr().err
 
 
 def test_the_restart_history_keeps_the_newest_fifty(tmp_path):

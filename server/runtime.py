@@ -127,7 +127,7 @@ def restart_history(path):
 
 def record_restart(path, at, kind, detail):
     """Append {"at", "kind": "watchdog"|"exit", "detail"}, keeping the newest
-    entries. The history is optional: an error writing it is ignored."""
+    entries. Never raises: returns whether the entry was written."""
     try:
         path = Path(path)
         entries = restart_history(path)
@@ -136,8 +136,9 @@ def record_restart(path, at, kind, detail):
         partial = path.with_name(path.name + ".part")
         partial.write_text(json.dumps(entries[-RESTART_HISTORY_ENTRIES:], indent=1))
         partial.replace(path)
+        return True
     except Exception:
-        pass
+        return False
 
 
 def exit_reason(code):
@@ -161,6 +162,8 @@ class Watchdog:
         self.mode = mode if mode in {"restart", "log", "off"} else "restart"
         self.history = history
         self.say = say
+        if mode != self.mode:
+            say(f"PIG_MUSIC_WATCHDOG={mode} is not restart, log or off; using restart")
         self.next_probe = started + WATCHDOG_GRACE
         self.silent = 0
         self.degraded = False
@@ -204,6 +207,11 @@ class Watchdog:
                     f"not restarting again: {WATCHDOG_RESTART_LIMIT} restarts"
                     " in the last hour"
                 )
+            # The limit lives in the history: without a written entry the
+            # restart could repeat every few minutes for ever, so it is
+            # recorded first and not done when that fails.
+            elif not record_restart(self.history, wall, "watchdog", unanswered):
+                refusal = "not restarting it: logs/restarts.json cannot be written"
         if refusal:
             if (
                 self.reminded is None
@@ -213,7 +221,6 @@ class Watchdog:
                 self.say(f"{unanswered}; {refusal}")
             return None
         self.say(f"{unanswered}; restarting it")
-        record_restart(self.history, wall, "watchdog", unanswered)
         return "restart"
 
 
@@ -369,7 +376,7 @@ def main():
         next_engine_check = 0
         history = root / "logs" / "restarts.json"
         watchdog = Watchdog(
-            os.environ.get("PIG_MUSIC_WATCHDOG", "restart").strip().lower(),
+            (os.environ.get("PIG_MUSIC_WATCHDOG") or "restart").strip().lower(),
             started,
             history,
         )
