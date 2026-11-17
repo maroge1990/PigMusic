@@ -781,14 +781,21 @@ struct StatusMessage: Equatable {
 /// The latest action waiting for its Undo (D-79, #183): what happened and an
 /// Undo button, on a solid brand surface so it is seen at once (#210).
 /// VoiceOver hears each action once, wherever its bar first shows. A failed
-/// action's notice (#245) shows in the same place, the newer of the two
-/// replacing the older; a tap hides it.
+/// action's notice (#245) shows in the same style just above it, never
+/// hiding it (Codex on #245); a tap hides the notice.
 struct UndoBar: View {
   let model: AppModel
   @Environment(\.colorScheme) private var scheme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   var body: some View {
-    switch model.notices.shown(over: model.undo.items.last) {
+    VStack(spacing: 0) {
+      ForEach(model.notices.stack(over: model.undo.items.last), id: \.key) { shown in
+        row(shown)
+      }
+    }
+  }
+  @ViewBuilder private func row(_ shown: ActionNotices.Shown) -> some View {
+    switch shown {
     case .undo(let item):
       bar {
         Text(item.label).font(PigType.footnote.weight(.medium)).lineLimit(2)
@@ -819,8 +826,6 @@ struct UndoBar: View {
       .accessibilityHint("Hides this message")
       .id("notice-\(notice.id)")
       .transition(transition)
-    case nil:
-      EmptyView()
     }
   }
   private func bar(@ViewBuilder _ content: () -> some View) -> some View {
@@ -834,6 +839,16 @@ struct UndoBar: View {
   }
   private var transition: AnyTransition {
     reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity)
+  }
+}
+
+extension ActionNotices.Shown {
+  /// The bar's identity, so a new notice or Undo slides in afresh.
+  var key: String {
+    switch self {
+    case .undo(let item): item.id
+    case .notice(let notice): "notice-\(notice.id)"
+    }
   }
 }
 
@@ -916,12 +931,8 @@ struct UndoOverlay: View {
         ? .dark : (model.preferences.appearance == "light" ? .light : nil))
   }
   /// What the bar shows, so a change of it animates.
-  private var shownID: String? {
-    switch model.notices.shown(over: model.undo.items.last) {
-    case .undo(let item): item.id
-    case .notice(let notice): "notice-\(notice.id)"
-    case nil: nil
-    }
+  private var shownID: [String] {
+    model.notices.stack(over: model.undo.items.last).map(\.key)
   }
 }
 

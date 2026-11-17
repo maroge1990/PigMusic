@@ -2,14 +2,14 @@ import Foundation
 import PigDomain
 import Testing
 
-// #245: a failed action says so on every page, in the Undo bar's place.
+// #245: a failed action says so on every page, beside the Undo bar.
 
 @MainActor @Test func aNoticeShowsUntilItsTimeRunsOutOrItIsTapped() async throws {
   let notices = ActionNotices(lifetime: .milliseconds(60))
   let first = notices.post("That didn't work.")
-  #expect(notices.current == first && notices.shown(over: nil) == .notice(first))
+  #expect(notices.current == first && notices.stack(over: nil) == [.notice(first)])
   notices.dismiss(first.id)
-  #expect(notices.current == nil && notices.shown(over: nil) == nil)
+  #expect(notices.current == nil && notices.stack(over: nil).isEmpty)
 
   let second = notices.post("Still didn't work.", reference: "abc")
   #expect(second.id != first.id && second.reference == "abc")
@@ -35,21 +35,20 @@ import Testing
   #expect(notices.current == nil)
 }
 
-@MainActor @Test func theNewerOfANoticeAndAnUndoShowsInTheirSharedPlace() async throws {
+/// Codex on #245: a notice never hides a waiting Undo, whose time runs on;
+/// it shows just above it.
+@MainActor @Test func aNoticeLeavesAWaitingUndoShown() async throws {
   let undo = UndoQueue(wait: .seconds(600), linger: .zero)
   let notices = ActionNotices(lifetime: .seconds(600))
   undo.schedule("removed", label: "Removed Song") { true }
-  let older = try #require(undo.items.last)
-  #expect(notices.shown(over: older) == .undo(older))
-  try await Task.sleep(for: .milliseconds(5))
+  let waiting = try #require(undo.items.last)
+  #expect(notices.stack(over: waiting) == [.undo(waiting)])
   let notice = notices.post("That didn't work.")
-  #expect(notices.shown(over: older) == .notice(notice))
-  try await Task.sleep(for: .milliseconds(5))
+  #expect(notices.stack(over: waiting) == [.notice(notice), .undo(waiting)])
   undo.schedule("hidden", label: "Hidden from Mix") { true }
   let newer = try #require(undo.items.last)
-  #expect(notices.shown(over: newer) == .undo(newer))
-  // Once the notice is gone the waiting Undo shows again: its time runs on.
+  #expect(notices.stack(over: newer) == [.notice(notice), .undo(newer)])
   notices.dismiss(notice.id)
-  #expect(notices.shown(over: older) == .undo(older))
+  #expect(notices.stack(over: newer) == [.undo(newer)])
   undo.discardAll()
 }
