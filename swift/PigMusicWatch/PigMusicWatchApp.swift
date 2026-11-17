@@ -50,12 +50,12 @@ private struct WatchReadiness: View {
         complete ? "Ready for your run" : "Almost ready",
         systemImage: complete ? "checkmark.circle.fill" : "clock"
       ).font(.headline)
-      Text(complete ? "\(total) songs" : "\(ready.count) of \(total) songs on Watch")
+      Text(complete ? "\(total) songs" : "\(ready.count) of \(total) songs on Apple Watch")
         .font(PigType.footnote)
       Text(summary.listening)
         .font(PigType.footnote).foregroundStyle(.secondary)
       if complete, let synced = model.lastSynced {
-        Text("Synced \(synced.formatted(.relative(presentation: .named)))")
+        Text("Refreshed \(synced.formatted(.relative(presentation: .named)))")
           .font(PigType.footnote).foregroundStyle(.secondary)
       }
     }
@@ -65,7 +65,7 @@ private struct WatchReadiness: View {
 
 /// Like Apple Music and Spotify on the Watch: what is playing first (here or on
 /// the iPhone), then the library by playlist, artist and album, with storage
-/// and sync last.
+/// and refresh last.
 private struct WatchLibraryView: View {
   @Environment(\.colorScheme) private var scheme
   @Bindable var model: WatchModel
@@ -78,7 +78,7 @@ private struct WatchLibraryView: View {
         if model.manifest.songs.isEmpty {
           ContentUnavailableView {
             Label {
-              Text("No music on your Watch yet")
+              Text("No music on Apple Watch yet")
             } icon: {
               Image("PigLockup").resizable().scaledToFit().frame(height: 32)
                 .accessibilityHidden(true)
@@ -133,32 +133,34 @@ private struct WatchLibraryView: View {
           }
         }
         Section("More") {
-          NavigationLink("Storage & sync") {
+          NavigationLink("Storage") {
             List {
-              Text("\(model.receipt?.ready.count ?? 0) songs downloaded").pigFigures()
+              Text("\(model.receipt?.ready.count ?? 0) songs on Apple Watch").pigFigures()
               Text(
                 ByteCountFormatter.string(
                   fromByteCount: model.receipt?.usedBytes ?? 0, countStyle: .file)
               ).pigFigures()
               Picker(
-                "Watch budget",
+                "Storage limit",
                 selection: Binding(
                   get: { Int((model.receipt?.budgetBytes ?? 1_073_741_824) / 1_073_741_824) },
                   set: { value in Task { await model.setBudget(value) } })
               ) {
                 ForEach([1, 2, 4, 8], id: \.self) { Text("\($0) GB").tag($0) }
               }
-              Button("Sync with phone") { Task { await model.send("sync") } }
+              Button("Refresh from iPhone", systemImage: "arrow.clockwise") {
+                Task { await model.send("sync") }
+              }
               Button("Send diagnostics to iPhone") { model.sendDiagnostics() }
               Toggle("Crossfade", isOn: $model.crossfade)
               if let message = model.message ?? model.link?.error {
                 Text(message).font(PigType.footnote).foregroundStyle(PigBrand.secondary(scheme))
               }
-            }.pigBrandedCanvas().navigationTitle("Storage & sync")
+            }.pigBrandedCanvas().navigationTitle("Storage")
           }
         }
         if model.manifest.context.account == nil {
-          Text("Sign in and open Apple Watch in the phone app to send music.").font(PigType.footnote)
+          Text("Sign in and open Apple Watch in PigMusic on iPhone to send music.").font(PigType.footnote)
         }
       }.pigBrandedCanvas().navigationTitle("PigMusic")
     }.pigBrandedCanvas()
@@ -337,7 +339,7 @@ private struct WatchSongs: View {
           } label: {
             VStack(alignment: .leading) {
               Text(song.track.title).lineLimit(2)
-              Text(ready ? song.track.artist : "Waiting for transfer").font(PigType.caption)
+              Text(ready ? song.track.artist : "Waiting for Apple Watch").font(PigType.caption)
                 .foregroundStyle(.secondary).lineLimit(1)
             }
           }

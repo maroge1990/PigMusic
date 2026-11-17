@@ -52,7 +52,7 @@ private struct DownloadList: View {
                 })
               TransferGroupLabel(
                 model: model, title: group.title,
-                subtitle: group.lead + " · " + control.summary(done: "on your phone"),
+                subtitle: group.lead + " · " + control.summary(done: "on this iPhone"),
                 artwork: group.artwork, control: control, noun: group.noun
               ) { tap, ids in act(tap, on: group.records.filter { ids.contains($0.id) }) }
             }
@@ -69,7 +69,7 @@ private struct DownloadList: View {
         }
       }
       DeviceGroupsSection(
-        model: model, title: "On your phone", device: "iPhone", groups: groups,
+        model: model, title: "On this iPhone", device: "iPhone", groups: groups,
         play: { tracks, index in model.play(tracks, at: index) }
       ) { ids, origin in await downloads.release(ids: ids, origin: origin) }
       Section("Settings") {
@@ -80,7 +80,7 @@ private struct DownloadList: View {
               get: { downloads.allowsCellular },
               set: { value in Task { await downloads.setCellular(value) } }))
         }
-        Picker("Download budget", selection: $budget) {
+        Picker("Storage limit", selection: $budget) {
           ForEach([1, 2, 5, 10, 20, 50], id: \.self) { Text("\($0) GB").tag($0) }
         }
         .onChange(of: budget) { _, value in

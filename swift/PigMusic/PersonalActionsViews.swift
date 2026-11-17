@@ -182,11 +182,11 @@ struct RequestsView: View {
   var body: some View {
     List {
       if !enabled {
-        StatusText("Server downloads are disabled.", kind: .error)
+        StatusText("Downloads are off on the server.", kind: .error)
       }
       if let error { StatusText(error, kind: .error) }
       if let notice { StatusText(notice) }
-      if loaded && groups.isEmpty { Text("No music requests").foregroundStyle(.secondary) }
+      if loaded && groups.isEmpty { Text("Nothing being added").foregroundStyle(.secondary) }
       if !groups.isEmpty {
         Section("Transfers") {
           ForEach(groups) { group in
@@ -214,7 +214,7 @@ struct RequestsView: View {
             }
           }
           if next != nil {
-            Button("Show more requests") { Task { await load(reset: false) } }.disabled(loading)
+            Button("Show more") { Task { await load(reset: false) } }.disabled(loading)
               .buttonStyle(.pigSecondary)
           }
         }
@@ -285,7 +285,7 @@ struct RequestsView: View {
     model.cancelRequestLater(item) { continuesForOthers in
       notice =
         continuesForOthers
-        ? "Your request was cancelled. The shared download continues for another person." : nil
+        ? "Cancelled for you. Another person is adding it too, so it continues." : nil
     }
   }
   private func load(reset: Bool) async {

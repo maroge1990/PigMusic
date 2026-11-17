@@ -154,7 +154,7 @@ import UIKit
         do {
           try await archive.recordListen(event)
           await flushListens()
-        } catch { message = "Listening history could not be saved: " + error.localizedDescription }
+        } catch { message = "Couldn't save listening history: " + error.localizedDescription }
       }
     }
   }
@@ -197,7 +197,7 @@ import UIKit
     phoneCover = phoneNowPlaying?.cover.flatMap(UIImage.init(data:))
     let info = Bundle.main.infoDictionary
     DiagnosticsLog.shared.launched(
-      "Watch",
+      "Apple Watch",
       version:
         "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
     )
@@ -332,7 +332,7 @@ import UIKit
         entries = albums.flatMap { album, artist, count in
           (1...count).map { ("\(album.split(separator: " ")[0]) Song \($0)", artist, album, artist) }
         }
-        entries[3].0 = "A Very Long Song Title That Keeps On Going Past the Edge of the Watch"
+        entries[3].0 = "A Very Long Song Title That Keeps On Going Past the Edge of the Screen"
       }
       do {
         var songs: [CompanionSong] = []
@@ -552,7 +552,7 @@ import UIKit
       } catch { message = error.localizedDescription }
     } else {
       link?.message(data)
-      message = "Request queued for your phone."
+      message = "Queued for iPhone."
     }
   }
   func setBudget(_ gigabytes: Int) async {

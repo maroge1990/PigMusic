@@ -16,40 +16,40 @@ struct ArtistAcquisitionView: View {
   @State private var confirm = false
   var body: some View {
     Form {
-      Section("Releases") {
+      Section("Album types") {
         Toggle("Albums", isOn: $albums)
         Toggle("Singles", isOn: $singles)
         Toggle("EPs", isOn: $eps)
-        Toggle("Monitor new releases", isOn: $monitor)
+        Toggle("Monitor new albums", systemImage: "bell", isOn: $monitor)
         Text(
-          "Monitoring starts with the current catalogue as a baseline. Request the catalogue separately to acquire existing releases."
+          "Monitoring starts with the current catalogue as a baseline. Use Add albums to library for the albums already out."
         ).font(PigType.footnote)
       }
       if let state {
-        Section("Request progress") {
+        Section("Progress") {
           Text(RequestStatus.label(state.status))
           Text(
-            "\(state.done.count) of \(state.total) releases reviewed · \(state.created) requests created"
+            "\(state.done.count) of \(state.total) albums reviewed · \(state.created) added"
           )
           if let error = state.error { StatusText(error, kind: .error) }
         }
       }
       Section {
         Button("Save monitoring settings") { Task { await save(request: false) } }
-        Button("Request selected catalogue") { confirm = true }
-          .confirmationDialog("Request all selected releases?", isPresented: $confirm) {
-            Button("Request catalogue") { Task { await save(request: true) } }
+        Button("Add selected albums", systemImage: "plus") { confirm = true }
+          .confirmationDialog("Add all selected albums to library?", isPresented: $confirm) {
+            Button("Add albums to library") { Task { await save(request: true) } }
           } message: {
-            Text("This can start many downloads")
+            Text("This can add many albums at once.")
           }
-        Button("Cancel artist request and monitoring", role: .destructive) {
+        Button("Cancel adding and monitoring", systemImage: "xmark", role: .destructive) {
           Task { await cancel() }
         }
-        Button("Refresh status") { Task { await load() } }
+        Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }
       }.disabled(loading || !model.canMutate || !(albums || singles || eps))
       if loading { ProgressView() }
       if let message { StatusText(message) }
-    }.pigCanvas().navigationTitle("Artist requests").navigationBarTitleDisplayMode(.inline).task { await load() }
+    }.pigCanvas().navigationTitle("Artist monitoring").navigationBarTitleDisplayMode(.inline).task { await load() }
   }
   private func apply(_ value: ArtistAcquisition) {
     state = value

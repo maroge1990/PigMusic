@@ -228,7 +228,7 @@ import UIKit
         if let command = try? JSONDecoder().decode(CompanionCommand.self, from: data), let self {
           reply = await self.handle(command)
         } else {
-          reply = CompanionReply(message: "Invalid Watch request.")
+          reply = CompanionReply(message: "Couldn't read the message from Apple Watch.")
         }
         return (try? JSONEncoder().encode(reply)) ?? Data()
       }
@@ -385,12 +385,12 @@ import UIKit
     -> SendOutcome
   {
     guard supported else {
-      let reason = "Watch downloads are managed by its paired iPhone."
+      let reason = "Apple Watch downloads are managed by its paired iPhone."
       message = reason
       return .failed(reason)
     }
     guard verified, let downloads else {
-      let reason = "Connect and refresh your phone library first."
+      let reason = "Connect and refresh your library on iPhone first."
       message = reason
       return .failed(reason)
     }
@@ -408,7 +408,7 @@ import UIKit
         + Set(tracks.map(\.id)).subtracting(Set(downloads.records.map(\.id))).count
         <= 1000
     else {
-      let reason = "Choose up to 1,000 songs for your Watch library."
+      let reason = "Choose up to 1,000 songs for Apple Watch."
       message = reason
       return .failed(reason)
     }
@@ -420,7 +420,7 @@ import UIKit
       }
       guard account.isCurrent(stamp) else { return .superseded }
       guard !personal.isEmpty else {
-        let reason = "Add these songs to your library before downloading them to Watch."
+        let reason = "Add these songs to your library before sending them to Apple Watch."
         message = reason
         return .failed(reason)
       }
@@ -866,7 +866,8 @@ import UIKit
         let data = try JSONEncoder().encode(next)
         guard data.count <= 2 * 1024 * 1024 else {
           published = nil
-          failPublish("Watch metadata is too large. Choose fewer songs or shorter playlist names.")
+          failPublish(
+            "The song list for Apple Watch is too large. Choose fewer songs or shorter playlist names.")
           return
         }
         try data.write(to: manifestURL, options: .atomic)
@@ -936,7 +937,8 @@ import UIKit
       inFlight: Set(outstanding.compactMap { $0.file.map { "\($0.songId):\($0.checksum)" } }),
       paused: paused, hasFile: { files[$0] != nil }, due: due)
     if audio.budgetFull {
-      failPublish("Watch storage budget is full. Remove Watch songs before adding more.")
+      failPublish(
+        "Apple Watch storage limit reached. Remove songs from Apple Watch before adding more.")
     }
     // A song ahead of the published manifest names the next library version,
     // which lists every ready song: the Watch holds it until that arrives.
@@ -981,7 +983,7 @@ import UIKit
     readyCache = nil
     DiagnosticsLog.shared.record(
       "watch",
-      "Watch holds \(plan.deliver.count) more songs; their iPhone copies were deleted"
+      "Apple Watch holds \(plan.deliver.count) more songs; their iPhone copies were deleted"
         + (plan.refetch.isEmpty ? "" : "; \(plan.refetch.count) lost songs fetched again"))
     if !plan.refetch.isEmpty {
       // A lost song's delivery starts again.
@@ -1116,7 +1118,7 @@ import UIKit
   }
   private func handle(_ command: CompanionCommand) async -> CompanionReply {
     guard verified, command.account == context.account, let model, let store = model.store else {
-      return CompanionReply(message: "Refresh the library on your phone first.")
+      return CompanionReply(message: "Refresh your library on iPhone first.")
     }
     let stamp = account.generation
     do {
@@ -1145,16 +1147,16 @@ import UIKit
         }
         await enqueue(tracks)
         return CompanionReply(
-          message: "Queued on your phone. AAC files transfer when both devices are available.")
+          message: "Queued on iPhone. AAC files transfer when both devices are available.")
       case "remove":
         for id in command.songIds.prefix(100) {
           guard account.isCurrent(stamp), command.account == context.account else {
-            return CompanionReply(message: "The phone account changed.")
+            return CompanionReply(message: "The iPhone account changed.")
           }
           await remove(id)
         }
       case "sync": await publish(force: true)
-      default: return CompanionReply(message: "Unsupported Watch command.")
+      default: return CompanionReply(message: "Couldn't run this command from Apple Watch.")
       }
       return CompanionReply()
     } catch { return CompanionReply(message: error.localizedDescription) }

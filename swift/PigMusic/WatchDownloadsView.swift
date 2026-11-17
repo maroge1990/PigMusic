@@ -35,7 +35,7 @@ struct WatchDownloadsView: View {
           }
         }
         DeviceGroupsSection(
-          model: model, title: "On your watch", device: "Apple Watch",
+          model: model, title: "On Apple Watch", device: "Apple Watch",
           groups: DeviceGroup.build(delivered)
         ) { ids, origin in await watch.release(ids, origin: origin) }
         Section("Settings") {
@@ -128,7 +128,7 @@ struct WatchDownloadsView: View {
       let album = TransferGroupControl(group.records.map { ($0.id, control($0, watch: watch)) })
       TransferGroupLabel(
         model: model, title: group.title,
-        subtitle: group.lead + " · " + album.summary(done: "on your watch"),
+        subtitle: group.lead + " · " + album.summary(done: "on Apple Watch"),
         artwork: group.artwork, control: album, noun: group.noun
       ) { tap, ids in
         let records = group.records.filter { ids.contains($0.id) }
@@ -180,11 +180,11 @@ struct WatchDownloadsView: View {
     }
   }
   private func status(_ record: DownloadRecord, watch: WatchPhoneController) -> String {
-    if onWatch(record, watch: watch) { return "On Watch" }
+    if onWatch(record, watch: watch) { return "On Apple Watch" }
     if record.isPaused || record.isHeld { return "Paused" }
     return switch record.state {
-    case "ready": "Waiting for Watch"
-    case "failed": "Failed"
+    case "ready": "Waiting for Apple Watch"
+    case "failed": "Couldn't download"
     case "downloading": "Downloading to iPhone"
     default: "Getting ready"
     }

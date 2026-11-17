@@ -178,7 +178,7 @@ struct PlaylistView: View {
           $0.mutation.playlistId == playlist.id && $0.state != "queued"
         }) {
           VStack(alignment: .leading, spacing: 4) {
-            Text(failed.message ?? "An edit to this playlist could not be applied.")
+            Text(failed.message ?? "Couldn't apply an edit to this playlist.")
               .font(PigType.footnote).foregroundStyle(PigBrand.danger(scheme))
             NavigationLink("Review edit") { PendingEditsView(model: model) }
               .font(PigType.footnote.weight(.semibold))

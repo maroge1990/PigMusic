@@ -259,15 +259,15 @@ struct DiagnosticsView: View {
               "Last confirmed", value: confirmed.formatted(.relative(presentation: .named)))
           }
           if let diagnostics = watch.watchDiagnostics {
-            LabeledContent("Watch app", value: diagnostics.version ?? "Unknown")
+            LabeledContent("Apple Watch app", value: diagnostics.version ?? "Unknown")
             LabeledContent(
-              "Watch log", value: diagnostics.sentAt.formatted(.relative(presentation: .named)))
+              "Apple Watch log", value: diagnostics.sentAt.formatted(.relative(presentation: .named)))
             if diagnostics.endedUnexpectedly {
-              Text("The Watch reported that its previous run ended unexpectedly.")
+              Text("Apple Watch reported that its previous run ended unexpectedly.")
                 .font(PigType.footnote).foregroundStyle(PigBrand.danger(scheme))
             }
           }
-          Button("Ask the Watch for its log") { watch.requestWatchDiagnostics() }
+          Button("Ask Apple Watch for its log") { watch.requestWatchDiagnostics() }
             .disabled(watch.link?.activated != true)
         }
       }
@@ -277,7 +277,7 @@ struct DiagnosticsView: View {
         }
       } footer: {
         Text(
-          "The export holds app events, connection states, battery figures and crash call stacks from this iPhone and the Watch. It contains no passwords, sign-in tokens or music links."
+          "The export holds app events, connection states, battery figures and crash call stacks from this iPhone and Apple Watch. It contains no passwords, sign-in tokens or music links."
         )
       }
     }

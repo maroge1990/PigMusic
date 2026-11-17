@@ -99,7 +99,7 @@ struct CatalogueArtistView: View {
             ArtistAcquisitionView(model: model, artistId: artistId)
           } label: {
             HStack {
-              Label("Requests and monitoring", systemImage: "bell")
+              Label("Artist monitoring", systemImage: "bell")
               Spacer()
               Image(systemName: "chevron.right").foregroundStyle(.tertiary)
             }
@@ -345,7 +345,7 @@ private struct ReleaseGrid: View {
             model: model, source: .releaseGroup(release.id), title: release.title,
             caption: [
               showType ? release.type : "", String(release.date.prefix(4)),
-              release.savedAlbumId == nil ? "" : "In library",
+              release.savedAlbumId == nil ? "" : "In your library",
             ]
             .filter { !$0.isEmpty }.joined(separator: " · "))
         }.buttonStyle(.plain)
@@ -384,8 +384,8 @@ struct CatalogueDiscographyView: View {
           Text(kindLabel).font(PigType.sectionTitle)
           Spacer()
           Menu {
-            Picker("Release type", selection: $kind) {
-              Text("All releases").tag("all")
+            Picker("Album type", selection: $kind) {
+              Text("All albums").tag("all")
               Text("Albums").tag("album")
               Text("Singles").tag("single")
               Text("EPs").tag("ep")
@@ -407,7 +407,7 @@ struct CatalogueDiscographyView: View {
         }
         ReleaseGrid(model: model, releases: orderedReleases, showType: true)
         if offset < total {
-          Button("Show more releases") { Task { await load(reset: false) } }.disabled(loading)
+          Button("Show more albums") { Task { await load(reset: false) } }.disabled(loading)
             .buttonStyle(.pigSecondary).frame(maxWidth: .infinity)
         }
       }.padding(.horizontal).padding(.bottom, 24)
@@ -416,8 +416,8 @@ struct CatalogueDiscographyView: View {
     .task(id: kind) { await load(reset: true) }
   }
   private var kindLabel: String {
-    ["all": "All releases", "album": "Albums", "single": "Singles", "ep": "EPs", "other": "Other"][
-      kind] ?? "All releases"
+    ["all": "All albums", "album": "Albums", "single": "Singles", "ep": "EPs", "other": "Other"][
+      kind] ?? "All albums"
   }
   private var orderedReleases: [CatalogueGroup] {
     releases.sorted {

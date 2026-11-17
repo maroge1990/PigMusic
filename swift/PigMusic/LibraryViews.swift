@@ -507,7 +507,7 @@ struct MiniPlayer: View {
         }.contentShape(Rectangle())
       }
       .buttonStyle(.plain)
-      .accessibilityLabel("Now playing: \(player.queue.current?.track.title ?? "")")
+      .accessibilityLabel("Now playing: " + (player.queue.current?.track.title ?? ""))
       .accessibilityHint("Opens the player")
       Button(action: player.toggle) {
         Image(systemName: player.wantsPlayback ? "pause.fill" : "play.fill")
