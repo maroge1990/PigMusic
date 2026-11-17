@@ -1,6 +1,7 @@
 import PigAPI
 import PigBrand
 import PigDomain
+import PigSync
 import SwiftUI
 import UIKit
 
@@ -595,6 +596,9 @@ struct CatalogueReleaseView: View {
   @State private var showingArtist = false
   @State private var requesting = false
   @State private var requestFailure: String?
+  /// The server was busy and can't say whether the songs were added
+  /// (#239): offered as a Refresh, never sent again blindly.
+  @State private var requestUnconfirmed = false
   @State private var loading = false
   @State private var error: String?
   @Environment(\.colorScheme) private var scheme
@@ -682,6 +686,11 @@ struct CatalogueReleaseView: View {
       // states (clock = requested), or a warning that retries.
       if requesting {
         ProgressView().frame(width: 40, height: 40).accessibilityLabel("Adding")
+      } else if requestUnconfirmed {
+        RoundIcon(label: "Couldn't confirm adding. Refresh", systemImage: "arrow.clockwise") {
+          requestUnconfirmed = false
+          Task { await load() }
+        }
       } else if let requestFailure {
         RoundIcon(
           label:
@@ -717,11 +726,14 @@ struct CatalogueReleaseView: View {
     guard !requesting else { return }
     requesting = true
     requestFailure = nil
+    requestUnconfirmed = false
     defer { requesting = false }
     do {
       _ = try await model.performPersonal { try await $0.requestMusic(tracks) }
       await load()
-    } catch is CancellationError {} catch { requestFailure = error.userMessage }
+    } catch is CancellationError {} catch NativeFailure.busyUnconfirmed {
+      requestUnconfirmed = true
+    } catch { requestFailure = error.userMessage }
   }
   private func track(_ song: CatalogueSong) -> Track {
     var track = song.track
