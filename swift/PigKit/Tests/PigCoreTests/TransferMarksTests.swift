@@ -18,6 +18,16 @@ struct TransferMarksTests {
     return record
   }
 
+  /// #246, D-116: one mark for each state; a failed song shows the
+  /// exclamation circle, not the retry arrows, and a waiting one the clock.
+  @Test func eachStateHasOneMark() {
+    #expect(TransferMark.waiting.symbol == "clock")
+    #expect(TransferMark.downloading(0.5).symbol == nil)
+    #expect(TransferMark.paused.symbol == "pause.circle")
+    #expect(TransferMark.failed.symbol == "exclamationmark.circle")
+    #expect(TransferMark.done.symbol == "checkmark.circle.fill")
+  }
+
   @Test func aPhoneSongsMarkPausesResumesAndRetries() {
     #expect(
       TransferControl.phone(record("a"), progress: nil) == TransferControl(.waiting, tap: .pause))

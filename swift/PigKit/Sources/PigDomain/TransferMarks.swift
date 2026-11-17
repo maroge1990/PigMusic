@@ -1,7 +1,8 @@
 import Foundation
 
 /// The mark on the right of a transfer on the three Downloads pages (D-109):
-/// clock (waiting), progress ring, pause circle, retry mark (failed) or check.
+/// clock (waiting), progress ring, pause circle, exclamation circle (failed)
+/// or check.
 public enum TransferMark: Equatable, Sendable {
   case waiting
   /// The share done, 0 to 1.
@@ -9,6 +10,18 @@ public enum TransferMark: Equatable, Sendable {
   case paused
   case failed
   case done
+
+  /// The mark's SF Symbol, one for each state (D-116); nil while
+  /// downloading, which draws a progress ring instead.
+  public var symbol: String? {
+    switch self {
+    case .waiting: "clock"
+    case .downloading: nil
+    case .paused: "pause.circle"
+    case .failed: "exclamationmark.circle"
+    case .done: "checkmark.circle.fill"
+    }
+  }
 }
 
 /// What tapping a mark does.
