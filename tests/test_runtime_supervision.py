@@ -3,12 +3,17 @@ server that stops answering is noticed, explained and restarted (#238)."""
 
 import json
 import socket
+from pathlib import Path
 import threading
+import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
+import server
 from server import runtime
+from server.security import FORWARDED
 
 
 class FakeProcess:
@@ -318,7 +323,10 @@ class Ready(BaseHTTPRequestHandler):
         "/missing": (404, {"detail": "Not Found"}),
     }
 
+    seen = []
+
     def do_GET(self):
+        self.seen.append((self.client_address[0], {k.lower() for k in self.headers}))
         status, body = self.answers[self.path]
         data = json.dumps(body).encode()
         self.send_response(status)
@@ -342,6 +350,20 @@ def test_the_probe_tells_ok_unavailable_and_no_answer_apart():
             ["thread_pool", "workers"],
         )
         assert runtime.probe(base + "/missing", 5) == ("degraded", ["HTTP 404"])
+        # The server answers readiness only to a direct local caller: the
+        # probe and the Dockerfile's health check (urllib) both are one.
+        del Ready.seen[:]
+        runtime.probe(base + "/ok", 5)
+        urllib.request.urlopen(base + "/ok", timeout=5).close()
+        assert len(Ready.seen) == 2
+        for address, headers in Ready.seen:
+            assert address == "127.0.0.1"
+            assert not headers & set(FORWARDED)
+        assert urllib.parse.urlsplit(runtime.READY_URL).hostname == "127.0.0.1"
+        dockerfile = Path(server.__file__).resolve().parents[1] / "Dockerfile"
+        if dockerfile.exists():  # not part of the image the suite also runs in
+            check = "urlopen('http://127.0.0.1:8765/api/health/ready')"
+            assert check in dockerfile.read_text()
     finally:
         web.shutdown()
         web.server_close()

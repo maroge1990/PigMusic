@@ -42,5 +42,5 @@ RUN mkdir -p /data && chown 99:100 /data
 USER 99:100
 # Every 2 minutes: each check starts a process in the container, about 0.9
 # CPU-s with Docker's exec, which was 3% of a core at 30 s while idle (#63).
-HEALTHCHECK --interval=120s --timeout=5s --start-period=20s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health')"
+HEALTHCHECK --interval=120s --timeout=10s --start-period=20s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health/ready')"
 CMD ["python", "-m", "server.runtime"]

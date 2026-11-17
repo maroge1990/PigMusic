@@ -47,15 +47,19 @@ class CredentialFilter(logging.Filter):
 
 
 class HealthCheckFilter(logging.Filter):
-    """Leaves a successful /api/health out of the access log: the container
-    health check asks every 2 minutes (686 lines a day, #146). A failing one
-    is still logged."""
+    """Leaves a successful /api/health or /api/health/ready out of the access
+    log: the container health check asks every 2 minutes (686 lines a day,
+    #146) and the watchdog every 30 s (#238). A failing one is still logged."""
 
     def filter(self, record):
         args = record.args
         if isinstance(args, tuple) and len(args) >= 5:
             path, status = str(args[2]).split("?", 1)[0], args[4]
-            if path == "/api/health" and isinstance(status, int) and status < 400:
+            if (
+                path in {"/api/health", "/api/health/ready"}
+                and isinstance(status, int)
+                and status < 400
+            ):
                 return False
         return True
 

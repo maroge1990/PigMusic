@@ -48,6 +48,10 @@ def test_every_api_route_is_anonymous_denied_and_bootstrap_closed(
             )
             if path == "/api/health":
                 assert response.status_code in {200, 405}
+            elif path == "/api/health/ready":
+                # The container's own probe (#238): to any caller that is not
+                # a direct local one the path does not exist.
+                assert (method, response.status_code) == ("GET", 404)
             elif path == "/api/v1/setup/owner":
                 assert response.status_code == (200 if method == "GET" else 403)
             else:
@@ -61,6 +65,8 @@ def test_every_api_route_is_anonymous_denied_and_bootstrap_closed(
                 method, path, json={} if method not in {"GET", "HEAD"} else None
             )
             assert response.status_code == 401, (method, path, response.text)
+        assert ("GET", "/api/health/ready") in set(request_paths(app))
+        assert client.get("/api/health/ready").status_code == 404
         health = client.get("/api/health").json()
         assert set(health) == {"status", "https", "storage_available"}
 

@@ -102,6 +102,12 @@ CANONICAL_SECONDS = 2
 TIDY_TRACKLISTS = 20
 
 
+# /api/health/ready (#238): how long a pool or database check may take, and
+# how long a worker may have been failing.
+READY_TIMEOUT = 5
+READY_WORKER_SECONDS = 300
+
+
 def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     https_origin = public_origin()
     store = Store(
@@ -431,6 +437,48 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         return JSONResponse(
             {"detail": "Check the submitted fields", "code": "invalid_request"},
             status_code=422,
+        )
+
+    @app.get("/api/health/ready", include_in_schema=False)
+    async def ready():
+        """Whether the server can do its work (#238), for the container's
+        health check and the supervisor's watchdog; the guard answers only a
+        direct local caller. /api/health below only shows it is reachable."""
+
+        async def within(function, *args):
+            # On the shared pool nearly every endpoint uses: no free thread
+            # within the limit is itself the failure.
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(function, *args), timeout=READY_TIMEOUT
+                )
+                return True
+            except Exception:
+                return False
+
+        thread_pool, database, storage = await asyncio.gather(
+            within(lambda: None),
+            within(store.read_document, "downloads"),
+            within(download_root, store),
+        )
+        now = time.time()
+        checks = {
+            "thread_pool": thread_pool,
+            "database": database,
+            # Between restarts is fine; failing for 5 minutes is not.
+            "workers": not any(
+                entry["failing_since"] is not None
+                and now - entry["failing_since"] > READY_WORKER_SECONDS
+                for entry in workers.snapshot().values()
+            ),
+            # Reported only: a missing NAS mount is a known state with its
+            # own message, and restarting would not bring it back.
+            "storage": storage,
+        }
+        up = thread_pool and database and checks["workers"]
+        return JSONResponse(
+            {"status": "ok" if up else "unavailable", "checks": checks},
+            status_code=200 if up else 503,
         )
 
     @app.get("/api/health")

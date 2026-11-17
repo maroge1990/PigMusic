@@ -3,8 +3,9 @@ from server.security import api_routes
 
 
 def test_every_api_route_is_versioned(tmp_path):
-    # U01-4: clients use /api/v1, owner tools /api/v1/admin. The container
-    # health check is the one unversioned path.
+    # U01-4: clients use /api/v1, owner tools /api/v1/admin. The reachability
+    # check and the container's own readiness probe (#238, answered only to a
+    # direct local caller) are the two unversioned paths.
     app = create_app(tmp_path)
     unversioned = sorted(
         {
@@ -13,7 +14,7 @@ def test_every_api_route_is_versioned(tmp_path):
             if not route.path.startswith("/api/v1/")
         }
     )
-    assert unversioned == ["/api/health"]
+    assert unversioned == ["/api/health", "/api/health/ready"]
 
 
 def test_owner_administration_lives_under_admin(tmp_path):
