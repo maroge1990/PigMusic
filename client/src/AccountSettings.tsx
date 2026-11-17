@@ -4,7 +4,7 @@ import {
   qualityLabel,
   type QualityOption,
 } from "./QualitySelect";
-import { api } from "./api";
+import { api, isUnconfirmed } from "./api";
 import type { Person } from "./AppShell";
 import { PageHeader } from "./PageHeader";
 import { formatRelative } from "./format";
@@ -103,6 +103,8 @@ export function AccountSettings({
       await load();
     } catch (e) {
       setError((e as Error).message);
+      // It may have been saved: show what the server holds now (#239).
+      if (isUnconfirmed(e)) void load().catch(() => {});
     }
   }
   function json(body: unknown) {

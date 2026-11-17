@@ -59,6 +59,17 @@ export async function apiFetch(
     ) {
       reads.clear();
       libraryRead = undefined;
+    } else if (
+      !isRead(method) &&
+      !readOnlyPost(path, options) &&
+      (await unconfirmedWrite(response))
+    ) {
+      // The write may have been saved: drop what was read before it and let
+      // open views read again, so the person can see whether it was (#239).
+      reads.clear();
+      libraryRead = undefined;
+      window.dispatchEvent(new Event("music-library-changed"));
+      window.dispatchEvent(new Event("music-requests-changed"));
     }
     return response;
   }
@@ -88,18 +99,51 @@ function readOnlyPost(path: string, options?: RequestInit) {
   );
 }
 
+/** What kind of failure a response was (#239): the server busy or out of
+ * reach (`busy`), a write that may or may not have been saved
+ * (`unconfirmed`), an unexpected server fault (`server`), or the server
+ * refusing this request (`request`). */
+export type FailureKind = "busy" | "unconfirmed" | "server" | "request";
+
+export const BUSY_MESSAGE = "The server is busy. Try again shortly.";
+export const UNCONFIRMED_MESSAGE =
+  "The server was busy, so this may or may not have been saved. Check before trying again.";
+export const SERVER_ERROR_MESSAGE =
+  "That didn't work: something went wrong on the server.";
+
+export function failureKind(status: number, code?: unknown): FailureKind {
+  if (status === 503 && code === "busy_unconfirmed") return "unconfirmed";
+  if (
+    (status === 503 && (code === "server_busy" || !code)) ||
+    status === 429 ||
+    status === 502 ||
+    status === 504
+  )
+    return "busy";
+  if (status === 500) return "server";
+  return "request";
+}
+
 export class ApiError extends Error {
   public code: string;
   public body: Record<string, unknown>;
+  public kind: FailureKind;
   constructor(
     message: string,
     code: string,
     body: Record<string, unknown> = {},
+    kind: FailureKind = "request",
   ) {
     super(message);
     this.code = code;
     this.body = body;
+    this.kind = kind;
   }
+}
+
+/** A write the server could not confirm: it may have been saved. */
+export function isUnconfirmed(error: unknown) {
+  return error instanceof ApiError && error.kind === "unconfirmed";
 }
 const accountErrors: Record<string, string> = {
   invalid_credentials: "The username or password is incorrect.",
@@ -123,22 +167,38 @@ const accountErrors: Record<string, string> = {
 
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await apiFetch("/api" + path, options);
-  if (!response.ok) {
-    let message = "Something went wrong. Please try again.";
-    let code = "request_failed";
-    let details: Record<string, unknown> = {};
-    try {
-      const body = await response.json();
+  if (!response.ok) throw await responseError(response);
+  return response.json();
+}
+
+/** Turns a failed response into the error a view shows: the server's own
+ * message, or one of the server-condition messages (#239). */
+export async function responseError(response: Response): Promise<ApiError> {
+  let message = "Something went wrong. Please try again.";
+  let code = "request_failed";
+  let details: Record<string, unknown> = {};
+  try {
+    const body = await response.clone().json();
+    if (body && typeof body === "object" && !Array.isArray(body)) {
       details = body;
-      code = body.code || "request_failed";
+      if (typeof body.code === "string" && body.code) code = body.code;
       if (typeof body.detail === "string")
         message = accountErrors[code] || body.detail;
-    } catch {
-      /* Keep a readable response for non-JSON failures. */
     }
-    throw new ApiError(message, code, details);
+  } catch {
+    /* Keep a readable response for non-JSON failures. */
   }
-  return response.json();
+  const kind = failureKind(response.status, details.code);
+  if (kind === "busy") message = accountErrors[code] || BUSY_MESSAGE;
+  else if (kind === "unconfirmed") message = UNCONFIRMED_MESSAGE;
+  else if (kind === "server") {
+    const id = details.request_id;
+    message =
+      typeof id === "string" && id
+        ? `${SERVER_ERROR_MESSAGE} Reference ${id.slice(0, 8)}`
+        : SERVER_ERROR_MESSAGE;
+  }
+  return new ApiError(message, code, details, kind);
 }
 
 export function cachedLibrary<T>(): Promise<T> {
@@ -215,6 +275,78 @@ export function clearSessionReads() {
   window.dispatchEvent(new Event("music-session-cleared"));
 }
 
+const BUSY_RETRIES = 2;
+const DEFAULT_RETRY_MS = 2000;
+const MAX_RETRY_MS = 10000;
+
+function isRead(method: string) {
+  return method === "GET" || method === "HEAD" || method === "OPTIONS";
+}
+
+/** The server or its proxy answered that it is busy or out of reach. */
+async function busyResponse(response: Response) {
+  if (![429, 502, 503, 504].includes(response.status)) return false;
+  let code: unknown;
+  if (response.status === 503)
+    try {
+      code = (await response.clone().json())?.code;
+    } catch {
+      /* A proxy's own page: no code. */
+    }
+  return failureKind(response.status, code) === "busy";
+}
+
+function retryDelay(response: Response) {
+  const header = response.headers.get("Retry-After");
+  const seconds = header === null ? NaN : Number(header.trim());
+  if (!header?.trim() || !Number.isFinite(seconds) || seconds < 0)
+    return DEFAULT_RETRY_MS;
+  return Math.min(seconds * 1000, MAX_RETRY_MS);
+}
+
+function pause(ms: number, signal?: AbortSignal | null) {
+  return new Promise<void>((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }, ms);
+    if (signal?.aborted) return abort();
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
+/** A read the server was too busy for is asked again, at most twice, after
+ * the wait it named (#239). Writes are never sent twice: the first may have
+ * been saved. */
+async function fetchRetrying(path: string, options?: RequestInit) {
+  const method = options?.method?.toUpperCase() || "GET";
+  const generation = sessionGeneration;
+  let response = await fetch(path, options);
+  for (let retry = 0; retry < BUSY_RETRIES && isRead(method); retry++) {
+    if (!(await busyResponse(response))) break;
+    await pause(retryDelay(response), options?.signal);
+    // A read for the person who just left is not repeated.
+    if (generation !== sessionGeneration) break;
+    response = await fetch(path, options);
+  }
+  return response;
+}
+
+/** The server was busy while handling a write and cannot say whether it was
+ * saved: the code is only sent for writes. */
+async function unconfirmedWrite(response: Response) {
+  if (response.status !== 503) return false;
+  try {
+    return (await response.clone().json())?.code === "busy_unconfirmed";
+  } catch {
+    return false;
+  }
+}
+
 async function transport(path: string, options?: RequestInit) {
   const generation = sessionGeneration;
   const catalogue =
@@ -228,7 +360,7 @@ async function transport(path: string, options?: RequestInit) {
     return new Response(JSON.stringify(hit), {
       headers: { "Content-Type": "application/json" },
     });
-  const response = await fetch(path, options);
+  const response = await fetchRetrying(path, options);
   if (catalogue && response.ok && generation === sessionGeneration) {
     const value = await response.clone().json();
     if (generation === sessionGeneration) {

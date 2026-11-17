@@ -51,13 +51,17 @@ test("an error is cleared by opening another page", async ({ page }) => {
       "/v1/albums/album-2": (route) =>
         route.fulfill({
           status: 500,
-          json: { detail: "The album could not be read", code: "internal" },
+          json: {
+            code: "server_error",
+            detail: "Something went wrong on the server.",
+            request_id: "feedface0001",
+          },
         }),
     },
   });
   await page.goto("/#/library/album/album-2");
   await expect(page.getByRole("alert")).toContainText(
-    "The album could not be read",
+    "something went wrong on the server. Reference feedface",
   );
   await page.goto(`/#/library/album/${album.id}`);
   await expect(page.getByRole("heading", { name: "Brat" })).toBeVisible();
