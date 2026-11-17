@@ -10,6 +10,10 @@ public struct CatalogueMemory: Sendable {
   public func peek<T: Sendable>(_ key: String, as type: T.Type = T.self) -> T? {
     values[key] as? T
   }
+  /// Drops one answer, so a page can't draw it again (#246).
+  public mutating func forget(_ key: String) {
+    values[key] = nil
+  }
   public mutating func remember(_ value: any Sendable, key: String) {
     if values.count > Self.limit { values.removeAll() }
     values[key] = value

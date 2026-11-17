@@ -14,6 +14,15 @@ struct CatalogueMemoryTests {
     #expect(memory.peek("release:1", as: String.self) == nil)
   }
 
+  @Test func forgetsOneAnswer() {
+    var memory = CatalogueMemory()
+    memory.remember("Sunrise", key: "release:1")
+    memory.remember("Dusk", key: "release:2")
+    memory.forget("release:1")
+    #expect(memory.peek("release:1", as: String.self) == nil)
+    #expect(memory.peek("release:2", as: String.self) == "Dusk")
+  }
+
   @Test func startsAgainEmptyPastItsLimit() {
     var memory = CatalogueMemory()
     for index in 0...CatalogueMemory.limit { memory.remember(index, key: "page:\(index)") }

@@ -1352,24 +1352,29 @@ enum PlayOrigin: Hashable {
       Conditional<T>
   ) async throws -> T {
     let stamp = account.generation
-    let result: T
-    if let database = store {
-      result = try await readCatalogue { service in
-        try await ConditionalCatalogue(store: database).load(key: key) {
-          try await load(service, $0)
-        }
+    // No validator: a 304 could vouch for a saved copy read before a
+    // concurrent load replaced it, so only a new body counts.
+    let result: T = try await readCatalogue { service in
+      guard case .fresh(let value, _) = try await load(service, nil) else {
+        throw NativeFailure.unavailable("This page is unavailable. Try again shortly.")
       }
-    } else {
-      result = try await readCatalogue { service in
-        guard case .fresh(let value, _) = try await load(service, nil) else {
-          throw NativeFailure.unavailable("This page is unavailable. Try again shortly.")
-        }
-        return value
-      }
+      return value
     }
     try account.check(stamp)
     remember(result, key: key)
+    if let database = store {
+      try? await database.removeCached("catalogue-etag:" + key)
+      try? await database.cache(result, key: "catalogue:" + key)
+    }
     return result
+  }
+  /// Forgets a page's saved answer, in memory and on this device, after a
+  /// change the server couldn't confirm: reopening the page then can't draw
+  /// the answer from before the change (#246).
+  func forgetCatalogue(key: String) async {
+    catalogueMemory.forget(key)
+    try? await store?.removeCached("catalogue-etag:" + key)
+    try? await store?.removeCached("catalogue:" + key)
   }
   /// The last catalogue answer for a key, so a revisited page draws at once.
   /// Pages still refresh it through `cachedCatalogue`.

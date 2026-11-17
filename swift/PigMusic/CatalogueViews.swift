@@ -735,6 +735,7 @@ struct CatalogueReleaseView: View {
       await load()
     } catch is CancellationError {} catch NativeFailure.busyUnconfirmed {
       requestUnconfirmed = true
+      await model.forgetCatalogue(key: "release:" + releaseId)
     } catch { requestFailure = error.userMessage }
   }
   private func track(_ song: CatalogueSong) -> Track {
