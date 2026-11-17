@@ -1149,9 +1149,9 @@ class Store:
         key = old.get("song_key") or list(song_key(intent))
         twin = next(
             (
-                (other_id, payload)
-                for other_id, raw in conn.execute(
-                    "SELECT id,payload FROM queue WHERE id<>? AND status IN "
+                (other_id, status, payload)
+                for other_id, status, raw in conn.execute(
+                    "SELECT id,status,payload FROM queue WHERE id<>? AND status IN "
                     + sql(PENDING)
                     + " AND json_extract(payload,'$.song_key')=json(?) "
                     "ORDER BY created_at,id",
@@ -1164,7 +1164,7 @@ class Store:
         )
         if not twin:
             return None
-        twin_id, joined = twin
+        twin_id, twin_status, joined = twin
         scopes = old.get("request_scope") or {}
         moved = False
         for person in people:
@@ -1184,6 +1184,15 @@ class Store:
                 "UPDATE queue SET payload=? WHERE id=?",
                 (json.dumps(joined), twin_id),
             )
+        if twin_status == PAUSED:
+            # Retry is a person asking now: a paused job it joins goes on, as
+            # a repeat request resumes it (`resume_paused` in enqueue).
+            conn.execute(
+                "UPDATE queue SET status='waiting_for_sources',"
+                "updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=?",
+                (twin_id, PAUSED),
+            )
+        if moved:
             # Its members decide a job's quality target, as after a join.
             from .household_policy import HouseholdPolicy
 

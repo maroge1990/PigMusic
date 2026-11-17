@@ -385,9 +385,12 @@ def jobs(store):
     return {r[0]: {**json.loads(r[2]), "status": r[1]} for r in rows}
 
 
+@pytest.mark.parametrize("later_paused", [False, True], ids=["waiting", "paused"])
 @pytest.mark.parametrize("ended", ["failed", "cancelled"])
 @pytest.mark.parametrize("route", ["mine", "admin"])
-def test_retry_joins_the_job_asking_again_made(tmp_path, monkeypatch, route, ended):
+def test_retry_joins_the_job_asking_again_made(
+    tmp_path, monkeypatch, route, ended, later_paused
+):
     # #243: a request naming a release fails (or the administrator cancels
     # it); the song is asked for again with no release, which is a new job.
     # Retry of the earlier job then put it back to waiting too: two
@@ -417,6 +420,11 @@ def test_retry_joins_the_job_asking_again_made(tmp_path, monkeypatch, route, end
         again = client.post("/api/v1/requests", json={"tracks": [plain]})
         assert again.json()["created"] == 1, again.text
         (later,) = set(jobs(store)) - {earlier}
+        if later_paused:
+            # A paused job joined goes on: Retry is a person asking now, as
+            # a repeat request resumes it (Codex on #243).
+            paused = client.post(f"/api/v1/requests/{later}/pause")
+            assert paused.json() == {"paused": True}, paused.text
 
         retried = client.post(
             {
