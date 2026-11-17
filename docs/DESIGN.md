@@ -14,6 +14,34 @@ This page describes how PigMusic looks and is laid out: which Pig family brand f
 - iPhone haptics: a light tap when something leaves with an Undo, success for a favourite, a queued song or a finished batch of downloads, an error when something fails. Nothing else buzzes.
 - Rows drawn in a stack are separated by a hairline from the title's edge, as system lists are; no full-width rules under headers.
 
+## Words and icons
+
+One word and one icon for each thing on web, iPhone and Watch (D-115 to D-117); `tests/test_vocabulary.py` fails when a retired one returns. Each platform draws its own version of the shape (SF Symbols, lucide).
+
+| Meaning | Icon (SF Symbol / lucide) | Words |
+| --- | --- | --- |
+| Ask the server for music | `plus` / `Plus` | Add to library; Add N songs to library |
+| Saving a copy to a device | `arrow.down.circle` / `CircleArrowDown` | Download; Couldn't download |
+| Send to Apple Watch | `applewatch` | Send to Apple Watch; On Apple Watch; Waiting for Apple Watch |
+| Favourite | `star` / `Star` | Favourite |
+| Remove from library, delete playlist | `trash` / `Trash2` | Remove from library (Undo) |
+| Remove a download from a device | `minus.circle` / `CircleMinus` | Remove download |
+| Cancel, close, remove from Up next | `xmark` / `X` | |
+| Hide | `eye.slash` / `EyeOff` | Hide |
+| After a failure / load the latest | `arrow.clockwise` / `RotateCw` | Try again / Refresh |
+| Undo | `arrow.uturn.backward` / `Undo2` | Undo |
+| Rewind | `clock.arrow.circlepath` / `History` | Rewind |
+| Monitor artist | `bell` / `Bell` | |
+| Other editions | `square.stack.3d.up` / `Layers` | |
+| Find more in the catalogue | `magnifyingglass` / `Search` | |
+| More actions | `ellipsis` / `Ellipsis` | |
+| Sort; move in Up next | `arrow.up.arrow.down` / `ArrowUpDown` | |
+| Rename | `pencil` / `Pencil` | Rename |
+
+Row marks: in your library `checkmark.circle.fill` / `CircleCheck` ("In your library"); downloaded on this iPhone `arrow.down.circle.fill`; waiting `clock` ("Adding" until the server has the song); downloading, a progress ring; paused `pause.circle` (tap to resume); failed `exclamationmark.circle` / `CircleAlert` (tap to try again); no mark when a song is on the server and streams. A play triangle only ever plays music.
+
+Words: Apple Watch and iPhone (never watch or phone); songs and albums (never tracks or releases); your library; Storage limit; every error reads "Couldn't … Try again." or says what to do next.
+
 ## Brand
 
 Pig family **1.9.0**. The canonical source is the PigBrand repository: `tokens/brand-tokens.json`, `docs/pig-family-brand-guide.md`, `docs/integration.md` and `assets/products/pig-music`. PigMusic vendors copies, so builds and CI don't need a sibling checkout. Brand questions go to that repository's guide; this section covers only how PigMusic consumes the brand.
