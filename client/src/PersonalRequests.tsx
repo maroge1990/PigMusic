@@ -52,7 +52,7 @@ const PAGE = 50;
 const labels: Record<string, [string, Phase]> = {
   waiting_for_sources: ["Adding", "waiting"],
   searching: ["Looking for a copy", "active"],
-  downloading: ["Downloading to the server", "active"],
+  downloading: ["Adding", "active"],
   validating: ["Checking the file", "active"],
   importing: ["Adding to the library", "active"],
   completed: ["In your library", "done"],
@@ -77,7 +77,7 @@ function summary(group: Group) {
     return (labels[item.status] || [item.status.replaceAll("_", " ")])[0];
   }
   const parts = [`${group.done} of ${group.songs} songs in your library`];
-  if (group.active) parts.push(`${group.active} downloading`);
+  if (group.active) parts.push(`${group.active} adding`);
   if (group.waiting) parts.push(`${group.waiting} waiting`);
   if (group.failed) parts.push(`${group.failed} couldn't be added`);
   if (group.paused) parts.push(`${group.paused} paused`);
@@ -85,7 +85,7 @@ function summary(group: Group) {
 }
 
 const groupLabel: Record<Phase, string> = {
-  active: "Downloading",
+  active: "Adding",
   waiting: "Waiting",
   paused: "Paused",
   done: "In your library",
@@ -260,7 +260,7 @@ export function PersonalRequests() {
                               <progress
                                 max={1}
                                 value={item.request_progress}
-                                aria-label={`Downloading ${item.title} to the server, ${Math.round(item.request_progress * 100)} percent`}
+                                aria-label={`Adding ${item.title}, ${Math.round(item.request_progress * 100)} percent`}
                               />
                             )}
                           {tone === "failed" && item.error && (

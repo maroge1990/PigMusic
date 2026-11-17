@@ -19,7 +19,7 @@ const defaults: Record<
   },
   requested: { label: "Adding", icon: (size) => <Clock size={size} /> },
   active: {
-    label: "Downloading",
+    label: "Adding",
     icon: (size) => <LoaderCircle size={size} className="spin" />,
   },
   failed: {

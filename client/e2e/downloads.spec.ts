@@ -252,3 +252,48 @@ test("#228: a paused request reads Paused", async ({ page }) => {
   await card.locator(":scope > summary").click();
   await expect(card.locator("li").nth(1)).toContainText("Paused");
 });
+
+// #246: a song the server is still fetching reads "Adding", as on iPhone.
+test("a song the server is fetching reads Adding", async ({ page }) => {
+  const song = {
+    id: "f1",
+    title: "Faint",
+    artist: "Linkin Park",
+    status: "downloading",
+    request_progress: 0.4,
+    error: null,
+    source: "soulseek",
+    quality: null,
+  };
+  const album = {
+    ...groups.groups[0],
+    id: "g-hybrid",
+    title: "Hybrid Theory",
+    state: "active",
+    songs: 2,
+    done: 0,
+    active: 2,
+    waiting: 0,
+    failed: 0,
+    progress: 0.4,
+    items: [song, { ...song, id: "f2", title: "Papercut" }],
+  };
+  await mockApi(page, {
+    answers: {
+      "/v1/requests/groups": (route) =>
+        route.fulfill({
+          json: { ...groups, total: 1, groups: [album] },
+        }),
+    },
+  });
+  await page.goto("/#/downloads");
+  const card = page.locator(".request-group");
+  await expect(card).toContainText("0 of 2 songs in your library · 2 adding");
+  await expect(card.getByRole("img", { name: "Adding" }).first()).toBeVisible();
+  await card.locator(":scope > summary").click();
+  await expect(card).toContainText("Adding · Soulseek");
+  await expect(
+    card.getByRole("progressbar", { name: "Adding Faint, 40 percent" }),
+  ).toBeVisible();
+  await expect(card).not.toContainText("Downloading");
+});
