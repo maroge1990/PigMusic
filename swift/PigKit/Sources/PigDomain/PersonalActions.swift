@@ -83,7 +83,7 @@ public struct RequestGroup: Codable, Sendable, Identifiable {
     var parts = ["\(done) of \(songs) songs in your library"]
     if active > 0 { parts.append("\(active) downloading") }
     if waiting > 0 { parts.append("\(waiting) waiting") }
-    if failed > 0 { parts.append("\(failed) failed") }
+    if failed > 0 { parts.append("\(failed) couldn't add") }
     if let paused, paused > 0 { parts.append("\(paused) paused") }
     return parts.joined(separator: " · ")
   }

@@ -207,9 +207,10 @@ public enum AppleImport {
       "Added to your playlists" + (parts.isEmpty ? "." : ": " + parts.joined(separator: ", ") + ".")
     ]
     if counts.requested > 0 {
-      lines.append("\(songs(counts.requested)) requested; they join the playlist once downloaded.")
+      lines.append(
+        "Adding \(songs(counts.requested)) to your library; they join the playlist once added.")
     } else if counts.missing > 0 {
-      lines.append("The missing songs join the playlist if they are downloaded later.")
+      lines.append("The missing songs join the playlist if they're added to your library later.")
     }
     if result.capped {
       lines.append("Only the first \(limit) songs were added.")

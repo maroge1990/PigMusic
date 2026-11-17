@@ -45,11 +45,11 @@ import PigStore
     /// round 2: nothing may vanish without a word).
     public func notice(titles: [String: String]) -> String? {
       if let reason {
-        return refused.count > 1 ? "\(refused.count) songs could not be requested: \(reason)" : reason
+        return refused.count > 1 ? "Couldn't add \(refused.count) songs: \(reason)" : reason
       }
       guard let id = skipped.first else { return nil }
       return
-        "\(titles[id] ?? "That song") is excluded from this server's downloads, so it wasn't requested."
+        "Couldn't add \(titles[id] ?? "that song"): it's excluded from this server's downloads."
     }
   }
 

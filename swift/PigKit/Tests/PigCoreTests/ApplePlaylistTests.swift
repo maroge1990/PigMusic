@@ -211,7 +211,7 @@ private struct FakeImport: AppleImportSource {
     result.counts == AppleImportCounts(inLibrary: 1, household: 1, missing: 2, requested: 0))
   #expect(
     AppleImport.summary(result)
-      == "Added to your playlists: 1 song in your library, 1 song from the server, 2 songs not on the server yet. The missing songs join the playlist if they are downloaded later."
+      == "Added to your playlists: 1 song in your library, 1 song from the server, 2 songs not on the server yet. The missing songs join the playlist if they're added to your library later."
   )
 }
 
@@ -225,7 +225,7 @@ private struct FakeImport: AppleImportSource {
   #expect(await imports.sent.first?.downloadMissing == true)
   #expect(
     AppleImport.summary(result)
-      == "Added to your playlists: 3 songs from the server, 2 songs not on the server yet. 2 songs requested; they join the playlist once downloaded."
+      == "Added to your playlists: 3 songs from the server, 2 songs not on the server yet. Adding 2 songs to your library; they join the playlist once added."
   )
   // The sheet's offer, before adding: on the server, and to download.
   let states: [ApplePlaylistSongState] = [

@@ -59,7 +59,7 @@ private struct Offline: Error {}
     report.skipped = ["first"]
     #expect(
       report.notice(titles: ["first": "First"])
-        == "First is excluded from this server's downloads, so it wasn't requested.")
+        == "Couldn't add First: it's excluded from this server's downloads.")
     report.reason = "No."
     #expect(report.notice(titles: ["first": "First"]) == "No.")
   }
@@ -78,11 +78,11 @@ private struct Offline: Error {}
     second.reason = "No."
     drained.absorb(second)
     #expect(drained.refused == ["first", "second"])
-    #expect(drained.notice(titles: [:]) == "2 songs could not be requested: No.")
+    #expect(drained.notice(titles: [:]) == "Couldn't add 2 songs: No.")
     var report = RequestOutbox.Report()
     report.refused = ["first", "second", "third"]
     report.reason = "No."
-    #expect(report.notice(titles: [:]) == "3 songs could not be requested: No.")
+    #expect(report.notice(titles: [:]) == "Couldn't add 3 songs: No.")
   }
 
   @Test func offlineKeepsEveryRequestForTheNextTry() async throws {

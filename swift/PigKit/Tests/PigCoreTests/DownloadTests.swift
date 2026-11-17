@@ -678,6 +678,14 @@ private final class Raised: @unchecked Sendable {
   #expect(DownloadPlace.watch.summary(songs: 2) == "2 songs on your watch")
 }
 
+/// #246, D-115/D-117: a song the server is still getting reads "Adding", and
+/// one it couldn't get "Couldn't add".
+@Test func requestStatesUseTheAgreedWords() {
+  #expect(RequestStatus.label("waiting_for_sources") == "Adding")
+  #expect(RequestStatus.label("failed") == "Couldn't add")
+  #expect(RequestStatus.label("completed") == "In your library")
+}
+
 /// Codex round 1 on batch 13 (#209): with a song removed and waiting for its
 /// Undo, tapping the next one plays it, not the hidden one before it.
 @Test func aTapDuringAnUndoPlaysTheSongTapped() {

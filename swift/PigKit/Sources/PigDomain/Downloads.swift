@@ -191,7 +191,7 @@ public enum RequestStatus {
   public static let finished: Set<String> = ["completed", "downloaded", "failed", "cancelled"]
   public static func label(_ status: String) -> String {
     switch status {
-    case "waiting_for_sources": "Waiting for a source"
+    case "waiting_for_sources": "Adding"
     case "searching": "Looking for a copy"
     case "downloading": "Downloading to the server"
     case "validating": "Checking the file"
@@ -199,7 +199,7 @@ public enum RequestStatus {
     case "completed", "downloaded": "In your library"
     case "cancelled": "Cancelled"
     case "paused": "Paused"
-    case "failed": "Couldn't get this song"
+    case "failed": "Couldn't add"
     case "running", "queued": "Working on it"
     case "done": "Done"
     default: status.replacingOccurrences(of: "_", with: " ").capitalized
