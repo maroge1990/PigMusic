@@ -40,13 +40,14 @@ public struct AcquisitionResult: Codable, Sendable {
 extension AcquisitionResult {
   /// What a request to add songs did, in the agreed words (D-115, #246):
   /// songs the server is getting now or already was (another person's job,
-  /// a household copy) are being added; skipped ones couldn't be added.
+  /// a household copy) are being added; skipped ones (excluded, or already
+  /// in your library) are counted as skipped.
   public var sentence: String {
     func songs(_ count: Int) -> String { "\(count) song\(count == 1 ? "" : "s")" }
     let adding = created + existing
     let parts = [
       adding > 0 ? "Adding \(songs(adding)) to your library." : nil,
-      skipped > 0 ? "Couldn't add \(songs(skipped))." : nil,
+      skipped > 0 ? "Skipped \(songs(skipped))." : nil,
     ].compactMap { $0 }
     return parts.isEmpty ? "Already in your library." : parts.joined(separator: " ")
   }

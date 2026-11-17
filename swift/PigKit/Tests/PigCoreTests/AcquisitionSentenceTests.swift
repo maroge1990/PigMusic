@@ -19,14 +19,14 @@ struct AcquisitionSentenceTests {
     #expect(result(existing: 1).sentence == "Adding 1 song to your library.")
   }
 
-  @Test func skippedSongsCouldNotBeAdded() {
-    #expect(result(skipped: 2).sentence == "Couldn't add 2 songs.")
+  @Test func skippedSongsAreSkipped() {
+    #expect(result(skipped: 2).sentence == "Skipped 2 songs.")
   }
 
   @Test func mixedResultsSayBoth() {
     #expect(
       result(created: 2, existing: 1, skipped: 1).sentence
-        == "Adding 3 songs to your library. Couldn't add 1 song.")
+        == "Adding 3 songs to your library. Skipped 1 song.")
   }
 
   @Test func nothingToAddIsAlreadyInYourLibrary() {
