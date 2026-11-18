@@ -26,31 +26,43 @@ def _run(call, function, args):
 
 class ReadinessChecks:
     def __init__(self):
-        # The newest call of each check, finished or not.
+        # The newest call of each check, finished or not, and the loop time
+        # its first caller stops waiting for it.
         self.calls = {}
+        self.deadlines = {}
 
     async def passes(self, name, function, *args, timeout):
-        """Whether `function(*args)` returns within `timeout` seconds. False
-        at once, without calling it, while the check's last call is still
-        running; false when it raises."""
-        previous = self.calls.get(name)
-        if previous is not None and not previous.done():
-            return False
+        """Whether `function(*args)` returns within `timeout` seconds; false
+        when it raises. A caller arriving while the check's last call is
+        still running waits for that same call (never a second thread),
+        within its own timeout and no longer than the call's first caller
+        would: once that has passed, the call counts as stalled and the
+        answer is false at once."""
+        loop = asyncio.get_running_loop()
+        now = loop.time()
+        call = self.calls.get(name)
         try:
-            call = Future()
-            threading.Thread(
-                target=_run,
-                args=(call, function, args),
-                name="ready-" + name,
-                daemon=True,
-            ).start()
-            # Only once started: a call that never ran must not stay
-            # outstanding for ever.
-            self.calls[name] = call
+            if call is not None and not call.done():
+                wait = min(timeout, self.deadlines[name] - now)
+                if wait <= 0:
+                    return False
+            else:
+                call = Future()
+                threading.Thread(
+                    target=_run,
+                    args=(call, function, args),
+                    name="ready-" + name,
+                    daemon=True,
+                ).start()
+                # Only once started: a call that never ran must not stay
+                # outstanding for ever.
+                self.calls[name] = call
+                self.deadlines[name] = now + timeout
+                wait = timeout
             # Shielded: giving up the wait leaves the call itself in place, so
             # the next poll sees it is still outstanding.
             await asyncio.wait_for(
-                asyncio.shield(asyncio.wrap_future(call)), timeout=timeout
+                asyncio.shield(asyncio.wrap_future(call)), timeout=wait
             )
             return True
         except Exception:

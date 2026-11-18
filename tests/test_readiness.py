@@ -326,6 +326,54 @@ def test_a_readiness_check_that_raises_or_hangs_fails_and_runs_once_at_a_time():
     asyncio.run(scenario())
 
 
+def test_overlapping_callers_share_one_check_and_its_answer():
+    """Codex on 7866ac1: a caller arriving while a healthy mount test was
+    still running was told at once the mount was unavailable."""
+    from server.readiness import ReadinessChecks
+
+    threads = []
+
+    def slow():
+        threads.append(threading.current_thread().name)
+        time.sleep(0.3)
+
+    async def scenario():
+        checks = ReadinessChecks()
+        return await asyncio.gather(
+            checks.passes("storage", slow, timeout=2),
+            checks.passes("storage", slow, timeout=2),
+        )
+
+    assert asyncio.run(scenario()) == [True, True]
+    assert len(threads) == 1
+
+
+def test_overlapping_callers_of_a_stalled_check_use_one_thread_and_fail():
+    from server.readiness import ReadinessChecks
+
+    release, threads = threading.Event(), []
+
+    def stalled():
+        threads.append(threading.current_thread().name)
+        release.wait(30)
+
+    async def scenario():
+        checks = ReadinessChecks()
+        began = time.monotonic()
+        answers = await asyncio.gather(
+            checks.passes("storage", stalled, timeout=0.3),
+            checks.passes("storage", stalled, timeout=0.3),
+        )
+        return answers, time.monotonic() - began
+
+    try:
+        answers, took = asyncio.run(scenario())
+    finally:
+        release.set()
+    assert answers == [False, False] and took < 2
+    assert len(threads) == 1
+
+
 def test_health_never_waits_on_a_hung_mount_on_a_request_thread(tmp_path, monkeypatch):
     """#256: /api/health tested the mount on each caller's own pool thread,
     so every app checking reachability held one more on a hung mount."""
