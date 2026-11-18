@@ -76,6 +76,25 @@ extension AcquisitionResult {
     return parts.isEmpty ? "Already in your library." : parts.joined(separator: " ")
   }
 }
+/// The one notice for a drain of the request outbox (#245): a refusal's
+/// reason (with how many songs when several), else the song left out; then
+/// the paused sentence when a song stayed paused (#264, Codex round 1 on
+/// batch D: it is never hidden by the rest).
+public enum RequestNotice {
+  public static func text(refused: Int, reason: String?, excluded: String?, paused: Bool)
+    -> String?
+  {
+    var parts: [String] = []
+    if let reason {
+      parts.append(refused > 1 ? "Couldn't add \(refused) songs: \(reason)" : reason)
+    } else if let excluded {
+      parts.append("Couldn't add \(excluded): it's excluded from this server's downloads.")
+    }
+    if paused { parts.append(AcquisitionResult.pausedNotice) }
+    return parts.isEmpty ? nil : parts.joined(separator: " ")
+  }
+}
+
 public struct AcquisitionRequest: Codable, Sendable, Identifiable {
   public let id: String
   public let title: String

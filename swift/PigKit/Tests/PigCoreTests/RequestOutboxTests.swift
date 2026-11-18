@@ -79,6 +79,23 @@ private struct Offline: Error {}
     #expect(report.notice(titles: ["first": "First"]) == "No.")
   }
 
+  /// Codex round 1 on batch D: a paused song is still told beside a song
+  /// left out or refused.
+  @Test func aPausedSongIsToldBesideAnExclusionOrARefusal() {
+    var excluded = RequestOutbox.Report()
+    excluded.skipped = ["first"]
+    excluded.paused = ["second"]
+    #expect(
+      excluded.notice(titles: ["first": "First"])
+        == "Couldn't add First: it's excluded from this server's downloads. Paused. Resume it in Downloads."
+    )
+    var refused = RequestOutbox.Report()
+    refused.refused = ["first"]
+    refused.reason = "No."
+    refused.paused = ["second"]
+    #expect(refused.notice(titles: [:]) == "No. Paused. Resume it in Downloads.")
+  }
+
   /// #245: one drain of the outbox says what was refused once, with how
   /// many songs when several were.
   @Test func severalRefusedSongsAreOneNotice() {

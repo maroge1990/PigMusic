@@ -47,14 +47,9 @@ import PigStore
     /// when several were refused (#245), or that a song was left out (Codex
     /// round 2: nothing may vanish without a word).
     public func notice(titles: [String: String]) -> String? {
-      if let reason {
-        return refused.count > 1 ? "Couldn't add \(refused.count) songs: \(reason)" : reason
-      }
-      if let id = skipped.first {
-        return
-          "Couldn't add \(titles[id] ?? "that song"): it's excluded from this server's downloads."
-      }
-      return paused.isEmpty ? nil : AcquisitionResult.pausedNotice
+      RequestNotice.text(
+        refused: refused.count, reason: reason,
+        excluded: skipped.first.map { titles[$0] ?? "that song" }, paused: !paused.isEmpty)
     }
   }
 
