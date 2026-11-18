@@ -1,4 +1,4 @@
-import { ApiError, api, isUnconfirmed } from "./api";
+import { ApiError, api } from "./api";
 import { notifyError } from "./notices";
 import { batches } from "./limits";
 import { expectedSession, withSession } from "./sessionId";
@@ -26,18 +26,20 @@ type Read = { revision: number; name?: string };
 /** A failure the notice area has already reported. */
 export class ReportedFailure extends Error {}
 
-/** No answer, or one that can't say whether the write was saved. */
-const lost = (error: unknown) =>
-  !(error instanceof ApiError) || isUnconfirmed(error);
+/** The server's own refusal (a 4xx answer): nothing was saved. Anything
+ * else (no answer, a 5xx or a gateway error) may have come after the batch
+ * was saved, so it can't be sent again on a guess (Codex, #249). */
+const refusedUnmade = (error: unknown) =>
+  error instanceof ApiError && error.kind === "request";
 
 /**
  * Adds songs to a playlist in order (Codex, #249). Each request appends a
  * batch all or none at the playlist revision it expects.
- * - A refusal (the server answered: an error, or 409 because the playlist
+ * - A refusal (the server's own 4xx answer, such as 409 because the playlist
  *   moved) offers Try again from that batch, never from the start, and
  *   keeps offering it until the copy is done or the notice is closed.
- * - A lost answer can't be told apart from a saved batch, so the copy
- *   stops and says so, with no resend.
+ * - A lost answer, a 5xx or a gateway error can't be told apart from a
+ *   saved batch, so the copy stops and says so, with no resend.
  * Everything is sent under `session`.
  */
 export async function addToPlaylist(
@@ -91,7 +93,7 @@ export async function addToPlaylist(
         ).revision;
       } catch (e) {
         changed();
-        if (lost(e)) {
+        if (!refusedUnmade(e)) {
           notifyError(
             `Couldn't tell whether the last ${songs(parts[i].length)} were added to ${name}. Check the playlist.`,
           );

@@ -50,6 +50,9 @@ function playlistServer() {
     server.playlist.entries.push(...JSON.parse(options.body).tracks);
     server.playlist.revision += 1;
     if (failure === "lose") throw new TypeError("Failed to fetch");
+    // Saved, then the server or its gateway failed building the answer.
+    if (failure === 500 || failure === 502)
+      return new Response("error", { status: failure });
     return Response.json(server.playlist);
   };
   return server;
@@ -137,3 +140,22 @@ test("a playlist that moved is refused unmade and can be tried again", async () 
   clearNotices();
   assert.equal(server.playlist.entries.length, 2);
 });
+
+for (const status of [500, 502])
+  test(`a ${status} after the batch was saved stops without resending`, async () => {
+    setSessionId("session-1");
+    const server = playlistServer();
+    const notices = watch();
+    server.next = status;
+    await assert.rejects(addToPlaylist("p1", songs(2)), ReportedFailure);
+    const error = notices.error();
+    notices.stop();
+    clearNotices();
+    assert.equal(
+      error.text,
+      "Couldn't tell whether the last 2 songs were added to Gym. Check the playlist.",
+    );
+    assert.equal(error.action, undefined);
+    assert.equal(server.appends, 1);
+    assert.equal(server.playlist.entries.length, 2);
+  });
