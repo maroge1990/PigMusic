@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { History } from "lucide-react";
+import { ChevronRight, History } from "lucide-react";
 import { api } from "./api";
 import { Cover } from "./Cover";
-import { formatCount } from "./format";
+import { formatCount, formatLength } from "./format";
 import { Empty, InlineError, Loading } from "./EmptyState";
 import { MixArtwork, mixCoverKind } from "./Mixes";
 import { discoverUrl } from "./navigation";
@@ -65,7 +65,6 @@ const labels: Record<RewindPeriod, string> = {
   month: "Month",
   year: "Year",
 };
-const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
 const count = (n: number, one: string, many = one + "s") =>
   `${formatCount(n)} ${n === 1 ? one : many}`;
 
@@ -110,56 +109,38 @@ function Figure({ report }: { report: RewindReport }) {
   );
 }
 
-/** Home: this week at a glance, opening Rewind. Hidden until a play. */
+/** Home: this week at a glance in the page's own look (D-120), opening
+ * Rewind. Hidden until a play. */
 export function RewindCard() {
   const { report } = useRewind("week");
   if (!report?.plays) return null;
-  const days = report.days ?? [];
-  const busiest = Math.max(1, ...days.map((d) => d.minutes));
+  const figures: [string, string][] = [
+    [formatLength(report.minutes * 60, "0 min"), "Listened"],
+  ];
+  if (report.top_artists[0])
+    figures.push([report.top_artists[0].name, "Top artist"]);
+  if (report.top_songs[0])
+    figures.push([report.top_songs[0].track.title, "Top song"]);
   return (
     <a className="rewind-card" href="#/home/rewind">
-      <span className="rewind-card-top">
-        <span className="rewind-card-title">
-          <History size={18} aria-hidden="true" />
-          Rewind
-        </span>
-        <span className="rewind-card-period">This week</span>
+      <span className="rewind-card-icon" aria-hidden="true">
+        <History size={24} />
       </span>
-      <span className="rewind-card-middle">
-        <Figure report={report} />
-        <span className="rewind-card-covers" aria-hidden="true">
-          {report.top_songs.slice(0, 3).map(({ track }, i) => (
-            <Cover
-              key={track.id + i}
-              title={track.title}
-              src={track.cover_url}
-              sizes="56px"
-            />
-          ))}
-        </span>
+      <span className="rewind-card-title">
+        <strong>Rewind</strong>
+        <span>This week</span>
       </span>
-      <span className="rewind-bars" aria-hidden="true">
-        {DAY_LETTERS.map((letter, i) => {
-          const day = days[i];
-          return (
-            <span
-              className={day ? "rewind-bar" : "rewind-bar future"}
-              key={i}
-              data-minutes={day?.minutes}
-            >
-              <span className="rewind-bar-track">
-                {day && (
-                  <span
-                    className="rewind-bar-fill"
-                    style={{ height: `${(day.minutes / busiest) * 100}%` }}
-                  />
-                )}
-              </span>
-              <span className="rewind-bar-day">{letter}</span>
-            </span>
-          );
-        })}
+      <span className="rewind-card-figures">
+        {figures.map(([value, label]) => (
+          <span key={label}>
+            <strong className={label === "Listened" ? "pig-amount" : ""}>
+              {value}
+            </strong>
+            <span>{label}</span>
+          </span>
+        ))}
       </span>
+      <ChevronRight className="rewind-card-more" size={18} aria-hidden="true" />
     </a>
   );
 }

@@ -155,8 +155,9 @@ async function setUp(page: Page) {
   return periods;
 }
 
-// #216: the Home card shows this week and opens Rewind.
-test("the Home card shows the week's minutes, plays and days", async ({
+// #216, D-120: the Home card shows this week in the page's own look and
+// opens Rewind.
+test("the Home card shows the week's time, top artist and top song", async ({
   page,
 }) => {
   await setUp(page);
@@ -165,27 +166,21 @@ test("the Home card shows the week's minutes, plays and days", async ({
   await expect(card).toBeVisible();
   await expect(card).toContainText("Rewind");
   await expect(card).toContainText("This week");
-  await expect(card.locator(".rewind-figure strong")).toHaveText("1,234");
-  await expect(card).toContainText("minutes · 45 plays");
-  await expect(card.locator(".rewind-card-covers .cover")).toHaveCount(3);
-  // Seven bars, Monday first; days still to come are empty.
-  const bars = card.locator(".rewind-bar");
-  await expect(bars).toHaveCount(7);
-  await expect(card.locator(".rewind-bar.future")).toHaveCount(4);
-  await expect(card.locator(".rewind-bar-day")).toHaveText([
-    "M",
-    "T",
-    "W",
-    "T",
-    "F",
-    "S",
-    "S",
+  await expect(card.locator(".rewind-card-figures > span")).toHaveText([
+    "20 hr 34 minListened",
+    "Charli xcxTop artist",
+    "Song 1Top song",
   ]);
-  // Heights are relative to the busiest day (Tuesday, 80 minutes).
-  const heights = await card
-    .locator(".rewind-bar-fill")
-    .evaluateAll((els) => els.map((el) => (el as HTMLElement).style.height));
-  expect(heights).toEqual(["50%", "100%", "25%"]);
+  // The page's light surface, not the dark media panel.
+  const colours = await card.evaluate((el) => {
+    const probe = document.createElement("div");
+    probe.style.background = "var(--surface)";
+    document.body.append(probe);
+    const surface = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return [getComputedStyle(el).backgroundColor, surface];
+  });
+  expect(colours[0]).toBe(colours[1]);
   // The old Mixes button is gone.
   await expect(page.getByRole("link", { name: "Your Rewind" })).toHaveCount(0);
 
