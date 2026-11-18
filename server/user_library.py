@@ -1196,6 +1196,8 @@ class UserLibrary:
     @coordinated
     def cancel_request(self, user_id, request_id):
         """Withdraw one beneficiary; shared downloads continue for remaining people."""
+        from .store import paused_by
+
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
@@ -1210,6 +1212,10 @@ class UserLibrary:
                 identity for identity in payload["requested_by"] if identity != user_id
             ]
             remaining = bool(payload["requested_by"])
+            if row[0] == PAUSED and paused_by(payload) == user_id:
+                # The pauser withdrew: the pause is nobody's own now, so any
+                # remaining or returning person's Add resumes it (#264).
+                payload["paused_by"] = None
             conn.execute(
                 "UPDATE queue SET payload=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (json.dumps(payload), row[0] if remaining else "cancelled", request_id),

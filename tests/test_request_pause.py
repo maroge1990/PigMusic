@@ -363,3 +363,26 @@ def test_an_add_leaves_a_request_the_person_paused_paused(tmp_path):
     users.pause_request(member, key)
     assert users.request(owner, [plain])["existing"] == 1
     assert status(store, key) == "waiting_for_sources"
+
+
+def test_withdrawing_from_a_shared_pause_leaves_the_song_addable(tmp_path):
+    """Codex round 1 on #264: the pauser of a shared request withdraws.
+    The pause is then nobody's own: it stays paused for the other person,
+    and the pauser's next Add rejoins (and resumes) it like anyone's."""
+    store, owner, member = fixture(tmp_path)
+    users = store.user_libraries
+    wanted = {**song("Shared"), "status": "missing"}
+    users.request(member, [wanted])
+    with store.connect() as conn:
+        (key,) = conn.execute("SELECT id FROM queue").fetchone()
+    users.request(owner, [wanted])
+    users.pause_request(member, key)
+    assert users.cancel_request(member, key)["continues_for_others"]
+    assert status(store, key) == "paused"
+    result = users.request(member, [wanted])
+    assert (result["existing"], result["paused"]) == (1, 0)
+    assert status(store, key) == "waiting_for_sources"
+    # Theirs again: pause and Resume in Downloads both work for them.
+    users.pause_request(member, key)
+    assert users.resume_request(member, key) == {"resumed": True}
+    assert status(store, key) == "waiting_for_sources"

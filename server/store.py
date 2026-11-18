@@ -76,11 +76,12 @@ def join_member(payload, user_id, scope):
 
 
 def paused_by(payload):
-    """Who paused a paused job (#264). One paused before that was recorded
-    counts as its first requester's."""
-    return payload.get("paused_by") or next(
-        iter(payload.get("requested_by") or []), None
-    )
+    """Who paused a paused job (#264): None once they withdrew from it (the
+    pause is then nobody's own). One paused before that was recorded counts
+    as its first requester's."""
+    if "paused_by" in payload:
+        return payload["paused_by"]
+    return next(iter(payload.get("requested_by") or []), None)
 
 
 class Store:
@@ -1961,6 +1962,7 @@ class Store:
                     prior
                     and prior[0] == PAUSED
                     and user_id
+                    and user_id in (json.loads(prior[1]).get("requested_by") or [])
                     and paused_by(json.loads(prior[1])) == user_id
                 ):
                     # Their own pause: Add leaves it, Resume resumes (#264).
