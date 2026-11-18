@@ -188,7 +188,7 @@ final class ScreensTour: XCTestCase {
       shoot("mix-card-menu")
       if open(app.buttons["Show songs"], "mix") {
         scrolled("mix", pages: 2)
-        if open(app.buttons["Mix options"], "mix-options") { closeMenu() }
+        if open(app.buttons["Mix actions"], "mix-options") { closeMenu() }
         let more = begins("More actions for ")
         if open(more, "mix-song-menu") { closeMenu() }
         back()
@@ -244,7 +244,11 @@ final class ScreensTour: XCTestCase {
     tab("Library")
     tap(app.buttons["Albums"], "albums-chip")
     if open(begins(name("ALBUM", "Rumours")), "library-album") {
-      if open(begins("More actions for "), "song-menu") {
+      // The album's one menu (D-118), then a song's.
+      let albumMenu = "More actions for " + name("ALBUM", "Rumours")
+      if open(app.buttons[albumMenu], "album-menu") { closeMenu() }
+      let songMenu = element("label BEGINSWITH 'More actions for ' AND label != %@", albumMenu)
+      if open(songMenu, "song-menu") {
         if open(begins("Add to playlist"), "song-menu-playlists") { closeMenu() }
         closeMenu()
       }
@@ -259,7 +263,7 @@ final class ScreensTour: XCTestCase {
         if open(begins("Now playing: "), "now-playing") {
           if open(app.buttons["Song actions"], "now-playing-menu") { closeMenu() }
           scrolled("now-playing", pages: 2)
-          if open(begins("Queue actions for "), "queue-row-menu") { closeMenu() }
+          if open(begins("More actions for "), "queue-row-menu") { closeMenu() }
           if open(app.buttons["Edit"], "queue") { back() }
           closeSheet()
         }

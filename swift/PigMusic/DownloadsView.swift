@@ -171,26 +171,19 @@ struct DeviceGroupsSection: View {
       }
     }
   }
-  @ViewBuilder private func songRow(_ group: DeviceGroup, _ record: DownloadRecord) -> some View {
-    let label = VStack(alignment: .leading, spacing: 2) {
-      Text(record.track.title).lineLimit(1)
-      Text(record.track.artist).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
-    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-    if let play {
-      Button {
-        // By id, from the songs shown: one hidden for its Undo never shifts it.
-        if let picked = PlaySelection(
-          group.records.map(\.track), hiding: { model.undo.hides(key(group, songId: $0.id)) },
-          tapped: record.id)
-        {
-          play(picked.tracks, picked.index)
-        }
-      } label: {
-        label
-      }.buttonStyle(.plain)
-    } else {
-      label
-    }
+  /// The one song row (D-118), with its menu; Apple Watch's songs don't play here.
+  private func songRow(_ group: DeviceGroup, _ record: DownloadRecord) -> some View {
+    SongRow(
+      model: model, track: record.track, play: play == nil ? nil : { playFrom(group, record) })
+  }
+  private func playFrom(_ group: DeviceGroup, _ record: DownloadRecord) {
+    // By id, from the songs shown: one hidden for its Undo never shifts it.
+    guard let play,
+      let picked = PlaySelection(
+        group.records.map(\.track), hiding: { model.undo.hides(key(group, songId: $0.id)) },
+        tapped: record.id)
+    else { return }
+    play(picked.tracks, picked.index)
   }
   private func remove(_ group: DeviceGroup, records: [DownloadRecord]) {
     let whole = records.count == group.records.count

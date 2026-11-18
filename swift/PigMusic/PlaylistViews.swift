@@ -170,6 +170,10 @@ struct PlaylistView: View {
             origin: DownloadOrigin(playlistId: playlist.id, playlistName: playlist.name),
             missingCount: missing.count
           ) { await addMissing() }
+          CollectionMenuButton(label: "More actions for \(playlist.name)") {
+            PlaylistActionsMenu(
+              model: model, playlist: playlist, missing: missing.count, addMissing: addMissing)
+          }
           Spacer()
         }.buttonStyle(.plain)
         if let message { StatusText(message) }
@@ -190,7 +194,16 @@ struct PlaylistView: View {
       }.listRowSeparator(.hidden).listRowBackground(Color.clear)
       Section {
         ForEach(Array(shown.enumerated()), id: \.element.entry.entryId) { index, row in
-          SongRow(model: model, track: row.entry.playbackTrack) { model.play(songs, at: index) }
+          SongRow(
+            model: model, track: row.entry.playbackTrack,
+            page: locked
+              ? []
+              : [
+                SongPageAction(.removeFromPlaylist) {
+                  model.removeLater(at: row.position, from: playlist)
+                }
+              ]
+          ) { model.play(songs, at: index) }
             .swipeActions {
               // At once, with Undo (D-79): sent when the Undo runs out.
               Button("Remove", systemImage: "xmark", role: .destructive) {

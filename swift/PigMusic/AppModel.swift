@@ -131,6 +131,9 @@ enum PlayOrigin: Hashable {
   private(set) var syncFailed = false
   /// Asks the tab bar to open Search: an empty library's one action.
   private(set) var searchRequests = 0
+  /// A page to push onto the selected tab (the player's artist link, a song
+  /// menu's Go to album or Go to artist, D-118); the player closes first.
+  var pageRoute: PageRoute?
   func openSearch() { searchRequests += 1 }
   /// Whether the scene is active and the foreground work runs (#97).
   @ObservationIgnored private var foreground = ForegroundGate()
@@ -1911,6 +1914,116 @@ enum PlayOrigin: Hashable {
       }
     }
   }
+  static func undoKey(mixEdition id: String) -> String { "mix-edition:" + id }
+  static func undoKey(artistAdding id: String) -> String { "artist-cancel:" + id }
+  static func undoKey(upNext id: UUID) -> String { "up-next:" + id.uuidString }
+  /// Hides a mix edition at once, with Undo (D-79, #183): Home and the mix's
+  /// page leave it out while the Undo waits; the server hears of it when the
+  /// Undo runs out.
+  func hideMixEditionLater(_ mix: PersonalMix) {
+    let stamp = account.generation
+    undo.schedule(Self.undoKey(mixEdition: mix.id), label: "Hid " + mix.title) { [weak self] in
+      guard let self, account.isCurrent(stamp) else { return false }
+      do {
+        try await hideMixEdition(mix.id)
+        return true
+      } catch {
+        if account.isCurrent(stamp) { notify(error) }
+        return false
+      }
+    }
+  }
+  /// Cancels adding and monitoring an artist at once, with Undo (D-79, #183).
+  func cancelArtistLater(id: String, done: @escaping @MainActor (ArtistAcquisition) -> Void) {
+    let stamp = account.generation
+    undo.schedule(Self.undoKey(artistAdding: id), label: "Cancelled adding and monitoring") {
+      [weak self] in
+      guard let self, account.isCurrent(stamp) else { return false }
+      do {
+        let value = try await performPersonal { try await $0.cancelArtist(id: id) }
+        done(value)
+        return true
+      } catch {
+        if account.isCurrent(stamp) { notify(error) }
+        return false
+      }
+    }
+  }
+  /// Takes a song out of Up next at once, with Undo (D-79, D-118).
+  func removeFromUpNextLater(_ item: PlaybackOccurrence) {
+    let player = player
+    let id = item.id
+    undo.schedule(Self.undoKey(upNext: id), label: "Removed " + item.track.title + " from Up next") {
+      player.removeUpcoming(id)
+      return true
+    }
+  }
+  /// Says something was done in the notice bar, with a tick (D-118: saving a
+  /// mix, which used to be an alert on Home and a line on its page).
+  func notifyDone(_ text: String) {
+    notices.post(text, done: true)
+    confirmations += 1
+    UIAccessibility.post(notification: .announcement, argument: text)
+  }
+  /// Saves a mix edition as a playlist (D-118: from its one menu).
+  func saveMixEdition(_ mix: PersonalMix) async {
+    do {
+      _ = try await performPersonal { try await $0.saveMix(mix.id) }
+      notifyDone("Playlist saved")
+    } catch is CancellationError {} catch { notify(error) }
+  }
+  /// The songs not in your library: household copies are added, the rest
+  /// asked for (the collection menu's Add N songs to library, D-118).
+  func addToLibrary(_ tracks: [Track]) async {
+    let household = tracks.filter { $0.serverState == "household_available" }.map(\.id)
+    let missing = tracks.filter { $0.serverState == "not_in_library" }
+    do {
+      if !household.isEmpty {
+        _ = try await performPersonal { try await $0.addMembership(trackIds: household) }
+      }
+      if !missing.isEmpty {
+        let result = try await performPersonal { try await $0.requestMusic(missing) }
+        if !result.downloadsEnabled {
+          notify("Adding. Downloads are off on the server, so it will wait.")
+          return
+        }
+      }
+      confirmations += 1
+    } catch is CancellationError {} catch { notify(error) }
+  }
+  /// Adds songs to a playlist, one edit each, in order (the collection menu).
+  func add(_ tracks: [Track], to playlist: Playlist) async {
+    do {
+      for track in tracks {
+        try await saveEdit(OfflineMutation(action: "append", playlistId: playlist.id, track: track))
+      }
+      confirmations += 1
+    } catch is CancellationError {} catch { notify(error) }
+  }
+  /// D-103: a success tap, no text; a failure says why.
+  func sendToWatch(_ tracks: [Track], origin: DownloadOrigin = .direct) async {
+    switch await watch?.enqueue(tracks, origin: origin) {
+    case .sent: confirmations += 1
+    case .failed(let reason): notify(reason)
+    case .superseded, nil: break
+    }
+  }
+  /// Whether an Apple Watch is paired: Send to Apple Watch shows only then
+  /// (D-118), on every menu.
+  var watchPaired: Bool { watch?.link?.paired == true }
+  /// Every song of a library artist, album by album, less those waiting for
+  /// their removal's Undo (the artist's collection menu).
+  func artistTracks(_ artist: Artist) async -> [Track] {
+    guard let store else { return [] }
+    var albums: [Album] = []
+    while let page = try? await store.albums(artistId: artist.id, offset: albums.count) {
+      albums += page
+      if page.count < 100 { break }
+    }
+    var tracks: [Track] = []
+    for album in albums { tracks += await albumTracks(album) }
+    return undo.withoutRemoved(tracks)
+  }
   func signOut() async {
     // Removals still showing Undo belong to this account: send them first.
     await undo.sendAllAndWait()
@@ -2011,6 +2124,16 @@ enum PlayOrigin: Hashable {
             repeating: snapshot.albums[index].id == "sunrise" ? "a" : "b", count: 64)
         }
         homeContent[.recent] = HomeContent(albums: snapshot.albums)
+        // One mix, so its card's menu and Hide this edition with Undo can be
+        // tried (D-118).
+        let mixSongs = String(
+          decoding: try LibraryCodec.encoder().encode(Array(snapshot.tracks.prefix(2))),
+          as: UTF8.self)
+        homeContent[.mixes] = try LibraryCodec.decoder().decode(
+          HomeContent.self,
+          from: Data(
+            #"{"albums":[],"mixes":[{"id":"demo-daily","kind":"daily","day":"Today","title":"Daily Mix","reason":"From your library","tracks":\#(mixSongs)}]}"#
+              .utf8))
         // A chart longer than Home's ten rows, so review screens show its rows
         // and the See all link.
         let chart = (1...12).map { rank in

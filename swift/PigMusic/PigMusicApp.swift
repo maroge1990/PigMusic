@@ -143,9 +143,14 @@ private struct AppHaptics: ViewModifier {
 private struct NoticeHaptic: ViewModifier {
   let model: AppModel
   func body(content: Content) -> some View {
-    content.sensoryFeedback(trigger: model.notices.current?.id) { _, now in
+    content.sensoryFeedback(trigger: failure) { _, now in
       now == nil ? nil : SensoryFeedback.error
     }
+  }
+  /// Something done (a mix saved) answers with success instead (D-118).
+  private var failure: Int? {
+    guard let notice = model.notices.current, !notice.done else { return nil }
+    return notice.id
   }
 }
 
@@ -236,14 +241,17 @@ struct LibraryShell: View {
   @State private var showAccount = false
   /// Counts choices of the Search tab, so its box takes the cursor each time.
   @State private var searchFocus = 0
-  /// The player's artist link: pushed onto the selected tab once the player closes.
-  @State private var artistRoute: ArtistRoute?
   private var playing: Bool { model.player.queue.current != nil }
   var body: some View {
     tabs
       .sheet(isPresented: $showPlayer) {
-        NowPlayingView(model: model) { artistRoute = $0 }
+        // The player's artist link: pushed onto the selected tab once the player closes.
+        NowPlayingView(model: model) { model.pageRoute = PageRoute(.artist($0)) }
           .undoBarSheet(model)
+      }
+      // A song menu's Go to album or Go to artist in the player (D-118).
+      .onChange(of: model.pageRoute) { _, route in
+        if route != nil { showPlayer = false }
       }
       .sheet(isPresented: $showAccount) {
         NavigationStack {
@@ -315,8 +323,8 @@ struct LibraryShell: View {
         }
       }
       .pigCanvas()
-      .navigationDestination(item: destination == selection ? $artistRoute : .constant(nil)) {
-        ArtistRouteView(model: model, route: $0)
+      .navigationDestination(item: destination == selection ? $model.pageRoute : .constant(nil)) {
+        PageRouteView(model: model, route: $0)
       }
       .toolbar {
         if destination != .search {

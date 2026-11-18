@@ -21,11 +21,14 @@ struct SongActionsMenu: View {
   /// neither Request nor the library's actions, so Request never shows for
   /// a song the library holds.
   let looked: Bool
+  /// What the row's page adds (D-118): Remove from playlist, the Up next edits.
+  var page: [SongPageAction] = []
   var body: some View {
     let track = SongMenu.resolved(own: own, live: model.liveState(opened))
     let sections = SongMenu.sections(
       for: track, looked: looked, requested: model.isRequested(track.id),
-      favourite: model.favourites[track.id], playing: model.player.queue.current != nil)
+      favourite: model.favourites[track.id], playing: model.player.queue.current != nil,
+      watch: model.watchPaired, page: page.map(\.item))
     ForEach(Array(sections.enumerated()), id: \.offset) { _, items in
       Section {
         ForEach(items, id: \.self) { item($0, track) }
@@ -34,6 +37,27 @@ struct SongActionsMenu: View {
   }
   @ViewBuilder private func item(_ item: SongMenuItem, _ track: Track) -> some View {
     switch item {
+    case .goToAlbum:
+      Button("Go to album", systemImage: "square.stack") {
+        if let link = SongMenu.album(of: track) {
+          model.pageRoute = PageRoute(.album(link, title: track.album ?? track.title))
+        }
+      }
+    case .goToArtist:
+      Button("Go to artist", systemImage: "music.microphone") {
+        let mine = track.serverState == nil || track.serverState == "in_library"
+        let origin: PlayOrigin = mine ? .library : .catalogue(artistId: nil)
+        model.pageRoute = PageRoute(.artist(ArtistRoute(track: track, origin: origin)))
+      }
+    case .page(let pageItem):
+      if let action = page.first(where: { $0.item == pageItem }) {
+        Button(
+          pageItem.label, systemImage: pageItem.symbol,
+          role: pageItem.destructive ? .destructive : nil
+        ) {
+          action.run()
+        }
+      }
     case .playNext:
       Button("Play next", systemImage: "text.line.first.and.arrowtriangle.forward") {
         model.player.enqueue([track], next: true)
@@ -135,6 +159,182 @@ struct SongActionsMenu: View {
   }
 }
 
+/// The one menu of an album, artist, playlist or mix (D-118, #249): from a
+/// long press on its card or row and from the ⋯ on its page. Which items
+/// show is CollectionMenu's (PigDomain). The songs are read when an item is
+/// chosen, so a card needn't load them to open its menu.
+struct CollectionActionsMenu: View {
+  let model: AppModel
+  let kind: CollectionKind
+  /// How many of its songs aren't in your library.
+  var missing = 0
+  /// A mix card's Show songs (a tap on the card plays the mix).
+  var open: (() -> Void)?
+  /// Downloads of a playlist are grouped under it on the device.
+  var origin: DownloadOrigin = .direct
+  /// A playlist isn't offered to itself.
+  var playlistId: String?
+  var mix: PersonalMix?
+  /// Adds the songs not in your library; by default asks for each.
+  var addMissing: (() async -> Void)?
+  /// After Hide this edition: a mix page closes.
+  var hidden: (() -> Void)?
+  let songs: @MainActor () async -> [Track]
+  var body: some View {
+    let sections = CollectionMenu.sections(
+      kind, missing: missing, watch: model.watchPaired, opens: open != nil)
+    ForEach(Array(sections.enumerated()), id: \.offset) { _, items in
+      Section {
+        ForEach(items, id: \.self) { item($0) }
+      }
+    }
+  }
+  @ViewBuilder private func item(_ item: CollectionMenuItem) -> some View {
+    switch item {
+    case .showSongs:
+      Button("Show songs", systemImage: "list.bullet") { open?() }
+    case .play:
+      Button("Play", systemImage: "play.fill") {
+        Task { model.play(await songs()) }
+      }
+    case .shuffle:
+      Button("Shuffle", systemImage: "shuffle") {
+        Task { model.play(await songs().shuffled()) }
+      }
+    case .playNext:
+      Button("Play next", systemImage: "text.line.first.and.arrowtriangle.forward") {
+        Task {
+          let tracks = await songs()
+          guard !tracks.isEmpty else { return }
+          if model.player.queue.current == nil {
+            model.play(tracks)
+          } else {
+            model.player.enqueue(tracks, next: true)
+            model.confirmations += 1
+          }
+        }
+      }
+    case .addToLibrary:
+      Button("Add \(missing) song\(missing == 1 ? "" : "s") to library", systemImage: "plus") {
+        Task {
+          if let addMissing { await addMissing() } else { await model.addToLibrary(await songs()) }
+        }
+      }.disabled(!model.canMutate)
+    case .addToPlaylist:
+      let playlists = model.playlists.filter { $0.favourites != true && $0.id != playlistId }
+      Menu("Add to playlist", systemImage: "text.badge.plus") {
+        ForEach(playlists) { playlist in
+          Button(playlist.name) { Task { await model.add(await songs(), to: playlist) } }
+        }
+        if playlists.isEmpty { Text("No playlists yet") }
+      }.disabled(!model.canMutate)
+    case .download:
+      // Worded as a song's Download (D-106, D-118).
+      Menu("Download", systemImage: "arrow.down.circle") {
+        Button("Original") { Task { await model.download(await songs(), origin: origin) } }
+        Button("Smaller AAC copy") {
+          Task { await model.download(await songs(), quality: "aac", origin: origin) }
+        }
+      }
+    case .sendToWatch:
+      Button("Send to Apple Watch", systemImage: "applewatch") {
+        Task { await model.sendToWatch(await songs(), origin: origin) }
+      }
+    case .saveMix:
+      Button("Save this edition", systemImage: "plus") {
+        if let mix { Task { await model.saveMixEdition(mix) } }
+      }.disabled(!model.canMutate)
+    case .hideMix:
+      // At once, with Undo (D-79).
+      Button("Hide this edition", systemImage: "eye.slash", role: .destructive) {
+        if let mix {
+          model.hideMixEditionLater(mix)
+          hidden?()
+        }
+      }
+    }
+  }
+}
+
+/// A library album's collection menu: its card's long press and its page's ⋯.
+struct AlbumActionsMenu: View {
+  let model: AppModel
+  let album: Album
+  var body: some View {
+    CollectionActionsMenu(model: model, kind: .album) {
+      model.undo.withoutRemoved(await model.albumTracks(album))
+    }
+  }
+}
+
+/// A library artist's collection menu: its card's long press and its page's ⋯.
+struct ArtistActionsMenu: View {
+  let model: AppModel
+  let artist: Artist
+  var body: some View {
+    CollectionActionsMenu(model: model, kind: .artist) { await model.artistTracks(artist) }
+  }
+}
+
+/// A playlist's collection menu: its row's long press and its page's ⋯. The
+/// page passes what it knows of the songs missing from your library.
+struct PlaylistActionsMenu: View {
+  let model: AppModel
+  let playlist: Playlist
+  var missing = 0
+  var addMissing: (() async -> Void)?
+  var body: some View {
+    CollectionActionsMenu(
+      model: model, kind: .playlist, missing: missing,
+      origin: DownloadOrigin(playlistId: playlist.id, playlistName: playlist.name),
+      playlistId: playlist.id, addMissing: addMissing
+    ) {
+      await model.playlistSongs(playlist)
+    }
+  }
+}
+
+extension AppModel {
+  /// A playlist's songs: those it holds, else as the server (or this
+  /// iPhone's last answer) has them.
+  func playlistSongs(_ playlist: Playlist) async -> [Track] {
+    if let entries = playlist.entries { return entries.map(\.playbackTrack) }
+    let id = playlist.id
+    let found = try? await cachedCatalogue(
+      key: "playlist:" + id, conditional: { try await $0.playlist(id: id, etag: $1) })
+    return (found?.entries ?? []).map(\.playbackTrack)
+  }
+}
+
+/// One of the page's own items in a song's menu (D-118), with what it does.
+struct SongPageAction {
+  let item: SongPageItem
+  let run: () -> Void
+  init(_ item: SongPageItem, run: @escaping () -> Void) {
+    self.item = item
+    self.run = run
+  }
+}
+
+extension SongPageItem {
+  var label: String {
+    switch self {
+    case .removeFromPlaylist: "Remove from playlist"
+    case .moveEarlier: "Move earlier"
+    case .moveLater: "Move later"
+    case .removeFromUpNext: "Remove from Up next"
+    }
+  }
+  var symbol: String {
+    switch self {
+    case .removeFromPlaylist, .removeFromUpNext: "xmark"
+    case .moveEarlier: "arrow.up"
+    case .moveLater: "arrow.down"
+    }
+  }
+  var destructive: Bool { self == .removeFromPlaylist || self == .removeFromUpNext }
+}
+
 /// Looks up what a song's ⋯ menu needs before it can open (#229): the
 /// library's own copy (#211), again after each sync, off the main thread in
 /// the library store, and the favourite state this iPhone already holds. The
@@ -143,6 +343,7 @@ struct SongActionsMenu: View {
 struct SongActionsLookup<Content: View>: View {
   let model: AppModel
   let track: Track
+  var page: [SongPageAction] = []
   @ViewBuilder let content: (SongActionsMenu) -> Content
   @State private var own: Track?
   /// The song the lookup answered; another song (the player's next) waits
@@ -150,7 +351,9 @@ struct SongActionsLookup<Content: View>: View {
   @State private var looked: String?
   var body: some View {
     let found = looked == track.id
-    content(SongActionsMenu(model: model, opened: track, own: found ? own : nil, looked: found))
+    content(
+      SongActionsMenu(
+        model: model, opened: track, own: found ? own : nil, looked: found, page: page))
       .task(id: Key(id: track.id, revision: model.libraryRevision)) {
         let copy = await model.ownCopy(of: track)
         guard !Task.isCancelled else { return }

@@ -92,7 +92,7 @@ final class ServerTests: XCTestCase {
     tap(artist)
     tap(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Night Drive'")).firstMatch)
     tap(app.buttons["Download"])
-    tap(app.buttons["Download smaller copies"])
+    tap(app.buttons["Smaller AAC copy"])
     tap(app.tabBars.buttons["Downloads"])
     tap(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'iPhone'")).firstMatch)
     let song = app.descendants(matching: .any)

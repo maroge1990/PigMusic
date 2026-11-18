@@ -9,7 +9,6 @@ struct HomeView: View {
   @Bindable var model: AppModel
   /// The mix whose songs a long press asked to see (#56).
   @State private var openedMix: String?
-  @State private var mixNotice: String?
   /// This week's Rewind for the card at the top (#216); nil hides it.
   @State private var week: Rewind?
   var body: some View {
@@ -27,7 +26,10 @@ struct HomeView: View {
             "Rewind. This week: \(RewindFigures.minutes(week.minutes)), "
               + RewindFigures.plays(week.plays))
         }
-        let mixes = model.homeContent[.mixes]?.mixes ?? []
+        // Less an edition hidden and waiting for its Undo (D-79).
+        let mixes = (model.homeContent[.mixes]?.mixes ?? []).filter {
+          !model.undo.hides(AppModel.undoKey(mixEdition: $0.id))
+        }
         let radio = model.homeContent[.mixes]?.radio
         if !mixes.isEmpty || radio != nil {
           Shelf(title: "Your mixes") {
@@ -62,7 +64,13 @@ struct HomeView: View {
               .accessibilityLabel("Play \(mix.title)")
               .accessibilityHint("Touch and hold for the songs and more options")
               .accessibilityAction(named: "Show songs") { openedMix = mix.id }
-              .contextMenu { mixOptions(mix) }
+              // The mix's one menu, as on its page (D-118).
+              .contextMenu {
+                CollectionActionsMenu(
+                  model: model, kind: .mix, missing: CollectionMenu.missing(mix.tracks).count,
+                  open: { openedMix = mix.id }, mix: mix
+                ) { mix.tracks }
+              }
             }
           }
         } else {
@@ -90,6 +98,7 @@ struct HomeView: View {
                   caption: album.artist
                 ).frame(width: 150)
               }.buttonStyle(.plain)
+                .contextMenu { AlbumActionsMenu(model: model, album: album) }
             }
           }
         }
@@ -102,14 +111,6 @@ struct HomeView: View {
       if let mix = model.homeContent[.mixes]?.mixes?.first(where: { $0.id == id }) {
         MixDetailView(model: model, mix: mix)
       }
-    }
-    .alert(
-      "Mix",
-      isPresented: Binding(get: { mixNotice != nil }, set: { if !$0 { mixNotice = nil } })
-    ) {
-      Button("OK") { mixNotice = nil }
-    } message: {
-      Text(mixNotice ?? "")
     }
     .task(id: model.artworkNamespace) { await model.refreshHome() }
     .task(id: model.artworkNamespace) { await loadWeek() }
@@ -125,24 +126,6 @@ struct HomeView: View {
     do {
       week = try await model.readCatalogue { try await $0.rewind(period: "week") }
     } catch is CancellationError {} catch { week = nil }
-  }
-
-  @ViewBuilder private func mixOptions(_ mix: PersonalMix) -> some View {
-    Button("Show songs", systemImage: "list.bullet") { openedMix = mix.id }
-    Button("Shuffle", systemImage: "shuffle") { model.play(mix.tracks.shuffled()) }
-    Button("Save this edition", systemImage: "plus") {
-      Task {
-        do {
-          _ = try await model.performPersonal { try await $0.saveMix(mix.id) }
-          mixNotice = MixDetailView.savedNotice
-        } catch { mixNotice = error.userMessage }
-      }
-    }.disabled(!model.canMutate)
-    Button("Hide this edition", systemImage: "eye.slash", role: .destructive) {
-      Task {
-        do { try await model.hideMixEdition(mix.id) } catch { mixNotice = error.userMessage }
-      }
-    }.disabled(!model.canMutate)
   }
 
   @ViewBuilder private func discovery(_ section: HomeSection, title: String, songs: Bool)
@@ -240,12 +223,9 @@ struct HomeView: View {
 }
 
 struct MixDetailView: View {
-  static let savedNotice = "Playlist saved"
   @Environment(\.dismiss) private var dismiss
   let model: AppModel
   let mix: PersonalMix
-  @State private var notice: StatusMessage?
-  @State private var saving = false
   /// Without songs hidden, or waiting for their Undo (#183), nor songs
   /// being removed from the library (D-108).
   private var tracks: [Track] {
@@ -268,19 +248,8 @@ struct MixDetailView: View {
           PlayCapsule { model.play(tracks) }.disabled(tracks.isEmpty)
           RoundIcon(label: "Shuffle", systemImage: "shuffle") { model.play(tracks.shuffled()) }
             .disabled(tracks.isEmpty)
-          RoundIcon(label: "Save this edition", systemImage: "plus") {
-            saving = true
-            Task {
-              do {
-                _ = try await model.performPersonal { try await $0.saveMix(mix.id) }
-                notice = .info(Self.savedNotice)
-              } catch { notice = .error(error.userMessage) }
-              saving = false
-            }
-          }.disabled(saving)
           Spacer()
         }.buttonStyle(.plain)
-        if let notice { StatusText(notice) }
       }.listRowSeparator(.hidden).listRowBackground(Color.clear)
       Section {
         ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
@@ -296,20 +265,16 @@ struct MixDetailView: View {
     }.listStyle(.plain).pigCanvas().navigationTitle(mix.title).navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .topBarTrailing) {
+          // The mix's one menu, as its card's long press (D-118): Save and
+          // Hide this edition live only there.
           Menu {
-            Button("Hide this edition", systemImage: "eye.slash", role: .destructive) {
-              saving = true
-              Task {
-                do {
-                  try await model.hideMixEdition(mix.id)
-                  dismiss()
-                } catch { notice = .error(error.userMessage) }
-                saving = false
-              }
-            }.disabled(saving)
+            CollectionActionsMenu(
+              model: model, kind: .mix, missing: CollectionMenu.missing(tracks).count, mix: mix,
+              hidden: { dismiss() }
+            ) { tracks }
           } label: {
-            Image(systemName: "ellipsis").accessibilityLabel("Mix options")
-          }
+            Image(systemName: "ellipsis").accessibilityLabel("Mix actions")
+          }.menuOrder(.fixed)
         }
       }
   }
@@ -447,7 +412,9 @@ private struct ChartSongsView: View {
   let tracks: [Track]
   var body: some View {
     ScrollView {
-      AlbumSongList(model: model, tracks: tracks, number: { index, _ in index + 1 }) {
+      AlbumSongList(
+        model: model, tracks: tracks, number: { index, _ in index + 1 }, albumPage: false
+      ) {
         model.play(tracks, at: $0)
       }.padding(.horizontal)
     }
@@ -709,11 +676,24 @@ struct RewindView: View {
         model: model, rank: index + 1, source: song.track.artworkSource, title: song.track.title,
         subtitle: song.track.artist + " · " + RewindFigures.plays(song.plays), size: sizes[index],
         unavailable: queue == nil)
-      if let queue {
-        Button { model.play(queue) } label: { row }.buttonStyle(.plain)
-          .accessibilityHint("Plays this song, then the ones after it")
-      } else {
-        row
+      // A song's one menu, from its ⋯ and a long press (D-118).
+      SongActionsLookup(model: model, track: song.track.actionTrack) { menu in
+        HStack(spacing: 4) {
+          if let queue {
+            Button { model.play(queue) } label: { row }.buttonStyle(.plain)
+              .accessibilityHint("Plays this song, then the ones after it")
+          } else {
+            row
+          }
+          Menu {
+            menu
+          } label: {
+            Image(systemName: "ellipsis").frame(minWidth: 32, minHeight: 44)
+              .foregroundStyle(.secondary)
+          }.buttonStyle(.plain).menuOrder(.fixed)
+            .accessibilityLabel("More actions for \(song.track.title)")
+        }
+        .contextMenu { menu }
       }
     }
   }
