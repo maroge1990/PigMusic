@@ -1,4 +1,6 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { formatCount } from "./format";
+import { SortControl, byName } from "./SortControl";
 import { AppleImport } from "./AppleImport";
 import { CollectionPages } from "./CollectionPages";
 import { CollectionCard, albumSongs, artistSongs } from "./CollectionMenu";
@@ -6,7 +8,7 @@ import { Cover } from "./Cover";
 import { Empty } from "./EmptyState";
 import { OwnerLibraryLinks } from "./OwnerTools";
 import { FavouritesList, PlaylistGrid } from "./PlaylistCards";
-import { ShuffleLibrary } from "./ShuffleLibrary";
+import { PlayLibrary } from "./PlayLibrary";
 import type { Playlist, PlaylistSummary } from "./libraryTypes";
 import type { Album, Artist, Library, Track } from "./types";
 
@@ -30,6 +32,41 @@ const sectionCategory = {
 type Section = keyof typeof sectionCategory;
 const tabLabel = (id: string) => id[0].toUpperCase() + id.slice(1);
 
+// Each tab's sort reads for what it holds (D-120). The server sends artists
+// by name and albums by artist, then year: those orders are the defaults.
+type ArtistSort = "name" | "name-desc";
+type AlbumSort = "artist" | "title" | "year";
+const artistSorts = [
+  ["name", "Name A–Z"],
+  ["name-desc", "Name Z–A"],
+] as const;
+const albumSorts = [
+  ["artist", "Artist A–Z"],
+  ["title", "Title A–Z"],
+  ["year", "Year"],
+] as const;
+/** The chosen sorts, kept while the app stays open. */
+const rememberedSort: { artists: ArtistSort; albums: AlbumSort } = {
+  artists: "name",
+  albums: "artist",
+};
+function sortArtists(items: Artist[], sort: ArtistSort) {
+  const sorted = [...items].sort((a, b) => byName(a.name, b.name));
+  return sort === "name-desc" ? sorted.reverse() : sorted;
+}
+function sortAlbums(items: Album[], sort: AlbumSort) {
+  if (sort === "artist") return items;
+  const sorted = [...items];
+  // Newest first; albums without a year go last.
+  if (sort === "year")
+    sorted.sort(
+      (a, b) =>
+        Number(b.year || 0) - Number(a.year || 0) || byName(a.title, b.title),
+    );
+  else sorted.sort((a, b) => byName(a.title, b.title));
+  return sorted;
+}
+
 /** The library's front page: a tab strip over artists, album sections,
  * favourites and playlists. */
 export function LibraryCollections({
@@ -52,12 +89,29 @@ export function LibraryCollections({
   createPlaylist: (name: string) => Promise<void>;
   refresh: () => Promise<void>;
 }) {
-  const counts: Record<string, number> = {
+  const artists = library.artists.filter((a) => !a.compilation_only);
+  const inSection = (id: Section) =>
+    library.albums.filter((a) => a.category === sectionCategory[id]);
+  const counts: Record<LibraryTab, number> = {
+    artists: artists.length,
+    albums: inSection("albums").length,
     musicals: library.stats.musicals,
     soundtracks: library.stats.soundtracks,
     compilations: library.stats.compilations,
+    playlists: playlists.filter((p) => !p.id.startsWith("pig-favourites:"))
+      .length,
+    favourites: favouriteList?.entries.length ?? 0,
   };
-  const visibleTabs = libraryTabs.filter((id) => counts[id] !== 0);
+  // Empty album sections stay hidden; the others show even when empty.
+  const visibleTabs = libraryTabs.filter(
+    (id) => !(id in sectionCategory) || id === "albums" || counts[id] !== 0,
+  );
+  const [sort, setSort] = useState(() => ({ ...rememberedSort }));
+  const choose = (key: "artists" | "albums", value: string) => {
+    rememberedSort[key] = value as never;
+    setSort({ ...rememberedSort });
+  };
+  const music = tab === "artists" || tab in sectionCategory;
   return (
     <>
       <div className="library-toolbar">
@@ -69,10 +123,30 @@ export function LibraryCollections({
               aria-current={tab === id ? "page" : undefined}
             >
               {tabLabel(id)}
+              <span className="nav-count pig-amount">
+                {formatCount(counts[id])}
+              </span>
             </a>
           ))}
         </nav>
-        <ShuffleLibrary total={library.stats.tracks} />
+        {music && (
+          <div className="library-actions">
+            <PlayLibrary total={library.stats.tracks} />
+            {tab === "artists" ? (
+              <SortControl
+                value={sort.artists}
+                options={artistSorts}
+                onChange={(v) => choose("artists", v)}
+              />
+            ) : (
+              <SortControl
+                value={sort.albums}
+                options={albumSorts}
+                onChange={(v) => choose("albums", v)}
+              />
+            )}
+          </div>
+        )}
       </div>
       {!library.stats.tracks && (tab === "artists" || tab === "albums") && (
         <Empty
@@ -82,8 +156,8 @@ export function LibraryCollections({
       )}
       {tab === "artists" && (
         <CollectionPages<Artist>
-          key={tab}
-          items={library.artists.filter((a) => !a.compilation_only)}
+          key={tab + sort.artists}
+          items={sortArtists(artists, sort.artists)}
           label="artists"
         >
           {(items) => (
@@ -114,10 +188,8 @@ export function LibraryCollections({
       )}
       {tab in sectionCategory && (
         <CollectionPages<Album>
-          key={tab}
-          items={library.albums.filter(
-            (a) => a.category === sectionCategory[tab as Section],
-          )}
+          key={tab + sort.albums}
+          items={sortAlbums(inSection(tab as Section), sort.albums)}
           label={tab}
         >
           {(items) => (

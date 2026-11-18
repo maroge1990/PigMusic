@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Shuffle } from "lucide-react";
+import { Play, Shuffle } from "lucide-react";
 import { api } from "./api";
 import { usePlayer } from "./Player";
 import { shuffled } from "./shuffle";
@@ -10,19 +10,20 @@ type Page = { items: Track[]; total: number };
 const SAMPLE_PAGES = 5;
 const SAMPLE_SIZE = 200;
 
-/** Shuffle the whole library without downloading every song's details:
- * the server pages the library, and a few random windows make the queue. */
-export function ShuffleLibrary({ total }: { total: number }) {
+/** Play or shuffle the whole library without downloading every song's
+ * details: the server pages the library. Play starts at the beginning;
+ * Shuffle takes a few random windows. */
+export function PlayLibrary({ total }: { total: number }) {
   const player = usePlayer();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  async function shuffleAll() {
+  async function start(shuffle: boolean) {
     setBusy(true);
     setError("");
     try {
-      const starts = new Set<number>();
+      const starts = new Set<number>(shuffle ? [] : [0]);
       const windows = Math.ceil(total / SAMPLE_SIZE);
-      while (starts.size < Math.min(SAMPLE_PAGES, windows))
+      while (shuffle && starts.size < Math.min(SAMPLE_PAGES, windows))
         starts.add(Math.floor(Math.random() * windows) * SAMPLE_SIZE);
       const pages = await Promise.all(
         [...starts].map((start) =>
@@ -31,9 +32,10 @@ export function ShuffleLibrary({ total }: { total: number }) {
           ),
         ),
       );
-      const queue = shuffled(
-        pages.flatMap((p) => p.items).filter((t) => t.available !== false),
-      );
+      const songs = pages
+        .flatMap((p) => p.items)
+        .filter((t) => t.available !== false);
+      const queue = shuffle ? shuffled(songs) : songs;
       if (queue.length) player.playSaved(queue[0], queue, 0);
     } catch (e) {
       setError((e as Error).message);
@@ -44,12 +46,21 @@ export function ShuffleLibrary({ total }: { total: number }) {
   return (
     <>
       <button
-        className="secondary-button shuffle-library"
-        aria-label="Shuffle all"
+        className="primary-button library-play"
+        aria-label="Play"
         disabled={!total || busy}
-        onClick={() => void shuffleAll()}
+        onClick={() => void start(false)}
       >
-        <Shuffle size={18} /> <span>Shuffle all</span>
+        <Play size={16} fill="currentColor" aria-hidden="true" />{" "}
+        <span>Play</span>
+      </button>
+      <button
+        className="secondary-button library-play"
+        aria-label="Shuffle"
+        disabled={!total || busy}
+        onClick={() => void start(true)}
+      >
+        <Shuffle size={16} aria-hidden="true" /> <span>Shuffle</span>
       </button>
       {error && <InlineError>{error}</InlineError>}
     </>
