@@ -167,17 +167,35 @@ export async function runAction(id: number) {
   }
 }
 
+/** The most kept notices (Undo, Try again, warnings) shown before the
+ * older ones fold into "N more". */
+export const MAX_KEPT_SHOWN = 3;
+
 /**
- * The notices on screen, oldest first. A live Undo is never hidden while
- * its change can still be taken back, nor an error's Try again: those
- * show, and the newest other notices fill what is left of `MAX_SHOWN`.
+ * The notices on screen, oldest first, and how many kept notices are folded
+ * away (Codex, #249). Kept notices are never dropped: the newest
+ * `MAX_KEPT_SHOWN` show, older ones fold into "N more" until `expanded`.
+ * Routine notices fill what is left of `MAX_SHOWN`, and the newest one
+ * always has a place, so a fresh error or success is never hidden.
  */
-export function shown(all = notices) {
-  const undos = all.filter(kept);
-  const room = Math.max(0, MAX_SHOWN - undos.length);
-  const others = all.filter((n) => !kept(n));
-  const showing = new Set([...undos, ...(room ? others.slice(-room) : [])]);
-  return all.filter((n) => showing.has(n));
+export function stack(all = notices, expanded = false) {
+  const keptAll = all.filter(kept);
+  const keptShown = expanded ? keptAll : keptAll.slice(-MAX_KEPT_SHOWN);
+  const routine = all.filter((n) => !kept(n));
+  const room = Math.max(
+    1,
+    MAX_SHOWN - Math.min(keptAll.length, MAX_KEPT_SHOWN),
+  );
+  const showing = new Set([...keptShown, ...routine.slice(-room)]);
+  return {
+    shown: all.filter((n) => showing.has(n)),
+    more: keptAll.length - keptShown.length,
+  };
+}
+
+/** The notices on screen, oldest first (see `stack`). */
+export function shown(all = notices, expanded = false) {
+  return stack(all, expanded).shown;
 }
 
 /** Calls `listener` with every change; returns the unsubscribe. */

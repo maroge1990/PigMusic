@@ -11,6 +11,7 @@ globalThis.Event = class {
   }
 };
 const { setSessionId } = await import("../src/sessionId.ts");
+const { clearSessionReads } = await import("../src/api.ts");
 const { MAX_SONGS_PER_REQUEST } = await import("../src/limits.ts");
 const { ReportedFailure, addToPlaylist } = await import("../src/playlists.ts");
 const { clearNotices, notifyError, runAction, subscribe } = await import(
@@ -215,4 +216,34 @@ test("two partial copies into one playlist each keep their Try again", async () 
   notices.stop();
   clearNotices();
   assert.equal(server.playlist.entries.length, size * 2);
+});
+
+test("a copy whose account signs out stops without a word", async () => {
+  // Codex (#249): a late 502 for account A published A's playlist name in
+  // B's notices.
+  setSessionId("session-1");
+  const server = playlistServer();
+  const notices = watch();
+  let release;
+  const original = globalThis.fetch;
+  globalThis.fetch = async (path, options) => {
+    if (options?.method === "POST") {
+      await new Promise((r) => (release = r));
+      return new Response("bad gateway", { status: 502 });
+    }
+    return original(path, options);
+  };
+  const copy = addToPlaylist("p1", songs(MAX_SONGS_PER_REQUEST + 1));
+  await new Promise((r) => setTimeout(r, 0));
+  // A signs out and B signs in while the append is on its way.
+  globalThis.navigator ??= {};
+  clearSessionReads();
+  setSessionId("session-2");
+  release();
+  await assert.rejects(copy, ReportedFailure);
+  const leaked = notices.error();
+  notices.stop();
+  clearNotices();
+  assert.equal(leaked, undefined);
+  assert.equal(server.appends, 0);
 });

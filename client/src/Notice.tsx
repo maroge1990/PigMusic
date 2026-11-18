@@ -4,7 +4,7 @@ import {
   dismiss,
   roleOf,
   runAction,
-  shown,
+  stack,
   subscribe,
   type Notice,
 } from "./notices";
@@ -17,10 +17,23 @@ import {
 export function NoticeArea() {
   const [all, setAll] = useState<Notice[]>([]);
   const [busy, setBusy] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState(false);
   useEffect(() => subscribe(setAll), []);
+  const { shown, more } = stack(all, expanded);
+  const folded = stack(all, false).more;
   return (
     <div className="notice-area">
-      {shown(all).map((notice) => (
+      {folded > 0 && (
+        <button
+          type="button"
+          className="notice-more"
+          aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? "Show fewer" : `${more} more`}
+        </button>
+      )}
+      {shown.map((notice) => (
         <div
           key={notice.id}
           className={`notice-${notice.kind} notice`}

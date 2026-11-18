@@ -93,6 +93,21 @@
   font-weight: 600;
   cursor: pointer;
 }
+/* Older kept notices fold into one "N more" (#249). */
+.notice-more {
+  min-height: 2.75rem;
+  padding: 0 var(--space-16);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-compact);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--type-footnote);
+  font-weight: 600;
+  box-shadow: var(--elevation-floating);
+  cursor: pointer;
+  pointer-events: auto;
+}
 .notice-close {
   min-width: 2.75rem;
   justify-content: center;

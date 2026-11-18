@@ -87,3 +87,58 @@ test("removing a song from a playlist says Removed, not Saved", async ({
   await expect(page.getByText("Saved", { exact: true })).toHaveCount(0);
   expect(calls).toEqual(["DELETE"]);
 });
+
+// Codex (#249): warnings that must stay never hide a fresh notice; older
+// ones fold into "N more", which opens them all in place.
+test("eight kept warnings fold into 5 more and a fresh error still shows", async ({
+  page,
+}) => {
+  let saved = false;
+  await mockApi(page, {
+    answers: {
+      "/v1/favourites": (route) =>
+        "favourite" in route.request().postDataJSON()
+          ? route.fulfill({
+              status: 503,
+              json: { detail: "Favourites are unavailable", code: "x" },
+            })
+          : route.fulfill({ json: { favourited: false } }),
+      "/v1/playlists": (route) =>
+        route.fulfill({ json: { playlists: [{ id: "p1", name: "Gym" }] } }),
+      "/v1/playlists/p1": (route) =>
+        route.fulfill({
+          json: { id: "p1", name: "Gym", revision: 1, entries: [] },
+        }),
+      // The gateway fails after each append: whether it saved is unknown.
+      "/v1/playlists/p1/songs": (route) => {
+        saved = true;
+        return route.fulfill({ status: 502, body: "Bad gateway" });
+      },
+    },
+  });
+  await page.goto(`/#/library/album/${album.id}`);
+  const dots = page.getByRole("button", { name: "More options for Von dutch" });
+  for (let i = 0; i < 8; i++) {
+    await dots.click();
+    await page.getByRole("menuitem", { name: "Add to playlist" }).click();
+    await page.getByRole("menuitem", { name: "Gym" }).click();
+    await expect(notices(page).locator(".notice")).toHaveCount(
+      Math.min(i + 1, 3),
+    );
+  }
+  expect(saved).toBe(true);
+  // A fresh, unrelated error still shows.
+  await dots.click();
+  await page.getByRole("menuitem", { name: "Favourite" }).click();
+  await expect(notices(page)).toContainText("Favourites are unavailable");
+  const more = notices(page).getByRole("button", { name: "5 more" });
+  await expect(more).toHaveAttribute("aria-expanded", "false");
+  await expect(notices(page).locator(".notice")).toHaveCount(4);
+  await more.click();
+  await expect(
+    notices(page).getByRole("button", { name: "Show fewer" }),
+  ).toHaveAttribute("aria-expanded", "true");
+  await expect(
+    notices(page).locator(".notice", { hasText: "Check the playlist" }),
+  ).toHaveCount(8);
+});

@@ -1,4 +1,4 @@
-import { ApiError, api } from "./api";
+import { ApiError, api, currentSession } from "./api";
 import { notifyError, notifyWarning } from "./notices";
 import { batches } from "./limits";
 import { expectedSession, withSession } from "./sessionId";
@@ -56,12 +56,21 @@ export async function addToPlaylist(
   // the same playlist keeps its own Try again.
   const key = `playlist-copy:${id}:${++copies}`;
   const bound = <T>(start: () => Promise<T>) => withSession(session, start);
+  // Another account signed in since the copy began: stop without a word,
+  // so nothing of this account's (a playlist name) reaches the next (Codex).
+  const generation = currentSession();
+  const ended = () =>
+    currentSession() !== generation || expectedSession() !== session;
+  function stopIfEnded() {
+    if (ended()) throw new ReportedFailure("Signed out");
+  }
   let name = "the playlist";
   const changed = () =>
     window.dispatchEvent(new Event("music-library-changed"));
   const songs = (n: number) => `${n} ${n === 1 ? "song" : "songs"}`;
   /** Says what failed and offers Try again from batch `at`. */
   function refused(at: number, error: unknown): never {
+    stopIfEnded();
     const added = parts.slice(0, at).flat().length;
     notifyError(
       added
@@ -76,6 +85,7 @@ export async function addToPlaylist(
     throw new ReportedFailure((error as Error).message);
   }
   async function sendFrom(start: number): Promise<void> {
+    stopIfEnded();
     let revision: number;
     try {
       const playlist = await bound(() => api<Read>(`/v1/playlists/${id}`));
@@ -86,6 +96,7 @@ export async function addToPlaylist(
       refused(start, e);
     }
     for (let i = start; i < parts.length; i++) {
+      stopIfEnded();
       try {
         revision = (
           await bound(() =>
@@ -100,6 +111,7 @@ export async function addToPlaylist(
           )
         ).revision;
       } catch (e) {
+        stopIfEnded();
         changed();
         if (!refusedUnmade(e)) {
           notifyWarning(
@@ -111,6 +123,7 @@ export async function addToPlaylist(
         refused(i, e);
       }
     }
+    stopIfEnded();
     changed();
   }
   await sendFrom(0);
