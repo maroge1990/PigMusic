@@ -14,7 +14,10 @@ export type FoundAlbum = Album & {
   in_library: boolean;
   server_state?: Track["server_state"];
 };
-export type FoundArtist = Artist & { in_library: boolean };
+export type FoundArtist = Artist & {
+  in_library: boolean;
+  musicbrainz_artist_id?: string | null;
+};
 export type FoundPlaylist = { id: string; name: string; track_count: number };
 /** One ranked search over your library and the server (D-61): each song,
  * album and artist once, marked in your library or not. */

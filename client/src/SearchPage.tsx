@@ -9,7 +9,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import { api, currentSession } from "./api";
+import { ApiError, api, currentSession } from "./api";
 import { Cover, catalogueArtistCover } from "./Cover";
 import { discoverUrl } from "./navigation";
 import { go } from "./routes";
@@ -69,6 +69,8 @@ function AlbumMark({ album }: { album: FoundAlbum }) {
     </span>
   );
 }
+
+type Candidate = { id: string; name: string; disambiguation?: string };
 
 const plural = (n: number, one: string) =>
   `${formatCount(n)} ${one}${n === 1 ? "" : "s"}`;
@@ -141,6 +143,10 @@ export function SearchPage({
   const [catalogue, setCatalogue] = useState<CatalogueArtist[] | null>(null);
   const [catalogueFailed, setCatalogueFailed] = useState(false);
   const [error, setError] = useState("");
+  const [choices, setChoices] = useState<{
+    detail: string;
+    candidates: Candidate[];
+  } | null>(null);
   // An account change ends this person's search: what was shown goes too.
   const [session, setSession] = useState(currentSession);
   useEffect(() => {
@@ -155,6 +161,7 @@ export function SearchPage({
   useEffect(() => {
     setCatalogueFailed(false);
     setError("");
+    setChoices(null);
     const key = fold(active);
     const saved = answer(key);
     setLocal(saved?.local ?? null);
@@ -238,9 +245,21 @@ export function SearchPage({
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
       return;
     event.preventDefault();
+    setChoices(null);
     void api<CatalogueArtist>(`/v1/catalogue/library-artists/${id}`)
       .then((identity) => go(discoverUrl(identity)))
-      .catch((e) => setError(e.message));
+      .catch((e) => {
+        // Several catalogue artists share the name: offer them (#251).
+        if (e instanceof ApiError && e.code === "conflict") {
+          const found = e.body.candidates;
+          setChoices({
+            detail: e.message,
+            candidates: Array.isArray(found) ? (found as Candidate[]) : [],
+          });
+          return;
+        }
+        setError(e.message);
+      });
   };
 
   // The top result is shown once, as the top result only.
@@ -263,11 +282,12 @@ export function SearchPage({
     .filter((a) => a !== topAlbum)
     .slice(0, ALBUMS_SHOWN);
   const serverArtists = (local?.artists || []).filter((a) => a !== topArtist);
-  // A catalogue artist the server already has is shown once, as the server's.
-  const named = new Set((local?.artists || []).map((a) => fold(a.name)));
-  const catalogueArtists = (catalogue || []).filter(
-    (a) => !named.has(fold(a.name)),
+  // A catalogue artist the server already has is shown once, as the
+  // server's; a namesake (another catalogue identity) stays.
+  const known = new Set(
+    (local?.artists || []).map((a) => a.musicbrainz_artist_id).filter(Boolean),
   );
+  const catalogueArtists = (catalogue || []).filter((a) => !known.has(a.id));
   const playlists = (local?.playlists || []).filter((p) => p !== topPlaylist);
   const artistCount = serverArtists.length + catalogueArtists.length;
   const nothing =
@@ -390,6 +410,31 @@ export function SearchPage({
         </label>
       </form>
       {error && <InlineError>{error}</InlineError>}
+      {choices && (
+        <div className="artist-choice" role="group" aria-label="Choose artist">
+          <p role="status">{choices.detail}</p>
+          <ul className="discover-list">
+            {choices.candidates.map((c) => (
+              <li key={c.id}>
+                <a href={"#" + discoverUrl(c)}>
+                  <Cover
+                    title={c.name}
+                    src={catalogueArtistCover(c.id)}
+                    artist
+                    sizes="48px"
+                  />
+                  <span className="discover-text">
+                    <strong>{c.name}</strong>
+                    <span>
+                      {["Artist", c.disambiguation].filter(Boolean).join(" · ")}
+                    </span>
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {!active && (
         <BeforeTyping library={library} recent={recent} forget={forget} />
       )}

@@ -15,7 +15,13 @@ test("search types ahead without a request per keystroke", async ({ page }) => {
           json: {
             ...nothing,
             top: [{ kind: "artist", id: artist.id }],
-            artists: [{ ...artist, in_library: true }],
+            artists: [
+              {
+                ...artist,
+                in_library: true,
+                musicbrainz_artist_id: "mb-charli",
+              },
+            ],
           },
         });
       },
@@ -224,7 +230,13 @@ test("D-120: results are grouped and each item shows once with one mark", async 
               server("album-2", "Brat remixed", "requested", true),
               server("album-3", "Sucker", "household_available", false),
             ],
-            artists: [{ ...artist, in_library: true }],
+            artists: [
+              {
+                ...artist,
+                in_library: true,
+                musicbrainz_artist_id: "mb-charli",
+              },
+            ],
           },
         }),
       "/v1/catalogue/artists": (route) =>
