@@ -186,6 +186,18 @@ def report(area, name, error):
     startup_problems.report(area, name, error)
 
 
+def unfinished(area, name, error):
+    """A readable record whose file step failed again at startup (disk
+    full, permission denied, the library mount changed): logged and listed
+    once per process; it stays as it is and is tried at the next start."""
+    with _lock:
+        if ("unfinished", name) in _reported:
+            return
+        _reported.add(("unfinished", name))
+    log.error("Could not finish %s record %s yet", area, name, exc_info=error)
+    startup_problems.report(area, name, error, kind="unfinished")
+
+
 def clear():
     """For tests: forget which records were reported."""
     with _lock:

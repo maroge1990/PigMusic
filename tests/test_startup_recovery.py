@@ -2,12 +2,15 @@
 it is skipped as it is, logged and listed, and the other records are still
 recovered."""
 
+import errno
 import json
+import os
+import shutil
 
 import pytest
 from fastapi.testclient import TestClient
 
-from server import startup_problems
+from server import startup_problems, system_health
 from server import document_records
 from server.app import create_app
 from server.organisation import Organisation
@@ -16,6 +19,7 @@ from server.store import Store
 from server.tidy import Tidy
 from test_recovery import setup
 from test_tidy import legacy, library
+from test_ui_contract import household, sign_in
 
 
 @pytest.fixture(autouse=True)
@@ -59,7 +63,8 @@ def malformed(prefix, wrong_type=None):
 def reported(area):
     entries = [p for p in startup_problems.snapshot() if p["area"] == area]
     for entry in entries:
-        assert set(entry) == {"at", "area", "record", "error"}
+        assert {"at", "area", "record", "error"} <= set(entry)
+        assert set(entry) <= {"at", "area", "record", "error", "kind"}
         # The class name only: never the exception text or the payload.
         assert entry["error"].isidentifier()
     return {entry["record"] for entry in entries}
@@ -405,6 +410,7 @@ def test_problems_keep_the_latest_fifty_without_detail():
         "area": "trash",
         "record": "removed:59",
         "error": "KeyError",
+        "kind": "set_aside",
     }
     problems.clear()
     assert len(startup_problems.snapshot()) == 50
@@ -487,3 +493,130 @@ def test_a_purge_folder_identity_may_use_all_64_bits(tmp_path, monkeypatch):
     assert document_records.parse("removed:x", json.dumps(record)) == record
     record["quarantine_folder"] = [2**64, 1]
     assert document_records.parse("removed:y", json.dumps(record)) is None
+
+
+# #258: a readable record whose file step fails again at startup (disk full,
+# permission denied, the library mount changed) is listed as unfinished.
+UNFINISHED = (
+    "A saved {} task could not be finished yet; it will be tried again at the"
+    " next start."
+)
+
+
+def unfinished(area):
+    return {
+        p["record"]
+        for p in startup_problems.snapshot()
+        if p["area"] == area and p.get("kind") == "unfinished"
+    }
+
+
+def test_a_trash_task_that_cannot_finish_at_startup_is_listed(tmp_path, monkeypatch):
+    store, root, path, track = setup(tmp_path, monkeypatch)
+    recovery = Recovery(store)
+    healthy = recovery.remove("saved")
+    healthy["status"] = "removing"
+    recovery.save("removed:" + healthy["id"], healthy)
+    # A purge stopped part-way whose Trash folder can't be opened now.
+    purge = dict(
+        healthy,
+        id="stuck-purge",
+        status="removed",
+        trash=".pig-music-trash/stuck-purge/Artist/Album/Song.mp3",
+        quarantine=".pig-music-purge-0",
+        quarantine_folder=[1, 2],
+    )
+    # A removal whose file step fails again: the disk is full.
+    (root / "Artist" / "Album" / "Copy.mp3").write_bytes(b"original music")
+    full = dict(
+        healthy,
+        id="disk-full",
+        original="Artist/Album/Copy.mp3",
+        trash=".pig-music-trash/disk-full/Copy.mp3",
+    )
+    put(
+        store,
+        {
+            "removed:stuck-purge": json.dumps(purge),
+            "removed:disk-full": json.dumps(full),
+        },
+    )
+    real_link, refused = os.link, []
+
+    def no_space(source, target, *args, **kwargs):
+        if "disk-full" in str(target):
+            refused.append(target)
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real_link(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(os, "link", no_space)
+    before = raw(store, ["removed:stuck-purge", "removed:disk-full"])
+    Recovery(Store(store.directory)).recover()
+    assert refused
+    assert store.read_document("removed:" + healthy["id"])["status"] == "removed"
+    assert raw(store, before) == before
+    assert (root / "Artist" / "Album" / "Copy.mp3").is_file()
+    assert unfinished("trash") == {"removed:stuck-purge", "removed:disk-full"}
+    assert reported("trash") == unfinished("trash")
+    lines = system_health.startup_lines()
+    assert {line["sentence"] for line in lines} == {UNFINISHED.format("trash")}
+
+
+def test_an_organisation_task_that_cannot_finish_at_startup_is_listed(
+    tmp_path, monkeypatch
+):
+    tidy, identity, operation = interrupted_tidy(tmp_path, monkeypatch)
+
+    def refused(*args, **kwargs):
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "link", refused)
+        patch.setattr(os, "replace", refused)
+        tidy.organisation.recover()
+    name = "organisation:" + operation
+    assert tidy.store.read_document(name)["status"] == "publishing"
+    assert unfinished("organisation") == {name}
+    # Tried again at the next start, it finishes.
+    tidy.organisation.recover()
+    assert tidy.store.read_document(name)["status"] == "completed"
+
+
+def test_an_organisation_undo_that_cannot_finish_at_startup_is_listed(
+    tmp_path, monkeypatch
+):
+    tidy, identity, operation, bad = recovered_with_malformed_records(
+        tmp_path, monkeypatch
+    )
+    name = "organisation:" + operation
+    step = tidy.store.read_document(name)
+    step["status"] = "undoing"
+    tidy.recovery.save(name, step)
+
+    def refused(*args, **kwargs):
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "link", refused)
+        patch.setattr(shutil, "copyfile", refused)
+        tidy.organisation.recover()
+    assert tidy.store.read_document(name)["status"] == "undoing"
+    assert unfinished("organisation") == {name}
+
+
+def test_the_system_page_lists_an_unfinished_task(tmp_path, monkeypatch):
+    startup_problems.report(
+        "trash", "removed:x", OSError("/music/private.flac"), kind="unfinished"
+    )
+    app = household(tmp_path, monkeypatch)
+    with TestClient(app, base_url="https://private.ts.net") as client:
+        sign_in(client, "mark")
+        answer = client.get("/api/v1/admin/system/health")
+        assert answer.status_code == 200, answer.text
+    problems = answer.json()["startup_problems"]
+    assert {
+        "at": problems[0]["at"],
+        "area": "trash",
+        "sentence": UNFINISHED.format("trash"),
+    } in problems
+    assert "/music" not in answer.text and "removed:x" not in answer.text
