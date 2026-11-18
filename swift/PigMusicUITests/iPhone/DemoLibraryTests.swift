@@ -29,6 +29,21 @@ final class DemoLibraryTests: XCTestCase {
     app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Now playing: '")).firstMatch
   }
 
+  /// Pauses from the mini player. iOS 26 also lists a hidden Pause (its
+  /// frame is off screen or a few points wide), so tap the one on screen.
+  private func pause() {
+    let pauses = app.buttons.matching(NSPredicate(format: "label == 'Pause'"))
+    expect(pauses.firstMatch)
+    let all = pauses.allElementsBoundByIndex
+    if let shown = all.first(where: { $0.isHittable }) {
+      shown.tap()
+    } else if let drawn = all.first(where: { $0.frame.minX.isFinite && !$0.frame.isEmpty }) {
+      drawn.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+    } else {
+      XCTFail("No Pause button on screen")
+    }
+  }
+
   private func playSunrise() {
     app.buttons["Sunrise, The Orchard"].tap()
     expect(app.buttons["Play"])
@@ -105,7 +120,7 @@ final class DemoLibraryTests: XCTestCase {
   func testThePlayerNamesTheSongAndArtist() {
     launch()
     playSunrise()
-    app.buttons["Pause"].tap()
+    pause()
     let playing = miniPlayer.label.replacingOccurrences(of: "Now playing: ", with: "")
     miniPlayer.tap()
     expect(app.staticTexts["Now playing"])
@@ -119,7 +134,7 @@ final class DemoLibraryTests: XCTestCase {
   func testNextSongMovesThroughTheAlbum() {
     launch()
     playSunrise()
-    app.buttons["Pause"].tap()
+    pause()
     if miniPlayer.label == "Now playing: First Light" { app.buttons["Next song"].tap() }
     expect(app.buttons["Now playing: Open Road"])
   }
@@ -129,7 +144,7 @@ final class DemoLibraryTests: XCTestCase {
   func testASongsMenuOffersItsActions() {
     launch()
     playSunrise()
-    app.buttons["Pause"].tap()
+    pause()
     app.buttons["More actions for First Light"].tap()
     checkSongMenu()
     // The quality is chosen in the Download submenu (D-106).
