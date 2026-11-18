@@ -42,7 +42,7 @@ One word and one icon for each thing on web, iPhone and Watch (D-115 to D-117); 
 | Sort; move in Up next | `arrow.up.arrow.down` / `ArrowUpDown` | |
 | Rename | `pencil` / `Pencil` | Rename |
 
-Row marks: in your library `checkmark.circle.fill` / `CircleCheck` ("In your library"); downloaded on this iPhone `arrow.down.circle.fill`; waiting `clock` ("Adding" until the server has the song); downloading, a progress ring; paused `pause.circle` (tap to resume); failed `exclamationmark.circle` / `CircleAlert` (tap to try again); no mark when a song is on the server and streams. A play triangle only ever plays music.
+Row marks: in your library `checkmark.circle.fill` / `CircleCheck` ("In your library"); downloaded on this iPhone `arrow.down.circle.fill`; waiting `clock` ("Adding" until the server has the song); downloading, a progress ring; paused `pause.circle` ("Paused"; tap to resume; an Add that meets a song you paused leaves it paused and says "Paused. Resume it in Downloads."); failed `exclamationmark.circle` / `CircleAlert` (tap to try again); no mark when a song is on the server and streams. A play triangle only ever plays music.
 
 Words: Apple Watch and iPhone (never watch or phone); songs and albums (never tracks or releases); your library; Storage limit; every error reads "Couldn't … Try again." or says what to do next.
 

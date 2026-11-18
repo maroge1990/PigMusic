@@ -70,7 +70,8 @@ extension AcquisitionResult {
     let parts = [
       adding > 0 ? "Adding \(songs(adding)) to your library." : nil,
       skipped > 0 ? "Skipped \(songs(skipped))." : nil,
-      paused > 0 ? "\(songs(paused)) paused. Resume in Downloads." : nil,
+      // The one sentence for it, as on the web (DESIGN.md's table).
+      paused > 0 ? Self.pausedNotice : nil,
     ].compactMap { $0 }
     return parts.isEmpty ? "Already in your library." : parts.joined(separator: " ")
   }

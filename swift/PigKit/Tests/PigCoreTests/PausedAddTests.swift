@@ -22,7 +22,9 @@ struct PausedAddTests {
     let result = try decode(
       #"{"created":2,"existing":0,"skipped":0,"paused":1,"downloads_enabled":true}"#)
     #expect(!result.onlyPaused)
-    #expect(result.sentence == "Adding 2 songs to your library. 1 song paused. Resume in Downloads.")
+    // The same sentence as the web's, after what was added.
+    #expect(
+      result.sentence == "Adding 2 songs to your library. Paused. Resume it in Downloads.")
   }
 
   /// An older server sends no `paused`.
