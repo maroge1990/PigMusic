@@ -9,6 +9,7 @@ Each is logged and listed for the System page once per process.
 
 import json
 import logging
+import math
 import threading
 
 from . import startup_problems
@@ -52,6 +53,34 @@ def _rows(values, kinds, field):
             raise TypeError(field)
         if not all(isinstance(v, kind) for v, kind in zip(row, kinds)):
             raise TypeError(field)
+
+
+INTEGER = (-(2**63), 2**63 - 1)  # What SQLite binds.
+UNSIGNED = (0, 2**64 - 1)  # A device or inode number: compared, never bound.
+
+
+def _in_range(value, field, bounds=INTEGER):
+    """Every number in `value` is one SQLite binds (#257): an integer
+    within signed 64 bits and a finite float (json reads NaN and Infinity),
+    so a record never fails part-way through a Restore or Undo."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _in_range(item, field, bounds)
+    elif isinstance(value, list):
+        for item in value:
+            _in_range(item, field, bounds)
+    elif isinstance(value, bool):
+        pass
+    elif isinstance(value, int):
+        if not bounds[0] <= value <= bounds[1]:
+            raise ValueError(field + " out of range")
+    elif isinstance(value, float) and not math.isfinite(value):
+        raise ValueError(field + " out of range")
+
+
+def _numbers_in_range(record, unsigned=()):
+    for field, value in record.items():
+        _in_range(value, field, UNSIGNED if field in unsigned else INTEGER)
 
 
 def usable_removal(record):
@@ -171,6 +200,7 @@ def parse(name, payload):
         if not isinstance(record, dict):
             raise TypeError("record is not an object")
         SHAPES[prefix](record)
+        _numbers_in_range(record, unsigned={"quarantine_folder"})
     except Exception as error:
         report(AREAS[prefix], name, error)
         return None

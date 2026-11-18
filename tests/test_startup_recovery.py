@@ -408,3 +408,82 @@ def test_problems_keep_the_latest_fifty_without_detail():
     }
     problems.clear()
     assert len(startup_problems.snapshot()) == 50
+
+
+# Codex, #257: a number SQLite cannot bind (outside signed 64 bits) or no
+# number at all (NaN, Infinity: json reads both) passed the type checks.
+OUT_OF_RANGE = [2**63, -(2**63) - 1, float("nan"), float("inf")]
+
+
+@pytest.mark.parametrize("added", OUT_OF_RANGE)
+def test_a_removal_with_an_out_of_range_number_is_set_aside_before_restore(
+    tmp_path, monkeypatch, added
+):
+    store, root, path, track = setup(tmp_path, monkeypatch)
+    recovery = Recovery(store)
+    with store.connect() as c:
+        c.execute(
+            "INSERT INTO users(id,username,display_name,role,created_at) VALUES ('owner','owner','Owner','owner',1)"
+        )
+    record = recovery.remove("saved")
+    record["memberships"] = [["owner", "saved", added, "household-add"]]
+    put(store, {"removed:" + record["id"]: json.dumps(record)})
+    before = files(root)
+    assert recovery.restore_many([record["id"]]) == {
+        "restored": [],
+        "failed": [record["id"]],
+    }
+    assert files(root) == before and not path.exists()
+    assert "removed:" + record["id"] in reported("trash")
+
+
+@pytest.mark.parametrize("removed_at", [float("inf"), 2**63])
+def test_a_removal_with_an_out_of_range_time_is_left_out_of_lists(
+    tmp_path, monkeypatch, removed_at
+):
+    store, root, path, track = setup(tmp_path, monkeypatch)
+    recovery = Recovery(store)
+    record = recovery.remove("saved")
+    record["removed_at"] = removed_at
+    put(store, {"removed:" + record["id"]: json.dumps(record)})
+    assert recovery.purge_plan(0)["items"] == []
+    assert "removed:" + record["id"] in reported("trash")
+
+
+def test_a_tidy_up_whose_removal_has_an_out_of_range_number_stops_before_undo(
+    tmp_path, monkeypatch
+):
+    tidy, identity, operation, bad = recovered_with_malformed_records(
+        tmp_path, monkeypatch
+    )
+    removal = {
+        "id": "huge",
+        "track_id": "song",
+        "root": str(tmp_path / "music"),
+        "original": "Artist/Album/Song.mp3",
+        "trash": ".pig-music-trash/huge/Artist/Album/Song.mp3",
+        "sha256": "0" * 64,
+        "status": "removed",
+        "memberships": [["owner", "song", 2**63, "household-add"]],
+    }
+    put(tidy.store, {"removed:huge": json.dumps(removal)})
+    record = tidy.store.read_document("tidy:" + identity)
+    record["removals"] = ["huge"]
+    tidy.save(record)
+    root = tmp_path / "music"
+    before = files(root)
+    with pytest.raises(ValueError):
+        tidy.undo(identity)
+    assert files(root) == before
+    assert tidy.store.read_document("organisation:" + operation)["status"] != "undone"
+    assert "removed:huge" in reported("trash")
+
+
+def test_a_purge_folder_identity_may_use_all_64_bits(tmp_path, monkeypatch):
+    """A device or inode number is unsigned and never bound into SQL."""
+    store, root, path, track = setup(tmp_path, monkeypatch)
+    record = Recovery(store).remove("saved")
+    record["quarantine_folder"] = [2**64 - 1, 2**63]
+    assert document_records.parse("removed:x", json.dumps(record)) == record
+    record["quarantine_folder"] = [2**64, 1]
+    assert document_records.parse("removed:y", json.dumps(record)) is None
