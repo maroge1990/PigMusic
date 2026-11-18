@@ -4,19 +4,30 @@ import { album, artist, mockApi } from "./mock";
 // Catalogue albums: an answer that arrives late belongs to the album or
 // edition it was asked for, never to the one now on screen (#262, #263).
 
-type Release = { id: string; title: string; song: string; explicit?: boolean };
-const track = (r: Release) => ({
-  id: "t-" + r.id,
-  title: r.song,
+type Release = {
+  id: string;
+  title: string;
+  song: string;
+  explicit?: boolean;
+  /** More songs after the first. */
+  more?: string[];
+  /** The songs the server says are being added, by read number. */
+  requested?: (read: number) => string[];
+};
+const track = (r: Release, title: string, n: number, read: number) => ({
+  id: `t-${r.id}-${n}`,
+  title,
   artist: artist.name,
   album: r.title,
   duration: 180,
-  track_number: 1,
+  track_number: n,
   disc_number: 1,
   musicbrainz_release_id: r.id,
-  musicbrainz_recording_id: "rec-" + r.id,
+  musicbrainz_recording_id: `rec-${r.id}-${n}`,
   explicit_edition: !!r.explicit,
-  server_state: "not_in_library",
+  server_state: r.requested?.(read).includes(title)
+    ? "requested"
+    : "not_in_library",
   saved_track: null,
 });
 const edition = (r: Release) => ({
@@ -51,7 +62,7 @@ async function catalogue(
   );
   const reads = new Map<string, number>();
   const held = new Set<string>();
-  const waiting: (() => void)[] = [];
+  const waiting: { n: number; resolve: () => void }[] = [];
   const answers: Record<string, (route: Route) => Promise<void>> = {
     [`/v1/artists/${artist.id}`]: (route) =>
       route.fulfill({
@@ -97,7 +108,7 @@ async function catalogue(
       const n = (reads.get(id) || 0) + 1;
       reads.set(id, n);
       if (n > 1 && held.has(id))
-        await new Promise<void>((resolve) => waiting.push(resolve));
+        await new Promise<void>((resolve) => waiting.push({ n, resolve }));
       await route
         .fulfill({
           json: {
@@ -105,7 +116,9 @@ async function catalogue(
             title: r.title,
             artist: artist.name,
             artist_id: "mb-1",
-            tracks: [track(r)],
+            tracks: [r.song, ...(r.more || [])].map((title, i) =>
+              track(r, title, i + 1, n),
+            ),
           },
         })
         .catch(() => {});
@@ -120,7 +133,12 @@ async function catalogue(
     hold: (id: string) => held.add(id),
     /** Answers the held reads, and waits until the page has had them. */
     release: async () => {
-      waiting.splice(0).forEach((resolve) => resolve());
+      waiting.splice(0).forEach((w) => w.resolve());
+      await page.waitForTimeout(300);
+    },
+    /** Answers one held read (by its number) and waits for the page. */
+    answer: async (n: number) => {
+      waiting.find((w) => w.n === n)?.resolve();
       await page.waitForTimeout(300);
     },
   };
@@ -300,4 +318,39 @@ test("a library lookup that fails says so, and Try again asks again (#263)", asy
   await notices.getByRole("button", { name: "Try again" }).click();
   await expect(add).toBeEnabled();
   expect(lookups).toBe(3);
+});
+
+test("an older row refresh never overwrites a newer one on the same edition (#263)", async ({
+  page,
+}) => {
+  const two = {
+    ...other,
+    more: ["Song P"],
+    // Read 2 follows the first Add, read 3 the second.
+    requested: (read: number) =>
+      read === 2 ? ["Song O"] : read >= 3 ? ["Song O", "Song P"] : [],
+  };
+  const mock = await catalogue(
+    page,
+    [{ id: "g-x", title: "Main", editions: [main, two] }],
+    added(1, 0),
+  );
+  await page.getByRole("button", { name: /Main/ }).click();
+  await page.getByRole("button", { name: /Choose another edition/ }).click();
+  await page.getByRole("button", { name: /Other/ }).click();
+  await expect(page.getByText("Song P")).toBeVisible();
+  mock.hold("r-other");
+  await page.getByRole("button", { name: "Add Song O to library" }).click();
+  await expect.poll(() => mock.reads("r-other")).toBe(2);
+  await page.getByRole("button", { name: "Add Song P to library" }).click();
+  await expect.poll(() => mock.reads("r-other")).toBe(3);
+  // The newer answer first, then the older one.
+  await mock.answer(3);
+  await mock.answer(2);
+  await expect(
+    page.getByRole("button", { name: "Add Song P to library" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Add Song O to library" }),
+  ).toHaveCount(0);
 });

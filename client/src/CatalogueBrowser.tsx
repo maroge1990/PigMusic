@@ -305,12 +305,19 @@ export function CatalogueBrowser({
   }, [release?.id]);
   /** Reads a release again in the background. The answer is shown only
    * while that release is still the one on screen, never over an album or
-   * edition opened since (#262, #263). */
+   * edition opened since (#262, #263), and only the latest one started:
+   * an older answer would undo a newer song's state. */
+  const refreshes = useRef(0);
   function refreshRelease(id: string) {
     const { generation } = shown.current;
+    const sequence = ++refreshes.current;
     return request<Release>(`releases/${id}`)
       .then((data) => {
-        if (shown.current.generation === generation && shown.current.id === id)
+        if (
+          shown.current.generation === generation &&
+          shown.current.id === id &&
+          refreshes.current === sequence
+        )
           setRelease(data);
       })
       .catch(() => {});
