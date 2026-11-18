@@ -1,10 +1,17 @@
 import type { ReactNode } from "react";
-import { CircleAlert, CircleCheck, Clock, LoaderCircle } from "lucide-react";
+import {
+  CircleAlert,
+  CircleCheck,
+  CirclePause,
+  Clock,
+  LoaderCircle,
+} from "lucide-react";
 
 export type BadgeState =
   | "library"
   | "requested"
   | "active"
+  | "paused"
   | "failed"
   | "neutral";
 
@@ -22,6 +29,7 @@ const defaults: Record<
     label: "Adding",
     icon: (size) => <LoaderCircle size={size} className="spin" />,
   },
+  paused: { label: "Paused", icon: (size) => <CirclePause size={size} /> },
   failed: {
     label: "Couldn't add",
     icon: (size) => <CircleAlert size={size} />,

@@ -3,7 +3,7 @@ import { discoverUrl } from "./navigation";
 import type { Track } from "./types";
 
 /** Where a song stands for this person. */
-export type SongState = "saved" | "server" | "pending" | "missing";
+export type SongState = "saved" | "server" | "pending" | "paused" | "missing";
 
 /** One song row, from any source: your library, the server or the catalogue. */
 export type Song = {
@@ -38,6 +38,9 @@ export type Song = {
   radio?: boolean;
   /** Similar songs that carried on when a queue ended (#202). */
   similar?: boolean;
+  /** Whether it is already yours is still being looked up: no Add until
+   * the answer, or a second copy could be added (#263). */
+  checking?: boolean;
   /** Tapped in search, which plays only that song (D-118): nothing similar
    * follows it on its own. Songs queued after it play on as usual. */
   search_play?: boolean;
@@ -135,7 +138,15 @@ export function songBody(s: Song) {
 
 /** What the server did with an Add to library: new jobs, songs already
  * on their way or now in your library, and songs it refused. */
-export type AddResult = { created: number; existing: number; skipped: number };
+export type AddResult = {
+  created: number;
+  existing: number;
+  skipped: number;
+  /** Songs you paused: Add leaves them paused (#264). */
+  paused?: number;
+};
+/** An Add that met a song you paused: only Downloads resumes it (#264). */
+export const PAUSED_NOTICE = "Paused. Resume it in Downloads.";
 
 export async function requestSong(s: Song): Promise<AddResult> {
   const result = await api<AddResult>("/v1/requests", {
@@ -149,23 +160,35 @@ export async function requestSong(s: Song): Promise<AddResult> {
 }
 
 /** Mark catalogue songs that are already in this person's library. */
+const LOOKUP_LIMIT = 200;
+/** Asks the server which of these songs are already yours, 200 at a time
+ * (its limit), each part tried twice before the lookup fails (#263). */
 export async function withLibrary(songs: Song[]): Promise<Song[]> {
   const open = songs.filter((s) => s.state !== "saved");
   if (!open.length) return songs;
-  const found = await api<{ tracks: (Track | null)[] }>("/v1/library/lookup", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      songs: open.slice(0, 200).map((s) => ({
+  const saved = new Map<string, Track | null>();
+  for (let start = 0; start < open.length; start += LOOKUP_LIMIT) {
+    const part = open.slice(start, start + LOOKUP_LIMIT);
+    const body = JSON.stringify({
+      songs: part.map((s) => ({
         title: s.title,
         artist: s.artist,
         musicbrainz_recording_id: s.recording_id,
         duration: s.duration || 0,
         recording_kind: s.recording_kind || [],
+        // "Live at Leeds" makes its songs live ones, tagged or not.
+        album: s.album || null,
       })),
-    }),
-  });
-  const saved = new Map(open.map((s, i) => [s.key, found.tracks[i]]));
+    });
+    const ask = () =>
+      api<{ tracks: (Track | null)[] }>("/v1/library/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+    const found = await ask().catch(ask);
+    part.forEach((s, i) => saved.set(s.key, found.tracks[i]));
+  }
   return songs.map((s) => {
     const track = saved.get(s.key);
     return track
@@ -178,7 +201,6 @@ export async function withLibrary(songs: Song[]): Promise<Song[]> {
       : s;
   });
 }
-
 type LibraryIndex = {
   artists: { id: string; name: string }[];
   albums: {

@@ -13,7 +13,13 @@ import { PageHeader } from "./PageHeader";
 import { PersonalQuality } from "./PersonalQuality";
 import { SearchPage } from "./SearchPage";
 import { Cover } from "./Cover";
-import { fromTrack, playlistSongs, songBody } from "./songs";
+import {
+  fromTrack,
+  PAUSED_NOTICE,
+  playlistSongs,
+  songBody,
+  type AddResult,
+} from "./songs";
 import { albumSummary, mergeAlbumTracks } from "./albumTracks";
 import { warmCovers, whenIdle } from "./prefetch";
 import { usePlayer } from "./Player";
@@ -256,11 +262,13 @@ export function PersonalLibrary({
     setDownloading(true);
     setError("");
     try {
-      await api("/v1/requests", {
+      const result = await api<AddResult>("/v1/requests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tracks: wanted.map(songBody) }),
       });
+      // Songs you paused stay paused (#264).
+      if (result.paused) notify(PAUSED_NOTICE);
       const ids = new Set(wanted.map((s) => s.key));
       setRelease(
         (old) =>
