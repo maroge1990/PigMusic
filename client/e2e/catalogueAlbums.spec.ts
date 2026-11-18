@@ -275,3 +275,29 @@ test("adding a song you paused shows it paused and points to Downloads (#264)", 
     page.getByRole("button", { name: "Add Song A to library" }),
   ).toHaveCount(0);
 });
+
+test("a library lookup that fails says so, and Try again asks again (#263)", async ({
+  page,
+}) => {
+  const a = { id: "r-a", title: "Album A", song: "Song A" };
+  let lookups = 0;
+  await catalogue(
+    page,
+    [{ id: "g-a", title: "Album A", editions: [a] }],
+    (route) => route.fulfill({ status: 500 }),
+    (route) =>
+      ++lookups <= 2
+        ? route.fulfill({ status: 500, json: { detail: "Broken" } })
+        : route.fulfill({ json: { tracks: [null] } }),
+  );
+  await page.getByRole("button", { name: /Album A/ }).click();
+  const notices = page.locator(".notice-area");
+  await expect(notices).toContainText(
+    "Couldn't check your library. Try again.",
+  );
+  const add = page.getByRole("button", { name: "Add to library", exact: true });
+  await expect(add).toBeDisabled();
+  await notices.getByRole("button", { name: "Try again" }).click();
+  await expect(add).toBeEnabled();
+  expect(lookups).toBe(3);
+});

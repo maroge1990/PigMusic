@@ -24,7 +24,7 @@ import { ArtistPopular } from "./ArtistPopular";
 import { MusicLink } from "./MusicLink";
 import { mergePage } from "./discography";
 import { ArtistAcquisition } from "./ArtistAcquisition";
-import { notify } from "./notices";
+import { notify, notifyError } from "./notices";
 import { OwnerPanel } from "./OwnerTools";
 import { FollowArtist } from "./FollowArtist";
 import { ArtistHero } from "./ArtistHero";
@@ -257,6 +257,8 @@ export function CatalogueBrowser({
   const [choose, setChoose] = useState(false);
   const player = usePlayer();
   const [rows, setRows] = useState<Row[]>([]);
+  // Try again after a failed library lookup asks again.
+  const [lookups, setLookups] = useState(0);
   useEffect(() => {
     if (!release) return setRows([]);
     const plain = releaseSongs(release, artist.id);
@@ -279,11 +281,19 @@ export function CatalogueBrowser({
         );
         setRows(plain.map((r) => yours.get(r.key) || r));
       })
-      .catch(() => {});
+      .catch(() => {
+        // Add stays off until the lookup answers (#263).
+        if (active)
+          notifyError(
+            "Couldn't check your library. Try again.",
+            () => setLookups((n) => n + 1),
+            "library-lookup",
+          );
+      });
     return () => {
       active = false;
     };
-  }, [release]);
+  }, [release, lookups]);
   // Which release is on screen, and since when: a navigation (another
   // album, another edition, back) starts a new generation (#262).
   const shown = useRef({ id: "", generation: 0 });
