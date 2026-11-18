@@ -14,6 +14,8 @@ on:
       - 'scripts/serve_contract_fixture.py'
       - 'scripts/generate_native_project.py'
       - 'scripts/generate_ui_test_project.py'
+      - 'scripts/simulator_ui_tests.py'
+      - 'scripts/serve_ui_test_server.py'
       - 'scripts/sync_native_brand.py'
       - 'scripts/generate_brand_tokens.py'
       - '.github/workflows/native.yml'
@@ -28,6 +30,8 @@ on:
       - 'scripts/serve_contract_fixture.py'
       - 'scripts/generate_native_project.py'
       - 'scripts/generate_ui_test_project.py'
+      - 'scripts/simulator_ui_tests.py'
+      - 'scripts/serve_ui_test_server.py'
       - 'scripts/sync_native_brand.py'
       - 'scripts/generate_brand_tokens.py'
       - '.github/workflows/native.yml'
@@ -88,8 +92,8 @@ jobs:
           xcodebuild -quiet -project swift/PigMusic.xcodeproj -scheme PigMusicWatch \
             -destination 'generic/platform=watchOS Simulator' -derivedDataPath swift/build/PigMusic \
             -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO build
-      # The tap-through tests run on the Mac's simulators (docs/TESTING.md);
-      # here they only have to compile, so a renamed screen breaks the push.
+      # The tap-through job below runs them; this catches a compile error
+      # sooner, so a renamed screen breaks the push within this job.
       - name: Simulator UI test bundles compile
         run: |
           python3 scripts/generate_ui_test_project.py --check
@@ -99,3 +103,39 @@ jobs:
           xcodebuild -quiet -project swift/PigMusicUITests/PigMusicUITests.xcodeproj \
             -scheme PigMusicWatchUITests -destination 'generic/platform=watchOS Simulator' \
             -derivedDataPath swift/build/PigMusicUITests CODE_SIGNING_ALLOWED=NO build-for-testing
+
+  # The simulator tap-through tests (docs/TESTING.md), on a fresh iPhone and
+  # Watch pair on the runner's newest runtimes, against the disposable HTTPS
+  # test server the script starts. Each class's log (with any failing screen's
+  # accessibility tree) and the server log are uploaded as `tap-through-logs`.
+  tap-through:
+    needs: native
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
+        with:
+          python-version: '3.14'
+      - name: Available simulators
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes available
+          xcrun simctl list devicetypes | grep -Ei 'iphone|watch' || true
+          xcrun simctl list pairs available || true
+      - name: Test server packages and FFmpeg
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -r requirements.lock.txt
+          command -v ffmpeg || brew install ffmpeg
+      - name: Tap-through tests (iPhone and Watch)
+        run: python3 scripts/simulator_ui_tests.py --create-pair --retry-launch-timeouts
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        if: always()
+        with:
+          name: tap-through-logs
+          # .localdata is a hidden folder; the logs only (not the test CA key).
+          path: .localdata/ui-tests/*.log
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
