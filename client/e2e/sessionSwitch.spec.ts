@@ -163,3 +163,64 @@ test("a radio refill that arrives after another tab's sign-in plays nothing", as
   await expect(mini).toBeHidden();
   await expect(page.getByText("Radio song 1")).toHaveCount(0);
 });
+
+// Codex confirmation: restarting the radio while a refill was held made the
+// new queue join the old one's request, which was then discarded, and Next
+// never moved on.
+test("restarting the radio while a refill is held still lets Next move on", async ({
+  page,
+}) => {
+  let releaseFirst: () => void = () => {};
+  const firstHeld = new Promise<void>((r) => (releaseFirst = r));
+  let refills = 0;
+  const entry = (index: number) => ({
+    ...album.tracks[0],
+    id: `mix:radio-1:${index}`,
+    title: "Radio song " + index,
+    server_state: "not_in_library",
+  });
+  await mockApi(page, {
+    answers: {
+      "/v1/home/mixes": (route: Route) =>
+        route.fulfill({
+          json: {
+            mixes: [],
+            preparing: false,
+            radio: { title: "Pat's radio", ready: 2 },
+          },
+        }),
+      "/v1/radio": async (route: Route) => {
+        const after = new URL(route.request().url()).searchParams.get("after");
+        if (after && ++refills === 1) await firstHeld;
+        return route.fulfill({
+          json: {
+            id: "radio-1",
+            title: "Pat's radio",
+            preparing: false,
+            tracks: [entry(after ? 1 : 0)],
+          },
+        });
+      },
+    },
+  });
+  await page.route("**/api/v1/playback/*/url", (route) =>
+    route.fulfill({
+      json: { url: "/api/v1/playback/files/silence", expires_in: 60 },
+    }),
+  );
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = () => Promise.resolve();
+  });
+  await page.goto("/#/home");
+  const radio = page.locator(".mix-card", { hasText: "Pat's radio" });
+  await radio.click();
+  const mini = page.locator(".mini-player");
+  await expect(mini).toContainText("Radio song 0");
+  await expect.poll(() => refills).toBe(1);
+  // Start the radio again: a new queue, while the first refill is held.
+  await radio.click();
+  await expect(mini).toContainText("Radio song 0");
+  await mini.getByRole("button", { name: "Next song" }).click();
+  releaseFirst();
+  await expect(mini).toContainText("Radio song 1");
+});

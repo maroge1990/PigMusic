@@ -275,10 +275,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ tracks: next.map(songBody) }),
     }).catch(() => undefined);
   }
-  const radioRequest = useRef<Promise<number> | null>(null);
+  /** A request still on its way, with the queue and session it is for. */
+  type Pending = {
+    request: Promise<number>;
+    songs: Song[];
+    generation: number;
+  };
+  /** Only a request for this very queue, in this session, is joined
+   * (Codex): a new queue starts its own. */
+  const joinable = (pending: Pending | null) =>
+    pending &&
+    pending.songs === queue.current &&
+    pending.generation === currentSession()
+      ? pending.request
+      : null;
+  const radioRequest = useRef<Pending | null>(null);
   /** Radio: append the next prepared songs; resolves to how many arrived. */
   function refillRadio(): Promise<number> {
-    if (radioRequest.current) return radioRequest.current;
+    const joined = joinable(radioRequest.current);
+    if (joined) return joined;
     const last = lastRadioSong(queue.current);
     if (!last?.cache_id) return Promise.resolve(0);
     // The refill belongs to this queue in this session (Codex): a stop, a
@@ -301,16 +316,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => 0)
       .finally(() => {
-        if (radioRequest.current === request) radioRequest.current = null;
+        if (radioRequest.current?.request === request)
+          radioRequest.current = null;
       });
-    radioRequest.current = request;
+    radioRequest.current = { request, songs, generation };
     return request;
   }
-  const similarRequestRef = useRef<Promise<number> | null>(null);
+  const similarRequestRef = useRef<Pending | null>(null);
   /** A queue that ended carries on with similar songs (#202); resolves to how
    * many arrived. */
   function continueWithSimilar(): Promise<number> {
-    if (similarRequestRef.current) return similarRequestRef.current;
+    const joined = joinable(similarRequestRef.current);
+    if (joined) return joined;
     const songs = queue.current;
     const generation = currentSession();
     const request: Promise<number> = api<{ tracks: Track[] }>(
@@ -336,10 +353,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => 0)
       .finally(() => {
-        if (similarRequestRef.current === request)
+        if (similarRequestRef.current?.request === request)
           similarRequestRef.current = null;
       });
-    similarRequestRef.current = request;
+    similarRequestRef.current = { request, songs, generation };
     return request;
   }
   /** Skipping a radio or similar song before it counts as a listen steers
