@@ -354,3 +354,81 @@ test("an older row refresh never overwrites a newer one on the same edition (#26
     page.getByRole("button", { name: "Add Song O to library" }),
   ).toHaveCount(0);
 });
+
+test("an older poll never overwrites a newer row refresh (#263)", async ({
+  page,
+}) => {
+  const two = {
+    ...other,
+    more: ["Song P"],
+    // Read 2 is the poll (Song O on its way), read 3 the row Add's refresh:
+    // as many songs on their way, so the poll carries on.
+    requested: (read: number) => (read <= 2 ? ["Song O"] : ["Song P"]),
+  };
+  const mock = await catalogue(
+    page,
+    [{ id: "g-x", title: "Main", editions: [main, two] }],
+    added(1, 0),
+  );
+  await page.getByRole("button", { name: /Main/ }).click();
+  await page.getByRole("button", { name: /Choose another edition/ }).click();
+  await page.getByRole("button", { name: /Other/ }).click();
+  await expect(page.getByText("Song P")).toBeVisible();
+  mock.hold("r-other");
+  await expect.poll(() => mock.reads("r-other"), { timeout: 8000 }).toBe(2);
+  await page.getByRole("button", { name: "Add Song P to library" }).click();
+  await expect.poll(() => mock.reads("r-other")).toBe(3);
+  await mock.answer(3);
+  await mock.answer(2);
+  await expect(
+    page.getByRole("button", { name: "Add Song P to library" }),
+  ).toHaveCount(0);
+});
+
+test("a row Add answered after an edition switch doesn't drop the new edition's refresh (#263)", async ({
+  page,
+}) => {
+  let answerOther = () => {};
+  const otherAnswered = new Promise<void>((resolve) => (answerOther = resolve));
+  const mine = {
+    ...main,
+    requested: (read: number) => (read >= 3 ? ["Song M"] : []),
+  };
+  const mock = await catalogue(
+    page,
+    [{ id: "g-x", title: "Main", editions: [mine, other] }],
+    async (route) => {
+      if (route.request().postData()?.includes("r-other")) await otherAnswered;
+      await route
+        .fulfill({
+          json: {
+            created: 1,
+            existing: 0,
+            skipped: 0,
+            downloads_enabled: true,
+          },
+        })
+        .catch(() => {});
+    },
+  );
+  await page.getByRole("button", { name: /Main/ }).click();
+  await page.getByRole("button", { name: /Choose another edition/ }).click();
+  await page.getByRole("button", { name: /Other/ }).click();
+  await page.getByRole("button", { name: "Add Song O to library" }).click();
+  // Back to the main edition while that Add is out.
+  await page.getByRole("button", { name: /Choose another edition/ }).click();
+  await page.getByRole("button", { name: /Main/ }).click();
+  await expect(page.getByText("Song M")).toBeVisible();
+  mock.hold("r-main");
+  await page
+    .getByRole("button", { name: "Add to library", exact: true })
+    .click();
+  await expect.poll(() => mock.reads("r-main")).toBe(3);
+  // The other edition's Add answers now, and its row asks for a refresh.
+  answerOther();
+  await page.waitForTimeout(300);
+  await mock.answer(3);
+  await expect(
+    page.getByRole("button", { name: "Add Song M to library" }),
+  ).toHaveCount(0);
+});

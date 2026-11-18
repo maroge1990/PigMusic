@@ -295,30 +295,32 @@ export function CatalogueBrowser({
     };
   }, [release, lookups]);
   // Which release is on screen, and since when: a navigation (another
-  // album, another edition, back) starts a new generation (#262).
-  const shown = useRef({ id: "", generation: 0 });
+  // album, another edition, back) starts a new view (#262). Within a view,
+  // its reads are numbered as they start (`started`), and `applied` is the
+  // newest one shown.
+  const shown = useRef({ id: "", generation: 0, started: 0, applied: 0 });
   useLayoutEffect(() => {
     shown.current = {
       id: release?.id || "",
       generation: shown.current.generation + 1,
+      started: 0,
+      applied: 0,
     };
   }, [release?.id]);
-  /** Reads a release again in the background. The answer is shown only
-   * while that release is still the one on screen, never over an album or
-   * edition opened since (#262, #263), and only the latest one started:
-   * an older answer would undo a newer song's state. */
-  const refreshes = useRef(0);
+  /** Every background read of a release (a poll, the read after an Add, a
+   * row's refresh) goes through here. A read for a release no longer on
+   * screen is not made, and an answer is shown only in the view that asked
+   * and only when nothing that started later has been shown: an older
+   * answer would undo a newer song's state (#262, #263). */
   function refreshRelease(id: string) {
-    const { generation } = shown.current;
-    const sequence = ++refreshes.current;
+    const view = shown.current;
+    if (view.id !== id) return Promise.resolve();
+    const sequence = ++view.started;
     return request<Release>(`releases/${id}`)
       .then((data) => {
-        if (
-          shown.current.generation === generation &&
-          shown.current.id === id &&
-          refreshes.current === sequence
-        )
-          setRelease(data);
+        if (shown.current !== view || sequence <= view.applied) return;
+        view.applied = sequence;
+        setRelease(data);
       })
       .catch(() => {});
   }
@@ -390,14 +392,9 @@ export function CatalogueBrowser({
       timer = setTimeout(() => {
         delay = Math.min(30000, delay * 1.5);
         if (document.hidden) return check();
-        void request<Release>(`releases/${id}`)
-          .then((data) => {
-            if (active) setRelease(data);
-          })
-          .catch(() => {})
-          .finally(() => {
-            if (active) check();
-          });
+        void refreshRelease(id).finally(() => {
+          if (active) check();
+        });
       }, delay);
     };
     check();
