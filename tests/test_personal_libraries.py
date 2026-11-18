@@ -837,3 +837,19 @@ def test_apple_music_playlist_long_name_keeps_the_usual_limit(tmp_path, monkeypa
 
     names = [p["name"] for p in Playlists(app.state.store, owner).list()]
     assert "x" * 100 in names and "x" * 150 not in names
+
+
+def test_library_albums_say_when_their_newest_song_was_added(tmp_path, monkeypatch):
+    """D-120: the web sorts albums by Recently added from added_at."""
+    app, owner, member, token, track = household(tmp_path, monkeypatch)
+    store = app.state.store
+    song = store.library["albums"][0]["tracks"][0]["id"]
+    monkeypatch.setattr(time, "time", lambda: 1_790_000_000)
+    store.user_libraries.add(member, [song])
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token},
+    ) as client:
+        albums = client.get("/api/v1/library").json()["albums"]
+    assert [a["added_at"] for a in albums] == ["2026-09-21T14:13:20Z"]
