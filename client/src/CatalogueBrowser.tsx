@@ -32,7 +32,12 @@ import type { Discography } from "./discography";
 import { SongRow } from "./SongRow";
 import { usePlayer } from "./Player";
 import { shuffled } from "./shuffle";
-import { songBody, type AddResult, type Song as Row } from "./songs";
+import {
+  songBody,
+  withLibrary,
+  type AddResult,
+  type Song as Row,
+} from "./songs";
 import type { Track } from "./types";
 import { EmptyLine, InlineError, Loading } from "./EmptyState";
 
@@ -251,10 +256,31 @@ export function CatalogueBrowser({
   const [rows, setRows] = useState<Row[]>([]);
   useEffect(() => {
     if (!release) return setRows([]);
-    // The release answer already says, edition by edition, which songs are
-    // yours; an edition-blind lookup must not overrule it.
-    setRows(releaseSongs(release, artist.id));
+    const plain = releaseSongs(release, artist.id);
+    setRows(plain);
+    // A song matches any edition unless it is an explicit edition: the
+    // library lookup may mark the others yours (a compilation copy counts),
+    // but an explicit edition keeps the release answer's state.
+    let active = true;
+    void withLibrary(plain.filter((r) => !r.explicit_edition))
+      .then((found) => {
+        if (!active) return;
+        const yours = new Map(
+          found.filter((s) => s.state === "saved").map((s) => [s.key, s]),
+        );
+        setRows(plain.map((r) => yours.get(r.key) || r));
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, [release]);
+  function reloadRelease() {
+    if (!release) return;
+    void request<Release>(`releases/${release.id}`)
+      .then(setRelease)
+      .catch(() => {});
+  }
   const [busy, setBusy] = useState(false);
   const groupBusy = listing.scope !== scope || listing.loading;
   const [error, setError] = useState("");
@@ -602,6 +628,7 @@ export function CatalogueBrowser({
                 index={i}
                 numbered
                 onAlbum
+                refresh={reloadRelease}
                 onArtist={
                   row.artist.toLocaleLowerCase() ===
                   artist.name.toLocaleLowerCase()

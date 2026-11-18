@@ -195,6 +195,7 @@ test("a member is told the owner links an ambiguous artist", async ({
 test("a live release's songs are requested as live recordings", async ({
   page,
 }) => {
+  let looked: unknown;
   let requested: unknown;
   const live = {
     id: "t-live",
@@ -266,10 +267,12 @@ test("a live release's songs are requested as live recordings", async ({
             tracks: [requested ? { ...live, server_state: "requested" } : live],
           },
         }),
-      // The studio "Von dutch" is in the library, and an edition-blind
-      // lookup would say so; the release's own answer keeps the live one apart.
-      "/v1/library/lookup": (route) =>
-        route.fulfill({ json: { tracks: [album.tracks[0]] } }),
+      // The studio "Von dutch" is in the library: the lookup must be told
+      // this one is live (the server then finds no match).
+      "/v1/library/lookup": (route) => {
+        looked = route.request().postDataJSON();
+        return route.fulfill({ json: { tracks: [null] } });
+      },
       "/v1/requests": (route) => {
         requested = route.request().postDataJSON();
         return route.fulfill({
@@ -288,6 +291,10 @@ test("a live release's songs are requested as live recordings", async ({
     .getByRole("button", { name: `Find more by ${artist.name}` })
     .click();
   await page.getByRole("button", { name: /Concert Night/ }).click();
+  await expect.poll(() => looked).toBeTruthy();
+  expect(looked).toMatchObject({
+    songs: [{ title: "Von dutch", duration: 180, recording_kind: ["live"] }],
+  });
   // #246: a song not on the server offers Add to library with the plus.
   const add = page.getByRole("button", {
     name: "Add Von dutch to library",
@@ -626,4 +633,161 @@ test("a catalogue album trusts its own answer over another edition", async ({
     .getByRole("button", { name: "Add to library", exact: true })
     .click({ timeout: 5000 });
   await expect.poll(() => sent.map((t) => t.title)).toEqual(["Von dutch"]);
+});
+
+// #246 (Codex): a song matches any edition unless it is an explicit edition.
+// An ordinary song you own on a compilation is yours on this album too, and
+// the album's Add leaves it out.
+test("an ordinary song you own on another album counts as yours", async ({
+  page,
+}) => {
+  let sent: { title: string }[] = [];
+  const song = (id: string, title: string, n: number) => ({
+    id,
+    title,
+    artist: artist.name,
+    duration: 180,
+    track_number: n,
+    disc_number: 1,
+    musicbrainz_recording_id: "rec-" + id,
+    server_state: "not_in_library",
+  });
+  await mockApi(page, {
+    answers: {
+      "/v1/catalogue/releases/r-plain": (route) =>
+        route.fulfill({
+          json: {
+            id: "r-plain",
+            title: "Plain album",
+            artist: artist.name,
+            artist_id: "mb-1",
+            tracks: [
+              song("p1", "Owned elsewhere", 1),
+              song("p2", "Not yet", 2),
+            ],
+          },
+        }),
+      // Your copy of "Owned elsewhere" is on a compilation.
+      "/v1/library/lookup": (route) =>
+        route.fulfill({
+          json: {
+            tracks: route
+              .request()
+              .postDataJSON()
+              .songs.map((s: { title: string }) =>
+                s.title === "Owned elsewhere"
+                  ? {
+                      ...album.tracks[0],
+                      id: "t-comp",
+                      title: "Owned elsewhere",
+                      musicbrainz_release_id: "r-compilation",
+                    }
+                  : null,
+              ),
+          },
+        }),
+      "/v1/requests": (route) => {
+        if (route.request().method() !== "POST")
+          return route.fulfill({
+            json: { items: [], next_offset: null, active: 0 },
+          });
+        sent = route.request().postDataJSON().tracks;
+        return route.fulfill({
+          json: {
+            created: 1,
+            existing: 0,
+            skipped: 0,
+            downloads_enabled: true,
+          },
+        });
+      },
+    },
+  });
+  await page.goto(
+    `/#/library/discography/mb-1?name=${encodeURIComponent(artist.name)}&release=r-plain`,
+  );
+  const owned = page.locator(".song-row", { hasText: "Owned elsewhere" });
+  await expect(
+    owned.getByRole("img", { name: "In your library" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Add to library", exact: true })
+    .click();
+  await expect.poll(() => sent.map((t) => t.title)).toEqual(["Not yet"]);
+});
+
+// #246 (Codex): an explicit-edition song already on its way shows the clock
+// after Add, even though you own the standard edition; the lookup, which
+// matches any edition, doesn't decide it.
+test("an explicit edition on its way reads Adding, not yours", async ({
+  page,
+}) => {
+  let added = false;
+  const deluxe = {
+    id: "x1",
+    title: "Deluxe only",
+    artist: artist.name,
+    duration: 180,
+    track_number: 1,
+    disc_number: 1,
+    musicbrainz_recording_id: "rec-x",
+    explicit_edition: true,
+    server_state: "not_in_library",
+  };
+  await mockApi(page, {
+    answers: {
+      "/v1/catalogue/releases/r-x": (route) =>
+        route.fulfill({
+          json: {
+            id: "r-x",
+            title: "Deluxe edition",
+            artist: artist.name,
+            artist_id: "mb-1",
+            tracks: [added ? { ...deluxe, server_state: "requested" } : deluxe],
+          },
+        }),
+      // You own the standard edition of the same recording.
+      "/v1/library/lookup": (route) =>
+        route.fulfill({
+          json: {
+            tracks: route
+              .request()
+              .postDataJSON()
+              .songs.map(() => ({
+                ...album.tracks[0],
+                id: "t-standard",
+                title: "Deluxe only",
+                musicbrainz_release_id: "r-standard",
+              })),
+          },
+        }),
+      "/v1/requests": (route) => {
+        if (route.request().method() !== "POST")
+          return route.fulfill({
+            json: { items: [], next_offset: null, active: 0 },
+          });
+        added = true;
+        return route.fulfill({
+          json: {
+            created: 0,
+            existing: 1,
+            skipped: 0,
+            downloads_enabled: true,
+          },
+        });
+      },
+    },
+  });
+  await page.goto(
+    `/#/library/discography/mb-1?name=${encodeURIComponent(artist.name)}&release=r-x`,
+  );
+  const row = page.locator(".song-row", { hasText: "Deluxe only" });
+  await row
+    .getByRole("button", { name: "Add Deluxe only to library", exact: true })
+    .click();
+  await expect(row.getByRole("img", { name: "Adding" })).toBeVisible();
+  await page.waitForTimeout(500);
+  await expect(row.getByRole("img", { name: "In your library" })).toHaveCount(
+    0,
+  );
 });
