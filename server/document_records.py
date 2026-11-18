@@ -59,16 +59,29 @@ INTEGER = (-(2**63), 2**63 - 1)  # What SQLite binds.
 UNSIGNED = (0, 2**64 - 1)  # A device or inode number: compared, never bound.
 
 
+def _text(value):
+    """Text SQLite and the filesystem take: it encodes as UTF-8 (json reads
+    an escaped lone surrogate, which neither does)."""
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("text that is not UTF-8") from None
+
+
 def _in_range(value, field, bounds=INTEGER):
     """Every number in `value` is one SQLite binds (#257): an integer
     within signed 64 bits and a finite float (json reads NaN and Infinity),
-    so a record never fails part-way through a Restore or Undo."""
+    and every text encodes as UTF-8, so a record never fails part-way
+    through a Restore or Undo."""
     if isinstance(value, dict):
         for key, item in value.items():
+            _text(key)
             _in_range(item, field, bounds)
     elif isinstance(value, list):
         for item in value:
             _in_range(item, field, bounds)
+    elif isinstance(value, str):
+        _text(value)
     elif isinstance(value, bool):
         pass
     elif isinstance(value, int):
@@ -80,6 +93,7 @@ def _in_range(value, field, bounds=INTEGER):
 
 def _numbers_in_range(record, unsigned=()):
     for field, value in record.items():
+        _text(field)
         _in_range(value, field, UNSIGNED if field in unsigned else INTEGER)
 
 

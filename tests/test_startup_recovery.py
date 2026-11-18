@@ -443,6 +443,43 @@ def test_a_removal_with_an_out_of_range_number_is_set_aside_before_restore(
     assert "removed:" + record["id"] in reported("trash")
 
 
+@pytest.mark.parametrize(
+    "membership",
+    [
+        ["\ud800", "saved", 1, "household-add"],
+        ["owner", "saved", 1, "household-\udfff"],
+    ],
+)
+def test_a_removal_with_text_that_is_not_utf8_is_set_aside_before_restore(
+    tmp_path, monkeypatch, membership
+):
+    """Codex on 7866ac1: json reads an escaped lone surrogate, which SQLite
+    can't bind, so Restore linked the file back before failing."""
+    store, root, path, track = setup(tmp_path, monkeypatch)
+    recovery = Recovery(store)
+    with store.connect() as c:
+        c.execute(
+            "INSERT INTO users(id,username,display_name,role,created_at) VALUES ('owner','owner','Owner','owner',1)"
+        )
+    record = recovery.remove("saved")
+    record["memberships"] = [membership]
+    put(store, {"removed:" + record["id"]: json.dumps(record)})
+    before = files(root)
+    assert recovery.restore_many([record["id"]]) == {
+        "restored": [],
+        "failed": [record["id"]],
+    }
+    assert files(root) == before and not path.exists()
+    assert "removed:" + record["id"] in reported("trash")
+
+
+def test_a_record_with_a_key_that_is_not_utf8_is_set_aside(tmp_path, monkeypatch):
+    store, root, path, track = setup(tmp_path, monkeypatch)
+    record = Recovery(store).remove("saved")
+    record["track"] = {"\ud800": "x"}
+    assert document_records.parse("removed:k", json.dumps(record)) is None
+
+
 @pytest.mark.parametrize("removed_at", [float("inf"), 2**63])
 def test_a_removal_with_an_out_of_range_time_is_left_out_of_lists(
     tmp_path, monkeypatch, removed_at
