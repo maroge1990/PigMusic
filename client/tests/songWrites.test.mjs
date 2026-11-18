@@ -44,13 +44,24 @@ test("collection menu writes name the session", async () => {
   setSessionId("session-1");
   const sent = serve({
     "/api/v1/requests": { created: 1, existing: 0, skipped: 0 },
+    "/api/v1/playlists/p1": { revision: 4, entries: [] },
+    "/api/v1/playlists/p1/songs?allow_repeat=true&revision=4": {
+      revision: 5,
+      entries: [],
+    },
   });
   await addSongsToLibrary([song, { ...song, key: "k2", title: "360" }]);
   await addToPlaylist("p1", [{ title: "Von dutch" }, { title: "360" }]);
   assert.deepEqual(sent, [
     ["POST", "/api/v1/requests", "session-1"],
-    // Codex (#249): one atomic append, not a request per song.
-    ["POST", "/api/v1/playlists/p1/songs?allow_repeat=true", "session-1"],
+    ["GET", "/api/v1/playlists/p1", null],
+    // Codex (#249): one atomic append at the revision read, not a request
+    // per song.
+    [
+      "POST",
+      "/api/v1/playlists/p1/songs?allow_repeat=true&revision=4",
+      "session-1",
+    ],
   ]);
   clearNotices();
 });

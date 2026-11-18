@@ -523,6 +523,8 @@ def personal_router(store, artist_jobs, recovery, mixes=None):
         body: Tracks | TrackInput,
         request: Request,
         allow_repeat: bool = False,
+        # The revision the client expects; refused (409) if it has moved.
+        revision: int | None = None,
     ):
         songs = body.tracks if isinstance(body, Tracks) else [body]
         try:
@@ -532,9 +534,10 @@ def personal_router(store, artist_jobs, recovery, mixes=None):
                     playlist_id,
                     [song.model_dump(exclude_none=True) for song in songs],
                     allow_repeat=allow_repeat,
+                    revision=revision,
                 )
             )
-        except PlaylistFull as exc:
+        except (PlaylistFull, PlaylistConflict) as exc:
             raise HTTPException(409, str(exc))
         except ValueError:
             raise HTTPException(404, "Playlist not found")

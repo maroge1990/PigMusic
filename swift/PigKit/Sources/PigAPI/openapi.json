@@ -22373,6 +22373,16 @@
               "title": "Allow Repeat",
               "type": "boolean"
             }
+          },
+          {
+            "in": "query",
+            "name": "revision",
+            "required": false,
+            "schema": {
+              "nullable": true,
+              "title": "Revision",
+              "type": "integer"
+            }
           }
         ],
         "requestBody": {

@@ -1,7 +1,7 @@
 import { useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { Ref } from "react";
 import { ListPlus, Plus, X } from "lucide-react";
-import { createPlaylist, loadPlaylists } from "./playlists";
+import { ReportedFailure, createPlaylist, loadPlaylists } from "./playlists";
 import { EmptyLine, InlineError } from "./EmptyState";
 import { focusMenuItem, menuKeys } from "./menuKeys";
 import { notify } from "./notices";
@@ -63,7 +63,9 @@ export function PlaylistPicker({
       popup.current?.hidePopover();
       notify("Added to playlist");
     } catch (e) {
-      setError((e as Error).message);
+      // Already said in the notice area, with its Try again.
+      if (e instanceof ReportedFailure) popup.current?.hidePopover();
+      else setError((e as Error).message);
     } finally {
       setBusy(false);
     }

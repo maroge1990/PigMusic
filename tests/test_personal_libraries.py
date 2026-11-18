@@ -534,6 +534,15 @@ def test_playlist_append_of_several_songs_is_all_or_nothing(tmp_path, monkeypatc
         assert [e["title"] for e in entries] == ["A", "B"]
         # One song on its own is still accepted, as before.
         assert client.post(path, json=song("C")).status_code == 200
+        # Codex: an append naming an old revision is refused unmade.
+        now = client.get("/api/v1/playlists/" + own["id"]).json()["revision"]
+        monkeypatch.setattr(playlists, "MAX_PLAYLIST_ENTRIES", 10)
+        stale = client.post(path + f"&revision={now - 1}", json={"tracks": [song("D")]})
+        assert stale.status_code == 409
+        fresh = client.post(path + f"&revision={now}", json={"tracks": [song("D")]})
+        assert fresh.status_code == 200 and fresh.json()["revision"] == now + 1
+        entries = client.get("/api/v1/playlists/" + own["id"]).json()["entries"]
+        assert [e["title"] for e in entries] == ["A", "B", "C", "D"]
 
 
 def test_server_info_is_for_signed_in_apps(tmp_path, monkeypatch):

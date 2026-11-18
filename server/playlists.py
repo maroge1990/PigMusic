@@ -189,9 +189,11 @@ class Playlists:
         return self.add_many(playlist_id, [track], allow_repeat=allow_repeat)
 
     @coordinated
-    def add_many(self, playlist_id, tracks, *, allow_repeat=False):
+    def add_many(self, playlist_id, tracks, *, allow_repeat=False, revision=None):
         """Appends songs in order in one transaction: all of them or none, so
-        trying again after a failure never doubles the ones already in."""
+        trying again after a failure never doubles the ones already in. With
+        `revision`, the append is refused unless the playlist is still at it,
+        so a client can tell whether an earlier batch of its own landed."""
         clause, params = self.clause()
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -202,6 +204,8 @@ class Playlists:
             if not row:
                 raise ValueError("Playlist not found.")
             payload = json.loads(row[0])
+            if revision is not None and payload.get("revision", 0) != revision:
+                raise PlaylistConflict("Playlist changed. Refresh before editing.")
             repeat = allow_repeat and not payload.get("favourites")
             entries = list(payload["tracks"])
             # Same-song needs the same context, so only songs that share one

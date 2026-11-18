@@ -36,9 +36,15 @@ test("adding a song to a playlist says so where you can see it", async ({
         route.fulfill({ json: { favourited: false } }),
       "/v1/playlists": (route) =>
         route.fulfill({ json: { playlists: [{ id: "p1", name: "Gym" }] } }),
+      "/v1/playlists/p1": (route) =>
+        route.fulfill({
+          json: { id: "p1", name: "Gym", revision: 1, entries: [] },
+        }),
       "/v1/playlists/p1/songs": (route) => {
         added = true;
-        return route.fulfill({ json: {} });
+        return route.fulfill({
+          json: { id: "p1", name: "Gym", revision: 2, entries: [] },
+        });
       },
     },
   });
