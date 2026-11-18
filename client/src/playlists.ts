@@ -21,13 +21,9 @@ export function createPlaylist(name: string) {
 }
 
 type Sent = { title?: string; artist?: string };
-type Read = { revision: number; entries: Sent[] };
+type Read = { revision: number; name?: string };
 
-const fold = (s = "") => s.toLocaleLowerCase().trim();
-const same = (a: Sent, b: Sent) =>
-  fold(a.title) === fold(b.title) && fold(a.artist) === fold(b.artist);
-
-/** A failure the notice area has already reported, with its Try again. */
+/** A failure the notice area has already reported. */
 export class ReportedFailure extends Error {}
 
 /** No answer, or one that can't say whether the write was saved. */
@@ -36,11 +32,12 @@ const lost = (error: unknown) =>
 
 /**
  * Adds songs to a playlist in order (Codex, #249). Each request appends a
- * batch all or none, and names the playlist revision it expects, so:
- * - Try again carries on from the first batch not confirmed, never from
- *   the start;
- * - after a lost answer the playlist is read: a revision one step on whose
- *   last songs are this batch means it landed; otherwise it is sent again.
+ * batch all or none at the playlist revision it expects.
+ * - A refusal (the server answered: an error, or 409 because the playlist
+ *   moved) offers Try again from that batch, never from the start, and
+ *   keeps offering it until the copy is done or the notice is closed.
+ * - A lost answer can't be told apart from a saved batch, so the copy
+ *   stops and says so, with no resend.
  * Everything is sent under `session`.
  */
 export async function addToPlaylist(
@@ -50,59 +47,54 @@ export async function addToPlaylist(
 ) {
   const parts = batches(bodies);
   const bound = <T>(start: () => Promise<T>) => withSession(session, start);
-  const read = () => bound(() => api<Read>(`/v1/playlists/${id}`));
-  const send = (tracks: Sent[], revision: number) =>
-    bound(() =>
-      api<Read>(
-        `/v1/playlists/${id}/songs?allow_repeat=true&revision=${revision}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tracks }),
-        },
-      ),
-    );
-  async function sendFrom(start: number): Promise<void> {
-    let revision = (await read()).revision;
-    for (let i = start; i < parts.length; i++) {
-      let answered: Read | null = null;
-      let failure: unknown = null;
-      // One more go after a lost answer or a moved revision, never more.
-      for (let attempt = 0; attempt < 2 && !answered; attempt++) {
-        try {
-          answered = await send(parts[i], revision);
-        } catch (e) {
-          failure = e;
-          // A 409: the playlist moved (or is full); it was not changed.
-          const moved = e instanceof ApiError && e.code === "conflict";
-          if (!lost(e) && !moved) break;
-          const now = await read().catch(() => null);
-          if (!now) break;
-          const tail = now.entries.slice(-parts[i].length);
-          if (
-            lost(e) &&
-            now.revision === revision + 1 &&
-            tail.length === parts[i].length &&
-            tail.every((entry, k) => same(entry, parts[i][k]))
-          )
-            answered = now;
-          else revision = now.revision;
-        }
-      }
-      if (!answered) {
-        window.dispatchEvent(new Event("music-library-changed"));
-        const added = parts.slice(0, i).flat().length;
-        notifyError(
-          added
-            ? `Added ${added} of ${bodies.length} songs to the playlist. Couldn't add the rest. Try again.`
-            : (failure as Error).message,
-          () => sendFrom(i),
-        );
-        throw new ReportedFailure((failure as Error).message);
-      }
-      revision = answered.revision;
-    }
+  let name = "the playlist";
+  const changed = () =>
     window.dispatchEvent(new Event("music-library-changed"));
+  const songs = (n: number) => `${n} ${n === 1 ? "song" : "songs"}`;
+  /** Says what failed and offers Try again from batch `at`. */
+  function refused(at: number, error: unknown): never {
+    const added = parts.slice(0, at).flat().length;
+    notifyError(
+      added
+        ? `Added ${added} of ${bodies.length} songs to ${name}. Couldn't add the rest. Try again.`
+        : (error as Error).message,
+      () =>
+        sendFrom(at).catch((e) => {
+          if (!(e instanceof ReportedFailure)) throw e;
+        }),
+    );
+    throw new ReportedFailure((error as Error).message);
+  }
+  async function sendFrom(start: number): Promise<void> {
+    const playlist = await bound(() => api<Read>(`/v1/playlists/${id}`));
+    let revision = playlist.revision;
+    if (playlist.name) name = playlist.name;
+    for (let i = start; i < parts.length; i++) {
+      try {
+        revision = (
+          await bound(() =>
+            api<Read>(
+              `/v1/playlists/${id}/songs?allow_repeat=true&revision=${revision}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ tracks: parts[i] }),
+              },
+            ),
+          )
+        ).revision;
+      } catch (e) {
+        changed();
+        if (lost(e)) {
+          notifyError(
+            `Couldn't tell whether the last ${songs(parts[i].length)} were added to ${name}. Check the playlist.`,
+          );
+          throw new ReportedFailure((e as Error).message);
+        }
+        refused(i, e);
+      }
+    }
+    changed();
   }
   await sendFrom(0);
 }
