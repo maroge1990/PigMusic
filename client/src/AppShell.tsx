@@ -30,6 +30,7 @@ import { SignIn } from "./SignIn";
 import { ToolBoundary } from "./ToolBoundary";
 import { useFixedHeight } from "./useFixedHeight";
 import { PageHeader } from "./PageHeader";
+import { initials } from "./format";
 import { PersonalRequests } from "./PersonalRequests";
 import { OwnerContext } from "./person";
 import { parseRoute, type Route, type Section } from "./routes";
@@ -435,14 +436,6 @@ export function AppShell() {
     </OwnerContext.Provider>
   );
 }
-
-const initials = (name: string) =>
-  name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0].toUpperCase())
-    .join("");
 
 const RECONNECT_FIRST = 3000;
 const RECONNECT_MAX = 300000;
