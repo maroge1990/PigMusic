@@ -64,12 +64,12 @@ export async function flushListens() {
   const session = expectedSession();
   if (!session) return;
   const listens = read();
-  // Old listens, and any made under another session, go.
-  const fresh = listens.filter(
-    (l) => l.played_at >= now - MONTH && l.session === session,
-  );
-  if (fresh.length !== listens.length) write(fresh);
-  const pending = fresh.slice(0, 200);
+  // Only listens past the server's window, or saved before listens named
+  // their session, go; another session's stay for it to send (Codex): a
+  // stale tab never deletes the account signed in now.
+  const kept = listens.filter((l) => l.played_at >= now - MONTH && l.session);
+  if (kept.length !== listens.length) write(kept);
+  const pending = kept.filter((l) => l.session === session).slice(0, 200);
   if (!pending.length) return;
   sending = true;
   try {
@@ -92,7 +92,9 @@ export async function flushListens() {
   }
 }
 
-/** Another account must never send this browser's earlier listens. */
-export function forgetListens() {
-  write([]);
+/** A session ended: its unsent listens go with it, and no other session's
+ * (another tab may be signed in as someone else). */
+export function forgetListens(session: string | null) {
+  if (!session) return;
+  write(read().filter((l) => l.session !== session));
 }

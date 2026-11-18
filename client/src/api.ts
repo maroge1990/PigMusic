@@ -355,9 +355,13 @@ export function clearSessionReads() {
   cataloguePages.clear();
   for (const map of sessionMaps) map.clear();
   ++sessionGeneration;
+  // The session that ended: what belongs only to it can go with it.
+  const ended = expectedSession();
   // Until /v1/me answers again, no write can say whose it is.
   setSessionId(null);
-  window.dispatchEvent(new Event("music-session-cleared"));
+  window.dispatchEvent(
+    new CustomEvent("music-session-cleared", { detail: ended }),
+  );
 }
 
 const BUSY_RETRIES = 2;

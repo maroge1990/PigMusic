@@ -27,7 +27,9 @@ globalThis.setInterval = () => 0;
 // A signed-in tab: every write names its session (#250).
 const { setSessionId } = await import("../src/sessionId.ts");
 setSessionId("session-1");
-const { flushListens, recordListen } = await import("../src/listens.ts");
+const { flushListens, forgetListens, recordListen } = await import(
+  "../src/listens.ts"
+);
 globalThis.setInterval = originalInterval;
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -106,5 +108,34 @@ test("a listen made under one account is never sent under the next", async () =>
   const sent = serve(200);
   await flushListens();
   assert.deepEqual(sent, []);
-  assert.deepEqual(stored(), []);
+  // Left for A's own session (or the age limit), never sent as B.
+  assert.deepEqual(stored(), ["from-a"]);
+});
+
+test("a stale tab sends its own listens and never deletes another session's", async () => {
+  // Codex: a flush under A's session deleted B's unsent listen, and the
+  // teardown emptied the whole store.
+  store.clear();
+  store.set(
+    KEY,
+    JSON.stringify([
+      { ...listen("from-a"), session: "session-1" },
+      { ...listen("from-b"), session: "session-2" },
+    ]),
+  );
+  setSessionId("session-1");
+  const sent = serve(200);
+  await flushListens();
+  assert.deepEqual(sent, [["from-a"]]);
+  assert.deepEqual(stored(), ["from-b"]);
+  store.set(
+    KEY,
+    JSON.stringify([
+      { ...listen("again-a"), session: "session-1" },
+      { ...listen("from-b"), session: "session-2" },
+    ]),
+  );
+  // A's session ends here: only A's listens go.
+  forgetListens("session-1");
+  assert.deepEqual(stored(), ["from-b"]);
 });

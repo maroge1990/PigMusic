@@ -154,9 +154,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setBusy(false);
       if ("mediaSession" in navigator) navigator.mediaSession.metadata = null;
     };
-    const signedOut = () => {
+    // Signed out or expired: the session's own end (below) forgets its
+    // listens; the player stops at once either way.
+    const signedOut = () => stop();
+    const sessionEnded = (event: Event) => {
       stop();
-      forgetListens();
+      forgetListens((event as CustomEvent<string | null>).detail ?? null);
     };
     const signedIn = () => {
       if (restoredQueue && cursor.current === restoredQueue.cursor)
@@ -172,7 +175,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     // Every end of a session (expiry, sign-out, another tab's sign-in or
     // sign-out) clears the shared reads; the player ends with it, before
     // the next account is read (Codex).
-    window.addEventListener("music-session-cleared", signedOut);
+    window.addEventListener("music-session-cleared", sessionEnded);
     // Listens saved while offline or before the tab closed.
     void flushListens();
     const online = () => void flushListens();
@@ -181,7 +184,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("music-signed-in", signedIn);
       window.removeEventListener("music-auth-required", signedOut);
       window.removeEventListener("music-signed-out", signedOut);
-      window.removeEventListener("music-session-cleared", signedOut);
+      window.removeEventListener("music-session-cleared", sessionEnded);
       window.removeEventListener("online", online);
     };
   }, []);
