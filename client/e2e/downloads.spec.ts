@@ -297,3 +297,76 @@ test("a song the server is fetching reads Adding", async ({ page }) => {
   ).toBeVisible();
   await expect(card).not.toContainText("Downloading");
 });
+
+test("D-120: Downloads groups requests and shows Loading while it waits", async ({
+  page,
+}) => {
+  let answer: () => void = () => {};
+  const answered = new Promise<void>((resolve) => (answer = resolve));
+  const posted: string[] = [];
+  const failed = {
+    ...groups.groups[1],
+    id: "g-faint",
+    title: "Faint",
+    state: "failed",
+    done: 0,
+    failed: 1,
+    updated_at: new Date().toISOString(),
+    items: [
+      {
+        id: "f1",
+        title: "Faint",
+        status: "failed",
+        request_progress: null,
+        error: "no_source",
+      },
+    ],
+  };
+  const fresh = {
+    ...groups.groups[1],
+    id: "g-papercut",
+    title: "Papercut",
+    updated_at: new Date().toISOString(),
+  };
+  await mockApi(page, {
+    answers: {
+      "/v1/requests/groups": async (route) => {
+        await answered;
+        return route.fulfill({
+          json: {
+            ...groups,
+            total: 4,
+            groups: [...groups.groups, failed, fresh],
+          },
+        });
+      },
+      "/v1/requests/f1/retry": (route) => {
+        posted.push("retry f1");
+        return route.fulfill({ json: { retried: true } });
+      },
+    },
+  });
+  await page.goto("/#/downloads");
+  await expect(page.getByRole("status").getByText("Loading…")).toBeVisible();
+  answer();
+  const main = page.locator("main");
+  await expect(main.locator("h2")).toHaveText([
+    "Adding1",
+    "Couldn't add1",
+    "Added this week1",
+    "Added earlier1",
+  ]);
+  const adding = page.getByRole("region", { name: /^Adding/ });
+  await expect(adding).toContainText("Meteora");
+  const couldNot = page.getByRole("region", { name: /^Couldn't add/ });
+  await expect(couldNot).toContainText("Faint");
+  // Try again sits on the row itself, without opening it.
+  await couldNot.getByRole("button", { name: "Try again: Faint" }).click();
+  await expect.poll(() => posted).toEqual(["retry f1"]);
+  await expect(
+    page.getByRole("region", { name: /^Added this week/ }),
+  ).toContainText("Papercut");
+  await expect(
+    page.getByRole("region", { name: /^Added earlier/ }),
+  ).toContainText("Numb");
+});

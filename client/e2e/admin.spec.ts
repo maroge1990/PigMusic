@@ -854,8 +854,23 @@ test("Reset password and Disable ask first, naming the person", async ({
     },
   });
   await page.goto("/#/admin/people");
-  const reset = page.getByRole("button", { name: "Reset password for Sam" });
-  const disable = page.getByRole("button", { name: "Disable Sam" });
+  // Both sit under the person's ⋯ (D-120).
+  const more = page.getByRole("button", { name: "More actions for Sam" });
+  const reset = {
+    click: async () => {
+      // The keyboard: on a phone the sticky header can cover the row.
+      await more.focus();
+      await page.keyboard.press("Enter");
+      await page.getByRole("menuitem", { name: "Reset password" }).click();
+    },
+  };
+  const disable = {
+    click: async () => {
+      await more.focus();
+      await page.keyboard.press("Enter");
+      await page.getByRole("menuitem", { name: "Disable" }).click();
+    },
+  };
   // #250: the app's own dialog asks, never the browser's.
   page.on("dialog", () => {
     throw new Error("The browser's confirm() was used");

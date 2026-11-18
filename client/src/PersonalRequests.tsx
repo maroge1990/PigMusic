@@ -1,10 +1,11 @@
 import { notify } from "./notices";
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, RotateCw } from "lucide-react";
+import { ChevronDown, CircleAlert, RotateCw } from "lucide-react";
 import { api } from "./api";
 import { Cover, catalogueCover } from "./Cover";
 import { DownloadLog } from "./DownloadLog";
-import { Empty, InlineError } from "./EmptyState";
+import { Empty, InlineError, Loading } from "./EmptyState";
+import { SectionHeader } from "./PageHeader";
 import { formatRelative } from "./format";
 import { friendlyRequestError } from "./requestError";
 import { sourceName } from "./sources";
@@ -48,6 +49,37 @@ type GroupPage = {
 };
 
 const PAGE = 50;
+/** Rows a section shows before "Show all". */
+const SHOWN = 5;
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+type Section = { id: string; title: string; groups: Group[] };
+
+/** Adding first, then what couldn't be added, then what arrived. */
+function sections(groups: Group[], now = Date.now()): Section[] {
+  const recent = (g: Group) => now - Date.parse(g.updated_at) < WEEK_MS;
+  const done = groups.filter((g) => g.state === "done");
+  return [
+    {
+      id: "adding",
+      title: "Adding",
+      groups: groups.filter((g) =>
+        ["active", "waiting", "paused"].includes(g.state),
+      ),
+    },
+    {
+      id: "failed",
+      title: "Couldn't add",
+      groups: groups.filter((g) => g.state === "failed"),
+    },
+    { id: "week", title: "Added this week", groups: done.filter(recent) },
+    {
+      id: "earlier",
+      title: "Added earlier",
+      groups: done.filter((g) => !recent(g)),
+    },
+  ].filter((s) => s.groups.length);
+}
 
 // Plain-language request states; the server keeps its technical names.
 const labels: Record<string, [string, Phase]> = {
@@ -102,6 +134,17 @@ export function PersonalRequests() {
   const [page, setPage] = useState<GroupPage | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // What is open survives a request moving to another group (#197).
+  const [openRows, setOpenRows] = useState<Set<string>>(new Set());
+  const toggle = (id: string, open: boolean) =>
+    setOpenRows((now) => {
+      if (now.has(id) === open) return now;
+      const next = new Set(now);
+      if (open) next.add(id);
+      else next.delete(id);
+      return next;
+    });
   const load = (at = offset) => {
     const serial = ++readSerial.current;
     return api<GroupPage>(`/v1/requests/groups?offset=${at}&limit=${PAGE}`)
@@ -159,9 +202,131 @@ export function PersonalRequests() {
     };
   }, [offset]);
   const finished = page?.groups.some((g) => g.done || g.failed);
+  function renderGroup(group: Group, retryOnRow: boolean) {
+    const failed = group.items.filter((i) =>
+      ["failed", "cancelled"].includes(i.status),
+    );
+    return (
+      <div className="download-row" key={group.id}>
+        <details
+          className="request-group"
+          open={openRows.has(group.id)}
+          onToggle={(event) => toggle(group.id, event.currentTarget.open)}
+        >
+          <summary>
+            <Cover
+              title={group.title}
+              src={
+                group.release_id
+                  ? catalogueCover("release", group.release_id)
+                  : null
+              }
+            />
+            <div className="request-group-text">
+              <strong>{group.title}</strong>
+              <p>
+                {[group.artist, formatRelative(group.updated_at)]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+              <p>{summary(group)}</p>
+              {group.state !== "done" && (
+                <progress
+                  max={1}
+                  value={group.progress}
+                  aria-label={`${group.title}: ${Math.round(group.progress * 100)} percent`}
+                />
+              )}
+            </div>
+            <StateBadge
+              state={badge[group.state]}
+              label={groupLabel[group.state]}
+              iconOnly
+            />
+            <ChevronDown
+              size={18}
+              className="request-group-chevron"
+              aria-hidden="true"
+            />
+          </summary>
+          <ol className="request-group-songs">
+            {group.items.map((item) => {
+              const [label, tone] = labels[item.status] || [
+                item.status.replaceAll("_", " "),
+                "waiting",
+              ];
+              return (
+                <li key={item.id}>
+                  <div>
+                    <span>{item.title}</span>
+                    <small>
+                      {[
+                        label,
+                        item.source ? sourceName(item.source) : "",
+                        item.quality || "",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </small>
+                    {item.request_progress !== null && tone === "active" && (
+                      <progress
+                        max={1}
+                        value={item.request_progress}
+                        aria-label={`Adding ${item.title}, ${Math.round(item.request_progress * 100)} percent`}
+                      />
+                    )}
+                    {tone === "failed" && item.error && (
+                      <p className="inline-error">
+                        {friendlyRequestError(item.error)}
+                      </p>
+                    )}
+                    <DownloadLog
+                      path={
+                        "/v1/requests/" + encodeURIComponent(item.id) + "/log"
+                      }
+                      title={item.title}
+                      version={`${item.status}|${item.updated_at ?? ""}`}
+                      startOpen={openRows.has("log:" + item.id)}
+                      onOpenChange={(open) => toggle("log:" + item.id, open)}
+                    />
+                  </div>
+                  <StateBadge state={badge[tone]} label={label} iconOnly />
+                </li>
+              );
+            })}
+          </ol>
+          {failed.length > 0 && !retryOnRow && (
+            <button
+              className="small-button"
+              disabled={busy}
+              aria-label={`Try again: ${failed.length === 1 ? failed[0].title : `${failed.length} songs from ${group.title}`}`}
+              onClick={() => void retry(failed)}
+            >
+              <RotateCw size={14} aria-hidden="true" />
+              {failed.length === 1
+                ? "Try again"
+                : `Try again (${failed.length} songs)`}
+            </button>
+          )}
+        </details>
+        {failed.length > 0 && retryOnRow && (
+          <button
+            className="secondary-button download-retry"
+            disabled={busy}
+            aria-label={`Try again: ${group.title}`}
+            onClick={() => void retry(failed)}
+          >
+            <RotateCw size={16} aria-hidden="true" />
+            Try again
+          </button>
+        )}
+      </div>
+    );
+  }
   return (
     <section className="request-groups">
       {error && <InlineError>{error}</InlineError>}
+      {!page && !error && <Loading />}
       {page && !page.total && (
         <Empty
           title="No downloads"
@@ -192,115 +357,43 @@ export function PersonalRequests() {
               </button>
             </nav>
           )}
-          {page.groups.map((group) => {
-            const failed = group.items.filter((i) =>
-              ["failed", "cancelled"].includes(i.status),
-            );
-            return (
-              <details className="request-group" key={group.id}>
-                <summary>
-                  <Cover
-                    title={group.title}
-                    src={
-                      group.release_id
-                        ? catalogueCover("release", group.release_id)
-                        : null
-                    }
-                  />
-                  <div className="request-group-text">
-                    <strong>{group.title}</strong>
-                    <p>
-                      {[group.artist, formatRelative(group.updated_at)]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </p>
-                    <p>{summary(group)}</p>
-                    {group.state !== "done" && (
-                      <progress
-                        max={1}
-                        value={group.progress}
-                        aria-label={`${group.title}: ${Math.round(group.progress * 100)} percent`}
-                      />
+          {sections(page.groups).map((section) => (
+            <section
+              className="download-section"
+              data-section={section.id}
+              key={section.id}
+              aria-labelledby={"downloads-" + section.id}
+            >
+              <SectionHeader
+                id={"downloads-" + section.id}
+                title={
+                  <>
+                    {section.id === "failed" && (
+                      <CircleAlert size={18} aria-hidden="true" />
                     )}
-                  </div>
-                  <StateBadge
-                    state={badge[group.state]}
-                    label={groupLabel[group.state]}
-                    iconOnly
-                  />
-                  <ChevronDown
-                    size={18}
-                    className="request-group-chevron"
-                    aria-hidden="true"
-                  />
-                </summary>
-                <ol className="request-group-songs">
-                  {group.items.map((item) => {
-                    const [label, tone] = labels[item.status] || [
-                      item.status.replaceAll("_", " "),
-                      "waiting",
-                    ];
-                    return (
-                      <li key={item.id}>
-                        <div>
-                          <span>{item.title}</span>
-                          <small>
-                            {[
-                              label,
-                              item.source ? sourceName(item.source) : "",
-                              item.quality || "",
-                            ]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          </small>
-                          {item.request_progress !== null &&
-                            tone === "active" && (
-                              <progress
-                                max={1}
-                                value={item.request_progress}
-                                aria-label={`Adding ${item.title}, ${Math.round(item.request_progress * 100)} percent`}
-                              />
-                            )}
-                          {tone === "failed" && item.error && (
-                            <p className="inline-error">
-                              {friendlyRequestError(item.error)}
-                            </p>
-                          )}
-                          <DownloadLog
-                            path={
-                              "/v1/requests/" +
-                              encodeURIComponent(item.id) +
-                              "/log"
-                            }
-                            title={item.title}
-                            version={`${item.status}|${item.updated_at ?? ""}`}
-                          />
-                        </div>
-                        <StateBadge
-                          state={badge[tone]}
-                          label={label}
-                          iconOnly
-                        />
-                      </li>
-                    );
-                  })}
-                </ol>
-                {failed.length > 0 && (
-                  <button
-                    className="small-button"
-                    disabled={busy}
-                    aria-label={`Try again: ${failed.length === 1 ? failed[0].title : `${failed.length} songs from ${group.title}`}`}
-                    onClick={() => void retry(failed)}
-                  >
-                    <RotateCw size={14} aria-hidden="true" />
-                    {failed.length === 1
-                      ? "Try again"
-                      : `Try again (${failed.length} songs)`}
-                  </button>
-                )}
-              </details>
-            );
-          })}
+                    {section.title}
+                    <span className="download-count pig-amount">
+                      {section.groups.length}
+                    </span>
+                  </>
+                }
+              />
+              {(expanded.has(section.id)
+                ? section.groups
+                : section.groups.slice(0, SHOWN)
+              ).map((group) => renderGroup(group, section.id === "failed"))}
+              {section.groups.length > SHOWN && !expanded.has(section.id) && (
+                <button
+                  className="text-button"
+                  onClick={() =>
+                    setExpanded((now) => new Set(now).add(section.id))
+                  }
+                >
+                  Show all {section.groups.length}
+                </button>
+              )}
+            </section>
+          ))}
           {/* The one Clear: finished entries only, the same for everyone. */}
           {finished && (
             <div className="release-actions request-clear">
@@ -311,11 +404,6 @@ export function PersonalRequests() {
               >
                 Clear finished
               </button>
-              <p className="muted">
-                Removes finished and cancelled entries, and songs that couldn't
-                be added, from this list. Active downloads and music files are
-                kept.
-              </p>
             </div>
           )}
         </>

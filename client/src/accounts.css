@@ -539,17 +539,9 @@ main h1[tabindex="-1"]:focus {
   gap: 0.125rem;
   min-width: 0;
 }
-.discover-text span,
-.discover-owned {
+.discover-text span {
   font-size: var(--type-footnote);
   color: var(--secondary);
-}
-.discover-owned {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-4);
-  color: var(--success);
-  white-space: nowrap;
 }
 .follow-artist {
   display: flex;
@@ -567,12 +559,41 @@ main h1[tabindex="-1"]:focus {
   border-color: var(--accent);
   color: var(--text-accent);
 }
-/* Downloads: one card per request; its songs, source and quality inside. */
-.request-group {
-  margin-bottom: var(--space-12);
-  border: 1px solid var(--border);
+/* Downloads: requests grouped into panels (Adding, Couldn't add, Added);
+   one row per request, its songs, source and quality inside. */
+.download-section {
+  margin-bottom: var(--space-16);
+  padding: var(--space-8) var(--space-16);
   border-radius: var(--radius-card);
   background: var(--surface);
+}
+.download-section .section-title h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+.download-section[data-section="failed"] .section-title h2 {
+  color: var(--danger);
+}
+.download-count {
+  color: var(--secondary);
+  font-size: var(--type-footnote);
+  font-weight: 400;
+}
+.download-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-12);
+}
+.download-row + .download-row {
+  border-top: 1px solid var(--border);
+}
+.download-retry {
+  margin-top: var(--space-16);
+}
+.request-group {
+  min-width: 0;
 }
 .request-group > summary {
   display: grid;
@@ -794,8 +815,19 @@ main h1[tabindex="-1"]:focus {
 }
 .session-list li > div {
   display: grid;
+  flex: 1;
   gap: 0.125rem;
   min-width: 0;
+}
+.session-icon {
+  display: inline-flex;
+  color: var(--secondary);
+}
+.session-list li:last-child {
+  border-bottom: 0;
+}
+.session-sign-out {
+  color: var(--danger);
 }
 .session-list span {
   font-size: var(--type-footnote);
@@ -851,4 +883,269 @@ main h1[tabindex="-1"]:focus {
 }
 .download-log .download-log-failed {
   color: var(--danger);
+}
+
+/* Account (D-120, screen 21): the profile card beside the sections. */
+.account-layout {
+  display: grid;
+  gap: var(--space-24);
+  align-items: start;
+}
+@media (min-width: 900px) {
+  .account-layout {
+    grid-template-columns: 18rem minmax(0, 1fr);
+  }
+}
+.account-profile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+  text-align: center;
+}
+.account-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 5.5rem;
+  height: 5.5rem;
+  border-radius: var(--radius-capsule);
+  background: var(--selected-fill);
+  color: var(--text-accent);
+  font-size: var(--type-title);
+  font-weight: 650;
+}
+.account-count {
+  color: var(--secondary);
+  font-size: var(--type-footnote);
+}
+.account-sign-out {
+  margin-top: var(--space-8);
+  min-height: 2.75rem;
+  color: var(--danger);
+  font-size: var(--type-subhead);
+  font-weight: 600;
+}
+.account-grid {
+  display: grid;
+  gap: 0 var(--space-16);
+  align-items: start;
+}
+@media (min-width: 900px) {
+  .account-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .account-devices {
+    grid-column: 1 / -1;
+  }
+}
+.account-grid h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+.account-grid h2 svg {
+  color: var(--accent);
+}
+.account-appearance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.account-appearance legend {
+  float: left;
+  padding: 0;
+}
+.account-segments {
+  display: inline-flex;
+  padding: var(--space-4);
+  border-radius: var(--radius-control);
+  background: var(--raised);
+}
+.account-section .account-segments label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.375rem;
+  padding: 0 var(--space-12);
+  border-radius: var(--radius-compact);
+  font-size: var(--type-footnote);
+  cursor: pointer;
+}
+.account-segments label:has(input:checked) {
+  background: var(--surface);
+  font-weight: 600;
+}
+.account-segments label:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+}
+.account-segments input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.account-start {
+  justify-self: start;
+}
+
+/* Admin › People (D-120, screen 22): People beside Unassigned music. */
+.admin-people-grid {
+  display: grid;
+  gap: 0 var(--space-24);
+  align-items: start;
+}
+@media (min-width: 900px) {
+  .admin-people-grid {
+    grid-template-columns: 1.4fr 1fr;
+  }
+}
+.admin-count {
+  margin-left: var(--space-8);
+  color: var(--secondary);
+  font-size: var(--type-footnote);
+  font-weight: 400;
+}
+.admin-add-person {
+  margin-bottom: var(--space-16);
+}
+.person-list,
+.unassigned-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.person-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  min-height: 3.75rem;
+}
+.person-row + .person-row {
+  border-top: 1px solid var(--border);
+}
+.person-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.person-text > span,
+.unassigned-text > span {
+  color: var(--secondary);
+  font-size: var(--type-footnote);
+}
+.person-row.is-disabled strong {
+  color: var(--secondary);
+}
+.person-avatar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius-capsule);
+  background: var(--selected-fill);
+  color: var(--text-accent);
+  font-size: var(--type-footnote);
+  font-weight: 650;
+}
+.person-row.is-disabled .person-avatar {
+  background: var(--raised);
+  color: var(--secondary);
+}
+.unassigned-list li + li {
+  margin-top: var(--space-12);
+}
+.unassigned-list form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+}
+.unassigned-list .cover {
+  flex: none;
+  width: 3.25rem;
+}
+.unassigned-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.unassigned-text fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-12);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.account-section .unassigned-text label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: var(--type-footnote);
+}
+
+/* Admin › Server library (D-120, screen 23): each tool a card with its
+   icon; Admin › Downloads: each queued song with its cover and who asked. */
+.library-tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+  gap: 0 var(--space-16);
+  align-items: start;
+}
+.library-tool h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+.library-tool h2 svg {
+  color: var(--accent);
+}
+.queue-row {
+  align-items: center;
+}
+.queue-row > .cover {
+  flex: none;
+  width: 3rem;
+}
+.result-row.queue-row .queue-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+.result-row.queue-row .queue-status .state-badge {
+  display: inline-flex;
+  margin-top: 0;
+}
+.queue-row progress {
+  width: 100%;
+  max-width: 20rem;
+  accent-color: var(--accent);
+}
+.queue-asker {
+  color: var(--secondary);
+  font-size: var(--type-footnote);
+  white-space: nowrap;
+}
+.account-section .unassigned-text input[type="checkbox"] {
+  width: 1.125rem;
+  height: 1.125rem;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.person-seen {
+  color: var(--secondary);
+  font-size: var(--type-footnote);
+  white-space: nowrap;
+}
+.person-menu-space {
+  width: 2.5rem;
+  flex: none;
 }

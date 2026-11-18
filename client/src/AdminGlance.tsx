@@ -62,7 +62,8 @@ export function AdminGlance({
     {
       label: "Albums awaiting an owner",
       value: unassigned,
-      href: "#/admin/library",
+      // Unassigned music sits beside People (D-120).
+      href: "#/admin/people",
       warn: true,
     },
     {

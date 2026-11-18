@@ -301,15 +301,17 @@ export function ServerLibraryTools({
 }) {
   return (
     <>
-      <LibraryScan refresh={refresh} />
-      <ToolBoundary>
-        <Suspense fallback={<Loading>Loading library tools…</Loading>}>
-          <TidyEditions />
-          <DuplicateSongs />
-          <RemovedMusic />
-          <Organisation />
-        </Suspense>
-      </ToolBoundary>
+      <div className="library-tools">
+        <LibraryScan refresh={refresh} />
+        <ToolBoundary>
+          <Suspense fallback={<Loading>Loading library tools…</Loading>}>
+            <TidyEditions />
+            <DuplicateSongs />
+            <RemovedMusic />
+            <Organisation />
+          </Suspense>
+        </ToolBoundary>
+      </div>
       {!!library?.snapshot.read_failures?.length && (
         <>
           <div className="section-title">

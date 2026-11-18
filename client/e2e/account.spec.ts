@@ -128,3 +128,76 @@ test("signing out with the server unreachable clears this device and finishes la
   );
   await expect(page.getByLabel("Username")).toHaveCount(0);
 });
+
+test("D-120: Account is a profile card beside sections with icons", async ({
+  page,
+}) => {
+  const saved: unknown[] = [];
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/me/sessions": (route) =>
+        route.fulfill({
+          json: {
+            sessions: [
+              {
+                id: "s1",
+                device_name: "Safari on Mac",
+                platform: "web",
+                last_seen_at: Date.now() / 1000,
+                revoked_at: null,
+                current: true,
+              },
+              {
+                id: "s2",
+                device_name: "Pat's iPhone",
+                platform: "ios",
+                last_seen_at: Date.now() / 1000 - 7200,
+                revoked_at: null,
+              },
+            ],
+          },
+        }),
+      "/v1/preferences": (route) => {
+        if (route.request().method() === "PUT")
+          saved.push(route.request().postDataJSON().appearance);
+        return route.fulfill({
+          json: { appearance: "system", default_tab: "artists" },
+        });
+      },
+    },
+  });
+  await page.goto("/#/account");
+  const profile = page.locator(".account-profile");
+  await expect(profile.locator(".account-avatar")).toHaveText("P");
+  await expect(profile.getByRole("heading", { name: "Pat" })).toBeVisible();
+  await expect(profile).toContainText("2 songs in your library");
+  await expect(
+    profile.getByRole("button", { name: "Sign out of PigMusic" }),
+  ).toBeVisible();
+  // The sections in the drawn order, each with its icon; Admin last.
+  await expect(page.locator(".account-grid h2")).toHaveText([
+    "Preferences",
+    "Your music quality",
+    "Password",
+    "Devices and sessions",
+  ]);
+  for (const h2 of await page.locator(".account-grid h2").all())
+    await expect(h2.locator("svg")).toHaveCount(1);
+  await expect(page.locator("main > section").last()).toHaveAttribute(
+    "aria-label",
+    "Admin shortcuts",
+  );
+  // Appearance is three choices; one tap saves it.
+  const appearance = page.getByRole("group", { name: "Appearance" });
+  await expect(appearance.getByRole("radio")).toHaveCount(3);
+  await appearance.getByText("Dark").click();
+  await expect.poll(() => saved).toEqual(["dark"]);
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  // The password form opens from its button.
+  await expect(page.getByLabel("Current password")).toHaveCount(0);
+  await page.getByRole("button", { name: "Change password" }).click();
+  await expect(page.getByLabel("Current password")).toBeFocused();
+  // No explanatory paragraphs (D-101).
+  await expect(page.getByText("Shared files retain")).toHaveCount(0);
+});

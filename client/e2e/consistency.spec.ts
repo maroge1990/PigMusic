@@ -192,7 +192,7 @@ test("#151: one section heading and one panel shape", async ({ page }) => {
   const radii = new Set<string>();
   for (const path of [
     "/#/home",
-    "/#/search?q=Charli",
+    "/#/search",
     "/#/library/artist/artist-1",
     "/#/account",
     "/#/admin",
@@ -246,8 +246,10 @@ test("#155: empty lines look the same; errors use the inline error", async ({
   await mockApi(page, {
     role: "owner",
     answers: {
-      "/v1/search": (r: Route) =>
-        r.fulfill({ json: { tracks: [], household_tracks: [] } }),
+      "/v1/search/results": (r: Route) =>
+        r.fulfill({
+          json: { top: [], songs: [], albums: [], artists: [], playlists: [] },
+        }),
       "/v1/catalogue/artists": (r: Route) =>
         r.fulfill({ json: { artists: [] } }),
       "/v1/admin/library/trash": (r: Route) => r.fulfill({ json: [] }),
@@ -256,11 +258,8 @@ test("#155: empty lines look the same; errors use the inline error", async ({
   const colour = (text: string | RegExp) =>
     page.getByText(text).evaluate((el) => getComputedStyle(el).color);
   await page.goto("/#/search?q=Zzzz");
-  const looks = [
-    await colour("Nothing in your library yet."),
-    await colour(/No catalogue artists match/),
-  ];
-  await page.goto("/#/admin/library");
+  const looks = [await colour(/Nothing matches/)];
+  await page.goto("/#/admin/people");
   looks.push(await colour("No music is waiting for assignment."));
   expect(new Set(looks).size).toBe(1);
 
