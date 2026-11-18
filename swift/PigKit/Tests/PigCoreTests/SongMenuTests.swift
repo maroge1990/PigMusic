@@ -128,6 +128,23 @@ struct SongMenuTests {
     #expect(server.first?.first == .requested)
   }
 
+  /// #264: a song the person paused reads Paused (the pause mark), not
+  /// Adding with the clock, though it is still asked for.
+  @Test func aPausedSongShowsPausedNotAdding() {
+    for state in ["not_in_library", "requested"] {
+      let sections = SongMenu.sections(
+        for: song(state), looked: true, requested: true, favourite: false, playing: false,
+        paused: true)
+      #expect(sections.first?.first == .paused)
+      #expect(!sections.joined().contains(.requested))
+    }
+    // In your library: paused no longer matters.
+    let mine = SongMenu.sections(
+      for: song("in_library"), looked: true, requested: false, favourite: false,
+      playing: false, paused: true)
+    #expect(!mine.joined().contains(.paused))
+  }
+
   @Test func aHouseholdSongIsAddedToTheLibrary() {
     let sections = SongMenu.sections(
       for: song("household_available"), looked: true, requested: true, favourite: false,

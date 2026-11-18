@@ -28,7 +28,8 @@ struct SongActionsMenu: View {
     let sections = SongMenu.sections(
       for: track, looked: looked, requested: model.isRequested(track.id),
       favourite: model.favourites[track.id], playing: model.player.queue.current != nil,
-      watch: model.watchPaired, page: page.map(\.item))
+      watch: model.watchPaired, page: page.map(\.item),
+      paused: model.requestedSongs.paused.contains(track.id))
     ForEach(Array(sections.enumerated()), id: \.offset) { _, items in
       Section {
         ForEach(items, id: \.self) { item($0, track) }
@@ -99,6 +100,9 @@ struct SongActionsMenu: View {
     case .requested:
       // #206: the same mark as an album page's requested songs.
       Button("Adding", systemImage: "clock") {}.disabled(true)
+    case .paused:
+      // #264: the row's pause mark; Downloads resumes it.
+      Button("Paused", systemImage: "pause.circle") {}.disabled(true)
     case .request:
       // At once, with Undo; sent when the server can be reached (#206).
       Button("Add to library", systemImage: "plus") {

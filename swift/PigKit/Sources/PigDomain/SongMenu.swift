@@ -11,6 +11,8 @@ public enum SongMenuItem: Hashable, Sendable {
   case requested
   /// Asks the server for the song, with Undo (#206).
   case request
+  /// Asked for, and paused by the person: a mark, not an action (#264).
+  case paused
   /// The favourite toggle; the song's state now (#212).
   case favourite(Bool)
   /// The favourite state isn't known on this iPhone yet: reads it.
@@ -71,12 +73,16 @@ public enum SongMenu {
   /// what the row's page adds.
   public static func sections(
     for track: Track, looked: Bool, requested: Bool, favourite: Bool?, playing: Bool,
-    watch: Bool = true, page: [SongPageItem] = []
+    watch: Bool = true, page: [SongPageItem] = [], paused: Bool = false
   ) -> [[SongMenuItem]] {
     var sections: [[SongMenuItem]] = []
     if playing { sections.append([.playNext, .addToQueue]) }
     var mine: [SongMenuItem] = []
-    if looked, let state = libraryState(track, requested: requested) { mine.append(state) }
+    if looked, var state = libraryState(track, requested: requested) {
+      // Paused by the person (#264): Paused, not Adding.
+      if paused && [.requested, .request].contains(state) { state = .paused }
+      mine.append(state)
+    }
     mine.append(favourite.map(SongMenuItem.favourite) ?? .loadFavourite)
     mine.append(.addToPlaylist)
     sections.append(mine)
