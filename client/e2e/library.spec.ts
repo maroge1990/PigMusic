@@ -485,3 +485,73 @@ test("adding a catalogue album confirms what the server did", async ({
   expect(sent.map((t) => t.title)).toEqual(["Queued song", "Skipped song"]);
   await expect.poll(() => reads).toBeGreaterThan(before);
 });
+
+// #246 (Codex): an album another household member already has is added in
+// one tap; its household copies are sent like missing songs.
+test("a household-only catalogue album is added in one tap", async ({
+  page,
+}) => {
+  let sent: { title: string }[] = [];
+  const copy = (id: string, title: string, n: number) => ({
+    id,
+    title,
+    artist: artist.name,
+    duration: 180,
+    track_number: n,
+    disc_number: 1,
+    server_state: "household_available",
+    household_track: {
+      ...album.tracks[0],
+      id: "h" + id,
+      title,
+      server_state: "household_available",
+    },
+  });
+  await mockApi(page, {
+    answers: {
+      "/v1/catalogue/releases/r-home": (route) =>
+        route.fulfill({
+          json: {
+            id: "r-home",
+            title: "Shared album",
+            artist: artist.name,
+            artist_id: "mb-1",
+            tracks: [copy("s1", "Shared one", 1), copy("s2", "Shared two", 2)],
+          },
+        }),
+      "/v1/library/lookup": (route) =>
+        route.fulfill({
+          json: {
+            tracks: route
+              .request()
+              .postDataJSON()
+              .songs.map(() => null),
+          },
+        }),
+      "/v1/requests": (route) => {
+        if (route.request().method() !== "POST")
+          return route.fulfill({
+            json: { items: [], next_offset: null, active: 0 },
+          });
+        sent = route.request().postDataJSON().tracks;
+        return route.fulfill({
+          json: {
+            created: 0,
+            existing: 2,
+            skipped: 0,
+            downloads_enabled: true,
+          },
+        });
+      },
+    },
+  });
+  await page.goto(
+    `/#/library/discography/mb-1?name=${encodeURIComponent(artist.name)}&release=r-home`,
+  );
+  await expect(page.getByText("Shared two").first()).toBeVisible();
+  await page
+    .getByRole("button", { name: "Add to library", exact: true })
+    .click({ timeout: 5000 });
+  await expect(page.getByText("Adding 2 songs to your library.")).toBeVisible();
+  expect(sent.map((t) => t.title)).toEqual(["Shared one", "Shared two"]);
+});

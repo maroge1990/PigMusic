@@ -131,6 +131,9 @@ type Release = {
   description: string;
   tracks: Song[];
 };
+// A song Add to library would add: not on the server yet, or a household
+// copy someone else already has.
+const addable = (row: Row) => row.state === "missing" || row.state === "server";
 // A song the server is still adding for you.
 const pending = (song: { server_state?: string }) =>
   song.server_state === "requested";
@@ -579,7 +582,7 @@ export function CatalogueBrowser({
               className="round-action"
               aria-label="Add to library"
               title="Add to library"
-              disabled={busy || !rows.some((r) => r.state === "missing")}
+              disabled={busy || !rows.some(addable)}
               onClick={() => download()}
             >
               <Plus size={18} aria-hidden="true" />
@@ -594,11 +597,11 @@ export function CatalogueBrowser({
               </a>
             )}
           </div>
-          {rows.length > 0 && !rows.some((r) => r.state === "missing") && (
+          {rows.length > 0 && !rows.some(addable) && (
             <p className="muted">
               {rows.every((r) => r.state === "saved")
                 ? "Already in your library: nothing to add."
-                : "Nothing to add: every song is in your library, on the server or being added."}
+                : "Nothing to add: every song is in your library or being added."}
             </p>
           )}
           <div className="song-list">
