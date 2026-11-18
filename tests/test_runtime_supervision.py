@@ -91,6 +91,108 @@ def test_the_engine_heap_has_room_for_a_burst_of_search_replies(tmp_path, monkey
     assert int(launched["DOTNET_GCHeapHardLimit"], 16) >= 512 * 1024 * 1024
 
 
+class HungEngine(FakeProcess):
+    """Never exits by itself; records when it was ended."""
+
+    def __init__(self, clock):
+        super().__init__(lifetime=None)
+        self.clock = clock
+        self.ended = None
+
+    def terminate(self):
+        if self.ended is None:
+            self.ended = self.clock[0]
+        super().terminate()
+
+
+def engine_supervised(tmp_path, monkeypatch, ticks, answer):
+    """main() with a fake server living `ticks` seconds, hung engines and a
+    scripted engine probe: `answer(clock)` returns its state."""
+    clock = [0.0]
+    engines, probes = [], []
+
+    def start_engine(root):
+        engines.append((clock[0], HungEngine(clock)))
+        return engines[-1][1], None
+
+    def sleep(seconds):
+        clock[0] += 1
+
+    def engine_probe():
+        probes.append(clock[0])
+        return answer(clock[0]), []
+
+    monkeypatch.setenv("PIG_MUSIC_DATA", str(tmp_path))
+    monkeypatch.setenv("PIG_MUSIC_EMBEDDED_ENGINE", "true")
+    monkeypatch.setattr(runtime, "start_engine", start_engine)
+    monkeypatch.setattr(runtime, "proxy_trust", lambda: "127.0.0.1")
+    monkeypatch.setattr(
+        runtime.subprocess, "Popen", lambda *a, **k: FakeProcess(lifetime=ticks)
+    )
+    monkeypatch.setattr(runtime.time, "sleep", sleep)
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(runtime.signal, "signal", lambda *a: None)
+    monkeypatch.setattr(runtime, "probe", lambda: ("ok", []), raising=False)
+    monkeypatch.setattr(runtime, "engine_probe", engine_probe, raising=False)
+    assert runtime.main() == 1
+    return engines, probes
+
+
+def test_a_hung_engine_is_ended_and_started_again(tmp_path, monkeypatch, capsys):
+    """#256: an engine that stops answering without exiting was never
+    restarted; every call to it just timed out."""
+    engines, probes = engine_supervised(
+        tmp_path, monkeypatch, 600, lambda now: "silent"
+    )
+    # Ten silent probes, 30 s apart, after its 180 s grace.
+    assert probes[:10] == [180 + 30 * n for n in range(10)]
+    (first, hung), (again, _) = engines[:2]
+    assert hung.ended == 450
+    assert again == 450 + runtime.ENGINE_BACKOFF_START
+    err = capsys.readouterr().err
+    assert "Source engine has not answered for 300 s; restarting it in 5s" in err
+    # The server itself was never touched.
+    assert "Server has not answered" not in err
+
+
+def test_an_engine_that_answers_is_never_ended(tmp_path, monkeypatch):
+    # Nine silent probes, then any answer (even a refusal) starts the count again.
+    engines, probes = engine_supervised(
+        tmp_path,
+        monkeypatch,
+        1500,
+        # Every ninth probe answers.
+        lambda now: "degraded" if (now - 180) % 270 == 240 else "silent",
+    )
+    assert len(engines) == 1
+    assert engines[0][1].ended >= 1499  # Only when the server ended.
+    assert len(probes) > 40
+
+
+def test_a_hung_engine_is_restarted_three_times_an_hour_then_reported(
+    tmp_path, monkeypatch, capsys
+):
+    engines, probes = engine_supervised(
+        tmp_path, monkeypatch, 3000, lambda now: "silent"
+    )
+    assert len(engines) == 4
+    ended = [e.ended for _, e in engines]
+    # The fourth hang within the hour is left running until the server ends.
+    assert all(at < 2000 for at in ended[:3]) and ended[3] >= 2999
+    err = capsys.readouterr().err
+    assert err.count("restarting it in") == 3
+    assert (
+        "Source engine has not answered for 300 s; not restarting it again:"
+        " 3 restarts in the last hour"
+    ) in err
+    # Reminded every 10 minutes, not on every probe.
+    assert err.count("not restarting it again") <= 2
+
+
+def test_the_engine_probe_asks_its_local_port():
+    assert runtime.ENGINE_URL.startswith("http://127.0.0.1:5030/")
+
+
 class Supervised:
     """main() with a fake server child, a fake clock (one second a tick) and
     a scripted probe in place of the HTTP request."""

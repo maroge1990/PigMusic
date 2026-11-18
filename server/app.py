@@ -109,6 +109,9 @@ TIDY_TRACKLISTS = 20
 # how long a worker may have been failing.
 READY_TIMEOUT = 5
 READY_WORKER_SECONDS = 300
+# /api/health (#256): how long its mount test may take before the answer says
+# storage is unavailable; the apps call it to test reachability.
+HEALTH_STORAGE_TIMEOUT = 2
 
 
 def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
@@ -505,12 +508,13 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         )
 
     @app.get("/api/health")
-    def health(request: Request):
-        try:
-            download_root(store)
-            storage_available = True
-        except (OSError, ValueError):
-            storage_available = False
+    async def health(request: Request):
+        # Never on a request's own thread (#256): an unresponsive mount would
+        # hold one for each caller. The readiness check's own thread, one
+        # call at a time, shared with /api/health/ready.
+        storage_available = await ready_checks.passes(
+            "storage", download_root, store, timeout=HEALTH_STORAGE_TIMEOUT
+        )
         if not security.legacy_test:
             return {
                 "status": "ok",

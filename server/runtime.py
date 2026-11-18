@@ -35,6 +35,15 @@ WATCHDOG_RESTART_LIMIT = 3
 WATCHDOG_RESTART_WINDOW = 3600
 WATCHDOG_REMINDER_SECONDS = 600
 RESTART_HISTORY_ENTRIES = 50
+# A source engine that hangs without exiting (#256): asked over its local
+# HTTP port every 30 s once it has had 3 minutes to start, ten probes in a
+# row without any answer (300 s) end it and it is started again with the
+# crash back-off above; at most 3 such restarts an hour, then a reminder
+# every 10 minutes. Any HTTP answer, even a refusal, counts as an answer.
+ENGINE_URL = "http://127.0.0.1:5030/health"
+ENGINE_HANG_LIMIT = 3
+ENGINE_HANG_WINDOW = 3600
+ENGINE_STOP_SECONDS = 10
 # The history also says how each run of the server ended (#241): "start"
 # when it is started, then "stop" (asked to stop: a release or a container
 # stop), "exit" (it ended by itself), "watchdog" (ended for not answering),
@@ -253,6 +262,69 @@ class Watchdog:
         return "restart"
 
 
+def engine_probe():
+    return probe(ENGINE_URL, WATCHDOG_PROBE_TIMEOUT)
+
+
+class EngineWatch:
+    """Decides when a running source engine has hung (#256), as Watchdog
+    does for the server: `due` says when to probe it, `observe` takes the
+    probe's state and returns "restart" when it should be ended."""
+
+    def __init__(self, started, say=say):
+        self.say = say
+        self.restarts = []  # Monotonic times of this process's hang restarts.
+        self.started(started)
+
+    def started(self, now):
+        """A new engine process: its grace begins and the count starts again."""
+        self.next_probe = now + WATCHDOG_GRACE
+        self.silent = 0
+        self.reminded = None
+
+    def due(self, now):
+        if now < self.next_probe:
+            return False
+        self.next_probe = now + WATCHDOG_INTERVAL
+        return True
+
+    def observe(self, now, state):
+        if state != "silent":
+            self.silent = 0
+            self.reminded = None
+            return None
+        self.silent += 1
+        if self.silent * WATCHDOG_INTERVAL < WATCHDOG_SILENT_SECONDS:
+            return None
+        unanswered = f"Source engine has not answered for {WATCHDOG_SILENT_SECONDS} s"
+        self.restarts = [
+            at for at in self.restarts if 0 <= now - at < ENGINE_HANG_WINDOW
+        ]
+        if len(self.restarts) >= ENGINE_HANG_LIMIT:
+            if (
+                self.reminded is None
+                or now - self.reminded >= WATCHDOG_REMINDER_SECONDS
+            ):
+                self.reminded = now
+                self.say(
+                    f"{unanswered}; not restarting it again:"
+                    f" {ENGINE_HANG_LIMIT} restarts in the last hour"
+                )
+            return None
+        self.restarts.append(now)
+        return "restart"
+
+
+def end_engine(engine):
+    """Ask a hung engine to stop, and kill it if it has not within 10 s."""
+    engine.terminate()
+    try:
+        engine.wait(timeout=ENGINE_STOP_SECONDS)
+    except subprocess.TimeoutExpired:
+        engine.kill()
+        engine.wait()
+
+
 class _Stopping(BaseException):
     """Raised by the stop signal to leave a probe that is still waiting."""
 
@@ -414,6 +486,7 @@ def main():
             history,
         )
         unanswered = False
+        engine_watch = EngineWatch(started)
         while not stopping and server.poll() is None:
             if engine and engine.poll() is not None:
                 if time.monotonic() - started >= ENGINE_HEALTHY_SECONDS:
@@ -426,6 +499,30 @@ def main():
                 engine = None
                 next_engine_check = time.monotonic() + backoff
                 backoff = min(backoff * 2, ENGINE_BACKOFF_LIMIT)
+            elif engine and engine_watch.due(time.monotonic()):
+                # Like the server's probe: at most 10 s, once every 30 s.
+                try:
+                    try:
+                        probing = True
+                        state, _ = engine_probe()
+                    finally:
+                        probing = False
+                except _Stopping:
+                    continue
+                if (
+                    not stopping
+                    and engine_watch.observe(time.monotonic(), state) == "restart"
+                ):
+                    if time.monotonic() - started >= ENGINE_HEALTHY_SECONDS:
+                        backoff = ENGINE_BACKOFF_START
+                    say(
+                        f"Source engine has not answered for {WATCHDOG_SILENT_SECONDS} s;"
+                        f" restarting it in {backoff}s"
+                    )
+                    end_engine(engine)
+                    engine = None
+                    next_engine_check = time.monotonic() + backoff
+                    backoff = min(backoff * 2, ENGINE_BACKOFF_LIMIT)
             if (
                 engine is None
                 and os.environ.get("PIG_MUSIC_EMBEDDED_ENGINE", "true").lower()
@@ -436,6 +533,7 @@ def main():
                     log.close()
                 engine, log = start_engine(root)
                 started = time.monotonic()
+                engine_watch.started(started)
                 if not engine:
                     next_engine_check = time.monotonic() + 5
             if watchdog.due(time.monotonic()):
