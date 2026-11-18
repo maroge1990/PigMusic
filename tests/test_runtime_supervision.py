@@ -105,14 +105,21 @@ class HungEngine(FakeProcess):
         super().terminate()
 
 
-def engine_supervised(tmp_path, monkeypatch, ticks, answer):
+def engine_supervised(
+    tmp_path, monkeypatch, ticks, answer, kind=HungEngine, server_probes=None
+):
     """main() with a fake server living `ticks` seconds, hung engines and a
     scripted engine probe: `answer(clock)` returns its state."""
     clock = [0.0]
     engines, probes = [], []
 
+    def server_probe():
+        if server_probes is not None:
+            server_probes.append(clock[0])
+        return "ok", []
+
     def start_engine(root):
-        engines.append((clock[0], HungEngine(clock)))
+        engines.append((clock[0], kind(clock)))
         return engines[-1][1], None
 
     def sleep(seconds):
@@ -132,7 +139,7 @@ def engine_supervised(tmp_path, monkeypatch, ticks, answer):
     monkeypatch.setattr(runtime.time, "sleep", sleep)
     monkeypatch.setattr(runtime.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(runtime.signal, "signal", lambda *a: None)
-    monkeypatch.setattr(runtime, "probe", lambda: ("ok", []), raising=False)
+    monkeypatch.setattr(runtime, "probe", server_probe, raising=False)
     monkeypatch.setattr(runtime, "engine_probe", engine_probe, raising=False)
     assert runtime.main() == 1
     return engines, probes
@@ -153,6 +160,58 @@ def test_a_hung_engine_is_ended_and_started_again(tmp_path, monkeypatch, capsys)
     assert "Source engine has not answered for 300 s; restarting it in 5s" in err
     # The server itself was never touched.
     assert "Server has not answered" not in err
+
+
+class UnkillableEngine(HungEngine):
+    """Stuck in uninterruptible I/O: survives even a kill. A wait with a
+    limit lets the fake clock run out; one without would block for ever."""
+
+    def __init__(self, clock):
+        super().__init__(clock)
+        self.killed = None
+
+    def poll(self):
+        return None
+
+    def terminate(self):
+        if self.ended is None:
+            self.ended = self.clock[0]
+
+    def kill(self):
+        if self.killed is None:
+            self.killed = self.clock[0]
+
+    def wait(self, timeout=None):
+        if timeout is None:
+            raise AssertionError("waited for the engine without a limit")
+        self.clock[0] += timeout
+        raise runtime.subprocess.TimeoutExpired("slskd", timeout)
+
+
+def test_an_engine_that_outlives_a_kill_never_stalls_the_supervisor(
+    tmp_path, monkeypatch, capsys
+):
+    """Codex on 7866ac1: after the kill the supervisor waited for the engine
+    without a limit, so one stuck in kernel I/O stopped the server's
+    watchdog, every engine restart and the shutdown deadline."""
+    server_probes = []
+    engines, probes = engine_supervised(
+        tmp_path,
+        monkeypatch,
+        1500,
+        lambda now: "silent",
+        kind=UnkillableEngine,
+        server_probes=server_probes,
+    )
+    ((_, stuck),) = engines  # No second engine while the first is still there.
+    assert stuck.ended == 450 and stuck.killed == 460
+    # The server's watchdog kept probing every 30 s throughout.
+    after = [at for at in server_probes if at > 450]
+    assert after and all(b - a == 30 for a, b in zip(after, after[1:]))
+    assert after[-1] > 1400
+    err = capsys.readouterr().err
+    assert "did not stop within 10 s; killing it" in err
+    assert "Waiting for the old source engine to end" in err
 
 
 def test_an_engine_that_answers_is_never_ended(tmp_path, monkeypatch):

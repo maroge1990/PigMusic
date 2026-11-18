@@ -315,14 +315,53 @@ class EngineWatch:
         return "restart"
 
 
-def end_engine(engine):
-    """Ask a hung engine to stop, and kill it if it has not within 10 s."""
-    engine.terminate()
-    try:
-        engine.wait(timeout=ENGINE_STOP_SECONDS)
-    except subprocess.TimeoutExpired:
-        engine.kill()
-        engine.wait()
+class Ending:
+    """A hung engine being ended, followed from the supervisor's loop and
+    never waited for: asked to stop, killed after 10 s, and kept until it
+    is reaped, since a process stuck in uninterruptible I/O can outlive
+    even a kill. No other engine starts while it is still there."""
+
+    def __init__(self, process, now, say=say):
+        self.process = process
+        self.say = say
+        self.kill_at = now + ENGINE_STOP_SECONDS
+        self.killed = False
+        self.reminded = None
+        process.terminate()
+
+    def gone(self, now):
+        if self.process.poll() is not None:
+            return True
+        if not self.killed and now >= self.kill_at:
+            self.killed = True
+            self.say(
+                f"Source engine did not stop within {ENGINE_STOP_SECONDS} s; killing it"
+            )
+            self.process.kill()
+        return False
+
+    def waiting(self, now):
+        """Said when another engine is due but this one is still there."""
+        if self.reminded is None or now - self.reminded >= WATCHDOG_REMINDER_SECONDS:
+            self.reminded = now
+            self.say("Waiting for the old source engine to end before starting another")
+
+
+def reap(children, deadline, say=say):
+    """End each child by `deadline` (monotonic): wait, then kill and wait at
+    most 5 s more. One that outlives a kill is left, so stopping never
+    hangs on it."""
+    for child in children:
+        if not child:
+            continue
+        try:
+            child.wait(timeout=max(0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            child.kill()
+            try:
+                child.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                say("A child process did not end after being killed; leaving it")
 
 
 class _Stopping(BaseException):
@@ -426,6 +465,7 @@ def start_engine(root):
 def main():
     server = None
     engine = None
+    ending = None  # A hung engine still being ended.
     stopping = False
     stop_signal = None
     probing = False
@@ -436,7 +476,7 @@ def main():
         stopping = True
         if first and signum is not None:
             stop_signal = signum
-        for child in (engine, server):
+        for child in (engine, ending and ending.process, server):
             if child and child.poll() is None:
                 child.terminate()
         # A probe can wait 10 s for a server that is not answering: the
@@ -488,6 +528,8 @@ def main():
         unanswered = False
         engine_watch = EngineWatch(started)
         while not stopping and server.poll() is None:
+            if ending and ending.gone(time.monotonic()):
+                ending = None
             if engine and engine.poll() is not None:
                 if time.monotonic() - started >= ENGINE_HEALTHY_SECONDS:
                     backoff = ENGINE_BACKOFF_START
@@ -519,11 +561,19 @@ def main():
                         f"Source engine has not answered for {WATCHDOG_SILENT_SECONDS} s;"
                         f" restarting it in {backoff}s"
                     )
-                    end_engine(engine)
+                    ending = Ending(engine, time.monotonic())
                     engine = None
                     next_engine_check = time.monotonic() + backoff
                     backoff = min(backoff * 2, ENGINE_BACKOFF_LIMIT)
             if (
+                engine is None
+                and os.environ.get("PIG_MUSIC_EMBEDDED_ENGINE", "true").lower()
+                == "true"
+                and time.monotonic() >= next_engine_check
+                and ending
+            ):
+                ending.waiting(time.monotonic())
+            elif (
                 engine is None
                 and os.environ.get("PIG_MUSIC_EMBEDDED_ENGINE", "true").lower()
                 == "true"
@@ -563,21 +613,16 @@ def main():
         elif not failed:
             record_restart(history, time.time(), "stop", stop_reason(stop_signal))
         stop(None, None)
-        deadline = time.monotonic() + 25
-        for child in (engine, server):
-            if not child:
-                continue
-            try:
-                child.wait(timeout=max(0, deadline - time.monotonic()))
-            except subprocess.TimeoutExpired:
-                child.kill()
-                child.wait()
+        reap((engine, ending and ending.process, server), time.monotonic() + 25)
         return 1 if failed else 0
     finally:
-        for child in (engine, server):
+        for child in (engine, ending and ending.process, server):
             if child and child.poll() is None:
                 child.kill()
-                child.wait()
+                try:
+                    child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
         if log:
             log.close()
 
