@@ -22,7 +22,11 @@ import { usePlayer } from "./Player";
 import { addToPlaylist } from "./playlists";
 import { PlaylistPicker, type PlaylistPickerHandle } from "./PlaylistPicker";
 import { shuffled } from "./shuffle";
-import { addSongsToLibrary, downloadSongs } from "./songActions";
+import {
+  addSongsToLibrary,
+  downloadSongs,
+  withCollection,
+} from "./songActions";
 import { fromTrack, playlistSongs, songBody, type Song } from "./songs";
 import type { Track } from "./types";
 
@@ -85,15 +89,19 @@ export function useCollectionMenu({
   const player = usePlayer();
   const menu = useMenu();
   const picker = useRef<PlaylistPickerHandle>(null);
-  const withSongs = (act: (list: Song[]) => unknown) => () =>
-    void songs()
-      .then(act)
-      .catch((e) => notifyError((e as Error).message));
+  // Every action takes its session before reading the songs (Codex).
+  const withSongs =
+    (act: (list: Song[], session: string | null) => unknown) => () =>
+      void withCollection(songs, act).catch((e) =>
+        notifyError((e as Error).message),
+      );
   const actions: Record<CollectionMenuItem, () => void> = {
     play: withSongs((list) => list.length && player.play(list, 0)),
     shuffle: withSongs((list) => list.length && player.play(shuffled(list), 0)),
     "play-next": withSongs((list) => player.playNext(list)),
-    "add-to-library": withSongs((list) => addSongsToLibrary(list)),
+    "add-to-library": withSongs((list, session) =>
+      addSongsToLibrary(list, session),
+    ),
     "add-to-playlist": () => picker.current?.open(menu.trigger.current!),
     download: withSongs((list) => downloadSongs(list)),
     "save-mix": () => mix?.save(),
@@ -118,7 +126,11 @@ export function useCollectionMenu({
       <PlaylistPicker
         ref={picker}
         title={title}
-        add={async (id) => addToPlaylist(id, (await songs()).map(songBody))}
+        add={(id) =>
+          withCollection(songs, (list, session) =>
+            addToPlaylist(id, list.map(songBody), session),
+          )
+        }
       />
     </>
   );

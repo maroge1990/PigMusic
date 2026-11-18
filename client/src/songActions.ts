@@ -51,14 +51,32 @@ export async function setFavourite(song: Song, favourite: boolean) {
 }
 
 /** Asks the server for the songs not yet yours ("Add to library", D-115). */
-export async function addSongsToLibrary(songs: Song[]) {
+/**
+ * Runs a collection action on its songs under the session that chose it
+ * (Codex, #249): the session is taken before the songs are read, and the
+ * action is dropped if another account signed in meanwhile.
+ */
+export async function withCollection(
+  songs: () => Promise<Song[]>,
+  act: (list: Song[], session: string | null) => unknown,
+) {
+  const session = expectedSession();
+  const list = await songs();
+  if (expectedSession() !== session) return;
+  return act(list, session);
+}
+
+export async function addSongsToLibrary(
+  songs: Song[],
+  /** The session that asked; every batch and Try again is sent under it. */
+  session = expectedSession(),
+) {
   const wanted = songs.filter(
     (s) => s.state === "missing" || s.state === "server",
   );
   if (!wanted.length) return notify("Already in your library");
   // A large collection goes in batches within the server's limit (Codex),
   // every one under the session that asked.
-  const session = expectedSession();
   const count = (n: number) => `${n} ${n === 1 ? "song" : "songs"}`;
   async function send(rest: Song[], addedBefore: number): Promise<void> {
     let adding = addedBefore;

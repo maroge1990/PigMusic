@@ -11,7 +11,7 @@ globalThis.Event = class {
   }
 };
 const { setSessionId } = await import("../src/sessionId.ts");
-const { addSongsToLibrary, removeFromLibrary } = await import(
+const { addSongsToLibrary, removeFromLibrary, withCollection } = await import(
   "../src/songActions.ts"
 );
 const { addToPlaylist } = await import("../src/playlists.ts");
@@ -155,5 +155,36 @@ test("a collection over the server's limit goes in batches; a failed one can be 
     [1, "session-1"],
   ]);
   assert.match(shown.at(-1).text, new RegExp(`Adding ${max * 2 + 1} songs`));
+  clearNotices();
+});
+
+test("a collection action keeps the session it was chosen under", async () => {
+  // Codex: the songs are read first; a sign-in while they load must not
+  // send the action as the new account.
+  setSessionId("session-1");
+  const sent = serve({
+    "/api/v1/requests": { created: 1, existing: 0, skipped: 0 },
+  });
+  let release;
+  const loading = new Promise((r) => (release = r));
+  const run = withCollection(
+    () => loading.then(() => [song]),
+    (list, session) => addSongsToLibrary(list, session),
+  );
+  setSessionId("session-2");
+  release();
+  await run;
+  assert.deepEqual(sent, []);
+
+  // Unchanged session: the action runs, sent under the session it began in.
+  setSessionId("session-1");
+  await withCollection(
+    async () => [song],
+    (list, session) => {
+      setSessionId("session-3");
+      return addSongsToLibrary(list, session);
+    },
+  );
+  assert.deepEqual(sent, [["POST", "/api/v1/requests", "session-1"]]);
   clearNotices();
 });
