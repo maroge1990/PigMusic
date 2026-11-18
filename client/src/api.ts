@@ -72,6 +72,9 @@ export async function apiFetch(
   options = { ...options, headers, credentials: "same-origin" };
 
   if (method !== "GET" || options?.signal) {
+    // The session this request began in: a late refusal for an earlier one
+    // must not end the session signed in now (Codex).
+    const generation = sessionGeneration;
     const response = await readResponse(path, options);
     if (response.status === 409)
       // Another sign-in holds the cookie now: the write was refused unmade.
@@ -81,6 +84,7 @@ export async function apiFetch(
         .then(
           (body) =>
             body?.code === "session_changed" &&
+            generation === sessionGeneration &&
             window.dispatchEvent(
               new CustomEvent("music-session-changed", { detail: body.detail }),
             ),

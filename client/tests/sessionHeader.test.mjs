@@ -93,3 +93,31 @@ test("signed out, every write the server takes before sign-in is sent (Codex rou
     [...PUBLIC_WRITES].map((write) => [write, null]),
   );
 });
+
+test("a refusal that arrives after the session changed ends nothing", async () => {
+  // Codex: a delayed 409 from the previous account tore down the new one.
+  const { clearSessionReads } = await import("../src/api.ts");
+  globalThis.navigator ??= {};
+  setSessionId("session-1");
+  events.length = 0;
+  let release;
+  globalThis.fetch = async () => {
+    await new Promise((r) => (release = r));
+    return Response.json(
+      { code: "session_changed", detail: "Started by another sign-in." },
+      { status: 409 },
+    );
+  };
+  const write = api("/v1/me/sessions", { method: "DELETE" }).catch(() => {});
+  while (!release) await new Promise((r) => setImmediate(r));
+  clearSessionReads();
+  setSessionId("session-2");
+  events.length = 0;
+  release();
+  await write;
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(
+    events.filter(([type]) => type === "music-session-changed"),
+    [],
+  );
+});
