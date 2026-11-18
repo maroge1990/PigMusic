@@ -4,6 +4,7 @@ else."""
 
 import asyncio
 import logging
+import os
 import threading
 import time
 from pathlib import Path
@@ -422,10 +423,15 @@ def test_a_hung_check_never_holds_up_the_process_exit(tmp_path):
         "    checks.close()\n"
         "asyncio.run(main())\n"
     )
+    # The image runs the tests from outside the source tree, so find the
+    # server package the suite itself imported.
+    source = str(Path(server_app.__file__).resolve().parents[1])
+    env = {**os.environ, "PYTHONPATH": source}
     began = time.monotonic()
     subprocess.run(
         [sys.executable, "-c", script],
-        cwd=str(Path(__file__).resolve().parents[1]),
+        cwd=source,
+        env=env,
         check=True,
         timeout=20,
     )
