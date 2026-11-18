@@ -257,3 +257,19 @@ test("a similar song skipped early steers by its library or mix id", () => {
     false,
   );
 });
+
+test("a song tapped in search never carries on with similar songs", async () => {
+  // D-118, Codex: search plays only the tapped song, Keep playing or not.
+  const { continuesWithSimilar } = await import("../src/queue.ts");
+  const tapped = {
+    key: "a",
+    title: "A",
+    artist: "X",
+    state: "saved",
+    search_play: true,
+  };
+  assert.equal(continuesWithSimilar([tapped], 0, 1, "off", true), false);
+  // A song queued after it plays on as usual.
+  const added = { key: "b", title: "B", artist: "X", state: "saved" };
+  assert.equal(continuesWithSimilar([tapped, added], 1, 1, "off", true), true);
+});

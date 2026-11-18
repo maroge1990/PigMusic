@@ -211,3 +211,38 @@ test("the Playback setting saves keep playing", async ({ page }) => {
     await page.evaluate(() => localStorage.getItem("pig-music-keep-playing")),
   ).toBe("false");
 });
+
+// D-118 (Codex): a song tapped in search plays alone; with Keep playing on,
+// nothing similar is asked for or played when it ends.
+test("a song played from search ends without similar songs", async ({
+  page,
+}) => {
+  const asked: unknown[] = [];
+  await albumPlayer(page, {
+    "/v1/search": (route) =>
+      route.fulfill({ json: { tracks: album.tracks, household_tracks: [] } }),
+    "/v1/catalogue/artists": (route) =>
+      route.fulfill({
+        json: { artists: [], offset: 0, total: 0, next_offset: null },
+      }),
+    "/v1/radio/continuation": (route) => {
+      asked.push(route.request().postDataJSON());
+      return route.fulfill({
+        json: {
+          id: "similar",
+          title: "Similar songs",
+          preparing: false,
+          tracks: [similar("lib-9", "Similar one")],
+        },
+      });
+    },
+  });
+  await page.goto("/#/search?q=Charli");
+  await page.locator(".song-row", { hasText: "Von dutch" }).click();
+  const mini = page.locator(".mini-player");
+  await expect(mini).toContainText("Von dutch");
+  await finishSong(page);
+  await page.waitForTimeout(500);
+  expect(asked).toEqual([]);
+  await expect(mini).not.toContainText("Similar one");
+});

@@ -125,8 +125,12 @@ export const collectionMenuLabels: Record<CollectionMenuItem, string> = {
 
 /** A tap plays the song and carries on through its list; in search it plays
  * only that song (D-118). */
-export function tapQueue<T>(page: SongPage, list: T[], index: number) {
+export function tapQueue<T extends object>(
+  page: SongPage,
+  list: T[],
+  index: number,
+) {
   return page === "search"
-    ? { queue: [list[index]], index: 0 }
+    ? { queue: [{ ...list[index], search_play: true }], index: 0 }
     : { queue: list, index };
 }

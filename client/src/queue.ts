@@ -158,7 +158,9 @@ export function continuesWithSimilar(
     delta > 0 &&
     cursor >= 0 &&
     cursor === songs.length - 1 &&
-    !songs[cursor].radio
+    !songs[cursor].radio &&
+    // Search plays only the tapped song (D-118, Codex).
+    !songs[cursor].search_play
   );
 }
 

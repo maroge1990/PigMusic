@@ -130,8 +130,12 @@ test("only a mix adds Save and Hide this edition", () => {
 });
 
 test("search plays only the tapped song; every other list carries on", () => {
-  const list = ["a", "b", "c"];
-  assert.deepEqual(tapQueue("search", list, 1), { queue: ["b"], index: 0 });
+  const list = [{ t: "a" }, { t: "b" }, { t: "c" }];
+  // The tapped song is marked, so nothing similar follows it on its own.
+  assert.deepEqual(tapQueue("search", list, 1), {
+    queue: [{ t: "b", search_play: true }],
+    index: 0,
+  });
   for (const page of ["library", "playlist", "chart", "mix", "rewind"])
     assert.deepEqual(tapQueue(page, list, 1), { queue: list, index: 1 });
 });
