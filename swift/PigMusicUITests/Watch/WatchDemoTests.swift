@@ -72,7 +72,13 @@ final class WatchDemoTests: XCTestCase {
   func testThePlayerHasNoTitleOverTheClock() {
     launchPlaying()
     app.staticTexts["First Light"].tap()
-    expect(app.staticTexts["The Orchard"])
+    // watchOS 27 shows the artist; watchOS 26 (GitHub's runners) lists only
+    // the player's Back button, so either shows the player is open.
+    let artist = app.staticTexts["The Orchard"]
+    let back = app.buttons["BackButton"]
+    let opened = NSPredicate { _, _ in artist.exists || back.exists }
+    let wait = XCTNSPredicateExpectation(predicate: opened, object: nil)
+    XCTAssertEqual(XCTWaiter().wait(for: [wait], timeout: 10), .completed, app.debugDescription)
     sleep(1)
     XCTAssertFalse(app.staticTexts["Now playing"].exists, app.debugDescription)
   }
