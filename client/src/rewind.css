@@ -222,3 +222,17 @@ a.rewind-row {
     width: 2.75rem;
   }
 }
+/* On a narrow screen the figures take their own line under the title. */
+@media (max-width: 600px) {
+  .rewind-card-title {
+    flex: 1;
+  }
+  .rewind-card-figures {
+    flex-basis: 100%;
+    order: 1;
+    gap: var(--space-8) var(--space-16);
+  }
+  .rewind-card-figures strong {
+    font-size: var(--type-body);
+  }
+}

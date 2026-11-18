@@ -197,8 +197,10 @@ test("the Home card is hidden while the week has no plays", async ({
       "/v1/rewind": (route) => route.fulfill({ json: report("month") }),
     },
   });
+  const answered = page.waitForResponse((r) => r.url().includes("/v1/rewind"));
   await page.goto("/#/home");
-  await expect(page.getByRole("heading", { name: "Your mixes" })).toBeVisible();
+  await answered;
+  await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
   await expect(page.locator(".rewind-card")).toHaveCount(0);
 });
 

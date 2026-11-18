@@ -201,7 +201,9 @@ test("#151: one section heading and one panel shape", async ({ page }) => {
   ]) {
     await page.goto(path);
     await expect(page.locator("main h1").first()).toBeVisible();
-    await expect(page.locator("main h2").first()).toBeVisible();
+    // D-120: an empty Home has no sections, so no h2 to wait for.
+    if (path !== "/#/home")
+      await expect(page.locator("main h2").first()).toBeVisible();
     const found = await page.evaluate((panels) => {
       const loose: string[] = [];
       const looks: string[] = [];

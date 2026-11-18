@@ -10,6 +10,7 @@ import type { Track } from "./types";
 import "./mixes.css";
 import { PageHeader, SectionHeader } from "./PageHeader";
 import { InlineError, Loading } from "./EmptyState";
+import { CoverPlay, ShelfPlaceholder, usePlaceholder } from "./HomeShelf";
 import { notify, notifyError } from "./notices";
 import { go } from "./routes";
 
@@ -259,10 +260,19 @@ export function Mixes() {
       clearTimeout(timer);
     };
   }, []);
+  const something = !!(feed?.mixes.length || feed?.radio);
+  // Shown only with something to play; while the first answer or the first
+  // mixes are on their way, at most a quiet placeholder row (D-120).
+  const placeholder = usePlaceholder(
+    "mixes",
+    !something && !error && (!feed || !!feed.preparing),
+  );
+  if (!something)
+    return placeholder ? <ShelfPlaceholder label="Mixes" /> : null;
   return (
-    <section className="home-section" aria-label="Your mixes">
-      <SectionHeader title="Your mixes" />
-      {feed?.mixes.length || feed?.radio ? (
+    <section className="home-section" aria-label="Mixes">
+      <SectionHeader title="Mixes" />
+      {feed && (
         <div className="mix-row">
           {feed.radio && (
             <button
@@ -272,7 +282,6 @@ export function Mixes() {
             >
               <MixArtwork kind="radio" />
               <strong>{feed.radio.title}</strong>
-              <span>Your library and new discoveries</span>
               <small>
                 <Radio size={12} aria-hidden="true" /> Endless · Start radio
               </small>
@@ -295,34 +304,13 @@ export function Mixes() {
               >
                 <MixArtwork kind={mix.kind} title={mix.title} />
                 <strong>{mix.title}</strong>
-                <span>
-                  {[...new Set(mix.tracks.map((t) => t.artist))]
-                    .slice(0, 3)
-                    .join(" · ")}
-                </span>
-                <small>
-                  {mix.tracks.length}{" "}
-                  {mix.tracks.length === 1 ? "song" : "songs"}
-                </small>
               </a>
+              <CoverPlay title={mix.title} songs={async () => songs(mix)} />
             </CollectionCard>
           ))}
         </div>
-      ) : !feed && !error ? (
-        <Loading>Loading your mixes…</Loading>
-      ) : (
-        <p role="status">
-          {error ||
-            (feed?.preparing
-              ? "Preparing your mixes. They'll appear once their audio is ready."
-              : "Your mixes appear as your library grows. Discoveries are prepared ahead of playback.")}
-        </p>
       )}
-      {feed?.preparing && !!feed.mixes.length && (
-        <small role="status">
-          Preparing more mixes. These are ready to play.
-        </small>
-      )}
+      {error && <InlineError>{error}</InlineError>}
     </section>
   );
 }

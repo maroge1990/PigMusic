@@ -1,0 +1,49 @@
+/* Home shelves (D-120): Play over each cover, and one quiet placeholder row
+ * while a shelf loads. */
+.cover-play {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  aspect-ratio: 1;
+  pointer-events: none;
+}
+.cover-play button {
+  position: absolute;
+  right: var(--space-8);
+  bottom: var(--space-8);
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: var(--elevation-soft);
+  pointer-events: auto;
+}
+.cover-play button:hover {
+  background: var(--raised);
+}
+.shelf-placeholder-heading {
+  display: block;
+  width: 12rem;
+  max-width: 60%;
+  height: 1.125rem;
+  border-radius: var(--radius-compact);
+  background: var(--raised);
+}
+.shelf-placeholder-row {
+  display: flex;
+  gap: var(--space-16);
+  margin-top: var(--space-12);
+  overflow: hidden;
+}
+.shelf-placeholder-row span {
+  flex: 0 0 7.5rem;
+  height: 2.75rem;
+  border-radius: var(--radius-compact);
+  background: var(--raised);
+}
