@@ -100,6 +100,9 @@ export function AppleImport({
         ))
       )
         return;
+      // With or without a question: the session that started this must
+      // still be the one signed in when the review is replaced.
+      if (session !== confirmSession()) return;
       await api("/v1/admin/migration/import", {
         method: "POST",
         headers: xml,

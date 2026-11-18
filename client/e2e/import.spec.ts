@@ -74,3 +74,41 @@ test("the owner hands the same export to the whole-library review", async ({
   // The review shows the handed-over export, not the "start an import" state.
   await expect(page.getByRole("link", { name: "New import" })).toBeVisible();
 });
+
+test("a whole-library review whose session ends during its read sends nothing (Codex)", async ({
+  page,
+}) => {
+  const posted: string[] = [];
+  let answerRead: () => void = () => {};
+  const read = new Promise<void>((resolve) => (answerRead = resolve));
+  let reading = false;
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/imports/apple/preview": (route) => route.fulfill({ json: preview }),
+      "/v1/admin/migration": async (route) => {
+        reading = true;
+        await read;
+        // No selections: no question is asked, so only the session check
+        // stands between this answer and the import.
+        return route.fulfill({ json: migration });
+      },
+      "/v1/admin/migration/import": (route) => {
+        posted.push(route.request().method());
+        return route.fulfill({ json: migration });
+      },
+    },
+  });
+  await page.goto("/#/library/playlists");
+  await page.getByLabel("Apple Music XML export").setInputFiles(exportFile);
+  await page.getByText("Admin: review the whole library").click();
+  await page.getByRole("button", { name: "Review whole library" }).click();
+  await expect.poll(() => reading).toBe(true);
+  // The session ends (revoked, or another tab signed in) mid-read.
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("music-auth-required")),
+  );
+  answerRead();
+  await page.waitForTimeout(500);
+  expect(posted).toEqual([]);
+});
