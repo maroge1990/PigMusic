@@ -275,13 +275,15 @@ struct SongFailureTests {
 /// Records the sessions that became invalid.
 private final class Invalidations: NSObject, URLSessionDelegate, @unchecked Sendable {
   private let lock = NSLock()
-  private var ended: Set<ObjectIdentifier> = []
+  /// The ended sessions themselves, not their addresses: once one is freed a
+  /// new session can be given its address and would look ended too.
+  private var ended: [URLSession] = []
   func urlSession(_ session: URLSession, didBecomeInvalidWithError error: Error?) {
-    _ = lock.withLock { ended.insert(ObjectIdentifier(session)) }
+    lock.withLock { if !ended.contains(where: { $0 === session }) { ended.append(session) } }
   }
   var count: Int { lock.withLock { ended.count } }
   func contains(_ session: URLSession) -> Bool {
-    lock.withLock { ended.contains(ObjectIdentifier(session)) }
+    lock.withLock { ended.contains { $0 === session } }
   }
   /// Waits up to two seconds for `done`.
   func wait(_ done: () -> Bool) async throws -> Bool {
