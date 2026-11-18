@@ -1,94 +1,135 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { api } from "./api";
-import { InlineError, Loading } from "./EmptyState";
+import { useEffect, useRef, useState } from "react";
+import { api, currentSession } from "./api";
+import { Loading } from "./EmptyState";
 import { formatListSize } from "./format";
-import { ListActions } from "./PlaylistCards";
-import { usePlayer } from "./Player";
-import { shuffled } from "./shuffle";
-import { fromTrack } from "./songs";
-import { SortControl, byName } from "./SortControl";
+import { dismiss, notifyError } from "./notices";
+import { PlayLibrary } from "./PlayLibrary";
+import { SongRow } from "./SongRow";
+import { fromTrack, type Song } from "./songs";
 import type { Track } from "./types";
 
-type Page = { items: Track[]; total: number; next_offset: number | null };
-type SongSort = "title" | "artist";
-const songSorts = [
-  ["title", "Title A–Z"],
-  ["artist", "Artist A–Z"],
-] as const;
-/** The chosen sort, kept while the app stays open. */
-let rememberedSort: SongSort = "title";
+type Page = {
+  items: Track[];
+  total: number;
+  next_offset: number | null;
+  revision: string;
+};
+const PAGE_SIZE = 200;
 
-export function sortSongs(tracks: Track[], sort: SongSort) {
-  return [...tracks].sort((a, b) =>
-    sort === "artist"
-      ? byName(a.artist, b.artist) ||
-        byName(a.album, b.album) ||
-        (a.disc_number || 0) - (b.disc_number || 0) ||
-        (a.track_number || 0) - (b.track_number || 0)
-      : byName(a.title, b.title) || byName(a.artist, b.artist),
-  );
-}
-
-/** The Songs tab (D-120): every song in your library, read a page at a
- * time from the server, with Play, Shuffle and a sort at the top. */
+/** The Songs tab (D-120): your songs in the server's order, the first page
+ * at once and each next one as you scroll near the end (Codex). Every page
+ * must come from the same library state as the first; if the library
+ * changed in between, the list starts again from the top. A page that
+ * fails says so with Try again for that page. The server can't sort its
+ * pages, so the tab has no Sort yet. */
 export function LibrarySongsTab({
   revision,
-  songs,
+  total,
+  onRemoved,
 }: {
   /** The library's state; a change reads the songs again. */
   revision: string;
-  songs: (tracks: Track[]) => ReactNode;
+  total: number;
+  /** After a song leaves your library. */
+  onRemoved?: () => void;
 }) {
-  const player = usePlayer();
-  const [tracks, setTracks] = useState<Track[] | null>(null);
-  const [error, setError] = useState("");
-  const [sort, setSort] = useState<SongSort>(rememberedSort);
-  useEffect(() => {
-    const controller = new AbortController();
-    void (async () => {
-      const all: Track[] = [];
-      let offset: number | null = 0;
-      while (offset !== null) {
-        const page: Page = await api<Page>(
-          `/v1/library-pages/tracks?offset=${offset}&limit=200`,
-          { signal: controller.signal },
-        );
-        all.push(...page.items);
-        offset = page.next_offset;
+  const [songs, setSongs] = useState<Song[] | null>(null);
+  const [count, setCount] = useState(total);
+  const state = useRef({
+    next: 0 as number | null,
+    revision: "",
+    loading: false,
+    notice: 0,
+    run: 0,
+  });
+  const end = useRef<HTMLDivElement>(null);
+
+  async function load() {
+    const s = state.current;
+    if (s.loading || s.next === null) return;
+    s.loading = true;
+    const run = s.run;
+    const generation = currentSession();
+    const offset = s.next;
+    try {
+      const page = await api<Page>(
+        `/v1/library-pages/tracks?offset=${offset}&limit=${PAGE_SIZE}`,
+      );
+      if (run !== s.run || generation !== currentSession()) return;
+      if (s.notice) dismiss(s.notice);
+      s.notice = 0;
+      if (offset > 0 && page.revision !== s.revision) {
+        // The library changed under the list: start again from the top.
+        restart();
+        return;
       }
-      if (!controller.signal.aborted) setTracks(all);
-    })().catch((e) => {
-      if (!controller.signal.aborted) setError((e as Error).message);
-    });
-    return () => controller.abort();
+      s.revision = page.revision;
+      s.next = page.next_offset;
+      setCount(page.total);
+      const added = page.items.map((t) => fromTrack(t));
+      setSongs((old) => (offset === 0 ? added : [...(old || []), ...added]));
+    } catch (e) {
+      if (run !== s.run || generation !== currentSession()) return;
+      s.notice = notifyError(
+        (e as Error).message,
+        () => {
+          s.notice = 0;
+          return load();
+        },
+        "library-songs-page",
+      );
+    } finally {
+      if (run === s.run) s.loading = false;
+    }
+  }
+  function restart() {
+    const s = state.current;
+    s.run++;
+    s.next = 0;
+    s.revision = "";
+    s.loading = false;
+    void load();
+  }
+  useEffect(() => {
+    restart();
+    return () => {
+      state.current.run++;
+      if (state.current.notice) dismiss(state.current.notice);
+    };
   }, [revision]);
-  if (error) return <InlineError>{error}</InlineError>;
-  if (!tracks) return <Loading>Loading your songs…</Loading>;
-  const shown = sortSongs(tracks, sort);
-  const playable = shown
-    .filter((t) => t.available !== false)
-    .map((t) => fromTrack(t));
-  const seconds = tracks.reduce((sum, t) => sum + (t.duration || 0), 0);
+  // The next page is read as the end of the list comes into view.
+  useEffect(() => {
+    const target = end.current;
+    if (!target || !songs) return;
+    const watcher = new IntersectionObserver(
+      (seen) => {
+        if (seen.some((e) => e.isIntersecting)) void load();
+      },
+      { rootMargin: "800px 0px" },
+    );
+    watcher.observe(target);
+    return () => watcher.disconnect();
+  }, [songs]);
+  if (!songs) return <Loading>Loading your songs…</Loading>;
   return (
     <>
       <div className="songs-tab-header">
-        <ListActions
-          disabled={!playable.length}
-          play={(shuffle) =>
-            player.play(shuffle ? shuffled(playable) : playable, 0)
-          }
-        />
-        <p>{formatListSize(tracks.length, seconds)}</p>
-        <SortControl
-          value={sort}
-          options={songSorts}
-          onChange={(value) => {
-            rememberedSort = value;
-            setSort(value);
-          }}
-        />
+        <PlayLibrary total={count} />
+        <p>{formatListSize(count)}</p>
       </div>
-      {songs(shown)}
+      <div className="song-list">
+        {songs.map((song, index) => (
+          <SongRow
+            key={song.key}
+            song={song}
+            queue={songs}
+            index={index}
+            page="library"
+            onRemoved={onRemoved}
+          />
+        ))}
+      </div>
+      <div ref={end} className="songs-tab-end" aria-hidden="true" />
     </>
   );
 }

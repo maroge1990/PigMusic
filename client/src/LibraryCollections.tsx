@@ -231,7 +231,7 @@ export function LibraryCollections({
       {tab === "songs" && (
         <LibrarySongsTab
           revision={library.revision || library.snapshot.captured_at}
-          songs={(tracks) => songs(tracks)}
+          total={library.stats.tracks}
         />
       )}
       {tab === "favourites" && (
