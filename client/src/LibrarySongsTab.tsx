@@ -1,20 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { api, currentSession } from "./api";
+import { currentSession } from "./api";
 import { Loading } from "./EmptyState";
 import { formatListSize } from "./format";
+import { librarySource, readLibraryPage } from "./librarySource";
 import { dismiss, notifyError } from "./notices";
+import { usePlayer } from "./Player";
 import { PlayLibrary } from "./PlayLibrary";
 import { SongRow } from "./SongRow";
 import { fromTrack, type Song } from "./songs";
-import type { Track } from "./types";
-
-type Page = {
-  items: Track[];
-  total: number;
-  next_offset: number | null;
-  revision: string;
-};
-const PAGE_SIZE = 200;
 
 /** The Songs tab (D-120): your songs in the server's order, the first page
  * at once and each next one as you scroll near the end (Codex). Every page
@@ -33,6 +26,7 @@ export function LibrarySongsTab({
   /** After a song leaves your library. */
   onRemoved?: () => void;
 }) {
+  const player = usePlayer();
   const [songs, setSongs] = useState<Song[] | null>(null);
   const [count, setCount] = useState(total);
   const state = useRef({
@@ -52,9 +46,7 @@ export function LibrarySongsTab({
     const generation = currentSession();
     const offset = s.next;
     try {
-      const page = await api<Page>(
-        `/v1/library-pages/tracks?offset=${offset}&limit=${PAGE_SIZE}`,
-      );
+      const page = await readLibraryPage(offset);
       if (run !== s.run || generation !== currentSession()) return;
       if (s.notice) dismiss(s.notice);
       s.notice = 0;
@@ -126,6 +118,19 @@ export function LibrarySongsTab({
             index={index}
             page="library"
             onRemoved={onRemoved}
+            // The rows loaded so far, then the rest of the library as the
+            // queue reaches it (Codex round 2).
+            onPlay={() =>
+              player.play(
+                songs,
+                index,
+                librarySource({
+                  next: state.current.next,
+                  revision: state.current.revision,
+                  given: songs.map((s) => s.key),
+                }),
+              )
+            }
           />
         ))}
       </div>

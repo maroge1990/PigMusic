@@ -11,6 +11,7 @@ import {
   recordListen,
 } from "./listens";
 import { MiniPlayer } from "./MiniPlayer";
+import { notifyError } from "./notices";
 import {
   fromMixTrack,
   fromSimilarTrack,
@@ -333,10 +334,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           return 0;
         if (!more.length) moreSource.current = null;
         source.songs.push(...more);
-        if (more.length) setQueueVersion((v) => v + 1);
+        setQueueVersion((v) => v + 1);
         return more.length;
       })
-      .catch(() => 0)
+      .catch((e: Error) => {
+        // The source stays: Next is still offered, and Try again reads the
+        // same page again (Codex round 2).
+        if (moreFor(source.songs) === source)
+          notifyError(e.message, () => readMore(), "player-more-songs");
+        return 0;
+      })
       .finally(() => {
         if (source.pending === request) source.pending = null;
       });
@@ -493,6 +500,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     prepareUpcoming();
   }
   function step(delta: number, action?: StartAction) {
+    // Past the loaded end of a queue with more to come, the next page is
+    // read first; Repeat All wraps only once there is no more (Codex).
+    if (
+      delta > 0 &&
+      cursor.current + delta >= queue.current.length &&
+      moreFor(queue.current)
+    ) {
+      const songs = queue.current;
+      const at = cursor.current;
+      void readMore().then((added) => {
+        if (queue.current !== songs || cursor.current !== at) return;
+        // No more pages: the queue ends (or wraps) as any other does.
+        if (added || !moreFor(songs)) step(delta, action);
+      });
+      return;
+    }
     const index = stepIndex(
       queue.current.length,
       cursor.current,
@@ -501,16 +524,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     );
     const next = queue.current[index];
     if (!next) {
-      if (delta > 0 && moreFor(queue.current)) {
-        // The next page is on its way: Next waits for it.
-        const songs = queue.current;
-        const at = cursor.current;
-        void readMore().then((added) => {
-          if (queue.current !== songs || cursor.current !== at) return;
-          // No more pages: the queue ends as any other does.
-          if (added || !moreFor(songs)) step(delta, action);
-        });
-      } else if (waitsForRadio(queue.current, cursor.current, delta)) {
+      if (waitsForRadio(queue.current, cursor.current, delta)) {
         // The waiting Next belongs to this queue in this session too.
         const songs = queue.current;
         const at = cursor.current;
@@ -568,7 +582,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [song?.url, queueVersion]);
   const canPrevious = canGoPrevious(busy, !!song?.url, cursor.current);
   const index = cursor.current;
-  const hasNext = queueHasNext(queue.current, index, repeat);
+  const hasNext =
+    queueHasNext(queue.current, index, repeat) || !!moreFor(queue.current);
   useEffect(() => {
     if (!song?.url) return;
     const request = serial.current;

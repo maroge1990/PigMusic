@@ -1,19 +1,19 @@
 import { useState } from "react";
 import { Play, Shuffle } from "lucide-react";
-import { api, currentSession } from "./api";
+import { currentSession } from "./api";
 import { usePlayer } from "./Player";
 import { shuffled } from "./shuffle";
 import { fromTrack } from "./songs";
-import type { Track } from "./types";
 import { InlineError } from "./EmptyState";
+import {
+  LIBRARY_PAGE_SIZE as SAMPLE_SIZE,
+  librarySource,
+  readLibraryPage as libraryPage,
+  type LibraryPage,
+} from "./librarySource";
 
-type Page = { items: Track[]; total: number; next_offset?: number | null };
 const SAMPLE_PAGES = 5;
-const SAMPLE_SIZE = 200;
-
-const libraryPage = (offset: number) =>
-  api<Page>(`/v1/library-pages/tracks?offset=${offset}&limit=${SAMPLE_SIZE}`);
-const playable = (page: Page) =>
+const playable = (page: LibraryPage) =>
   page.items.filter((t) => t.available !== false).map((t) => fromTrack(t));
 
 /** Play or shuffle the whole library without downloading every song's
@@ -40,21 +40,11 @@ export function PlayLibrary({ total }: { total: number }) {
         if (queue.length) player.play(queue, 0);
         return;
       }
-      const first = await libraryPage(0);
+      // One reader for the first songs and every refill (Codex round 2).
+      const read = librarySource();
+      const queue = await read();
       if (currentSession() !== generation) return;
-      let next = first.next_offset ?? null;
-      const more = async () => {
-        // Pages with nothing playable are passed over, up to the end.
-        while (next !== null) {
-          const page = await libraryPage(next);
-          next = page.next_offset ?? null;
-          const songs = playable(page);
-          if (songs.length) return songs;
-        }
-        return [];
-      };
-      const queue = playable(first);
-      if (queue.length) player.play(queue, 0, more);
+      if (queue.length) player.play(queue, 0, read);
     } catch (e) {
       if (currentSession() === generation) setError((e as Error).message);
     } finally {
