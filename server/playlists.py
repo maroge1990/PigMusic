@@ -1,10 +1,12 @@
 """Ordered, persistent playlist membership, independent of the migration inventory."""
 
 import json, uuid
+from collections import defaultdict
 from datetime import datetime, timezone
 from .library import identifier
 from .library import normalise
 from .lifecycle import coordinated
+from .matching import context
 
 
 class PlaylistConflict(ValueError):
@@ -202,11 +204,19 @@ class Playlists:
             payload = json.loads(row[0])
             repeat = allow_repeat and not payload.get("favourites")
             entries = list(payload["tracks"])
+            # Same-song needs the same context, so only songs that share one
+            # are compared; a bulk append near the limit stays quick.
+            by_context = defaultdict(list)
+            if not repeat:
+                for entry in entries:
+                    by_context[context(entry)].append(entry)
             for track in tracks:
-                if repeat or not any(self.same_song(t, track) for t in entries):
+                bucket = by_context[context(track)] if not repeat else []
+                if repeat or not any(self.same_song(t, track) for t in bucket):
                     # Raises before anything is written: the whole batch fails.
                     ensure_room(entries)
                     entries.append(track)
+                    bucket.append(track)
             payload["tracks"] = entries
             payload["revision"] = payload.get("revision", 0) + 1
             conn.execute(
