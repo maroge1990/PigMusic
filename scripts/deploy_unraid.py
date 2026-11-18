@@ -111,7 +111,11 @@ def suite_commands(image, stage):
         + TEST_LIBS
         + " -r /tmp/requirements-test.lock.txt; chmod -R a+rX "
         + shlex.quote(libs),
-        "docker run --rm --network none --memory=1g --user 99:100 --tmpfs /tmp:rw,uid=99,gid=100 --tmpfs /data:rw,uid=99,gid=100 -e PYTHONDONTWRITEBYTECODE=1 -e PIG_MUSIC_PRELOAD=false -e PIG_MUSIC_EMBEDDED_ENGINE=false -v "
+        # 2 GB: the suite's temporary files live in this tmpfs and count
+        # towards the limit (about 450 MB by the end); measured peaks were
+        # 1.43 GB for the 17 Nov release and 1.39 GB for 18 Nov (#225). The
+        # benchmarks below keep their 1 GB scale gates.
+        "docker run --rm --network none --memory=2g --user 99:100 --tmpfs /tmp:rw,uid=99,gid=100 --tmpfs /data:rw,uid=99,gid=100 -e PYTHONDONTWRITEBYTECODE=1 -e PIG_MUSIC_PRELOAD=false -e PIG_MUSIC_EMBEDDED_ENGINE=false -v "
         + shlex.quote(stage + "/tests:/tests:ro")
         + " -v "
         + shlex.quote(stage + ":/source:ro")

@@ -107,7 +107,7 @@ def test_release_verify_checks_the_image_then_runs_the_suite_with_the_test_folde
     assert "--network none" not in install
 
     # The suite itself still has no network and the exact image.
-    assert suite.startswith("docker run --rm --network none --memory=1g --user 99:100")
+    assert suite.startswith("docker run --rm --network none --memory=2g --user 99:100")
     assert shlex.quote(stage + "/testlibs:/opt/pig-test:ro") in suite
     assert "-e PYTHONPATH=/opt/pig-test " in suite
     assert (shlex.quote(image) + " -m pytest /tests") in suite
