@@ -283,7 +283,10 @@ final class DemoLibraryTests: XCTestCase {
     app.buttons["Sunrise, The Orchard"].tap()
     expect(app.buttons["Play First Light by The Orchard"])
     let more = app.buttons["More actions for First Light"]
-    expect(more)
+    // The page is still sliding in for a moment.
+    let ready = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "hittable == true"), object: more)
+    XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 10), .completed, app.debugDescription)
     more.tap()
     let playlist = app.buttons["Add to playlist"]
     expect(playlist)
@@ -353,10 +356,18 @@ final class DemoLibraryTests: XCTestCase {
   /// first, as signing out another device does.
   func testSigningOutOfThisIPhoneAsksFirst() {
     launch()
-    app.buttons["Account"].firstMatch.tap()
+    // A tap while Home is still settling can be lost: try again until the
+    // Account sheet shows.
+    let account = app.navigationBars["Account"]
+    for _ in 0..<3 where !account.exists {
+      app.buttons["Account"].firstMatch.tap()
+      _ = account.waitForExistence(timeout: 5)
+    }
+    expect(account)
+    // At the foot of the form, drawn only once scrolled to.
     let signOut = app.buttons["Sign out"]
+    for _ in 0..<6 where !(signOut.exists && signOut.isHittable) { app.swipeUp() }
     expect(signOut)
-    for _ in 0..<5 where !signOut.isHittable { app.swipeUp() }
     signOut.tap()
     let question = app.staticTexts["Sign out of this iPhone? It will need to sign in again."]
     expect(question)
