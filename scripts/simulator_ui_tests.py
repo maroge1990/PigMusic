@@ -6,11 +6,20 @@ and runs swift/PigMusicUITests in order: the empty Watch, the iPhone (the
 offline `--demo` library, then signing in to the server and sending an album
 to the Watch) and the Watch's own `--demo` library. WatchConnectivity file
 transfers never reach a Watch simulator, so what the iPhone sends stops there.
-Shuts the simulators and the server down afterwards. Runs on a Mac with Xcode,
-the iOS and watchOS simulator runtimes, FFmpeg and the server's Python
-packages in `.venv`; see docs/TESTING.md.
+Shuts the simulators and the server down afterwards. Runs in CI on GitHub's
+macOS runners (native.yml), or on a Mac with Xcode, the iOS and watchOS
+simulator runtimes, FFmpeg and the server's Python packages in `.venv`; see
+docs/TESTING.md.
 
     python3 scripts/simulator_ui_tests.py [--skip-build] [--only iphone|watch] [--keep]
+        [--iphone NAME] [--watch NAME] [--create-pair] [--retry-launch-timeouts]
+
+`--iphone` and `--watch` (or PIG_UI_IPHONE and PIG_UI_WATCH) pick the pair by
+device name; `--create-pair` instead creates a fresh pair of those device types
+(else the newest) on the newest iOS and watchOS runtimes and deletes it
+afterwards (CI); `--retry-launch-timeouts` reruns a test
+class once when the simulator failed to launch the app, never for any other
+failure.
 """
 
 from __future__ import annotations
@@ -38,6 +47,13 @@ PHASES = (
     ("iphone", "PigMusicUITests", ["DemoLibraryTests", "ServerTests"]),
     ("watch", "PigMusicWatchUITests", ["WatchDemoTests"]),
 )
+# What xcodebuild prints when a slow simulator never got the app running: a
+# test class that failed with one of these may be rerun once (CI turns it on).
+LAUNCH_TIMEOUTS = (
+    "Failed to launch",
+    "Timed out attempting to launch app",
+    "Scene update failed",
+)
 
 
 def simctl(*args, check=True):
@@ -46,16 +62,83 @@ def simctl(*args, check=True):
     )
 
 
-def paired() -> dict[str, str]:
+def choose_pair(
+    pairs: dict, iphone: str | None = None, watch: str | None = None
+) -> dict[str, str] | None:
+    """The first pair whose iPhone (and Watch) names match, or None."""
+    for pair in pairs.values():
+        phone_name, watch_name = pair["phone"]["name"], pair["watch"]["name"]
+        if iphone and phone_name != iphone:
+            continue
+        if not iphone and not phone_name.startswith("iPhone"):
+            continue
+        if watch and watch_name != watch:
+            continue
+        return {"iphone": pair["phone"]["udid"], "watch": pair["watch"]["udid"]}
+    return None
+
+
+def paired(iphone: str | None = None, watch: str | None = None) -> dict[str, str]:
     """{"iphone": udid, "watch": udid} for the first available iPhone pair."""
     pairs = json.loads(simctl("list", "pairs", "available", "-j").stdout)["pairs"]
-    for pair in pairs.values():
-        if pair["phone"]["name"].startswith("iPhone"):
-            return {"iphone": pair["phone"]["udid"], "watch": pair["watch"]["udid"]}
+    found = choose_pair(pairs, iphone, watch)
+    if found:
+        return found
     raise SystemExit(
         "No paired iPhone and Watch simulator: create one with "
-        "`xcrun simctl pair <watch udid> <iphone udid>`."
+        "`xcrun simctl pair <watch udid> <iphone udid>`, or pass --create-pair."
     )
+
+
+def _version(runtime: dict) -> tuple[int, ...]:
+    return tuple(int(part) for part in runtime["version"].split(".") if part.isdigit())
+
+
+def new_pair_plan(
+    runtimes: list[dict], iphone: str | None = None, watch: str | None = None
+) -> dict[str, tuple[str, str, str]]:
+    """{"iphone"|"watch": (name, device type, runtime)} on the newest iOS and
+    watchOS runtimes: the named device types, else each runtime's last."""
+    families = {
+        "iphone": ("iOS", "iPhone", iphone),
+        "watch": ("watchOS", "Apple Watch", watch),
+    }
+    plan = {}
+    for kind, (platform, family, wanted) in families.items():
+        candidates = sorted(
+            (
+                runtime
+                for runtime in runtimes
+                if runtime.get("isAvailable", True)
+                and runtime.get("platform", runtime["name"].split()[0]) == platform
+            ),
+            key=_version,
+        )
+        if not candidates:
+            raise SystemExit(f"No {platform} simulator runtime is installed")
+        runtime = candidates[-1]
+        types = [
+            device
+            for device in runtime.get("supportedDeviceTypes", [])
+            if device.get("productFamily") == family
+            and (not wanted or device["name"] == wanted)
+        ]
+        if not types:
+            raise SystemExit(f"{runtime['name']} has no {wanted or family} simulator")
+        plan[kind] = (types[-1]["name"], types[-1]["identifier"], runtime["identifier"])
+    return plan
+
+
+def create_pair(iphone: str | None, watch: str | None) -> dict[str, str]:
+    """Creates and pairs a fresh iPhone and Watch; returns their UDIDs."""
+    runtimes = json.loads(simctl("list", "runtimes", "available", "-j").stdout)
+    devices = {}
+    plan = new_pair_plan(runtimes["runtimes"], iphone, watch)
+    for kind, (name, device_type, runtime) in plan.items():
+        devices[kind] = simctl("create", name, device_type, runtime).stdout.strip()
+        print(f"Created {name} on {runtime.rsplit('.', 1)[-1]}", file=sys.stderr)
+    simctl("pair", devices["watch"], devices["iphone"])
+    return devices
 
 
 def booted() -> set[str]:
@@ -141,7 +224,27 @@ def wait_for(server: subprocess.Popen, account: Path) -> dict:
     raise SystemExit("The test server did not answer within two minutes")
 
 
-def main(argv=None):
+def launch_timed_out(log: str) -> bool:
+    """Whether xcodebuild's output says the app never got launched."""
+    return any(text in log for text in LAUNCH_TIMEOUTS)
+
+
+def run_tests(
+    command: list[str], environment: dict, log: Path, retry: bool, run=subprocess.run
+) -> subprocess.CompletedProcess:
+    """Runs one `xcodebuild test`; with `retry`, once more only when it failed
+    because the app did not launch. `log` gets the whole last attempt, with any
+    failing screen's accessibility tree; a retried first attempt sits beside it."""
+    result = run(command, capture_output=True, text=True, env=environment)
+    if retry and result.returncode and launch_timed_out(result.stdout):
+        log.with_suffix(".attempt1.log").write_text(result.stdout)
+        print("  the app did not launch: retrying once", file=sys.stderr)
+        result = run(command, capture_output=True, text=True, env=environment)
+    log.write_text(result.stdout)
+    return result
+
+
+def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--skip-build", action="store_true", help="Test the apps already installed"
@@ -152,19 +255,48 @@ def main(argv=None):
         action="store_true",
         help="Leave the simulators and the test server running",
     )
-    args = parser.parse_args(argv)
-    devices = paired()
+    parser.add_argument(
+        "--iphone",
+        default=os.environ.get("PIG_UI_IPHONE") or None,
+        help="iPhone simulator name (default: PIG_UI_IPHONE, else the first pair's)",
+    )
+    parser.add_argument(
+        "--watch",
+        default=os.environ.get("PIG_UI_WATCH") or None,
+        help="Watch simulator name (default: PIG_UI_WATCH, else the iPhone's)",
+    )
+    parser.add_argument(
+        "--create-pair",
+        action="store_true",
+        help="Create a fresh pair on the newest runtimes, deleted afterwards (CI)",
+    )
+    parser.add_argument(
+        "--retry-launch-timeouts",
+        action="store_true",
+        help="Rerun a test class once when the app failed to launch (CI)",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    # CI's runner images keep pairs on older runtimes than the apps support.
+    created = args.create_pair
+    if created:
+        devices = create_pair(args.iphone, args.watch)
+    else:
+        devices = paired(args.iphone, args.watch)
     WORK.mkdir(parents=True, exist_ok=True)
     built = {}
-    if not args.skip_build:
-        for kind, scheme in APPS.items():
-            built[kind] = build(scheme, devices[kind])
     failed = []
     server = None
     # Other projects share the Mac's simulators: only the devices this run
     # boots are shut down afterwards, never all of them.
     running_before = booted()
     try:
+        if not args.skip_build:
+            for kind, scheme in APPS.items():
+                built[kind] = build(scheme, devices[kind])
         server, account = start_server()
         # The Watch boots only beside its booted iPhone.
         for kind in ("iphone", "watch"):
@@ -187,7 +319,7 @@ def main(argv=None):
             if args.only and kind != args.only:
                 continue
             print(f"{scheme} ({', '.join(classes)})", file=sys.stderr)
-            result = subprocess.run(
+            result = run_tests(
                 [
                     "xcodebuild",
                     "test",
@@ -199,12 +331,10 @@ def main(argv=None):
                     f"id={devices[kind]}",
                     *(f"-only-testing:{scheme}/{name}" for name in classes),
                 ],
-                capture_output=True,
-                text=True,
-                env=environment,
+                environment,
+                WORK / f"{scheme}-{classes[0]}.log",
+                args.retry_launch_timeouts,
             )
-            # The whole log, with any failing screen's accessibility tree.
-            (WORK / f"{scheme}-{classes[0]}.log").write_text(result.stdout)
             for line in result.stdout.splitlines():
                 if " error: " in line or line.startswith(("Test Case", "** TEST")):
                     print(line)
@@ -219,6 +349,8 @@ def main(argv=None):
             for udid in devices.values():
                 if udid not in running_before:
                     simctl("shutdown", udid, check=False)
+                if created:
+                    simctl("delete", udid, check=False)
     if failed:
         print("Failed:", "; ".join(failed), file=sys.stderr)
         return 1
