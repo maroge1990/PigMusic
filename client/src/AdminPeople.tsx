@@ -1,3 +1,4 @@
+import { expectedSession, sessionHeader } from "./sessionId";
 import { askToConfirm } from "./confirmDialog";
 import { notify } from "./notices";
 import { useEffect, useState } from "react";
@@ -124,48 +125,58 @@ export function AdminPeople() {
               <>
                 <button
                   aria-label={`Reset password for ${p.display_name}`}
-                  onClick={async () =>
-                    (await askToConfirm({
+                  onClick={async () => {
+                    const session = await askToConfirm({
                       title: `Reset ${p.display_name}'s password?`,
                       body: `${p.display_name} is signed out everywhere at once and needs the new invite link to choose a password. This can't be undone.`,
                       action: "Reset password",
                       destructive: true,
-                    })) &&
-                    void action(
-                      async () =>
-                        setInvite({
-                          invite: await api<Invite>(
-                            `/v1/people/${p.id}/setup-code`,
-                            { method: "POST" },
-                          ),
-                          name: p.display_name,
-                        }),
-                      "New invite created",
-                    )
-                  }
+                    });
+                    if (session)
+                      void action(
+                        async () =>
+                          setInvite({
+                            invite: await api<Invite>(
+                              `/v1/people/${p.id}/setup-code`,
+                              {
+                                method: "POST",
+                                headers: sessionHeader(session),
+                              },
+                            ),
+                            name: p.display_name,
+                          }),
+                        "New invite created",
+                      );
+                  }}
                 >
                   Reset password
                 </button>
                 <button
                   aria-label={`${p.disabled ? "Enable" : "Disable"} ${p.display_name}`}
-                  onClick={async () =>
+                  onClick={async () => {
                     // Disabling signs them out everywhere: ask first (#72).
-                    (p.disabled ||
-                      (await askToConfirm({
-                        title: `Disable ${p.display_name}'s account?`,
-                        body: `${p.display_name} is signed out everywhere and can't sign in until you enable the account again.`,
-                        action: "Disable",
-                        destructive: true,
-                      }))) &&
-                    void action(
-                      () =>
-                        api(`/v1/people/${p.id}/disabled`, {
-                          ...json({ disabled: !p.disabled }),
-                          method: "PUT",
-                        }),
-                      p.disabled ? "Account enabled" : "Account disabled",
-                    )
-                  }
+                    const session = p.disabled
+                      ? expectedSession()
+                      : await askToConfirm({
+                          title: `Disable ${p.display_name}'s account?`,
+                          body: `${p.display_name} is signed out everywhere and can't sign in until you enable the account again.`,
+                          action: "Disable",
+                          destructive: true,
+                        });
+                    if (session)
+                      void action(
+                        () =>
+                          api(`/v1/people/${p.id}/disabled`, {
+                            method: "PUT",
+                            headers: {
+                              "Content-Type": "application/json",
+                              ...sessionHeader(session),
+                            },
+                            body: JSON.stringify({ disabled: !p.disabled }),
+                          }),
+                        p.disabled ? "Account enabled" : "Account disabled",
+                      );
+                  }}
                 >
                   {p.disabled ? "Enable" : "Disable"}
                 </button>

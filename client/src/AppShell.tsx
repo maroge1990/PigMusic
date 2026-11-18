@@ -1,7 +1,7 @@
 import { flushPending } from "./deferred";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { setConfirmIdentity } from "./confirmDialog";
+import { setSessionId } from "./sessionId";
 import { notifyError } from "./notices";
 import { openSessionChannel } from "./sessionChannel";
 import { NoticeArea } from "./Notice";
@@ -193,13 +193,9 @@ export function AppShell() {
       }
       const me = await api<Person & { session_id?: string }>("/v1/me");
       session.current = me.session_id ?? null;
-      // A confirmed action rechecks that the server still has this session.
-      setConfirmIdentity(
-        session.current,
-        async () =>
-          (await api<{ session_id?: string }>("/v1/me")).session_id ?? null,
-        () => notifyError("Couldn't check who is signed in. Try again."),
-      );
+      // Every write names this session; the server refuses it if another
+      // sign-in holds the cookie by the time it arrives.
+      setSessionId(session.current);
       setUser(me);
       setError("");
     } catch (e) {
@@ -225,15 +221,23 @@ export function AppShell() {
     // Another tab signed in or out: the shared cookie changed, so this
     // tab's session is gone. Drop its questions and deferred writes, then
     // read who is signed in now.
-    const stopListening = tabs.listen(() => {
+    const lost = () => {
       session.current = null;
-      setConfirmIdentity(null, null);
       clearSessionReads();
       void refresh();
-    });
+    };
+    const stopListening = tabs.listen(lost);
+    // The server refused a write started under an earlier sign-in.
+    const changed = (event: Event) => {
+      lost();
+      // After the session's notices are cleared, so this one stays.
+      notifyError(String((event as CustomEvent).detail));
+    };
+    window.addEventListener("music-session-changed", changed);
     return () => {
       window.removeEventListener("music-auth-required", expired);
       window.removeEventListener("music-forbidden", forbidden);
+      window.removeEventListener("music-session-changed", changed);
       stopListening();
     };
   }, []);
@@ -249,10 +253,10 @@ export function AppShell() {
 
   async function signOut() {
     // The server may be unreachable: this device is cleared anyway (#80).
+    // The logout names the session this click was made under.
     if (!(await signOutSession(api, session.current, undefined, flushPending)))
       setError(OFFLINE_SIGN_OUT);
     session.current = null;
-    setConfirmIdentity(null, null);
     clearSessionReads();
     tabs.announce("signed-out");
     window.dispatchEvent(new Event("music-signed-out"));

@@ -160,6 +160,8 @@ test("more live Undos than fit are all shown, routine notices dropped", () => {
 
 test("page-hide sends each pending action once with keepalive; an undone one never", async () => {
   const { defer, flushPending } = await import("../src/deferred.ts");
+  const { setSessionId } = await import("../src/sessionId.ts");
+  setSessionId("session-1");
   const area = watch();
   const sent = [];
   const offer = (name) => {

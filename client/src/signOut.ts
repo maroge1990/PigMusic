@@ -12,7 +12,10 @@ const UNKNOWN = "unknown";
 export const OFFLINE_SIGN_OUT =
   "Signed out on this device. PigMusic couldn't reach the server, so it will finish signing out the next time it opens.";
 
-type Call = (path: string, options?: RequestInit) => Promise<unknown>;
+type Call = (
+  path: string,
+  options?: RequestInit & { anySession?: boolean },
+) => Promise<unknown>;
 
 function failedCode(error: unknown) {
   return (error as { code?: string } | null)?.code;
@@ -28,14 +31,26 @@ export async function signOutSession(
   storage: Pick<Storage, "setItem"> = localStorage,
   flush: () => Promise<unknown> = async () => {},
 ): Promise<boolean> {
+  // Writes still waiting for their Undo time go first, under this session
+  // (D-79).
   await flush().catch(() => {});
+  // No session known (it was already lost): nothing of this tab's to end,
+  // and the cookie may be another sign-in's.
+  if (!session) return true;
   try {
-    await call("/v1/auth/logout", { method: "POST" });
+    await call("/v1/auth/logout", {
+      method: "POST",
+      headers: { "X-Pig-Expected-Session": session },
+    });
     return true;
   } catch (error) {
-    if (failedCode(error) === "authentication_required") return true;
+    const code = failedCode(error);
+    // Signed out already, or the cookie is another sign-in's now: this
+    // session is out of this browser's reach either way.
+    if (code === "authentication_required" || code === "session_changed")
+      return true;
     try {
-      storage.setItem(PENDING, session || UNKNOWN);
+      storage.setItem(PENDING, session);
     } catch {
       // Private browsing: the session ends when it expires.
     }
@@ -58,8 +73,10 @@ export async function finishSignOut(
   if (!pending) return true;
   if (pending === UNKNOWN) return false;
   try {
+    // An earlier sign-in's session, ended by its id: it names no session.
     await call(`/v1/me/sessions/${encodeURIComponent(pending)}`, {
       method: "DELETE",
+      anySession: true,
     });
   } catch (error) {
     // Already signed out, or now signed in as someone else, whose sessions

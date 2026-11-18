@@ -4,14 +4,10 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 
-const {
-  answerConfirm,
-  askToConfirm,
-  confirmSession,
-  endConfirmSession,
-  setConfirmIdentity,
-  subscribeConfirm,
-} = await import("../src/confirmDialog.ts");
+const { setSessionId } = await import("../src/sessionId.ts");
+const { answerConfirm, askToConfirm, endConfirmSession, subscribeConfirm } =
+  await import("../src/confirmDialog.ts");
+const { clearNotices, subscribe } = await import("../src/notices.ts");
 
 const question = {
   title: "Disable Sam's account?",
@@ -20,17 +16,20 @@ const question = {
   destructive: true,
 };
 
-test("the action resolves true and Cancel false", async () => {
+test.beforeEach(() => setSessionId("s-pat"));
+
+test("the action resolves with the asking session, Cancel with null", async () => {
   let open = null;
   const stop = subscribeConfirm((q) => (open = q));
   const yes = askToConfirm(question);
   assert.equal(open.title, "Disable Sam's account?");
   answerConfirm(open.id, true);
-  assert.equal(await yes, true);
+  // The write names this session, so the server refuses it under another.
+  assert.equal(await yes, "s-pat");
   assert.equal(open, null);
   const no = askToConfirm(question);
   answerConfirm(open.id, false);
-  assert.equal(await no, false);
+  assert.equal(await no, null);
   stop();
 });
 
@@ -39,9 +38,9 @@ test("a new question cancels one still open", async () => {
   const stop = subscribeConfirm((q) => (open = q));
   const first = askToConfirm(question);
   const second = askToConfirm({ ...question, title: "Reset Sam's password?" });
-  assert.equal(await first, false);
+  assert.equal(await first, null);
   answerConfirm(open.id, true);
-  assert.equal(await second, true);
+  assert.equal(await second, "s-pat");
   stop();
 });
 
@@ -51,7 +50,7 @@ test("a stale handler can't answer a newer question (Codex round 1)", async () =
   const first = askToConfirm(question);
   const firstId = open.id;
   const second = askToConfirm({ ...question, title: "Reset Sam's password?" });
-  assert.equal(await first, false);
+  assert.equal(await first, null);
   // The first question's buttons, still on screen for a moment, answer.
   answerConfirm(firstId, true);
   assert.equal(open?.title, "Reset Sam's password?");
@@ -60,7 +59,7 @@ test("a stale handler can't answer a newer question (Codex round 1)", async () =
   await new Promise((r) => setImmediate(r));
   assert.equal(settled, false);
   answerConfirm(open.id, false);
-  assert.equal(await second, false);
+  assert.equal(await second, null);
   stop();
 });
 
@@ -70,7 +69,7 @@ test("losing the session cancels an open question (Codex round 1)", async () => 
   const asked = askToConfirm(question);
   const id = open.id;
   endConfirmSession();
-  assert.equal(await asked, false);
+  assert.equal(await asked, null);
   assert.equal(open, null);
   // Its buttons can't bring it back for the next account.
   answerConfirm(id, true);
@@ -78,39 +77,47 @@ test("losing the session cancels an open question (Codex round 1)", async () => 
   stop();
 });
 
-test("a question asked for an ended session is never shown", async () => {
-  const session = confirmSession();
-  endConfirmSession();
+test("a question started under a session that has changed is never shown", async () => {
   let open = null;
   const stop = subscribeConfirm((q) => (open = q));
-  assert.equal(await askToConfirm(question, session), false);
+  const started = "s-pat";
+  setSessionId("s-sam");
+  assert.equal(await askToConfirm(question, started), null);
   assert.equal(open, null);
   stop();
 });
 
-test("a confirmed question checks the server still has the asking session (Codex)", async () => {
+test("with no session known, nothing is asked and it says why (Codex round 2)", async () => {
+  // Between losing a session and /v1/me answering again.
+  setSessionId(null);
+  clearNotices();
+  let notices = [];
+  const stopNotices = subscribe((all) => (notices = all));
   let open = null;
   const stop = subscribeConfirm((q) => (open = q));
-  // Another tab signed in as Sam, replacing the shared cookie.
-  let server = "s-pat";
-  setConfirmIdentity("s-pat", async () => server);
+  assert.equal(await askToConfirm(question), null);
+  assert.equal(open, null);
+  assert.deepEqual(
+    notices.map((n) => [n.kind, n.text]),
+    [
+      [
+        "error",
+        "Couldn't tell who is signed in. Reload PigMusic and try again.",
+      ],
+    ],
+  );
+  stop();
+  stopNotices();
+  clearNotices();
+});
+
+test("a question answered after the session changed resolves null", async () => {
+  let open = null;
+  const stop = subscribeConfirm((q) => (open = q));
   const asked = askToConfirm(question);
-  server = "s-sam";
+  setSessionId("s-sam");
   answerConfirm(open.id, true);
-  assert.equal(await asked, false);
-  // Still Pat's session: the action goes ahead.
-  server = "s-pat";
-  const again = askToConfirm(question);
-  answerConfirm(open.id, true);
-  assert.equal(await again, true);
-  // The check couldn't be made: nothing is done.
-  setConfirmIdentity("s-pat", async () => {
-    throw new Error("offline");
-  });
-  const offline = askToConfirm(question);
-  answerConfirm(open.id, true);
-  assert.equal(await offline, false);
-  setConfirmIdentity(null, null);
+  assert.equal(await asked, null);
   stop();
 });
 

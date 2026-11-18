@@ -13,6 +13,9 @@ registerHooks({
   },
 });
 
+// A signed-in tab: every write names its session (#250).
+const { setSessionId } = await import("../src/sessionId.ts");
+setSessionId("session-1");
 const { defer, flushPending, isPending } = await import("../src/deferred.ts");
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));

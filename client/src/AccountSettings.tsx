@@ -1,4 +1,5 @@
 import { askToConfirm } from "./confirmDialog";
+import { sessionHeader } from "./sessionId";
 import { notify } from "./notices";
 import { useEffect, useState } from "react";
 import {
@@ -256,18 +257,17 @@ export function AccountSettings({
           <button
             className="secondary-button"
             onClick={async () => {
-              if (
-                await askToConfirm({
-                  title: "Sign out everywhere else?",
-                  body: "Every other browser and app signed in to your account is signed out at once. This device stays signed in.",
-                  action: "Sign out everywhere else",
-                  destructive: true,
-                })
-              )
+              const session = await askToConfirm({
+                title: "Sign out everywhere else?",
+                body: "Every other browser and app signed in to your account is signed out at once. This device stays signed in.",
+                action: "Sign out everywhere else",
+                destructive: true,
+              });
+              if (session)
                 void action(async () => {
                   const result = await api<{ revoked: number }>(
                     "/v1/me/sessions",
-                    { method: "DELETE" },
+                    { method: "DELETE", headers: sessionHeader(session) },
                   );
                   notify(
                     `Signed out ${result.revoked} other ${result.revoked === 1 ? "device" : "devices"}.`,
