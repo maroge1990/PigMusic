@@ -82,6 +82,9 @@ class Recovery:
                     "SELECT * FROM library_members WHERE track_id=?", (track_id,)
                 )
             ]
+        # Before any file changes: a record its reader would set aside
+        # would leave the song neither in the library nor in Trash.
+        document_records.check_new("removed:" + identity, record)
         return record, root
 
     def begin(self, conn, record, exclude=True):

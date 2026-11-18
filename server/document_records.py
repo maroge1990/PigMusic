@@ -60,41 +60,60 @@ UNSIGNED = (0, 2**64 - 1)  # A device or inode number: compared, never bound.
 
 
 def _text(value):
-    """Text SQLite and the filesystem take: it encodes as UTF-8 (json reads
-    an escaped lone surrogate, which neither does)."""
+    """Text SQLite binds: it encodes as UTF-8 (json reads an escaped lone
+    surrogate, which SQLite refuses)."""
     try:
         value.encode("utf-8")
     except UnicodeEncodeError:
         raise ValueError("text that is not UTF-8") from None
 
 
-def _in_range(value, field, bounds=INTEGER):
-    """Every number in `value` is one SQLite binds (#257): an integer
-    within signed 64 bits and a finite float (json reads NaN and Infinity),
-    and every text encodes as UTF-8, so a record never fails part-way
-    through a Restore or Undo."""
-    if isinstance(value, dict):
-        for key, item in value.items():
-            _text(key)
-            _in_range(item, field, bounds)
-    elif isinstance(value, list):
-        for item in value:
-            _in_range(item, field, bounds)
-    elif isinstance(value, str):
-        _text(value)
-    elif isinstance(value, bool):
-        pass
-    elif isinstance(value, int):
-        if not bounds[0] <= value <= bounds[1]:
-            raise ValueError(field + " out of range")
-    elif isinstance(value, float) and not math.isfinite(value):
+def _integer(value, field, bounds=INTEGER):
+    if not isinstance(value, bool) and not bounds[0] <= value <= bounds[1]:
         raise ValueError(field + " out of range")
 
 
-def _numbers_in_range(record, unsigned=()):
-    for field, value in record.items():
-        _text(field)
-        _in_range(value, field, UNSIGNED if field in unsigned else INTEGER)
+def _finite(record, fields):
+    """A time compared and converted with int(): json also reads NaN and
+    Infinity, which int() refuses."""
+    for field in fields:
+        value = record.get(field)
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError(field + " out of range")
+
+
+# Only what a reader binds into SQL is held to SQLite's limits (#257): the
+# song snapshot, paths and other JSON metadata keep any value json stores
+# (a file's mtime_ns may pass 2**63; a file name need not be UTF-8).
+
+
+def bindable_removal(record):
+    for field in ("id", "track_id"):
+        _text(record[field])
+    for user, song, added, source in record.get("memberships", []):
+        for text in (user, song, source):
+            _text(text)
+        _integer(added, "memberships")
+    for number in record.get("quarantine_folder") or []:
+        _integer(number, "quarantine_folder", UNSIGNED)
+    _finite(record, ("removed_at", "purged_at"))
+
+
+def bindable_operation(record):
+    for field in ("id", "track_id"):
+        _text(record[field])
+
+
+def bindable_tidy(record):
+    _text(record["id"])
+    for text in (*record["moves"], *record["removals"]):
+        _text(text)
+    for row in record["memberships"]:
+        for text in row:
+            _text(text)
+    for item in record.get("unresolved", []):
+        _text(item["id"])
+    _finite(record, ("time",))
 
 
 def usable_removal(record):
@@ -185,6 +204,12 @@ SHAPES = {
     "tidy": usable_tidy,
 }
 
+BINDABLE = {
+    "removed": bindable_removal,
+    "organisation": bindable_operation,
+    "tidy": bindable_tidy,
+}
+
 _reported = set()
 _lock = threading.Lock()
 
@@ -212,6 +237,21 @@ def unfinished(area, name, error):
     startup_problems.report(area, name, error, kind="unfinished")
 
 
+def check_new(name, record):
+    """Raise ValueError if `record`, about to be saved as `name`, would not
+    read back: checked before any file changes, so nothing is moved that
+    Restore or Undo could not find again."""
+    prefix = name.split(":", 1)[0]
+    try:
+        again = json.loads(json.dumps(record))
+        SHAPES[prefix](again)
+        BINDABLE[prefix](again)
+    except Exception:
+        raise ValueError(
+            "This song's details can't be saved for Restore; nothing was changed."
+        ) from None
+
+
 def clear():
     """For tests: forget which records were reported."""
     with _lock:
@@ -226,7 +266,7 @@ def parse(name, payload):
         if not isinstance(record, dict):
             raise TypeError("record is not an object")
         SHAPES[prefix](record)
-        _numbers_in_range(record, unsigned={"quarantine_folder"})
+        BINDABLE[prefix](record)
     except Exception as error:
         report(AREAS[prefix], name, error)
         return None

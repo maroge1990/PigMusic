@@ -473,14 +473,54 @@ def test_a_removal_with_text_that_is_not_utf8_is_set_aside_before_restore(
     assert "removed:" + record["id"] in reported("trash")
 
 
-def test_a_record_with_a_key_that_is_not_utf8_is_set_aside(tmp_path, monkeypatch):
+def test_a_song_snapshot_keeps_any_value_json_stores(tmp_path, monkeypatch):
+    """Only what is bound into SQL is held to SQLite's limits: the song
+    snapshot and paths may hold a large number or a non-UTF-8 file name."""
     store, root, path, track = setup(tmp_path, monkeypatch)
     record = Recovery(store).remove("saved")
-    record["track"] = {"\ud800": "x"}
-    assert document_records.parse("removed:k", json.dumps(record)) is None
+    record["track"] = {"\ud800": "x", "mtime_ns": 2**63, "relative_path": "\udcff"}
+    record["original"] = "Artist/\udcff.mp3"
+    assert document_records.parse("removed:k", json.dumps(record)) == record
 
 
-@pytest.mark.parametrize("removed_at", [float("inf"), 2**63])
+def test_a_song_whose_file_time_passes_64_bits_is_removed_and_restored(
+    tmp_path, monkeypatch
+):
+    """Codex on 438047f: an mtime of 2**63 ns in the song snapshot let
+    Remove unlink the original and write a record its reader set aside, so
+    the song left Trash and Restore said it was not found."""
+    store, root, path, track = setup(tmp_path, monkeypatch)
+    # As a file's stat gives it (a downloaded song keeps its mtime_ns).
+    store.snapshot_tracks["saved"]["mtime_ns"] = 2**63
+    recovery = Recovery(store)
+    record = recovery.remove("saved")
+    assert not path.exists()
+    assert record["id"] in {r["id"] for r in recovery.list()}
+    recovery.restore(record["id"])
+    assert path.read_bytes() == b"original music"
+    assert reported("trash") == set()
+
+
+def test_a_removal_whose_record_would_not_read_back_changes_nothing(
+    tmp_path, monkeypatch
+):
+    store, root, path, track = setup(tmp_path, monkeypatch)
+
+    def unreadable(record):
+        raise ValueError("fixture")
+
+    monkeypatch.setitem(document_records.BINDABLE, "removed", unreadable)
+    before = files(root)
+    with pytest.raises(ValueError, match="nothing was changed"):
+        Recovery(store).remove("saved")
+    assert files(root) == before and path.exists()
+    with store.connect() as c:
+        assert not c.execute(
+            "SELECT 1 FROM documents WHERE name >= 'removed:' AND name < 'removed;'"
+        ).fetchone()
+
+
+@pytest.mark.parametrize("removed_at", [float("inf"), float("nan")])
 def test_a_removal_with_an_out_of_range_time_is_left_out_of_lists(
     tmp_path, monkeypatch, removed_at
 ):
