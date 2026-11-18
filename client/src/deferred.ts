@@ -2,7 +2,10 @@
  * Undo for an action the server cannot take back (D-79, #183): it shows as
  * done at once and is sent after `UNDO_DELAY_MS` unless Undo is pressed. A
  * page that is closed or hidden first sends it at once (keepalive), so a
- * pending action is only ever made sooner, never lost.
+ * pending action is only ever made sooner, never lost. Signing out sends it
+ * at once too, before the session ends; a session lost any other way
+ * (revoked, expired, another account in another tab) cancels it, so nothing
+ * deferred ever runs after the session it was made in.
  */
 export const UNDO_DELAY_MS = 10_000;
 
@@ -19,14 +22,14 @@ type Entry = {
 
 const pending = new Map<string, Entry>();
 
-function fire(key: string, keepalive: boolean) {
+function fire(key: string, keepalive: boolean): Promise<unknown> {
   const entry = pending.get(key);
-  if (!entry) return;
+  if (!entry) return Promise.resolve();
   pending.delete(key);
   clearTimeout(entry.timer);
   // From here it can no longer be undone.
   entry.start();
-  entry.send(keepalive).then(
+  return entry.send(keepalive).then(
     () => entry.resolve(true),
     (error: unknown) => entry.reject(error),
   );
@@ -74,14 +77,29 @@ export function isPending(key: string) {
   return pending.has(key);
 }
 
-/** Sends everything pending at once, as the page goes away. */
-export function flushPending() {
-  for (const key of [...pending.keys()]) fire(key, true);
+/** Sends everything pending at once (keepalive), as the page goes away or
+ * before signing out; resolves once every send has finished. */
+export function flushPending(): Promise<void> {
+  return Promise.allSettled(
+    [...pending.keys()].map((key) => fire(key, true)),
+  ).then(() => {});
+}
+
+/** Cancels everything pending: the session it was made in has ended. Each
+ * one settles as not sent (`done` resolves false). */
+export function cancelPending() {
+  for (const [key, entry] of [...pending]) {
+    pending.delete(key);
+    clearTimeout(entry.timer);
+    entry.resolve(false);
+  }
 }
 
 if (typeof window !== "undefined") {
-  window.addEventListener("pagehide", flushPending);
+  window.addEventListener("pagehide", () => void flushPending());
+  // Sign-out has sent what was pending already; any other end cancels it.
+  window.addEventListener("music-session-cleared", cancelPending);
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") flushPending();
+    if (document.visibilityState === "hidden") void flushPending();
   });
 }

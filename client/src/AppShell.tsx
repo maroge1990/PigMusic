@@ -1,3 +1,4 @@
+import { flushPending } from "./deferred";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { NoticeArea } from "./Notice";
@@ -226,7 +227,7 @@ export function AppShell() {
 
   async function signOut() {
     // The server may be unreachable: this device is cleared anyway (#80).
-    if (!(await signOutSession(api, session.current)))
+    if (!(await signOutSession(api, session.current, undefined, flushPending)))
       setError(OFFLINE_SIGN_OUT);
     session.current = null;
     clearSessionReads();
