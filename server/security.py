@@ -34,6 +34,9 @@ def local_probe(request):
     )
 
 
+# The words for an error code the guard raises, where the code alone would
+# not say what happened.
+MESSAGES = {"session_changed": "This was started by another sign-in."}
 PUBLIC = frozenset(
     {
         ("GET", "/api/health"),
@@ -177,6 +180,18 @@ class Security:
                 or request.headers.get("x-pig-request") != "1"
             ):
                 raise HTTPException(403, "request_header_required")
+        # Web tabs share one cookie: a write names the session it was
+        # started under, and one started by another sign-in changes nothing
+        # (#250). Without the header (the native apps) nothing changes.
+        expected = request.headers.get("x-pig-expected-session")
+        if (
+            expected is not None
+            and request.method not in {"GET", "HEAD", "OPTIONS"}
+            and not hmac.compare_digest(
+                expected.encode(), str(session["public_id"]).encode()
+            )
+        ):
+            raise HTTPException(409, "session_changed")
         if (
             kind == "web"
             and token
