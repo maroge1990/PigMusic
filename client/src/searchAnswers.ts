@@ -65,9 +65,11 @@ const recentKey = (person: string) => "pig-music-recent-searches:" + person;
 /** This person's recent searches on this browser, newest first. */
 export function recentSearches(
   person: string,
-  storage: Pick<Storage, "getItem"> = localStorage,
+  given?: Pick<Storage, "getItem">,
 ): string[] {
   try {
+    // Reading localStorage itself can throw when site data is blocked.
+    const storage = given ?? localStorage;
     const value = JSON.parse(storage.getItem(recentKey(person)) || "[]");
     return Array.isArray(value)
       ? value.filter((v) => typeof v === "string").slice(0, RECENT_LIMIT)
@@ -81,9 +83,10 @@ export function recentSearches(
 export function saveRecentSearches(
   person: string,
   list: string[],
-  storage: Pick<Storage, "setItem" | "removeItem"> = localStorage,
+  given?: Pick<Storage, "setItem" | "removeItem">,
 ) {
   try {
+    const storage = given ?? localStorage;
     if (list.length)
       storage.setItem(
         recentKey(person),
