@@ -394,7 +394,7 @@ export function SearchPage({
         <BeforeTyping library={library} recent={recent} forget={forget} />
       )}
       {active && !local && !error && <Loading>Searching…</Loading>}
-      {active && local && (
+      {active && (local || error) && (
         <div
           className="search-results"
           // Opening a result keeps the search among the recent ones.
