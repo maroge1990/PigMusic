@@ -1,38 +1,12 @@
 import { useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { Ref } from "react";
 import { ListPlus, Plus, X } from "lucide-react";
-import { api } from "./api";
+import { createPlaylist, loadPlaylists } from "./playlists";
 import { EmptyLine, InlineError } from "./EmptyState";
 import { focusMenuItem, menuKeys } from "./menuKeys";
 import { notify } from "./notices";
 
 type Playlist = { id: string; name: string };
-
-/** Your playlists, without Favourites (that one is the star). */
-export async function loadPlaylists(): Promise<Playlist[]> {
-  return (
-    await api<{ playlists: Playlist[] }>("/v1/playlists")
-  ).playlists.filter((p) => !p.id.startsWith("pig-favourites:"));
-}
-
-export function createPlaylist(name: string) {
-  return api<Playlist>("/v1/playlists", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
-}
-
-/** Adds songs to a playlist in order, then says the library changed. */
-export async function addToPlaylist(id: string, bodies: object[]) {
-  for (const body of bodies)
-    await api(`/v1/playlists/${id}/songs?allow_repeat=true`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  window.dispatchEvent(new Event("music-library-changed"));
-}
 
 export type PlaylistPickerHandle = {
   /** Opens the picker next to `anchor`; focus returns there on close. */

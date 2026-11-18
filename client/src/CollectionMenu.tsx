@@ -19,11 +19,8 @@ import {
 } from "./menus";
 import { notifyError } from "./notices";
 import { usePlayer } from "./Player";
-import {
-  PlaylistPicker,
-  addToPlaylist,
-  type PlaylistPickerHandle,
-} from "./PlaylistPicker";
+import { addToPlaylist } from "./playlists";
+import { PlaylistPicker, type PlaylistPickerHandle } from "./PlaylistPicker";
 import { shuffled } from "./shuffle";
 import { addSongsToLibrary, downloadSongs } from "./songActions";
 import { fromTrack, playlistSongs, songBody, type Song } from "./songs";

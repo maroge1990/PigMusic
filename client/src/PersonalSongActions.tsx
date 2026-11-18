@@ -1,4 +1,5 @@
-import { PlaylistPicker, addToPlaylist } from "./PlaylistPicker";
+import { PlaylistPicker } from "./PlaylistPicker";
+import { addToPlaylist } from "./playlists";
 import { useEffect, useState } from "react";
 import { Star } from "lucide-react";
 import { api } from "./api";

@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { expectedSession, withSession } from "./sessionId";
 import { notify, notifyError, offerUndo } from "./notices";
 import type { RemovalPreview } from "./removal";
 import { songBody, type AddResult, type Song } from "./songs";
@@ -84,6 +85,8 @@ export async function removeFromLibrary(ids: string[], after?: () => void) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ track_ids: ids }),
     });
+    // Undo belongs to the session that removed the songs (#250).
+    const session = expectedSession();
     const removed = await api<{ id: string; undo_until: number }>(
       "/v1/library/remove",
       {
@@ -98,9 +101,9 @@ export async function removeFromLibrary(ids: string[], after?: () => void) {
     offerUndo(
       "Removed from your library.",
       async () => {
-        await api(`/v1/library/removals/${removed.id}/undo`, {
-          method: "POST",
-        });
+        await withSession(session, () =>
+          api(`/v1/library/removals/${removed.id}/undo`, { method: "POST" }),
+        );
         window.dispatchEvent(new Event("music-library-changed"));
       },
       "Restored",

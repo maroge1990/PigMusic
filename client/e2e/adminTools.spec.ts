@@ -167,7 +167,7 @@ test("Remove from server acts at once and Undo puts the song back", async ({
   const menu = page.getByRole("menu", { name: "Von dutch" });
   await open.click();
   const before = libraryReads;
-  await menu.getByRole("button", { name: "Remove from server" }).click();
+  await menu.getByRole("menuitem", { name: "Remove from server" }).click();
   await expect.poll(() => removed).toEqual(["POST"]);
   expect(asked).toEqual([]);
   // Every open library view reads the library again.

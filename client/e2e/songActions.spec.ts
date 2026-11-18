@@ -81,8 +81,14 @@ test("Remove from server shows a readable error for any answer", async ({
   await page
     .getByRole("button", { name: "More options for Von dutch" })
     .click();
-  const menu = page.getByRole("menu", { name: "Von dutch" });
-  await menu.getByRole("button", { name: "Remove from server" }).click();
+  const menu = page.getByRole("menu", { name: "Von dutch", exact: true });
+  // #249: the owner's item is a menu item with its icon, and comes last.
+  const items = menu.getByRole("menuitem");
+  await expect(items.last()).toHaveText("Remove from server");
+  await expect(items.last().locator("svg.lucide-trash-2")).toHaveCount(1);
+  await page.keyboard.press("End");
+  await expect(items.last()).toBeFocused();
+  await menu.getByRole("menuitem", { name: "Remove from server" }).click();
   const alert = menu.getByRole("alert");
   await expect(alert).toContainText("Something went wrong");
   await expect(alert).not.toContainText("[object");

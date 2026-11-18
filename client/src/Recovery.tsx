@@ -2,6 +2,7 @@ import { api } from "./api";
 import { restoreFromTrash } from "./trashUndo";
 import { offerUndo } from "./notices";
 import { useState } from "react";
+import { Trash2 } from "lucide-react";
 
 /** Owner-only: move the server's files to recoverable trash for everyone. */
 export function RemoveFromServer({
@@ -9,7 +10,10 @@ export function RemoveFromServer({
   id,
   title,
   removed,
+  menuItem = false,
 }: {
+  /** Drawn as the last item of a song menu, with its icon (#249). */
+  menuItem?: boolean;
   kind: "tracks" | "albums" | "artists";
   id: string;
   title: string;
@@ -46,13 +50,26 @@ export function RemoveFromServer({
   }
   return (
     <>
-      <button
-        className="danger-text-button"
-        disabled={busy}
-        onClick={() => void remove()}
-      >
-        Remove from server
-      </button>
+      {menuItem ? (
+        <button
+          type="button"
+          role="menuitem"
+          className="danger"
+          disabled={busy}
+          onClick={() => void remove()}
+        >
+          <span>Remove from server</span>
+          <Trash2 size={18} />
+        </button>
+      ) : (
+        <button
+          className="danger-text-button"
+          disabled={busy}
+          onClick={() => void remove()}
+        >
+          Remove from server
+        </button>
+      )}
       {error && (
         <span className="inline-error" role="alert">
           {error}

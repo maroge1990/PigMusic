@@ -27,12 +27,9 @@ import {
   type SongMenuItem,
   type SongPage,
 } from "./menus";
-import {
-  PlaylistPicker,
-  addToPlaylist,
-  type PlaylistPickerHandle,
-} from "./PlaylistPicker";
+import { PlaylistPicker, type PlaylistPickerHandle } from "./PlaylistPicker";
 import { usePlayer } from "./Player";
+import { addToPlaylist } from "./playlists";
 import { RemoveFromServer } from "./Recovery";
 import { useOwner } from "./person";
 import {
@@ -327,6 +324,7 @@ export function SongRow({
               id={song.saved.id}
               title={song.title}
               removed={() => menu.close()}
+              menuItem
             />
           </div>
         )}
