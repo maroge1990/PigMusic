@@ -17,6 +17,28 @@ type Call = (
   options?: RequestInit & { anySession?: boolean },
 ) => Promise<unknown>;
 
+/** How long sign-out waits for pending writes, then for the logout. */
+export const SIGN_OUT_WAIT_MS = 3_000;
+
+/** Settles with `promise`, or rejects with a timed-out error after `ms`. */
+function within<T>(promise: Promise<T>, ms: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            Object.assign(new Error("Sign-out timed out"), {
+              code: "timed_out",
+            }),
+          ),
+        ms,
+      );
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 function failedCode(error: unknown) {
   return (error as { code?: string } | null)?.code;
 }
@@ -29,19 +51,23 @@ export async function signOutSession(
   call: Call,
   session: string | null,
   storage: Pick<Storage, "setItem"> = localStorage,
-  flush: () => Promise<unknown> = async () => {},
+  drain: () => Promise<unknown> = async () => {},
+  wait = SIGN_OUT_WAIT_MS,
 ): Promise<boolean> {
-  // Writes still waiting for their Undo time go first, under this session
-  // (D-79).
-  await flush().catch(() => {});
+  // Writes still waiting for their Undo time, or already on their way, go
+  // first, under this session (D-79), but never hold sign-out up for long.
+  await within(drain(), wait).catch(() => {});
   // No session known (it was already lost): nothing of this tab's to end,
   // and the cookie may be another sign-in's.
   if (!session) return true;
   try {
-    await call("/v1/auth/logout", {
-      method: "POST",
-      headers: { "X-Pig-Expected-Session": session },
-    });
+    await within(
+      call("/v1/auth/logout", {
+        method: "POST",
+        headers: { "X-Pig-Expected-Session": session },
+      }),
+      wait,
+    );
     return true;
   } catch (error) {
     const code = failedCode(error);

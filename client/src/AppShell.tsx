@@ -1,4 +1,4 @@
-import { flushPending } from "./deferred";
+import { drainPending } from "./deferred";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { setSessionId } from "./sessionId";
@@ -251,10 +251,19 @@ export function AppShell() {
   }, [user, route]);
   useEffect(() => setDenied(false), [user, route]);
 
-  async function signOut() {
-    // The server may be unreachable: this device is cleared anyway (#80).
-    // The logout names the session this click was made under.
-    if (!(await signOutSession(api, session.current, undefined, flushPending)))
+  /** One sign-out at a time: a second click joins the first. */
+  const signingOut = useRef<Promise<void> | null>(null);
+  function signOut() {
+    signingOut.current ??= signOutNow().finally(
+      () => (signingOut.current = null),
+    );
+    return signingOut.current;
+  }
+  async function signOutNow() {
+    // The server may be unreachable or slow: this device is cleared anyway,
+    // within a few seconds (#80). The logout names the session this click
+    // was made under.
+    if (!(await signOutSession(api, session.current, undefined, drainPending)))
       setError(OFFLINE_SIGN_OUT);
     session.current = null;
     clearSessionReads();

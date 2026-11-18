@@ -25,6 +25,8 @@ type Entry = {
 };
 
 const pending = new Map<string, Entry>();
+/** Sends under way (from the timer, page hide or a flush) until settled. */
+const inFlight = new Set<Promise<unknown>>();
 
 function fire(key: string, keepalive: boolean): Promise<unknown> {
   const entry = pending.get(key);
@@ -44,6 +46,8 @@ function fire(key: string, keepalive: boolean): Promise<unknown> {
     () => entry.resolve(true),
     (error: unknown) => entry.reject(error),
   );
+  inFlight.add(settled);
+  void settled.finally(() => inFlight.delete(settled));
   return settled;
 }
 
@@ -104,6 +108,16 @@ export function flushPending(): Promise<void> {
   return Promise.allSettled(
     [...pending.keys()].map((key) => fire(key, true)),
   ).then(() => {});
+}
+
+/**
+ * Before signing out: sends everything still waiting (keepalive) and
+ * resolves once every send under way has settled, those already started by
+ * the timer or a page hide included, so the logout never overtakes one.
+ */
+export function drainPending(): Promise<void> {
+  for (const key of [...pending.keys()]) void fire(key, true);
+  return Promise.allSettled([...inFlight]).then(() => {});
 }
 
 /** Cancels everything pending: the session it was made in has ended. Each

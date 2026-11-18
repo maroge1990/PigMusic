@@ -38,6 +38,31 @@ test("signing out sends a playlist delete still waiting for its Undo time first"
   expect(calls).toEqual(["DELETE p1", "logout"]);
 });
 
+test("sign-out runs once however often it is clicked, and names its session", async ({
+  page,
+}) => {
+  const logouts: (string | null)[] = [];
+  let answer: () => void = () => {};
+  const answered = new Promise<void>((resolve) => (answer = resolve));
+  await mockApi(page, {
+    answers: {
+      "/v1/auth/logout": async (route: Route) => {
+        logouts.push(route.request().headers()["x-pig-expected-session"]);
+        await answered;
+        return route.fulfill({ json: {} });
+      },
+    },
+  });
+  await page.goto("/#/account");
+  const signOut = page.getByRole("button", { name: "Sign out of PigMusic" });
+  await signOut.click();
+  await signOut.click();
+  await expect.poll(() => logouts.length).toBe(1);
+  answer();
+  await expect(page.getByLabel("Username")).toBeVisible();
+  expect(logouts).toEqual(["session-1"]);
+});
+
 test("a write refused as another sign-in's says so and is dropped", async ({
   page,
 }) => {

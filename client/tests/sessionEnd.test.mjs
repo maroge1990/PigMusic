@@ -13,7 +13,7 @@ globalThis.document = Object.assign(new EventTarget(), {
 // A signed-in tab: every write names its session (#250).
 const { setSessionId } = await import("../src/sessionId.ts");
 setSessionId("session-1");
-const { defer, flushPending, isPending } = await import("../src/deferred.ts");
+const { defer, drainPending, isPending } = await import("../src/deferred.ts");
 const { expectedSession } = await import("../src/sessionId.ts");
 const { signOutSession } = await import("../src/signOut.ts");
 const { answerConfirm, askToConfirm, subscribeConfirm } = await import(
@@ -39,7 +39,7 @@ test("signing out sends pending deferred writes first, then logs out", async () 
       ),
     "session-1",
     storage,
-    flushPending,
+    drainPending,
   );
   // The logout names the session the click was made under (Codex round 2).
   assert.deepEqual(order, [
@@ -131,6 +131,58 @@ test("without BroadcastChannel, other tabs hear it through storage", async () =>
   there.announce("signed-out");
   assert.deepEqual(heard, ["signed-out"]);
   stopListening();
+});
+
+test("sign-out waits for a send the timer already started (Codex round 2)", async () => {
+  const order = [];
+  defer(
+    "in-flight-a",
+    async () => {
+      await wait(30);
+      order.push("DELETE playlist");
+    },
+    1,
+  );
+  await wait(5);
+  // Sending already: it has left the pending list, but not the network.
+  assert.equal(isPending("in-flight-a"), false);
+  await signOutSession(
+    async (path) => order.push(`POST ${path}`),
+    "session-1",
+    storage,
+    drainPending,
+  );
+  assert.deepEqual(order, ["DELETE playlist", "POST /v1/auth/logout"]);
+});
+
+test("a stalled send holds sign-out up only for the bound (Codex round 2)", async () => {
+  const order = [];
+  defer("stalled-a", () => new Promise(() => {}));
+  const started = Date.now();
+  const done = await signOutSession(
+    async (path) => order.push(`POST ${path}`),
+    "session-1",
+    storage,
+    drainPending,
+    50,
+  );
+  assert.equal(done, true);
+  assert.deepEqual(order, ["POST /v1/auth/logout"]);
+  assert.ok(Date.now() - started < 1000);
+});
+
+test("a stalled logout still lets this device sign out (Codex round 2)", async () => {
+  const kept = new Map();
+  const done = await signOutSession(
+    () => new Promise(() => {}),
+    "session-1",
+    { setItem: (key, value) => kept.set(key, value) },
+    async () => {},
+    50,
+  );
+  // Treated as unreachable: ended by its id on the next start (#80).
+  assert.equal(done, false);
+  assert.deepEqual([...kept.values()], ["session-1"]);
 });
 
 test("a deferred write names the session it was scheduled under (Codex round 2)", async () => {
