@@ -170,6 +170,11 @@ struct SongActionsMenu: View {
 struct CollectionActionsMenu: View {
   let model: AppModel
   let kind: CollectionKind
+  /// For "Couldn't load <name>. Try again."
+  let name: String
+  /// How many songs it has, when known without reading them: none disables
+  /// Play, Shuffle and Play next (Codex round 2 on batch D).
+  var known: Int?
   /// How many of its songs aren't in your library.
   var missing = 0
   /// A mix card's Show songs (a tap on the card plays the mix).
@@ -183,7 +188,21 @@ struct CollectionActionsMenu: View {
   var addMissing: (() async -> Void)?
   /// After Hide this edition: a mix page closes.
   var hidden: (() -> Void)?
-  let songs: @MainActor () async -> [Track]
+  /// Nil when they couldn't be read.
+  let songs: @MainActor () async -> [Track]?
+  private var empty: Bool { known == 0 }
+  /// Plays only what was read: nothing leaves what plays alone, and a read
+  /// that failed says so (Codex round 2 on batch D).
+  private func playing(_ act: @escaping @MainActor ([Track]) -> Void) {
+    Task {
+      switch CollectionPlay.decide(await songs(), name: name) {
+      case .play(let tracks): act(tracks)
+      case .nothing: break
+      case .notice(let text): model.notify(text)
+      }
+    }
+  }
+  private func everySong() async -> [Track] { await songs() ?? [] }
   var body: some View {
     let sections = CollectionMenu.sections(
       kind, missing: missing, watch: model.watchPaired, opens: open != nil)
@@ -199,17 +218,15 @@ struct CollectionActionsMenu: View {
       Button("Show songs", systemImage: "list.bullet") { open?() }
     case .play:
       Button("Play", systemImage: "play.fill") {
-        Task { model.play(await songs()) }
-      }
+        playing { model.play($0) }
+      }.disabled(empty)
     case .shuffle:
       Button("Shuffle", systemImage: "shuffle") {
-        Task { model.play(await songs().shuffled()) }
-      }
+        playing { model.play($0.shuffled()) }
+      }.disabled(empty)
     case .playNext:
       Button("Play next", systemImage: "text.line.first.and.arrowtriangle.forward") {
-        Task {
-          let tracks = await songs()
-          guard !tracks.isEmpty else { return }
+        playing { tracks in
           if model.player.queue.current == nil {
             model.play(tracks)
           } else {
@@ -217,32 +234,32 @@ struct CollectionActionsMenu: View {
             model.confirmations += 1
           }
         }
-      }
+      }.disabled(empty)
     case .addToLibrary:
       Button("Add \(missing) song\(missing == 1 ? "" : "s") to library", systemImage: "plus") {
         Task {
-          if let addMissing { await addMissing() } else { await model.addToLibrary(await songs()) }
+          if let addMissing { await addMissing() } else { await model.addToLibrary(await everySong()) }
         }
       }.disabled(!model.canMutate)
     case .addToPlaylist:
       let playlists = model.playlists.filter { $0.favourites != true && $0.id != playlistId }
       Menu("Add to playlist", systemImage: "text.badge.plus") {
         ForEach(playlists) { playlist in
-          Button(playlist.name) { Task { await model.add(await songs(), to: playlist) } }
+          Button(playlist.name) { Task { await model.add(await everySong(), to: playlist) } }
         }
         if playlists.isEmpty { Text("No playlists yet") }
       }.disabled(!model.canMutate)
     case .download:
       // Worded as a song's Download (D-106, D-118).
       Menu("Download", systemImage: "arrow.down.circle") {
-        Button("Original") { Task { await model.download(await songs(), origin: origin) } }
+        Button("Original") { Task { await model.download(await everySong(), origin: origin) } }
         Button("Smaller AAC copy") {
-          Task { await model.download(await songs(), quality: "aac", origin: origin) }
+          Task { await model.download(await everySong(), quality: "aac", origin: origin) }
         }
       }
     case .sendToWatch:
       Button("Send to Apple Watch", systemImage: "applewatch") {
-        Task { await model.sendToWatch(await songs(), origin: origin) }
+        Task { await model.sendToWatch(await everySong(), origin: origin) }
       }
     case .saveMix:
       Button("Save this edition", systemImage: "plus") {
@@ -265,7 +282,7 @@ struct AlbumActionsMenu: View {
   let model: AppModel
   let album: Album
   var body: some View {
-    CollectionActionsMenu(model: model, kind: .album) {
+    CollectionActionsMenu(model: model, kind: .album, name: album.title) {
       model.undo.withoutRemoved(await model.albumTracks(album))
     }
   }
@@ -276,7 +293,9 @@ struct ArtistActionsMenu: View {
   let model: AppModel
   let artist: Artist
   var body: some View {
-    CollectionActionsMenu(model: model, kind: .artist) { await model.artistTracks(artist) }
+    CollectionActionsMenu(model: model, kind: .artist, name: artist.name) {
+      await model.artistTracks(artist)
+    }
   }
 }
 
@@ -289,7 +308,9 @@ struct PlaylistActionsMenu: View {
   var addMissing: (() async -> Void)?
   var body: some View {
     CollectionActionsMenu(
-      model: model, kind: .playlist, missing: missing,
+      model: model, kind: .playlist, name: playlist.name,
+      known: playlist.entries == nil ? playlist.trackCount : model.shownEntries(playlist).count,
+      missing: missing,
       origin: DownloadOrigin(playlistId: playlist.id, playlistName: playlist.name),
       playlistId: playlist.id, addMissing: addMissing
     ) {
@@ -303,14 +324,14 @@ extension AppModel {
   /// iPhone's last answer) has them.
   /// Less the songs removed here, waiting for their Undo or already applied,
   /// whichever copy answers (Codex round 1 on batch D).
-  func playlistSongs(_ playlist: Playlist) async -> [Track] {
+  func playlistSongs(_ playlist: Playlist) async -> [Track]? {
     var copy = playlist
     if copy.entries == nil {
       let id = playlist.id
       guard
         let found = try? await cachedCatalogue(
           key: "playlist:" + id, conditional: { try await $0.playlist(id: id, etag: $1) })
-      else { return [] }
+      else { return nil }
       copy = found
     }
     return shownEntries(copy).map(\.entry.playbackTrack)

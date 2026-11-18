@@ -1767,6 +1767,8 @@ enum PlayOrigin: Hashable {
     _ tracks: [Track], at index: Int = 0, restored: PlaybackCheckpoint? = nil,
     origin: PlayOrigin = .library
   ) {
+    // Nothing to play never stops what plays (Codex round 2 on batch D).
+    guard !tracks.isEmpty || restored != nil else { return }
     playOrigin = origin
     #if DEBUG
       if ProcessInfo.processInfo.arguments.contains("--demo"),

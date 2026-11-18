@@ -67,7 +67,8 @@ struct HomeView: View {
               // The mix's one menu, as on its page (D-118).
               .contextMenu {
                 CollectionActionsMenu(
-                  model: model, kind: .mix, missing: CollectionMenu.missing(mix.tracks).count,
+                  model: model, kind: .mix, name: mix.title, known: mix.tracks.count,
+                  missing: CollectionMenu.missing(mix.tracks).count,
                   open: { openedMix = mix.id }, mix: mix
                 ) { mix.tracks }
               }
@@ -269,7 +270,8 @@ struct MixDetailView: View {
           // Hide this edition live only there.
           Menu {
             CollectionActionsMenu(
-              model: model, kind: .mix, missing: CollectionMenu.missing(tracks).count, mix: mix,
+              model: model, kind: .mix, name: mix.title, known: tracks.count,
+              missing: CollectionMenu.missing(tracks).count, mix: mix,
               hidden: { dismiss() }
             ) { tracks }
           } label: {

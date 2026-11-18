@@ -130,6 +130,20 @@ public enum CollectionMenuItem: Hashable, Sendable {
   case hideMix
 }
 
+/// What Play, Shuffle or Play next in a collection's menu does once its
+/// songs are read (Codex round 2 on batch D): nothing to play leaves what
+/// plays alone; a read that failed says so.
+public enum CollectionPlay: Equatable, Sendable {
+  case play([Track])
+  case nothing
+  case notice(String)
+  /// `songs` is nil when they couldn't be read.
+  public static func decide(_ songs: [Track]?, name: String) -> CollectionPlay {
+    guard let songs else { return .notice("Couldn't load \(name). Try again.") }
+    return songs.isEmpty ? .nothing : .play(songs)
+  }
+}
+
 /// What the one collection menu offers (D-118): Play, Shuffle, Play next;
 /// Add to library (when some songs aren't yours), Add to playlist; Download,
 /// Send to Apple Watch; and for a mix, Save and Hide this edition.
