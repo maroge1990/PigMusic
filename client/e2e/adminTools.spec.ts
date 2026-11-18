@@ -321,7 +321,19 @@ test("D-120: People sits beside Unassigned music, each album with its cover", as
   await mockApi(page, {
     role: "owner",
     answers: {
-      "/v1/people": (route: Route) => route.fulfill({ json: people(1) }),
+      "/v1/people": (route: Route) =>
+        route.fulfill({
+          json: {
+            people: [
+              {
+                ...people().people[0],
+                song_count: 1284,
+                last_seen: new Date(Date.now() - 7200_000).toISOString(),
+              },
+              { ...people(1).people[1], song_count: 1, last_seen: null },
+            ],
+          },
+        }),
       "/v1/people/activity": (route: Route) =>
         route.fulfill({ json: { events: [], warnings: [] } }),
       "/v1/admin/unassigned": (route: Route) =>
@@ -355,9 +367,19 @@ test("D-120: People sits beside Unassigned music, each album with its cover", as
   await expect(
     page.getByRole("menuitem", { name: "Reset password" }),
   ).toBeHidden();
+  // Role and songs, and when they were last seen.
   await expect(peopleList.locator(".person-row").first()).toContainText(
-    "Owner",
+    "Owner · 1,284 songs",
   );
+  await expect(
+    peopleList.locator(".person-row").first().locator(".person-seen"),
+  ).toHaveText("2 h ago");
+  await expect(peopleList.locator(".person-row").nth(1)).toContainText(
+    "1 song",
+  );
+  await expect(
+    peopleList.locator(".person-row").nth(1).locator(".person-seen"),
+  ).toHaveCount(0);
   // A disabled person reads Disabled and can't be given music.
   await expect(peopleList.locator(".person-row").nth(1)).toContainText(
     "Disabled",
@@ -467,4 +489,12 @@ test("D-120: each Server library tool is a card with its icon", async ({
   ]);
   for (const h2 of await tools.locator("h2").all())
     await expect(h2.locator("svg")).toHaveCount(1);
+  // No explanatory paragraphs (D-101); the tools keep their buttons.
+  await expect(page.getByText("Existing files are left unchanged")).toHaveCount(
+    0,
+  );
+  await expect(page.getByText("Originals are preserved")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Scan library" }),
+  ).toBeVisible();
 });

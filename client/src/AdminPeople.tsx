@@ -5,13 +5,21 @@ import { useEffect, useState } from "react";
 import { KeyRound, Plus, UserCheck, UserX } from "lucide-react";
 import { api } from "./api";
 import { Cover } from "./Cover";
-import { formatCount, formatDateTime, initials } from "./format";
+import {
+  formatCount,
+  formatDateTime,
+  formatRelative,
+  initials,
+} from "./format";
 import type { Person } from "./AppShell";
 import { InvitePanel, type Invite } from "./InvitePanel";
 import { guessedAccounts, type Activity } from "./accountAlerts";
 import { EmptyLine, InlineError } from "./EmptyState";
 import { MenuButton, MenuPopup, useMenu } from "./Menu";
 import { SectionHeader } from "./PageHeader";
+
+/** A person as Admin › People lists them (D-120). */
+type Member = Person & { song_count?: number; last_seen?: string | null };
 
 type InboxAlbum = {
   id: string;
@@ -32,7 +40,7 @@ function json(body: unknown) {
 
 /** Shared loading/notice state for the administrator account screens. */
 function useAdminData(inboxOffset = 0) {
-  const [people, setPeople] = useState<Person[]>([]);
+  const [people, setPeople] = useState<Member[]>([]);
   const [events, setEvents] = useState<Activity[]>([]);
   const [warnings, setWarnings] = useState<Activity[]>([]);
   const [inbox, setInbox] = useState<InboxAlbum[]>([]);
@@ -40,7 +48,7 @@ function useAdminData(inboxOffset = 0) {
   const [inboxNext, setInboxNext] = useState<number | null>(null);
   const [error, setError] = useState("");
   async function load() {
-    setPeople((await api<{ people: Person[] }>("/v1/people")).people);
+    setPeople((await api<{ people: Member[] }>("/v1/people")).people);
     const activity = await api<{ events: Activity[]; warnings?: Activity[] }>(
       "/v1/people/activity",
     );
@@ -89,7 +97,7 @@ function PersonRow({
   action,
   invited,
 }: {
-  person: Person;
+  person: Member;
   action: Act;
   invited: (invite: Invite, name: string) => void;
 }) {
@@ -147,8 +155,14 @@ function PersonRow({
         <strong>{p.display_name}</strong>
         <span>
           {p.disabled ? "Disabled" : p.role === "owner" ? "Owner" : "Member"}
+          {p.song_count !== undefined &&
+            ` · ${formatCount(p.song_count)} ${p.song_count === 1 ? "song" : "songs"}`}
         </span>
       </div>
+      {p.last_seen && (
+        <span className="person-seen">{formatRelative(p.last_seen)}</span>
+      )}
+      {p.role === "owner" && <span className="person-menu-space" />}
       {p.role !== "owner" && (
         <>
           <MenuButton
