@@ -1867,7 +1867,12 @@ enum PlayOrigin: Hashable {
     removals.removed(playlist: playlist.id, position: position, revision: playlist.revision)
   }
   static func undoKey(playlist: String, revision: Int, position: Int) -> String {
-    "playlist-entry:\(playlist)@\(revision)#\(position)"
+    PlaylistRemoval.undoKey(playlist: playlist, revision: revision, position: position)
+  }
+  /// A playlist's songs as its page and its menus use them: less those
+  /// removed here, waiting for their Undo or already applied (Codex round 1).
+  func shownEntries(_ playlist: Playlist) -> [(position: Int, entry: PlaylistEntry)] {
+    PlaylistRemoval.shown(playlist, ledger: removals) { undo.hides($0) }
   }
   static func undoKey(mix: String, song: String) -> String { "mix-song:" + mix + ":" + song }
   static func undoKey(download id: String) -> String { "download:" + id }

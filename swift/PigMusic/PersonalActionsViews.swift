@@ -301,12 +301,19 @@ struct PlaylistActionsMenu: View {
 extension AppModel {
   /// A playlist's songs: those it holds, else as the server (or this
   /// iPhone's last answer) has them.
+  /// Less the songs removed here, waiting for their Undo or already applied,
+  /// whichever copy answers (Codex round 1 on batch D).
   func playlistSongs(_ playlist: Playlist) async -> [Track] {
-    if let entries = playlist.entries { return entries.map(\.playbackTrack) }
-    let id = playlist.id
-    let found = try? await cachedCatalogue(
-      key: "playlist:" + id, conditional: { try await $0.playlist(id: id, etag: $1) })
-    return (found?.entries ?? []).map(\.playbackTrack)
+    var copy = playlist
+    if copy.entries == nil {
+      let id = playlist.id
+      guard
+        let found = try? await cachedCatalogue(
+          key: "playlist:" + id, conditional: { try await $0.playlist(id: id, etag: $1) })
+      else { return [] }
+      copy = found
+    }
+    return shownEntries(copy).map(\.entry.playbackTrack)
   }
 }
 

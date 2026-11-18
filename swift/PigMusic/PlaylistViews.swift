@@ -131,15 +131,9 @@ struct PlaylistView: View {
   }
   /// With each song's position in the playlist, without songs waiting for
   /// their removal's Undo (#183).
-  private var shown: [(position: Int, entry: PlaylistEntry)] {
-    (playlist.entries ?? []).enumerated().filter {
-      // A stale copy can still list a song this iPhone removed (Codex).
-      !model.removed(playlist, at: $0.offset)
-        && !model.undo.hides(
-        AppModel.undoKey(
-          playlist: playlist.id, revision: playlist.revision, position: $0.offset))
-    }.map { ($0.offset, $0.element) }
-  }
+  /// A stale copy can still list a song this iPhone removed (Codex); the
+  /// page's menu uses the same songs.
+  private var shown: [(position: Int, entry: PlaylistEntry)] { model.shownEntries(playlist) }
   private var entries: [PlaylistEntry] { shown.map(\.entry) }
   /// A removal from this playlist is waiting or being sent: the page keeps
   /// the version it was made on until all of them are sent, so a waiting row
