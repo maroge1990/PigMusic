@@ -4,6 +4,7 @@ recovered."""
 
 import errno
 import json
+import math
 import os
 import shutil
 import sqlite3
@@ -748,3 +749,40 @@ def test_a_locked_database_during_organisation_recovery_is_retried_not_set_aside
     assert tidy.store.read_document(name)["status"] == "publishing"
     tidy.organisation.recover()
     assert tidy.store.read_document(name)["status"] == "completed"
+
+
+def test_trash_lists_every_record_beside_an_odd_song_snapshot(tmp_path, monkeypatch):
+    """Codex on b71c163: a snapshot holding a lone surrogate or NaN, kept
+    as json stores it, aborted the strict JSON encoder and hid all of
+    Trash. The answer shows U+FFFD and null; the record is unchanged."""
+    app = household(tmp_path, monkeypatch)
+
+    def removal(identity, track):
+        return {
+            "id": identity,
+            "status": "removed",
+            "track_id": "song",
+            "track": track,
+            "root": str(tmp_path / "nas"),
+            "original": "song.mp3",
+            "trash": f".pig-music-trash/{identity}/song.mp3",
+            "sha256": "0" * 64,
+        }
+
+    rows = {
+        "removed:healthy": json.dumps(removal("healthy", {"title": "One"})),
+        "removed:surrogate": json.dumps(removal("surrogate", {"title": "\udcff"})),
+        "removed:nan": json.dumps(removal("nan", {"title": "Two", "gain": math.nan})),
+    }
+    put(app.state.store, rows)
+    with TestClient(app, base_url="https://private.ts.net") as client:
+        sign_in(client, "mark")
+        answer = client.get("/api/v1/admin/library/trash")
+    assert answer.status_code == 200, answer.text
+    listed = {r["id"]: r["track"] for r in answer.json()}
+    assert listed == {
+        "healthy": {"title": "One"},
+        "surrogate": {"title": "\ufffd"},
+        "nan": {"title": "Two", "gain": None},
+    }
+    assert raw(app.state.store, rows) == rows

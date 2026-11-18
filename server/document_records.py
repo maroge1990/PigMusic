@@ -244,6 +244,22 @@ def unfinished(area, name, error):
     startup_problems.report(area, name, error, kind="unfinished")
 
 
+def presentable(value):
+    """`value` for a JSON answer: song snapshots keep what json stores,
+    including a lone surrogate (a file name that is not UTF-8) or NaN, which
+    a strict encoder refuses, aborting the whole list. Those become U+FFFD
+    and null here; the stored record is left as it is."""
+    if isinstance(value, dict):
+        return {presentable(k): presentable(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [presentable(item) for item in value]
+    if isinstance(value, str):
+        return "".join("\ufffd" if "\ud800" <= c <= "\udfff" else c for c in value)
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
 def check_new(name, record):
     """Raise ValueError if `record`, about to be saved as `name`, would not
     read back: checked before any file changes, so nothing is moved that
