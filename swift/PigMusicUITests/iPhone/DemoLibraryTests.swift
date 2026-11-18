@@ -187,9 +187,11 @@ final class DemoLibraryTests: XCTestCase {
 
   private func checkSongMenu(file: StaticString = #filePath, line: UInt = #line) {
     // Play next and Add to queue are offered while something is playing.
+    // Send to Apple Watch only while one is paired (D-118).
     expect(app.buttons["Play next"], file: file, line: line)
     for action in [
-      "Add to queue", "Add to playlist", "Download", "Send to Apple Watch", "Remove from library",
+      "Add to queue", "Add to playlist", "Download", "Go to album", "Go to artist",
+      "Remove from library",
     ] {
       XCTAssertTrue(app.buttons[action].exists, action, file: file, line: line)
     }
@@ -257,9 +259,116 @@ final class DemoLibraryTests: XCTestCase {
     // Enabled once the page's songs have loaded.
     let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: download)
     wait(for: [enabled], timeout: 10)
-    // It still opens the menu, with the device choices first.
+    // It still opens the menu, with the device choices first, worded as a
+    // song's Download (D-118).
     download.tap()
-    expect(app.buttons["Download smaller copies"], file: file, line: line)
+    expect(app.buttons["Smaller AAC copy"], file: file, line: line)
+    XCTAssertTrue(app.buttons["Original"].exists, file: file, line: line)
+  }
+
+  /// The menu item named `label` lined up with `reference`, another item of
+  /// the open menu: the page behind can have a button of the same name.
+  private func inMenu(_ label: String, beside reference: XCUIElement) -> XCUIElement? {
+    app.buttons.matching(identifier: label).allElementsBoundByIndex.first {
+      abs($0.frame.minX - reference.frame.minX) < 1 && abs($0.frame.width - reference.frame.width) < 1
+    }
+  }
+
+  /// D-118 (#249): a song's menu keeps one order on every page: Favourite,
+  /// Add to playlist; Download (and Send to Apple Watch while one is paired);
+  /// Go to album, Go to artist; Remove from library. Nothing plays, so the
+  /// queue's items are left out.
+  func testTheSongMenuKeepsTheAgreedOrder() {
+    launch()
+    app.buttons["Sunrise, The Orchard"].tap()
+    expect(app.buttons["Play First Light by The Orchard"])
+    let more = app.buttons["More actions for First Light"]
+    expect(more)
+    more.tap()
+    let playlist = app.buttons["Add to playlist"]
+    expect(playlist)
+    let favourite = app.buttons.matching(
+      NSPredicate(
+        format: "label IN %@",
+        ["Add to favourites", "Remove from favourites", "Load favourite status"])
+    ).firstMatch
+    XCTAssertTrue(favourite.exists, app.debugDescription)
+    XCTAssertFalse(app.buttons["Play next"].exists)
+    guard let download = inMenu("Download", beside: playlist) else {
+      print(app.debugDescription)
+      return XCTFail("No Download item in the song menu")
+    }
+    var order = [favourite, playlist, download]
+    let watch = app.buttons["Send to Apple Watch"]
+    if watch.exists { order.append(watch) }
+    order += ["Go to album", "Go to artist", "Remove from library"].map { app.buttons[$0] }
+    for (above, below) in zip(order, order.dropFirst()) {
+      XCTAssertTrue(below.exists, "\(below)\n\(app.debugDescription)")
+      XCTAssertLessThan(above.frame.midY, below.frame.midY, "\(above) above \(below)")
+    }
+    // Go to artist opens the song's artist.
+    app.buttons["Go to artist"].tap()
+    expect(app.navigationBars["The Orchard"])
+  }
+
+  /// D-118 (#249): a long press on an album card opens the album's one menu.
+  func testALongPressOnAnAlbumCardOpensItsMenu() {
+    launch()
+    let card = app.buttons["Sunrise, The Orchard"]
+    expect(card)
+    card.press(forDuration: 1.2)
+    expect(app.buttons["Shuffle"])
+    for action in ["Play", "Play next", "Add to playlist", "Download"] {
+      XCTAssertTrue(app.buttons[action].exists, "\(action)\n\(app.debugDescription)")
+    }
+    // Save and Hide this edition belong to mixes alone.
+    XCTAssertFalse(app.buttons["Hide this edition"].exists)
+    XCTAssertFalse(app.buttons["Save this edition"].exists)
+    dismissMenu()
+  }
+
+  /// D-79 (#183): hiding a mix edition acts at once with Undo, from the
+  /// mix's one menu (D-118), and Undo brings it back.
+  func testHidingAMixEditionOffersUndo() {
+    launch()
+    let mix = app.buttons["Play Daily Mix"]
+    expect(mix)
+    mix.press(forDuration: 1.2)
+    let hide = app.buttons["Hide this edition"]
+    expect(hide)
+    for action in ["Show songs", "Play next", "Save this edition"] {
+      XCTAssertTrue(app.buttons[action].exists, "\(action)\n\(app.debugDescription)")
+    }
+    hide.tap()
+    expect(app.staticTexts["Hid Daily Mix"])
+    XCTAssertTrue(mix.waitForNonExistence(timeout: 5), app.debugDescription)
+    // No question was asked.
+    XCTAssertFalse(app.sheets.firstMatch.exists)
+    XCTAssertFalse(app.alerts.firstMatch.exists)
+    app.buttons["Undo"].tap()
+    expect(mix)
+  }
+
+  /// D-79 (#183): signing out of this iPhone can't be undone, so it asks
+  /// first, as signing out another device does.
+  func testSigningOutOfThisIPhoneAsksFirst() {
+    launch()
+    app.buttons["Account"].firstMatch.tap()
+    let signOut = app.buttons["Sign out"]
+    expect(signOut)
+    for _ in 0..<5 where !signOut.isHittable { app.swipeUp() }
+    signOut.tap()
+    let question = app.staticTexts["Sign out of this iPhone? It will need to sign in again."]
+    expect(question)
+    // Cancelled: still signed in.
+    let cancel = app.buttons["Cancel"]
+    if cancel.exists {
+      cancel.tap()
+    } else {
+      app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)).tap()
+    }
+    XCTAssertTrue(question.waitForNonExistence(timeout: 5))
+    expect(app.staticTexts["Demo listener"])
   }
 
   func testSearchFindsALibrarySong() {
