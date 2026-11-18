@@ -5,7 +5,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 18 Nov 2026 (Melbourne), afternoon.*
+*Overwritten at the end of every session. 18 Nov 2026 (Melbourne), evening.*
 
 - **Live:** release `words-20261118-v4`, server `3a51459` (batch C, released 12:50; healthy, readiness ok, no warnings).
   **TestFlight:** 0.2.0 (1135) from `ad7e50d`, with batch C's iPhone and Watch half.
@@ -14,8 +14,12 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   by `tests/test_vocabulary.py`. Song rows and albums now report what the server did (Adding, Skipped). Reviews: Codex
   round per half, confirmations and a final round; its high (album Add resent paused songs) fixed and confirmed by an Opus
   stand-in review. Findings filed: #259 to #264.
-- **Codex usage is empty** (from 18 Nov 11:20): Opus adversarial reviews stand in; anything waiting for Codex is logged in
-  the session worktree's `.localdata/codex-review-log.md`. Mark says when Codex is available again.
+- **#265 in progress (D-119, the Mac stops being the build machine):** the simulator tap-through tests run in CI
+  (`native.yml` job `tap-through`, iPhone 17 + Apple Watch Series 11 on GitHub's iOS/watchOS 26.5; three mini-player
+  tests skip below iOS 27). Xcode Cloud workflow "TestFlight" (Mark set it up 18 Nov) archives scheme PigMusic for
+  internal TestFlight when a branch starting `testflight-` is pushed; build numbers start at 2000. Build 2000 failed on
+  the OpenAPI plugin trust; `swift/ci_scripts/ci_post_clone.sh` fixes that and build 2001 was running at handover.
+- **Codex:** usage ran out on 18 Nov and came back the same afternoon; an Opus stand-in review covered the gap.
 - **Release check:** the Unraid verify's test suite now gets 2 GB (its tmpfs counts; both the 17 and 18 Nov suites peak
   at about 1.4 GB, #225).
 - **Waiting on Mark's device check:** build 1094's artwork and notices (#168, #245, #239), then build 1135's words and
