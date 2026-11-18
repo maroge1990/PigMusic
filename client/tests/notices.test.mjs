@@ -126,6 +126,73 @@ test("notices stack newest last, at most three shown", () => {
   area.stop();
 });
 
+test("later notices never hide a live Undo before it is sent (Codex round 1)", () => {
+  const area = watch();
+  // A deferred delete: sent after 10 s unless Undo is pressed.
+  offerUndo("Road trip deleted.", () => {}, "Back", new Promise(() => {}));
+  for (let second = 1; second <= 10; second++) {
+    notify(`Saved ${second}`);
+    notifyError(`Couldn't ${second}. Try again.`);
+    mock.timers.tick(1_000);
+    assert.equal(area.shown().length, MAX_SHOWN);
+    assert.equal(area.shown()[0].text, "Road trip deleted.", `at ${second} s`);
+  }
+  // Routine notices keep their order after the Undo, newest last.
+  assert.deepEqual(
+    area.shown().map((n) => n.text),
+    ["Road trip deleted.", "Saved 10", "Couldn't 10. Try again."],
+  );
+  area.stop();
+});
+
+test("more live Undos than fit are all shown, routine notices dropped", () => {
+  const area = watch();
+  notify("Saved");
+  for (const name of ["A", "B", "C", "D"])
+    offerUndo(`${name} deleted.`, () => {});
+  notify("Moved up");
+  assert.deepEqual(
+    area.shown().map((n) => n.text),
+    ["A deleted.", "B deleted.", "C deleted.", "D deleted."],
+  );
+  area.stop();
+});
+
+test("page-hide sends each pending action once with keepalive; an undone one never", async () => {
+  const { defer, flushPending } = await import("../src/deferred.ts");
+  const area = watch();
+  const sent = [];
+  const offer = (name) => {
+    const pending = defer(`page-hide-${name}`, async (keepalive) =>
+      sent.push([name, keepalive]),
+    );
+    return offerUndo(
+      `${name} deleted.`,
+      () => {
+        if (!pending.undo()) throw new Error("It was deleted already.");
+      },
+      `${name} is back.`,
+      pending.started,
+    );
+  };
+  offer("A");
+  offer("B");
+  await runAction(offer("C"));
+  flushPending();
+  flushPending();
+  await flush();
+  assert.deepEqual(sent.sort(), [
+    ["A", true],
+    ["B", true],
+  ]);
+  // Once sent, their Undo is gone; the undone one says it is back.
+  assert.deepEqual(
+    area.now().map((n) => n.text),
+    ["C is back."],
+  );
+  area.stop();
+});
+
 test("a notice with the same key replaces the earlier one", () => {
   const area = watch();
   notify("Added to favourites", "favourite");

@@ -114,3 +114,119 @@ test("replacing the whole-library review asks in the app first", async ({
   await expect(page).toHaveURL(/#\/admin\/migration\?imported=1$/);
   expect(posted).toEqual(["POST"]);
 });
+
+test("a question left open when the session ends is gone for the next account (Codex round 1)", async ({
+  page,
+}) => {
+  const deletes: string[] = [];
+  let person = "pat";
+  await mockApi(page, {
+    answers: {
+      "/v1/me": (route) =>
+        route.fulfill({
+          json: {
+            id: person,
+            username: person,
+            display_name: person,
+            role: "member",
+            session_id: "s-" + person,
+          },
+        }),
+      "/v1/auth/login": (route) => route.fulfill({ json: {} }),
+      "/v1/me/sessions": (route) => {
+        if (route.request().method() === "DELETE") {
+          deletes.push(person);
+          return route.fulfill({ json: { revoked: 1 } });
+        }
+        return route.fulfill({
+          json: {
+            sessions: [
+              {
+                id: "a",
+                device_name: "Mac",
+                client: "web",
+                created_at: 0,
+                last_seen_at: 0,
+                current: true,
+                revoked_at: null,
+              },
+              {
+                id: "b",
+                device_name: "iPhone",
+                client: "app",
+                created_at: 0,
+                last_seen_at: 0,
+                current: false,
+                revoked_at: null,
+              },
+            ],
+          },
+        });
+      },
+      "/v1/quality": (route) =>
+        route.fulfill({
+          json: { preferences: [], options: [], household_default: "" },
+        }),
+    },
+  });
+  await page.goto("/#/account");
+  await page.getByRole("button", { name: "Sign out other devices" }).click();
+  const ask = page.getByRole("dialog", { name: "Sign out everywhere else?" });
+  await expect(ask).toBeVisible();
+  // Pat's session is revoked elsewhere while the question is open.
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("music-auth-required")),
+  );
+  await expect(page.getByLabel("Username")).toBeVisible();
+  person = "sam";
+  await page.getByLabel("Username").fill("sam");
+  await page.getByLabel("Password").fill("a password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByLabel("Username")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Sign out other devices" }),
+  ).toBeVisible();
+  await expect(ask).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(deletes).toEqual([]);
+});
+
+test("another tab signing in closes the question in this one (Codex)", async ({
+  page,
+}) => {
+  const deletes: string[] = [];
+  const session = (id: string, current: boolean) => ({
+    id,
+    device_name: current ? "Mac" : "iPhone",
+    client: "web",
+    created_at: 0,
+    last_seen_at: 0,
+    current,
+    revoked_at: null,
+  });
+  await mockApi(page, {
+    answers: {
+      "/v1/me/sessions": (route) => {
+        if (route.request().method() === "DELETE") {
+          deletes.push("DELETE");
+          return route.fulfill({ json: { revoked: 1 } });
+        }
+        return route.fulfill({
+          json: { sessions: [session("a", true), session("b", false)] },
+        });
+      },
+    },
+  });
+  await page.goto("/#/account");
+  await page.getByRole("button", { name: "Sign out other devices" }).click();
+  const ask = page.getByRole("dialog", { name: "Sign out everywhere else?" });
+  await expect(ask).toBeVisible();
+  // What another tab's sign-in sends.
+  await page.evaluate(() => {
+    const other = new BroadcastChannel("pig-music-session");
+    other.postMessage({ change: "signed-in", tab: "other", at: 1 });
+    other.close();
+  });
+  await expect(ask).toHaveCount(0);
+  expect(deletes).toEqual([]);
+});

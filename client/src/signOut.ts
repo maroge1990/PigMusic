@@ -19,12 +19,16 @@ function failedCode(error: unknown) {
 }
 
 /** Sign out; true when the server ended the session now, false when it
- * couldn't be reached and the session will be ended later. */
+ * couldn't be reached and the session will be ended later. `flush` first
+ * sends every change still waiting for its Undo time, under this session
+ * (D-79): after the logout nothing deferred may run. */
 export async function signOutSession(
   call: Call,
   session: string | null,
   storage: Pick<Storage, "setItem"> = localStorage,
+  flush: () => Promise<unknown> = async () => {},
 ): Promise<boolean> {
+  await flush().catch(() => {});
   try {
     await call("/v1/auth/logout", { method: "POST" });
     return true;

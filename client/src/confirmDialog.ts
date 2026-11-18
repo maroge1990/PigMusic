@@ -17,33 +17,96 @@ export type ConfirmQuestion = {
 
 export type AskedQuestion = ConfirmQuestion & { id: number };
 
-let asked: (AskedQuestion & { answer: (yes: boolean) => void }) | null = null;
+let asked:
+  | (AskedQuestion & {
+      answer: (yes: boolean) => void;
+      session: number;
+      identity: string | null;
+    })
+  | null = null;
 let next = 0;
+/** Counts sign-ins: a question belongs to the session that asked it. */
+let session = 0;
 const listeners = new Set<(question: AskedQuestion | null) => void>();
+/** The server's id for this tab's session, and how to read it again. */
+let identity: string | null = null;
+let serverSession: (() => Promise<string | null>) | null = null;
+let checkFailed = () => {};
+
+/**
+ * Says which server session this tab is signed in with, and how to ask the
+ * server for the one it has now. Another tab can replace the shared cookie,
+ * so a confirmed action rechecks it before it goes ahead.
+ */
+export function setConfirmIdentity(
+  id: string | null,
+  read: (() => Promise<string | null>) | null,
+  failed: () => void = () => {},
+) {
+  identity = id;
+  serverSession = read;
+  checkFailed = failed;
+}
 
 function publish() {
   for (const listener of listeners) listener(asked);
 }
 
+/** The session a caller started under; pass it to askToConfirm after an
+ * await, so a question for an account that has gone is never shown. */
+export function confirmSession() {
+  return session;
+}
+
+/**
+ * The session ended (signed out, revoked or expired) or the dialog's host
+ * left: the open question is cancelled, and nothing asked for that session
+ * can be shown or approved afterwards.
+ */
+export function endConfirmSession() {
+  session++;
+  if (asked) answerConfirm(asked.id, false);
+}
+
 /**
  * Asks `question` in the app's dialog; resolves true for the action, false
- * for Cancel or Escape. A new question cancels one still open.
+ * for Cancel or Escape. A new question cancels one still open; a question
+ * for an ended `forSession` resolves false without being shown.
  */
-export function askToConfirm(question: ConfirmQuestion): Promise<boolean> {
-  answerConfirm(false);
+export function askToConfirm(
+  question: ConfirmQuestion,
+  forSession = session,
+): Promise<boolean> {
+  if (forSession !== session) return Promise.resolve(false);
+  if (asked) answerConfirm(asked.id, false);
   return new Promise<boolean>((resolve) => {
-    asked = { ...question, id: ++next, answer: resolve };
+    asked = { ...question, id: ++next, answer: resolve, session, identity };
     publish();
   });
 }
 
-/** Answers the open question, if any. */
-export function answerConfirm(yes: boolean) {
+/**
+ * Answers question `id`. A handler left from an earlier question (its id no
+ * longer open) is ignored, so it can never approve a newer one. Yes goes
+ * ahead only once the server still has the session that asked; if it
+ * can't be checked, nothing is done.
+ */
+export function answerConfirm(id: number, yes: boolean) {
   const question = asked;
-  if (!question) return;
+  if (!question || question.id !== id) return;
   asked = null;
-  question.answer(yes);
   publish();
+  if (!yes) return question.answer(false);
+  const same = () => question.session === session;
+  const read = serverSession;
+  if (!read) return question.answer(same());
+  read().then(
+    (now) => question.answer(same() && now === question.identity),
+    () => {
+      question.answer(false);
+      checkFailed();
+    },
+  );
 }
 
 /** Calls `listener` with the open question (or null) on every change. */
@@ -56,3 +119,6 @@ export function subscribeConfirm(
     listeners.delete(listener);
   };
 }
+
+if (typeof window !== "undefined")
+  window.addEventListener("music-session-cleared", endConfirmSession);

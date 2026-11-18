@@ -148,9 +148,17 @@ export async function runAction(id: number) {
   }
 }
 
-/** The notices on screen: the newest `MAX_SHOWN`, oldest first. */
+/**
+ * The notices on screen, oldest first. A live Undo is never hidden while
+ * its change can still be taken back: every Undo shows, and the newest
+ * other notices fill what is left of `MAX_SHOWN`.
+ */
 export function shown(all = notices) {
-  return all.slice(-MAX_SHOWN);
+  const undos = all.filter((n) => n.kind === "action");
+  const room = Math.max(0, MAX_SHOWN - undos.length);
+  const others = all.filter((n) => n.kind !== "action");
+  const kept = new Set([...undos, ...(room ? others.slice(-room) : [])]);
+  return all.filter((n) => kept.has(n));
 }
 
 /** Calls `listener` with every change; returns the unsubscribe. */
@@ -169,3 +177,8 @@ export function clearNotices() {
   notices = [];
   publish();
 }
+
+// A notice, and above all its Undo, belongs to the account that acted: it
+// leaves when that session ends, as the old Undo bar left with the shell.
+if (typeof window !== "undefined")
+  window.addEventListener("music-session-cleared", clearNotices);

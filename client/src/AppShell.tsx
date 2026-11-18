@@ -1,5 +1,9 @@
+import { flushPending } from "./deferred";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { setConfirmIdentity } from "./confirmDialog";
+import { notifyError } from "./notices";
+import { openSessionChannel } from "./sessionChannel";
 import { NoticeArea } from "./Notice";
 import {
   CircleArrowDown,
@@ -60,6 +64,8 @@ const sections: { id: Section; label: string; icon: LucideIcon }[] = [
   { id: "admin", label: "Admin", icon: ShieldCheck },
 ];
 
+/** This tab's line to the other PigMusic tabs (sign-in changes). */
+const tabs = openSessionChannel();
 export function AppShell() {
   const [user, setUser] = useState<Person | null>(null);
   // This tab's session id, to end it later if signing out happens offline.
@@ -187,6 +193,13 @@ export function AppShell() {
       }
       const me = await api<Person & { session_id?: string }>("/v1/me");
       session.current = me.session_id ?? null;
+      // A confirmed action rechecks that the server still has this session.
+      setConfirmIdentity(
+        session.current,
+        async () =>
+          (await api<{ session_id?: string }>("/v1/me")).session_id ?? null,
+        () => notifyError("Couldn't check who is signed in. Try again."),
+      );
       setUser(me);
       setError("");
     } catch (e) {
@@ -209,9 +222,19 @@ export function AppShell() {
     const forbidden = () => setDenied(true);
     window.addEventListener("music-auth-required", expired);
     window.addEventListener("music-forbidden", forbidden);
+    // Another tab signed in or out: the shared cookie changed, so this
+    // tab's session is gone. Drop its questions and deferred writes, then
+    // read who is signed in now.
+    const stopListening = tabs.listen(() => {
+      session.current = null;
+      setConfirmIdentity(null, null);
+      clearSessionReads();
+      void refresh();
+    });
     return () => {
       window.removeEventListener("music-auth-required", expired);
       window.removeEventListener("music-forbidden", forbidden);
+      stopListening();
     };
   }, []);
 
@@ -226,10 +249,12 @@ export function AppShell() {
 
   async function signOut() {
     // The server may be unreachable: this device is cleared anyway (#80).
-    if (!(await signOutSession(api, session.current)))
+    if (!(await signOutSession(api, session.current, undefined, flushPending)))
       setError(OFFLINE_SIGN_OUT);
     session.current = null;
+    setConfirmIdentity(null, null);
     clearSessionReads();
+    tabs.announce("signed-out");
     window.dispatchEvent(new Event("music-signed-out"));
     setUser(null);
     location.hash = "/home";
@@ -247,6 +272,7 @@ export function AppShell() {
       <FirstRun
         complete={() => {
           setFirstRun(false);
+          tabs.announce("signed-in");
           void refresh();
         }}
       />
@@ -258,6 +284,7 @@ export function AppShell() {
         signedIn={() => {
           signedInAgain();
           setHint(installHintPending());
+          tabs.announce("signed-in");
           void refresh();
         }}
         initialError={error}
