@@ -9,6 +9,16 @@ const zebra = {
   artist_id: "artist-2",
   year: 2001,
   cover_url: null,
+  added_at: "2026-01-01T00:00:00Z",
+};
+const middle = {
+  ...zebra,
+  id: "album-3",
+  title: "Middle",
+  artist: "Mango",
+  artist_id: "artist-3",
+  year: 2010,
+  added_at: null,
 };
 const library = {
   artists: [
@@ -16,7 +26,11 @@ const library = {
     artist,
   ],
   // The server sends albums by artist: Aardvark before Charli xcx.
-  albums: [zebra, { ...album, year: 2024 }],
+  albums: [
+    zebra,
+    { ...album, year: 2024, added_at: "2026-11-01T00:00:00Z" },
+    middle,
+  ],
   stats: {
     tracks: 4,
     artists: 2,
@@ -61,7 +75,8 @@ test("Library tabs show counts, Play, Shuffle and a sort named for the tab", asy
   const tabs = page.getByRole("navigation", { name: "Library collections" });
   await expect(tabs.getByRole("link")).toHaveText([
     "Artists2",
-    "Albums2",
+    "Albums3",
+    "Songs4",
     "Playlists1",
     "Favourites1",
   ]);
@@ -70,16 +85,21 @@ test("Library tabs show counts, Play, Shuffle and a sort named for the tab", asy
   await expect(toolbar.getByRole("button", { name: "Shuffle" })).toBeEnabled();
   const sort = toolbar.getByLabel("Sort");
   await expect(sort.locator("option")).toHaveText([
+    "Recently added",
     "Artist A–Z",
     "Title A–Z",
     "Year",
   ]);
+  // Recently added is the default: newest first, unknown times last.
+  await expect(sort).toHaveValue("recent");
   const titles = page.locator(".personal-grid h3");
-  await expect(titles).toHaveText(["Zebra", "Brat"]);
+  await expect(titles).toHaveText(["Brat", "Zebra", "Middle"]);
+  await sort.selectOption({ label: "Artist A–Z" });
+  await expect(titles).toHaveText(["Zebra", "Brat", "Middle"]);
   await sort.selectOption({ label: "Title A–Z" });
-  await expect(titles).toHaveText(["Brat", "Zebra"]);
+  await expect(titles).toHaveText(["Brat", "Middle", "Zebra"]);
   await sort.selectOption({ label: "Year" });
-  await expect(titles).toHaveText(["Brat", "Zebra"]);
+  await expect(titles).toHaveText(["Brat", "Middle", "Zebra"]);
 
   // Play starts the library from its beginning.
   const start = page.waitForRequest((r) =>
@@ -97,4 +117,59 @@ test("Library tabs show counts, Play, Shuffle and a sort named for the tab", asy
   // Playlists and Favourites have their own Play and Shuffle.
   await tabs.getByRole("link", { name: /Playlists/ }).click();
   await expect(toolbar.getByRole("button")).toHaveCount(0);
+});
+
+// D-120 (#251): the Songs tab reads every page of your songs, sorts them by
+// title and puts Play, Shuffle, the count and length at the top.
+test("the Songs tab pages through your songs with Play, Shuffle and Sort", async ({
+  page,
+}) => {
+  const song = (id: string, title: string, artist: string) => ({
+    ...album.tracks[0],
+    id,
+    title,
+    artist,
+  });
+  const offsets: string[] = [];
+  await mockApi(page, {
+    answers: {
+      "/v1/library": (route) => route.fulfill({ json: library }),
+      "/v1/library-pages/tracks": (route) => {
+        const url = new URL(route.request().url());
+        const offset = url.searchParams.get("offset") || "";
+        offsets.push(offset);
+        return route.fulfill({
+          json:
+            offset === "0"
+              ? {
+                  items: [
+                    song("s1", "Cherry", "Ada"),
+                    song("s2", "Apple", "Cy"),
+                  ],
+                  total: 3,
+                  next_offset: 200,
+                }
+              : {
+                  items: [song("s3", "Banana", "Bo")],
+                  total: 3,
+                  next_offset: null,
+                },
+        });
+      },
+    },
+  });
+  await page.goto("/#/library/songs");
+  const titles = page.locator(".song-list .song-text strong");
+  await expect(titles).toHaveText(["Apple", "Banana", "Cherry"]);
+  expect(offsets).toEqual(["0", "200"]);
+  const header = page.locator(".songs-tab-header");
+  await expect(header).toContainText("3 songs · 9 min");
+  await expect(header.getByRole("button", { name: "Play" })).toBeEnabled();
+  await expect(
+    header.getByRole("button", { name: "Shuffle", exact: true }),
+  ).toBeEnabled();
+  const sort = header.getByLabel("Sort");
+  await expect(sort.locator("option")).toHaveText(["Title A–Z", "Artist A–Z"]);
+  await sort.selectOption({ label: "Artist A–Z" });
+  await expect(titles).toHaveText(["Cherry", "Banana", "Apple"]);
 });

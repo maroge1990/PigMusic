@@ -9,6 +9,7 @@ import { Empty } from "./EmptyState";
 import { OwnerLibraryLinks } from "./OwnerTools";
 import { FavouritesList, PlaylistGrid } from "./PlaylistCards";
 import { PlayLibrary } from "./PlayLibrary";
+import { LibrarySongsTab } from "./LibrarySongsTab";
 import type { Playlist, PlaylistSummary } from "./libraryTypes";
 import type { Album, Artist, Library, Track } from "./types";
 
@@ -18,6 +19,7 @@ export const libraryTabs = [
   "musicals",
   "soundtracks",
   "compilations",
+  "songs",
   "playlists",
   "favourites",
 ] as const;
@@ -35,12 +37,13 @@ const tabLabel = (id: string) => id[0].toUpperCase() + id.slice(1);
 // Each tab's sort reads for what it holds (D-120). The server sends artists
 // by name and albums by artist, then year: those orders are the defaults.
 type ArtistSort = "name" | "name-desc";
-type AlbumSort = "artist" | "title" | "year";
+type AlbumSort = "recent" | "artist" | "title" | "year";
 const artistSorts = [
   ["name", "Name A–Z"],
   ["name-desc", "Name Z–A"],
 ] as const;
 const albumSorts = [
+  ["recent", "Recently added"],
   ["artist", "Artist A–Z"],
   ["title", "Title A–Z"],
   ["year", "Year"],
@@ -48,7 +51,7 @@ const albumSorts = [
 /** The chosen sorts, kept while the app stays open. */
 const rememberedSort: { artists: ArtistSort; albums: AlbumSort } = {
   artists: "name",
-  albums: "artist",
+  albums: "recent",
 };
 function sortArtists(items: Artist[], sort: ArtistSort) {
   const sorted = [...items].sort((a, b) => byName(a.name, b.name));
@@ -57,6 +60,11 @@ function sortArtists(items: Artist[], sort: ArtistSort) {
 function sortAlbums(items: Album[], sort: AlbumSort) {
   if (sort === "artist") return items;
   const sorted = [...items];
+  // Newest first; albums with no recorded time go last, in the server's order.
+  if (sort === "recent")
+    return sorted.sort((a, b) =>
+      (b.added_at || "").localeCompare(a.added_at || ""),
+    );
   // Newest first; albums without a year go last.
   if (sort === "year")
     sorted.sort(
@@ -98,6 +106,7 @@ export function LibraryCollections({
     musicals: library.stats.musicals,
     soundtracks: library.stats.soundtracks,
     compilations: library.stats.compilations,
+    songs: library.stats.tracks,
     playlists: playlists.filter((p) => !p.id.startsWith("pig-favourites:"))
       .length,
     favourites: favouriteList?.entries.length ?? 0,
@@ -218,6 +227,12 @@ export function LibraryCollections({
             </div>
           )}
         </CollectionPages>
+      )}
+      {tab === "songs" && (
+        <LibrarySongsTab
+          revision={library.revision || library.snapshot.captured_at}
+          songs={(tracks) => songs(tracks)}
+        />
       )}
       {tab === "favourites" && (
         <FavouritesList playlist={favouriteList} songs={songs} />

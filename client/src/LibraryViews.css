@@ -15,6 +15,22 @@
   border-radius: var(--radius-compact);
   max-width: 100%;
 }
+/* The Songs tab: Play and Shuffle, the count and length, then Sort. */
+.songs-tab-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12) var(--space-16);
+  margin-bottom: var(--space-16);
+}
+.songs-tab-header .release-actions {
+  margin: 0;
+}
+.songs-tab-header p {
+  flex: 1;
+  margin: 0;
+  color: var(--secondary);
+}
 .library-controls {
   display: flex;
   align-items: center;
