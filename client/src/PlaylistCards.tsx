@@ -74,7 +74,10 @@ export function FavouritesCover() {
  * playlists tab asks; the list itself carries counts only. */
 function usePlaylistFacts(playlists: PlaylistSummary[]) {
   const [facts, setFacts] = useState<Record<string, PlaylistFacts>>({});
-  const ids = playlists.map((p) => `${p.id}@${p.track_count ?? 0}`).join(",");
+  // A playlist edit moves its revision, even when its count stays (Codex).
+  const ids = playlists
+    .map((p) => `${p.id}@${p.revision ?? ""}:${p.track_count ?? 0}`)
+    .join(",");
   useEffect(() => {
     const controller = new AbortController();
     for (const p of playlists)

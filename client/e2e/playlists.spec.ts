@@ -148,3 +148,45 @@ test("Favourites shows its count and length with Play, Shuffle and Sort", async 
   await sort.selectOption({ label: "Title" });
   await expect(titles).toHaveText(["Song 0", "Song 1", "Song 2"]);
 });
+
+// Codex round 1, finding 6: a playlist edited without changing its count
+// (one song swapped for another) shows its new length, not the old one.
+test("a playlist card follows an edit that keeps its count", async ({
+  page,
+}) => {
+  let edited = false;
+  const swapped = {
+    ...kitchen,
+    revision: 2,
+    entries: kitchen.entries.map((e) => ({ ...e, duration: 60 })),
+  };
+  await mockApi(page, {
+    answers: {
+      "/v1/playlists": (route) =>
+        route.fulfill({
+          json: {
+            playlists: [
+              {
+                id: "p2",
+                name: "Kitchen disco",
+                track_count: 4,
+                revision: edited ? 2 : 1,
+              },
+            ],
+          },
+        }),
+      "/v1/playlists/p2": (route) =>
+        route.fulfill({ json: edited ? swapped : kitchen }),
+    },
+  });
+  await page.goto("/#/library/playlists");
+  const card = page.locator(".playlist-grid .album-card", {
+    hasText: "Kitchen disco",
+  });
+  await expect(card).toContainText("4 songs · 1 hr 32 min");
+  edited = true;
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("music-library-changed")),
+  );
+  await expect(card).toContainText("4 songs · 4 min");
+});
