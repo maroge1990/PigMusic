@@ -1,5 +1,5 @@
 import { ApiError, api } from "./api";
-import { notifyError } from "./notices";
+import { notifyError, notifyWarning } from "./notices";
 import { batches } from "./limits";
 import { expectedSession, withSession } from "./sessionId";
 
@@ -29,8 +29,12 @@ export class ReportedFailure extends Error {}
 /** The server's own refusal (a 4xx answer): nothing was saved. Anything
  * else (no answer, a 5xx or a gateway error) may have come after the batch
  * was saved, so it can't be sent again on a guess (Codex, #249). */
+const REFUSALS = [400, 403, 404, 409, 413, 422];
 const refusedUnmade = (error: unknown) =>
-  error instanceof ApiError && error.kind === "request";
+  error instanceof ApiError && REFUSALS.includes(error.status ?? 0);
+
+/** Each copy has its own retry, whatever playlist it goes to. */
+let copies = 0;
 
 /**
  * Adds songs to a playlist in order (Codex, #249). Each request appends a
@@ -48,6 +52,9 @@ export async function addToPlaylist(
   session = expectedSession(),
 ) {
   const parts = batches(bodies);
+  // One key for this copy and all its retries (Codex): another copy into
+  // the same playlist keeps its own Try again.
+  const key = `playlist-copy:${id}:${++copies}`;
   const bound = <T>(start: () => Promise<T>) => withSession(session, start);
   let name = "the playlist";
   const changed = () =>
@@ -64,7 +71,7 @@ export async function addToPlaylist(
         sendFrom(at).catch((e) => {
           if (!(e instanceof ReportedFailure)) throw e;
         }),
-      "playlist-copy:" + id,
+      key,
     );
     throw new ReportedFailure((error as Error).message);
   }
@@ -95,8 +102,9 @@ export async function addToPlaylist(
       } catch (e) {
         changed();
         if (!refusedUnmade(e)) {
-          notifyError(
+          notifyWarning(
             `Couldn't tell whether the last ${songs(parts[i].length)} were added to ${name}. Check the playlist.`,
+            key,
           );
           throw new ReportedFailure((e as Error).message);
         }

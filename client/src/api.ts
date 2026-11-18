@@ -174,6 +174,8 @@ export class ApiError extends Error {
   public code: string;
   public body: Record<string, unknown>;
   public kind: FailureKind;
+  /** The HTTP status, when the server or a proxy answered. */
+  public status?: number;
   constructor(
     message: string,
     code: string,
@@ -251,7 +253,9 @@ export async function responseError(
         ? `${SERVER_ERROR_MESSAGE} Reference ${id.slice(0, 8)}`
         : SERVER_ERROR_MESSAGE;
   }
-  return new ApiError(message, code, details, kind);
+  const error = new ApiError(message, code, details, kind);
+  error.status = response.status;
+  return error;
 }
 
 /** The error for a failed write sent with `apiFetch` (#239). Only a refusal

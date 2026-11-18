@@ -10,6 +10,7 @@ const {
   dismiss,
   notify,
   notifyError,
+  notifyWarning,
   offerUndo,
   roleOf,
   runAction,
@@ -126,6 +127,21 @@ test("an error offering Try again stays when another error comes", () => {
   // Its own next failure replaces it.
   notifyError("Added 500 of 501 songs. Try again.", () => {}, "copy");
   assert.equal(area.now().filter((n) => n.key === "copy").length, 1);
+  area.stop();
+});
+
+test("a Check-the-playlist warning shows even with three retries live", () => {
+  // Codex (#249): kept Try again notices filled every slot and hid it.
+  const area = watch();
+  for (const i of [1, 2, 3]) notifyError("Copy " + i, () => {}, "copy" + i);
+  const warning = notifyWarning(
+    "Couldn't tell whether the last 2 songs were added. Check the playlist.",
+  );
+  notifyError("Couldn't save. Try again.");
+  notify("Saved");
+  assert.ok(area.shown().some((n) => n.id === warning));
+  assert.ok(area.now().some((n) => n.id === warning));
+  assert.equal(area.shown().filter((n) => n.action).length, 3);
   area.stop();
 });
 

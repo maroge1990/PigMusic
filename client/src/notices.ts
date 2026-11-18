@@ -31,6 +31,8 @@ export type Notice = {
   action?: NoticeAction;
   /** A notice with the same key replaces the earlier one. */
   key?: string;
+  /** Kept on screen like a live Undo (see notifyWarning). */
+  keep?: boolean;
 };
 
 /** Success and updates are polite; failures interrupt. */
@@ -62,7 +64,7 @@ function add(notice: Omit<Notice, "id">, shownFor?: number): number {
       (notice.key && old.key === notice.key) ||
       // An error offering Try again is kept, like a live Undo: only its own
       // key replaces it, or the person closes it (Codex, #249).
-      (notice.kind === "error" && old.kind === "error" && !old.action)
+      (notice.kind === "error" && old.kind === "error" && !kept(old))
     )
       remove(old.id);
   notices = [...notices, { ...notice, id }];
@@ -78,6 +80,18 @@ function add(notice: Omit<Notice, "id">, shownFor?: number): number {
 /** Says something went well, or what changed; it clears by itself. */
 export function notify(text: string, key?: string) {
   return add({ kind: "info", text, key }, NOTICE_SHOWN_MS);
+}
+
+/** Kept on screen and never replaced by an unrelated error: a live Undo, an
+ * error offering Try again, and a warning the person must act on. */
+function kept(n: Omit<Notice, "id">) {
+  return n.kind === "action" || !!n.action || !!n.keep;
+}
+
+/** Something failed in a way only the person can check (a write that may
+ * have been saved): kept on screen until closed or its own key replaces it. */
+export function notifyWarning(text: string, key?: string) {
+  return add({ kind: "error", text, key, keep: true });
 }
 
 /** Says something failed; it stays until closed or replaced. */
@@ -159,7 +173,6 @@ export async function runAction(id: number) {
  * show, and the newest other notices fill what is left of `MAX_SHOWN`.
  */
 export function shown(all = notices) {
-  const kept = (n: Notice) => n.kind === "action" || !!n.action;
   const undos = all.filter(kept);
   const room = Math.max(0, MAX_SHOWN - undos.length);
   const others = all.filter((n) => !kept(n));

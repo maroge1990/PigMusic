@@ -51,7 +51,7 @@ function playlistServer() {
     server.playlist.revision += 1;
     if (failure === "lose") throw new TypeError("Failed to fetch");
     // Saved, then the server or its gateway failed building the answer.
-    if (failure === 500 || failure === 502)
+    if (failure === 500 || failure === 502 || failure === 524)
       return new Response("error", { status: failure });
     return Response.json(server.playlist);
   };
@@ -141,7 +141,7 @@ test("a playlist that moved is refused unmade and can be tried again", async () 
   assert.equal(server.playlist.entries.length, 2);
 });
 
-for (const status of [500, 502])
+for (const status of [500, 502, 524])
   test(`a ${status} after the batch was saved stops without resending`, async () => {
     setSessionId("session-1");
     const server = playlistServer();
@@ -180,4 +180,39 @@ test("an unrelated error keeps a partial copy's Try again", async () => {
   notices.stop();
   clearNotices();
   assert.equal(server.playlist.entries.length, MAX_SONGS_PER_REQUEST + 1);
+});
+
+test("two partial copies into one playlist each keep their Try again", async () => {
+  setSessionId("session-1");
+  const server = playlistServer();
+  const notices = watch();
+  let shown = [];
+  const stop = subscribe((all) => (shown = all));
+  // Each copy's second batch is refused once.
+  const original = globalThis.fetch;
+  let refusals = 0;
+  globalThis.fetch = async (path, options) => {
+    if (
+      options?.method === "POST" &&
+      JSON.parse(options.body).tracks.length === 1 &&
+      refusals < 2
+    ) {
+      refusals += 1;
+      return Response.json(
+        { detail: "Couldn't save. Try again.", code: "request_failed" },
+        { status: 400 },
+      );
+    }
+    return original(path, options);
+  };
+  const size = MAX_SONGS_PER_REQUEST + 1;
+  await assert.rejects(addToPlaylist("p1", songs(size)), ReportedFailure);
+  await assert.rejects(addToPlaylist("p1", songs(size)), ReportedFailure);
+  const retries = shown.filter((n) => n.action?.label === "Try again");
+  assert.equal(retries.length, 2);
+  for (const retry of retries) await runAction(retry.id);
+  stop();
+  notices.stop();
+  clearNotices();
+  assert.equal(server.playlist.entries.length, size * 2);
 });
