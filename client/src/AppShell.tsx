@@ -177,9 +177,16 @@ export function AppShell() {
     return () => window.removeEventListener("hashchange", changed);
   }, []);
 
+  /** Each read of who is signed in; a session change starts a new one. */
+  const refreshes = useRef(0);
   async function refresh() {
+    // Only the latest read of who is signed in counts (Codex): one begun
+    // before another session change is ignored.
+    const run = ++refreshes.current;
+    const stale = () => run !== refreshes.current;
     try {
       const state = await api<{ setup_required: boolean }>("/v1/setup/owner");
+      if (stale()) return;
       setFirstRun(state.setup_required);
       if (state.setup_required) {
         setUser(null);
@@ -192,6 +199,7 @@ export function AppShell() {
         return;
       }
       const me = await api<Person & { session_id?: string }>("/v1/me");
+      if (stale()) return;
       session.current = me.session_id ?? null;
       // Every write names this session; the server refuses it if another
       // sign-in holds the cookie by the time it arrives.
@@ -199,22 +207,33 @@ export function AppShell() {
       setUser(me);
       setError("");
     } catch (e) {
+      if (stale()) return;
       setUser(null);
       if ((e as ApiError).code === "setup_required")
         setError("The administrator needs to finish the first account setup.");
       else if ((e as ApiError).code !== "authentication_required")
         setError((e as Error).message);
     } finally {
-      setReady(true);
+      if (!stale()) setReady(true);
     }
+  }
+
+  /**
+   * The one teardown for any lost or changed session, this tab's or
+   * another's (Codex): exactly what signing out does here. The shared
+   * reads, questions, deferred writes, notices, playback, queue and unsent
+   * listens go (clearSessionReads tells each), and the member views unmount
+   * before the next account is read.
+   */
+  function endSession() {
+    session.current = null;
+    clearSessionReads();
+    setUser(null);
   }
 
   useEffect(() => {
     void refresh();
-    const expired = () => {
-      setUser(null);
-      clearSessionReads();
-    };
+    const expired = () => endSession();
     const forbidden = () => setDenied(true);
     window.addEventListener("music-auth-required", expired);
     window.addEventListener("music-forbidden", forbidden);
@@ -222,8 +241,8 @@ export function AppShell() {
     // tab's session is gone. Drop its questions and deferred writes, then
     // read who is signed in now.
     const lost = () => {
-      session.current = null;
-      clearSessionReads();
+      endSession();
+      setReady(false);
       void refresh();
     };
     const stopListening = tabs.listen(lost);
@@ -266,8 +285,7 @@ export function AppShell() {
     // was made under.
     if (!(await signOutSession(api, session.current, undefined, drainPending)))
       setError(OFFLINE_SIGN_OUT);
-    session.current = null;
-    clearSessionReads();
+    endSession();
     tabs.announce("signed-out");
     window.dispatchEvent(new Event("music-signed-out"));
     setUser(null);

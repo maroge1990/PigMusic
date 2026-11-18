@@ -169,6 +169,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     // Whoever signs in next must never send this account's unsent listens.
     window.addEventListener("music-auth-required", signedOut);
     window.addEventListener("music-signed-out", signedOut);
+    // Every end of a session (expiry, sign-out, another tab's sign-in or
+    // sign-out) clears the shared reads; the player ends with it, before
+    // the next account is read (Codex).
+    window.addEventListener("music-session-cleared", signedOut);
     // Listens saved while offline or before the tab closed.
     void flushListens();
     const online = () => void flushListens();
@@ -177,6 +181,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("music-signed-in", signedIn);
       window.removeEventListener("music-auth-required", signedOut);
       window.removeEventListener("music-signed-out", signedOut);
+      window.removeEventListener("music-session-cleared", signedOut);
       window.removeEventListener("online", online);
     };
   }, []);

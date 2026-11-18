@@ -65,6 +65,8 @@ test("a batch the server refuses is dropped, so later listens still reach it (#6
 test("signed-out, rate-limited and server failures keep listens for a retry", async () => {
   for (const status of [401, 429, 503]) {
     store.clear();
+    // A 401 ends the session; the next round is signed in again.
+    setSessionId("session-1");
     serve(status);
     recordListen(listen("kept"));
     await settle();
@@ -78,10 +80,31 @@ test("listens older than the server's 30-day window are never sent", async () =>
   setSessionId("session-1");
   store.set(
     KEY,
-    JSON.stringify([listen("stale", now() - 31 * 86400), listen("fresh")]),
+    JSON.stringify(
+      [listen("stale", now() - 31 * 86400), listen("fresh")].map((l) => ({
+        ...l,
+        session: "session-1",
+      })),
+    ),
   );
   const sent = serve(200);
   await flushListens();
   assert.deepEqual(sent, [["fresh"]]);
+  assert.deepEqual(stored(), []);
+});
+
+test("a listen made under one account is never sent under the next", async () => {
+  // Codex: after another tab's sign-in, A's saved listen went out with B's
+  // session header.
+  store.clear();
+  setSessionId("session-1");
+  serve(503);
+  recordListen(listen("from-a"));
+  await settle();
+  assert.deepEqual(stored(), ["from-a"]);
+  setSessionId("session-2");
+  const sent = serve(200);
+  await flushListens();
+  assert.deepEqual(sent, []);
   assert.deepEqual(stored(), []);
 });
