@@ -61,7 +61,9 @@ KEPT = {
         "Household default: ",
     ],
     "PigMusic/Components.swift": ['message = .info("Saved")'],
-    "PigMusic/ArtistAcquisitionView.swift": ['Text("This can start many downloads")'],
+    "PigMusic/ArtistAcquisitionView.swift": [
+        'Text("This can add many albums at once.")'
+    ],
     "PigMusic/PendingEditsView.swift": ["Discarding stops retries"],
     "PigMusic/SearchViews.swift": ['PigQuietState("Find music")', "Listening…"],
     "PigMusic/LibraryViews.swift": [

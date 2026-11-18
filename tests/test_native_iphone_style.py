@@ -49,7 +49,10 @@ def test_favourites_are_a_star_and_colours_are_brand_roles():
 
 
 def test_one_wording_for_adding_to_the_library():
-    assert found('"Add to library"') == []
+    """D-115 (#246): asking the server for music is "Add to library"."""
+    for gone in ('"Add to my library"', '"Request song"', '"Download all missing"'):
+        assert found(gone) == [], gone
+    assert found('"Add to library"') != []
 
 
 def test_errors_and_notices_share_one_status_line():

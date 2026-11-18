@@ -396,7 +396,7 @@ struct DownloadMenu: View {
           }
         }
       } label: {
-        RoundIconLabel(systemImage: sent ? "checkmark" : "arrow.down.circle")
+        RoundIconLabel(systemImage: sent ? "checkmark" : "arrow.down")
       }
       .buttonStyle(.plain)
       // One VoiceOver stop named "Download" (#97): a Menu wraps its label in a
