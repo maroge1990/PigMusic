@@ -442,6 +442,7 @@ struct DownloadMenu: View {
 
 struct AccountView: View {
   @Bindable var model: AppModel
+  @State private var signingOut = false
   var body: some View {
     Form {
       Section {
@@ -483,8 +484,15 @@ struct AccountView: View {
         )
       }
       Section {
-        Button("Sign out", role: .destructive) { Task { await model.signOut() } }.disabled(
-          model.busy || model.mutationActive)
+        // Asks first, as signing out another device does: it can't be undone (D-79, #183).
+        Button("Sign out", role: .destructive) { signingOut = true }
+          .disabled(model.busy || model.mutationActive)
+          .confirmationDialog(
+            "Sign out of this iPhone? It will need to sign in again.", isPresented: $signingOut,
+            titleVisibility: .visible
+          ) {
+            Button("Sign out", role: .destructive) { Task { await model.signOut() } }
+          }
       }
       if let message = model.message { Section { StatusText(message) } }
     }.navigationTitle("Account")
