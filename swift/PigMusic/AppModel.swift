@@ -1959,10 +1959,27 @@ enum PlayOrigin: Hashable {
   func removeFromUpNextLater(_ item: PlaybackOccurrence) {
     let player = player
     guard let taken = player.takeUpcoming(item.id) else { return }
+    let key = Self.undoKey(upNext: item.id)
+    upNextRemovals[key] = taken
     undo.schedule(
-      Self.undoKey(upNext: item.id), label: "Removed " + item.track.title + " from Up next",
-      undone: { player.putBack(taken.item, at: taken.position) }
-    ) { true }
+      key, label: "Removed " + item.track.title + " from Up next",
+      undone: { [weak self] in
+        player.putBack(taken)
+        self?.upNextRemovals[key] = nil
+      }
+    ) { [weak self] in
+      self?.upNextRemovals[key] = nil
+      return true
+    }
+  }
+  /// Up next removals whose Undo still shows, by Undo id.
+  @ObservationIgnored private var upNextRemovals: [String: TakenOccurrence] = [:]
+  /// The queue was replaced (something else plays, or Stop): Undo can't
+  /// put a song into another queue, so those Undos leave (Codex round 1).
+  func queueReplaced() {
+    for (key, taken) in upNextRemovals where !player.queue.holds(taken) {
+      undo.sendNow(key)
+    }
   }
   /// Says something was done in the notice bar, with a tick (D-118: saving a
   /// mix, which used to be an alert on Home and a line on its page).

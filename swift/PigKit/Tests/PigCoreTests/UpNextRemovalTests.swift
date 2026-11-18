@@ -28,11 +28,11 @@ struct UpNextRemovalTests {
     var queue = make(["a", "b", "c", "d"])
     let found = queue.takeUpcoming(queue.items[2].id)
     let taken = try #require(found)
-    queue.putBack(taken.item, at: taken.position)
+    queue.putBack(taken)
     #expect(titles(queue) == ["a", "b", "c", "d"])
     #expect(queue.items[2].id == taken.item.id)
     // Never twice.
-    queue.putBack(taken.item, at: taken.position)
+    queue.putBack(taken)
     #expect(titles(queue) == ["a", "b", "c", "d"])
   }
 
@@ -44,9 +44,58 @@ struct UpNextRemovalTests {
     queue.next()
     queue.next()  // now "d"; "b"'s old place (1) is behind it
     #expect(queue.current?.track.title == "d")
-    queue.putBack(taken.item, at: taken.position)
+    queue.putBack(taken)
     #expect(titles(queue) == ["a", "c", "d", "b"])
     #expect(queue.current?.track.title == "d")
+  }
+
+  /// Codex round 1 on batch D: Undo never puts a song into another queue.
+  /// Playing something else replaces the queue: Undo does nothing.
+  @Test func undoAfterTheQueueWasReplacedDoesNothing() throws {
+    var queue = make(["a", "b", "c"])
+    let found = queue.takeUpcoming(queue.items[1].id)
+    let taken = try #require(found)
+    queue.replace(["x", "y"].map { Track(id: $0, title: $0, artist: "Artist") })
+    #expect(!queue.holds(taken))
+    let back = queue.putBack(taken)
+    #expect(!back)
+    #expect(titles(queue) == ["x", "y"])
+  }
+
+  /// Stop empties the queue: Undo does nothing, and nothing becomes current.
+  @Test func undoAfterStopDoesNothing() throws {
+    var queue = make(["a", "b", "c"])
+    let found = queue.takeUpcoming(queue.items[1].id)
+    let taken = try #require(found)
+    queue.replace([])
+    let back = queue.putBack(taken)
+    #expect(!back)
+    #expect(queue.items.isEmpty && queue.current == nil)
+  }
+
+  /// Moving on and reordering keep the same queue: Undo still works.
+  @Test func undoSurvivesAdvancingAndReordering() throws {
+    var queue = make(["a", "b", "c", "d", "e"])
+    let found = queue.takeUpcoming(queue.items[3].id)
+    let taken = try #require(found)
+    queue.next()
+    queue.moveUpcoming(queue.items[3].id, by: -1)
+    queue.shuffleUpcoming()
+    #expect(queue.holds(taken))
+    let back = queue.putBack(taken)
+    #expect(back)
+    #expect(queue.items.contains { $0.id == taken.item.id })
+  }
+
+  /// A queue read back from a checkpoint is a new queue.
+  @Test func aRestoredQueueIsANewQueue() throws {
+    var queue = make(["a", "b"])
+    let found = queue.takeUpcoming(queue.items[1].id)
+    let taken = try #require(found)
+    let saved = try JSONEncoder().encode(queue)
+    var restored = try JSONDecoder().decode(PlaybackQueue.self, from: saved)
+    let back = restored.putBack(taken)
+    #expect(!back)
   }
 
   @Test func thePlayingSongCantBeTaken() {
@@ -66,6 +115,17 @@ struct UpNextRemovalTests {
     await undo.sendAllAndWait()
     undo.undo("y")
     #expect(putBack.ids == ["x"])
+  }
+
+  /// The queue it came from ended: the Undo leaves without putting it back.
+  @MainActor @Test func anUndoCanBeDroppedWithoutUndoing() async {
+    let undo = UndoQueue(wait: .seconds(60), linger: .zero)
+    let putBack = Undone()
+    undo.schedule("x", label: "Removed X", undone: { putBack.ids.append("x") }) { true }
+    undo.sendNow("x")
+    #expect(undo.items.isEmpty)
+    undo.undo("x")
+    #expect(putBack.ids.isEmpty)
   }
 }
 

@@ -253,6 +253,8 @@ struct LibraryShell: View {
       .onChange(of: model.pageRoute) { _, route in
         if route != nil { showPlayer = false }
       }
+      // Something else plays, or Stop: Up next's Undos leave (Codex round 1).
+      .onChange(of: model.player.queue.identity) { model.queueReplaced() }
       .sheet(isPresented: $showAccount) {
         NavigationStack {
           AccountView(model: model).pigCanvas()

@@ -89,6 +89,10 @@ import Observation
     undoes.removeValue(forKey: id)?()
   }
 
+  /// Sends one waiting action now: its Undo leaves (an Up next removal whose
+  /// queue has ended can no longer be undone).
+  public func sendNow(_ id: String) { send(id) }
+
   /// Sends every waiting action now, in order.
   public func sendAll() {
     for item in items { send(item.id) }

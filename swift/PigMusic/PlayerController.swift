@@ -80,13 +80,14 @@ import PigSync
     engineQueueChanged()
   }
   /// Takes a song out of Up next at once; `putBack` is its Undo (D-118).
-  func takeUpcoming(_ id: UUID) -> (item: PlaybackOccurrence, position: Int)? {
+  func takeUpcoming(_ id: UUID) -> TakenOccurrence? {
     guard let taken = queue.takeUpcoming(id) else { return nil }
     engineQueueChanged()
     return taken
   }
-  func putBack(_ item: PlaybackOccurrence, at position: Int) {
-    queue.putBack(item, at: position)
+  /// Only into the queue it came from (Codex round 1 on batch D).
+  func putBack(_ taken: TakenOccurrence) {
+    guard queue.putBack(taken) else { return }
     engineQueueChanged()
   }
   func moveUpcoming(_ id: UUID, by delta: Int) {
