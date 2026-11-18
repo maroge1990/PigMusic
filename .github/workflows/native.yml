@@ -129,6 +129,12 @@ jobs:
           .venv/bin/python -m pip install -r requirements.lock.txt
           command -v ffmpeg || brew install ffmpeg
       - name: Tap-through tests (iPhone and Watch)
+        # The models the tests are written against (the development Mac has
+        # iPhone 17 and Series 12); left to choose, the runner picked an
+        # iPhone 11, whose mini player hid the Pause button.
+        env:
+          PIG_UI_IPHONE: iPhone 17
+          PIG_UI_WATCH: Apple Watch Series 11 (46mm)
         run: python3 scripts/simulator_ui_tests.py --create-pair --retry-launch-timeouts
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         if: always()
