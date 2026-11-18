@@ -64,6 +64,43 @@ function watch() {
   return { error: () => all.find((n) => n.kind === "error"), stop };
 }
 
+test("Try again resumes after a refusal, through an outage, to 501 songs", async () => {
+  setSessionId("session-1");
+  const server = playlistServer();
+  const notices = watch();
+  const copy = songs(MAX_SONGS_PER_REQUEST + 1);
+  // The first batch goes in; the second is refused.
+  const appendAfterFirst = globalThis.fetch;
+  globalThis.fetch = async (path, options) => {
+    if (options?.method === "POST" && server.appends === 1)
+      server.next = "refuse";
+    return appendAfterFirst(path, options);
+  };
+  await assert.rejects(addToPlaylist("p1", copy), ReportedFailure);
+  assert.equal(server.playlist.entries.length, MAX_SONGS_PER_REQUEST);
+  const first = notices.error();
+  assert.match(first.text, /Added 500 of 501 songs to Gym/);
+
+  // Try again while the server is out of reach: the same offer stays.
+  server.down = true;
+  await runAction(first.id);
+  const second = notices.error();
+  assert.equal(second.text, first.text);
+  assert.equal(second.action.label, "Try again");
+  assert.equal(server.playlist.entries.length, MAX_SONGS_PER_REQUEST);
+
+  // Back again: Try again adds only the rest.
+  server.down = false;
+  await runAction(second.id);
+  notices.stop();
+  clearNotices();
+  assert.equal(server.playlist.entries.length, MAX_SONGS_PER_REQUEST + 1);
+  assert.deepEqual(
+    server.playlist.entries.map((e) => e.title),
+    copy.map((e) => e.title),
+  );
+});
+
 test("a lost answer stops the copy and says so, without resending", async () => {
   setSessionId("session-1");
   const server = playlistServer();

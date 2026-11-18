@@ -66,9 +66,15 @@ export async function addToPlaylist(
     throw new ReportedFailure((error as Error).message);
   }
   async function sendFrom(start: number): Promise<void> {
-    const playlist = await bound(() => api<Read>(`/v1/playlists/${id}`));
-    let revision = playlist.revision;
-    if (playlist.name) name = playlist.name;
+    let revision: number;
+    try {
+      const playlist = await bound(() => api<Read>(`/v1/playlists/${id}`));
+      revision = playlist.revision;
+      if (playlist.name) name = playlist.name;
+    } catch (e) {
+      // Not even read: nothing was sent, so the same Try again stays.
+      refused(start, e);
+    }
     for (let i = start; i < parts.length; i++) {
       try {
         revision = (
