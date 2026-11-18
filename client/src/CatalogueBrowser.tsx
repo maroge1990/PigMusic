@@ -445,10 +445,9 @@ export function CatalogueBrowser({
       const response = await apiFetch("/api/v1/requests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // Songs already yours would come back as skipped: send the rest.
-        body: JSON.stringify({
-          tracks: rows.filter((r) => r.state !== "saved").map(songBody),
-        }),
+        // Only songs you can add: one already yours would come back as
+        // skipped, and resending one on its way would resume it if paused.
+        body: JSON.stringify({ tracks: rows.filter(addable).map(songBody) }),
       });
       if (!response.ok)
         throw await writeFailure(

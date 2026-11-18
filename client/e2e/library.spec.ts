@@ -457,7 +457,7 @@ test("adding a catalogue album confirms what the server did", async ({
         return route.fulfill({
           json: {
             created: 0,
-            existing: 1,
+            existing: 0,
             skipped: 1,
             downloads_enabled: true,
           },
@@ -479,10 +479,9 @@ test("adding a catalogue album confirms what the server did", async ({
   await page
     .getByRole("button", { name: "Add to library", exact: true })
     .click();
-  await expect(
-    page.getByText("Adding 1 song to your library. Skipped 1 song."),
-  ).toBeVisible();
-  expect(sent.map((t) => t.title)).toEqual(["Queued song", "Skipped song"]);
+  await expect(page.getByText("Skipped 1 song.")).toBeVisible();
+  // A song on its way is not sent again: resending would resume it if paused.
+  expect(sent.map((t) => t.title)).toEqual(["Skipped song"]);
   await expect.poll(() => reads).toBeGreaterThan(before);
 });
 
