@@ -6,6 +6,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 from pathlib import Path
@@ -44,6 +45,11 @@ ENGINE_URL = "http://127.0.0.1:5030/health"
 ENGINE_HANG_LIMIT = 3
 ENGINE_HANG_WINDOW = 3600
 ENGINE_STOP_SECONDS = 10
+# Starting the engine checks the library mount and prepares its folders on
+# the NAS first, which can hang: it runs on a thread of its own, one at a
+# time, and the supervisor waits for it at most half a second each time.
+ENGINE_LAUNCH_WAIT = 0.5
+ENGINE_LAUNCH_SLOW = 30
 # The history also says how each run of the server ended (#241): "start"
 # when it is started, then "stop" (asked to stop: a release or a container
 # stop), "exit" (it ended by itself), "watchdog" (ended for not answering),
@@ -347,6 +353,40 @@ class Ending:
             self.say("Waiting for the old source engine to end before starting another")
 
 
+class Launch:
+    """One start of the source engine on its own thread (#256), so a hung
+    library mount never stalls the supervisor's loop. `start_engine` still
+    checks the mount before it prepares any folder."""
+
+    def __init__(self, root, now):
+        self.result = (None, None)
+        self.began = now
+        self.said = False
+        self.thread = threading.Thread(
+            target=self.run, args=(root,), name="engine-launch", daemon=True
+        )
+        self.thread.start()
+        self.thread.join(ENGINE_LAUNCH_WAIT)
+
+    def run(self, root):
+        try:
+            self.result = start_engine(root)
+        except Exception:
+            self.result = (None, None)
+
+    def done(self):
+        return not self.thread.is_alive()
+
+    def slow(self, now):
+        """Said once when the start has waited on the mount for 30 s."""
+        if not self.said and now - self.began >= ENGINE_LAUNCH_SLOW:
+            self.said = True
+            say(
+                "Starting the source engine is waiting on the library mount;"
+                " the server carries on meanwhile"
+            )
+
+
 def reap(children, deadline, say=say):
     """End each child by `deadline` (monotonic): wait, then kill and wait at
     most 5 s more. One that outlives a kill is left, so stopping never
@@ -466,6 +506,7 @@ def main():
     server = None
     engine = None
     ending = None  # A hung engine still being ended.
+    launch = None  # A start of the engine still running.
     stopping = False
     stop_signal = None
     probing = False
@@ -490,7 +531,7 @@ def main():
     try:
         root = Path(os.environ.get("PIG_MUSIC_DATA", "/data"))
         history = root / "logs" / "restarts.json"
-        engine, log = start_engine(root)
+        launch = Launch(root, time.monotonic())
         record_start(history, time.time())
         server = subprocess.Popen(
             [
@@ -575,17 +616,24 @@ def main():
                 ending.waiting(time.monotonic())
             elif (
                 engine is None
+                and launch is None
                 and os.environ.get("PIG_MUSIC_EMBEDDED_ENGINE", "true").lower()
                 == "true"
                 and time.monotonic() >= next_engine_check
             ):
                 if log:
                     log.close()
-                engine, log = start_engine(root)
+                    log = None
+                launch = Launch(root, time.monotonic())
+            if launch and launch.done():
+                engine, log = launch.result
+                launch = None
                 started = time.monotonic()
                 engine_watch.started(started)
                 if not engine:
                     next_engine_check = time.monotonic() + 5
+            elif launch:
+                launch.slow(time.monotonic())
             if watchdog.due(time.monotonic()):
                 # Done here rather than on a thread: one probe holds the loop
                 # for at most its 10 s timeout, once every 30 s.
@@ -612,6 +660,12 @@ def main():
             record_restart(history, time.time(), "exit", reason)
         elif not failed:
             record_restart(history, time.time(), "stop", stop_reason(stop_signal))
+        if launch:
+            # An engine started while stopping is ended with the rest; one
+            # still waiting on the mount is left to its daemon thread.
+            launch.thread.join(ENGINE_LAUNCH_WAIT)
+            if launch.done() and engine is None:
+                engine, log = launch.result
         stop(None, None)
         reap((engine, ending and ending.process, server), time.monotonic() + 25)
         return 1 if failed else 0

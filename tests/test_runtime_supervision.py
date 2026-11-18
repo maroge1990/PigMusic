@@ -214,6 +214,63 @@ def test_an_engine_that_outlives_a_kill_never_stalls_the_supervisor(
     assert "Waiting for the old source engine to end" in err
 
 
+def test_starting_the_engine_on_a_hung_mount_never_stalls_the_supervisor(
+    tmp_path, monkeypatch, capsys
+):
+    """Codex on 438047f: the engine's start checks the library mount and
+    makes its folders on the NAS from the supervisor's own loop, so a hung
+    mount stopped the server's watchdog, restarts and shutdown."""
+    clock = [0.0]
+    release = threading.Event()
+    launches, server_probes, active = [], [], [0, 0]
+
+    def start_engine(root):
+        launches.append((clock[0], threading.current_thread().name))
+        if len(launches) == 1:
+            return HungEngine(clock), None
+        active[0] += 1
+        active[1] = max(active)
+        if threading.current_thread() is threading.main_thread():
+            raise AssertionError("the mount check would hang the supervisor")
+        release.wait(5)  # The mount check hangs.
+        active[0] -= 1
+        return None, None
+
+    def server_probe():
+        server_probes.append(clock[0])
+        if launches[1:] and clock[0] > launches[1][0] + 300:
+            release.set()  # The loop kept running while the start hung.
+        return "ok", []
+
+    def sleep(seconds):
+        clock[0] += 1
+
+    monkeypatch.setenv("PIG_MUSIC_DATA", str(tmp_path))
+    monkeypatch.setenv("PIG_MUSIC_EMBEDDED_ENGINE", "true")
+    monkeypatch.setattr(runtime, "start_engine", start_engine)
+    monkeypatch.setattr(runtime, "proxy_trust", lambda: "127.0.0.1")
+    monkeypatch.setattr(
+        runtime.subprocess, "Popen", lambda *a, **k: FakeProcess(lifetime=1200)
+    )
+    monkeypatch.setattr(runtime.time, "sleep", sleep)
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(runtime.signal, "signal", lambda *a: None)
+    monkeypatch.setattr(runtime, "probe", server_probe, raising=False)
+    monkeypatch.setattr(runtime, "engine_probe", lambda: ("silent", []))
+    try:
+        assert runtime.main() == 1
+    finally:
+        release.set()
+    assert release.is_set() and len(launches) >= 2
+    # The hung start ran off the loop, and only one start at a time.
+    assert all(name == "engine-launch" for _, name in launches)
+    assert active[1] == 1
+    after = [at for at in server_probes if at > launches[1][0]]
+    assert after and all(b - a == 30 for a, b in zip(after, after[1:]))
+    err = capsys.readouterr().err
+    assert "Starting the source engine is waiting on the library mount" in err
+
+
 def test_an_engine_that_answers_is_never_ended(tmp_path, monkeypatch):
     # Nine silent probes, then any answer (even a refusal) starts the count again.
     engines, probes = engine_supervised(
