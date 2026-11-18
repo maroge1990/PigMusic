@@ -6,7 +6,8 @@ import { PageHeader, SectionHeader } from "./PageHeader";
 import { SongRow } from "./SongRow";
 import { withLibrary, type Song } from "./songs";
 import { warmArtist, whenIdle } from "./prefetch";
-import { Mixes } from "./Mixes";
+import { MixPage, Mixes } from "./Mixes";
+import { CollectionCard, albumSongs } from "./CollectionMenu";
 import { InlineError, Loading } from "./EmptyState";
 import { Rewind, RewindCard, rewindPeriod } from "./Rewind";
 import type { Route } from "./routes";
@@ -138,7 +139,13 @@ function HomeSection({ kind }: { kind: "popular" | "recommended" }) {
           {collection === "songs" ? (
             <div className="song-list home-songs">
               {(allSongs ? songs : songs.slice(0, 10)).map((song, i) => (
-                <SongRow key={song.key} song={song} queue={songs} index={i} />
+                <SongRow
+                  key={song.key}
+                  song={song}
+                  queue={songs}
+                  index={i}
+                  page="chart"
+                />
               ))}
               {songs.length > 10 && (
                 <button type="button" onClick={() => setAllSongs(!allSongs)}>
@@ -212,15 +219,18 @@ function RecentlyAdded() {
       <SectionHeader title="Recently added" />
       <div className="home-grid">
         {albums.map((album) => (
-          <a
-            className="album-card"
+          <CollectionCard
             key={album.id}
-            href={"#/library/album/" + album.id}
+            kind="album"
+            title={album.title}
+            songs={() => albumSongs(album.id)}
           >
-            <Cover title={album.title} src={album.cover_url} />
-            <strong>{album.title}</strong>
-            <p>{album.artist}</p>
-          </a>
+            <a className="album-card" href={"#/library/album/" + album.id}>
+              <Cover title={album.title} src={album.cover_url} />
+              <strong>{album.title}</strong>
+              <p>{album.artist}</p>
+            </a>
+          </CollectionCard>
         ))}
       </div>
     </section>
@@ -228,6 +238,8 @@ function RecentlyAdded() {
 }
 
 export function Home({ route }: { route: Route }) {
+  if (route.parts[0] === "mix" && route.parts[1])
+    return <MixPage id={decodeURIComponent(route.parts[1])} />;
   if (route.parts[0] === "rewind")
     return <Rewind period={rewindPeriod(route.params.get("period"))} />;
   return (

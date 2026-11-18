@@ -28,11 +28,6 @@ import type { Playlist, PlaylistSummary } from "./libraryTypes";
 import { LibrarySongs } from "./LibrarySongs";
 import { ArtistAlbums } from "./ArtistAlbums";
 import { PlaylistOptions } from "./PlaylistOptions";
-import {
-  RemovalDialog,
-  type Removal,
-  type RemovalPreview,
-} from "./RemoveFromLibrary";
 import { go, type Route } from "./routes";
 import { OwnerAlbumTools, OwnerArtistTools } from "./OwnerTools";
 import { InlineError, Loading } from "./EmptyState";
@@ -114,7 +109,6 @@ export function PersonalLibrary({
   const [playlists, setPlaylists] = useState<PlaylistSummary[]>([]);
   const [favouriteList, setFavouriteList] = useState<Playlist | null>(null);
   const [error, setError] = useState("");
-  const [removal, setRemoval] = useState<Removal | null>(null);
   const player = usePlayer();
   /** Only the latest refresh may apply its answers (#97). */
   const refreshes = useRef(0);
@@ -346,18 +340,6 @@ export function PersonalLibrary({
         setError((e as Error).message);
     }
   }
-  async function preview(ids: string[]) {
-    try {
-      const data = await api<RemovalPreview>("/v1/library/removal-preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ track_ids: ids }),
-      });
-      setRemoval({ preview: data, ids });
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
   function songs(tracks: Track[], playlist?: Playlist) {
     return (
       <LibrarySongs
@@ -367,7 +349,12 @@ export function PersonalLibrary({
         cover={detail?.cover}
         albumPage={detail?.quality?.scope === "album"}
         artistName={detail?.artist?.name}
-        remove={(id) => void preview([id])}
+        page={searching ? "search" : undefined}
+        onRemoved={() => {
+          // Leave the page the songs were removed from, address too (#97).
+          if (openRoute.current) backToLibrary();
+          else setDetail(null);
+        }}
         moveUp={(playlist, entry) =>
           void action(async () => {
             await api(`/v1/playlists/${playlist.id}`, {
@@ -643,44 +630,6 @@ export function PersonalLibrary({
             )
           }
           refresh={refresh}
-        />
-      )}
-      {removal && (
-        <RemovalDialog
-          removal={removal}
-          cancel={() => setRemoval(null)}
-          confirm={() =>
-            void action(async () => {
-              const r = await api<{ id: string; undo_until: number }>(
-                "/v1/library/remove",
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    track_ids: removal.ids,
-                    confirmation: removal.preview.confirmation,
-                  }),
-                },
-              );
-              offerUndo(
-                "Removed from your library.",
-                async () => {
-                  await api(`/v1/library/removals/${r.id}/undo`, {
-                    method: "POST",
-                  });
-                  backToLibrary();
-                  await refresh();
-                },
-                "Restored",
-                undefined,
-                r.undo_until * 1000 - Date.now(),
-              );
-              setRemoval(null);
-              // Leave the page the songs were removed from, address too (#97).
-              if (openRoute.current) backToLibrary();
-              else setDetail(null);
-            })
-          }
         />
       )}
     </main>

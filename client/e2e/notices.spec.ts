@@ -46,8 +46,8 @@ test("adding a song to a playlist says so where you can see it", async ({
   await page
     .getByRole("button", { name: "More options for Von dutch" })
     .click();
-  await page.getByRole("menuitem", { name: "Add to playlist…" }).click();
-  await page.getByRole("button", { name: "Gym" }).click();
+  await page.getByRole("menuitem", { name: "Add to playlist" }).click();
+  await page.getByRole("menuitem", { name: "Gym" }).click();
   await expect(notices(page).getByRole("status")).toHaveText(
     "Added to playlist",
   );

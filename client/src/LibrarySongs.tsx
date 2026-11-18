@@ -1,4 +1,3 @@
-import { ArrowUp, X } from "lucide-react";
 import { CollectionPages } from "./CollectionPages";
 import type { Entry, Playlist } from "./libraryTypes";
 import { SongRow } from "./SongRow";
@@ -12,10 +11,13 @@ export function LibrarySongs({
   cover,
   albumPage,
   artistName,
-  remove,
+  onRemoved,
   moveUp,
   removeFromPlaylist,
+  page,
 }: {
+  /** Search plays only the tapped song. */
+  page?: "search";
   tracks: Track[];
   playlist?: Playlist;
   cover?: string | null;
@@ -23,8 +25,8 @@ export function LibrarySongs({
   albumPage: boolean;
   /** On an artist page, rows by that artist don't repeat the name. */
   artistName?: string;
-  /** Asks to remove one song from the library. */
-  remove: (trackId: string) => void;
+  /** After a song leaves your library. */
+  onRemoved: () => void;
   moveUp: (playlist: Playlist, entry: Entry) => void;
   removeFromPlaylist: (playlist: Playlist, entry: Entry) => void;
 }) {
@@ -53,34 +55,17 @@ export function LibrarySongs({
                   t.artist.toLocaleLowerCase() ===
                     String(albumArtist || artistName).toLocaleLowerCase()
                 }
-                onRemove={
-                  playlist || song.state !== "saved"
-                    ? undefined
-                    : () => remove(t.id)
-                }
-                menu={
-                  playlist &&
-                  !playlist.favourites &&
-                  entry && (
-                    <>
-                      <button
-                        role="menuitem"
-                        disabled={entry.position === 0}
-                        onClick={() => moveUp(playlist, entry)}
-                      >
-                        <span>Move up</span>
-                        <ArrowUp size={18} />
-                      </button>
-                      <button
-                        role="menuitem"
-                        className="danger"
-                        onClick={() => removeFromPlaylist(playlist, entry)}
-                      >
-                        <span>Remove from playlist</span>
-                        <X size={18} />
-                      </button>
-                    </>
-                  )
+                page={page || (playlist ? "playlist" : "library")}
+                onRemoved={onRemoved}
+                playlist={
+                  playlist && entry
+                    ? {
+                        editable: !playlist.favourites,
+                        first: entry.position === 0,
+                        moveUp: () => moveUp(playlist, entry),
+                        remove: () => removeFromPlaylist(playlist, entry),
+                      }
+                    : undefined
                 }
               />
             );

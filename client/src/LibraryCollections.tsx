@@ -2,6 +2,12 @@ import { ListMusic } from "lucide-react";
 import type { ReactNode } from "react";
 import { AppleImport } from "./AppleImport";
 import { CollectionPages } from "./CollectionPages";
+import {
+  CollectionCard,
+  albumSongs,
+  artistSongs,
+  playlistSongList,
+} from "./CollectionMenu";
 import { Cover } from "./Cover";
 import { Empty } from "./EmptyState";
 import { OwnerLibraryLinks } from "./OwnerTools";
@@ -88,18 +94,24 @@ export function LibraryCollections({
           {(items) => (
             <div className="personal-grid">
               {items.map((artist) => (
-                <a
+                <CollectionCard
                   key={artist.id}
-                  className="album-card"
-                  href={"#/library/artist/" + artist.id}
+                  kind="artist"
+                  title={artist.name}
+                  songs={() => artistSongs(artist.id)}
                 >
-                  <Cover title={artist.name} src={artist.cover_url} artist />
-                  <h3>{artist.name}</h3>
-                  <p>
-                    {artist.album_count} album
-                    {artist.album_count === 1 ? "" : "s"}
-                  </p>
-                </a>
+                  <a
+                    className="album-card"
+                    href={"#/library/artist/" + artist.id}
+                  >
+                    <Cover title={artist.name} src={artist.cover_url} artist />
+                    <h3>{artist.name}</h3>
+                    <p>
+                      {artist.album_count} album
+                      {artist.album_count === 1 ? "" : "s"}
+                    </p>
+                  </a>
+                </CollectionCard>
               ))}
             </div>
           )}
@@ -116,19 +128,25 @@ export function LibraryCollections({
           {(items) => (
             <div className="personal-grid">
               {items.map((album) => (
-                <a
+                <CollectionCard
                   key={album.id}
-                  className="album-card"
-                  href={"#/library/album/" + album.id}
+                  kind="album"
+                  title={album.title}
+                  songs={() => albumSongs(album.id)}
                 >
-                  <Cover title={album.title} src={album.cover_url} />
-                  <h3>{album.title}</h3>
-                  <p>
-                    {tab === "albums"
-                      ? `${album.artist} · ${album.track_count} song${album.track_count === 1 ? "" : "s"}`
-                      : album.artist}
-                  </p>
-                </a>
+                  <a
+                    className="album-card"
+                    href={"#/library/album/" + album.id}
+                  >
+                    <Cover title={album.title} src={album.cover_url} />
+                    <h3>{album.title}</h3>
+                    <p>
+                      {tab === "albums"
+                        ? `${album.artist} · ${album.track_count} song${album.track_count === 1 ? "" : "s"}`
+                        : album.artist}
+                    </p>
+                  </a>
+                </CollectionCard>
               ))}
             </div>
           )}
@@ -168,11 +186,17 @@ export function LibraryCollections({
               Create
             </button>
           </form>
-          <ul className="playlist-list">
+          <div className="playlist-list">
             {playlists
               .filter((p) => !p.id.startsWith("pig-favourites:"))
               .map((p) => (
-                <li key={p.id}>
+                <CollectionCard
+                  key={p.id}
+                  kind="playlist"
+                  title={p.name}
+                  songs={() => playlistSongList(p.id)}
+                  className="playlist-card"
+                >
                   <a href={"#/library/playlist/" + p.id}>
                     <ListMusic size={22} aria-hidden="true" />
                     <strong>{p.name}</strong>
@@ -186,9 +210,9 @@ export function LibraryCollections({
                         : ""}
                     </span>
                   </a>
-                </li>
+                </CollectionCard>
               ))}
-          </ul>
+          </div>
           {!playlists.some((p) => !p.id.startsWith("pig-favourites:")) && (
             <Empty
               title="No playlists yet"

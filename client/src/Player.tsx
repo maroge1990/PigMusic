@@ -58,7 +58,8 @@ const SHEET_OUT_MS = 200;
 type Controls = {
   /** Play `queue[index]`, then carry on through the queue. */
   play: (queue: Song[], index?: number) => void;
-  playNext: (song: Song) => void;
+  /** One song, or a whole album or playlist in its order. */
+  playNext: (song: Song | Song[]) => void;
   addToQueue: (song: Song) => void;
   playSaved: (track: Track, queue?: Track[], position?: number) => void;
   current: string | null;
@@ -348,9 +349,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       Math.max(0, index),
     );
   }
-  function playNext(s: Song) {
-    if (!song) return play([s]);
-    insertNext(queue.current, cursor.current, s);
+  function playNext(s: Song | Song[]) {
+    const list = Array.isArray(s) ? s : [s];
+    if (!list.length) return;
+    if (!song) return play(list);
+    for (const next of [...list].reverse())
+      insertNext(queue.current, cursor.current, next);
     setQueueVersion((v) => v + 1);
   }
   function addToQueue(s: Song) {

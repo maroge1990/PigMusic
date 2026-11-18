@@ -234,9 +234,10 @@ test("Rewind switches period and list", async ({ page }) => {
   const list = page.locator(".rewind-ranked > li");
   await expect(list).toHaveCount(10);
   await expect(list.first()).toContainText("Song 1");
-  await expect(list.first()).toContainText("Charli xcx · 20 plays");
-  await expect(list.first().locator(".rewind-rank.top")).toHaveText("1");
-  await expect(list.nth(3).locator(".rewind-rank.top")).toHaveCount(0);
+  // #248: the one song row, with its rank and plays.
+  await expect(list.first()).toContainText("Charli xcx · Brat · 20 plays");
+  await expect(list.first().locator(".song-rank.top")).toHaveText("1");
+  await expect(list.nth(3).locator(".song-rank.top")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Artists" }).click();
   await expect(page.getByRole("button", { name: "Artists" })).toHaveAttribute(
@@ -276,8 +277,8 @@ test("tapping a song plays it and the songs ranked after it", async ({
   await setUp(page);
   await page.goto("/#/home/rewind");
   const rows = page.locator(".rewind-ranked > li");
-  await expect(rows.nth(6).locator("button")).toBeDisabled();
-  await rows.nth(4).locator("button").click();
+  await expect(rows.nth(6).locator(".song-main")).toBeDisabled();
+  await rows.nth(4).locator(".song-main").click();
   await expect(page.locator(".mini-player")).toContainText("Song 5");
   await expect
     .poll(async () =>
@@ -288,6 +289,21 @@ test("tapping a song plays it and the songs ranked after it", async ({
       ),
     )
     .toEqual(["Song 5", "Song 6", "Song 8", "Song 9", "Song 10"]);
+});
+
+// #248: a Rewind song has the one song menu, from ⋯ or a right-click.
+test("a Rewind song row has the song menu", async ({ page }) => {
+  await setUp(page);
+  await page.goto("/#/home/rewind");
+  const row = page.locator(".rewind-ranked > li").first();
+  await row.getByRole("button", { name: "More options for Song 1" }).click();
+  const menu = page.getByRole("menu", { name: "Song 1" });
+  await expect(menu.getByRole("menuitem").first()).toHaveText("Play next");
+  await expect(menu.getByRole("menuitem").first()).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  await row.locator(".song-text").click({ button: "right" });
+  await expect(menu).toBeVisible();
 });
 
 // #216: library page first, then the catalogue, else not a link.

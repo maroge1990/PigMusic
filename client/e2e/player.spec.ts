@@ -300,8 +300,13 @@ test("Up next moves and removes songs, and skipping follows it", async ({
   ).toBeDisabled();
   await upNext.getByRole("button", { name: "Move Club classics up" }).click();
   await expect(rows).toHaveText(["Club classics", "360"]);
+  // #248: Remove from Up next is in the one song menu.
   await upNext
-    .getByRole("button", { name: "Remove Club classics from Up next" })
+    .getByRole("button", { name: "More options for Club classics" })
+    .click();
+  await page
+    .getByRole("menu", { name: "Club classics" })
+    .getByRole("menuitem", { name: "Remove from Up next" })
     .click();
   await expect(rows).toHaveText(["360"]);
   await expect

@@ -1,12 +1,9 @@
 import type { ReactNode, RefObject } from "react";
 import { Fragment, useEffect, useRef } from "react";
 import {
-  ArrowDown,
-  ArrowUp,
   ChevronDown,
   Repeat,
   Repeat1,
-  X,
   SkipBack,
   SkipForward,
   Square,
@@ -15,6 +12,7 @@ import {
 } from "lucide-react";
 import { Cover } from "./Cover";
 import { PersonalSongActions } from "./PersonalSongActions";
+import { SongRow } from "./SongRow";
 import type { Playing } from "./playbackSource";
 import { startsSimilar, type RepeatMode } from "./queue";
 import { goToAlbum, goToPlayingArtist, type Song } from "./songs";
@@ -293,32 +291,23 @@ function UpNext({
                 </li>
               )}
               <li>
-                <button onClick={() => step(i + 1)}>
-                  <strong>{s.title}</strong>
-                  <small>{s.artist}</small>
-                </button>
-                <span className="np-queue-tools">
-                  <button
-                    aria-label={`Move ${s.title} up`}
-                    disabled={i === 0}
-                    onClick={() => moveUpcoming(at, -1)}
-                  >
-                    <ArrowUp size={16} />
-                  </button>
-                  <button
-                    aria-label={`Move ${s.title} down`}
-                    disabled={at === songs.length - 1}
-                    onClick={() => moveUpcoming(at, 1)}
-                  >
-                    <ArrowDown size={16} />
-                  </button>
-                  <button
-                    aria-label={`Remove ${s.title} from Up next`}
-                    onClick={() => removeUpcoming(at)}
-                  >
-                    <X size={16} />
-                  </button>
-                </span>
+                {/* The one song row (#248): cover, the library mark and the
+                    song menu, with this page's Move and Remove from Up next. */}
+                <SongRow
+                  song={s}
+                  queue={songs}
+                  index={at}
+                  page="queue"
+                  onPlay={() => step(i + 1)}
+                  upNext={{
+                    up: i === 0 ? undefined : () => moveUpcoming(at, -1),
+                    down:
+                      at === songs.length - 1
+                        ? undefined
+                        : () => moveUpcoming(at, 1),
+                    remove: () => removeUpcoming(at),
+                  }}
+                />
               </li>
             </Fragment>
           );

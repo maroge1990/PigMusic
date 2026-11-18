@@ -164,55 +164,46 @@ for (const appearance of ["light", "dark"]) {
     await expect(
       cards.filter({ hasText: "Your 1990s" }).locator("svg text"),
     ).toHaveText("90s");
-    // #56: a click plays the mix at once; its songs are one option away.
-    const playback = page.waitForRequest(
-      (request) =>
-        request.url().includes("/v1/playback/") && request.method() === "POST",
-    );
-    await page.getByRole("button", { name: "Play Daily blend" }).click();
-    expect(decodeURIComponent((await playback).url())).toContain(
-      "mix:edition-0:0/url",
-    );
-    await expect(page.getByRole("dialog")).toHaveCount(0);
-    expect(
-      mock.unknown.filter((path) => path.includes("remote-playback")),
-    ).toEqual([]);
-    await page.getByRole("button", { name: "Options for Daily blend" }).click();
+    // D-118: the mix's menu plays it at once; Save and Hide live only there.
+    await page
+      .getByRole("button", { name: "More options for Daily blend" })
+      .click();
     const menu = page.getByRole("menu", { name: "Daily blend" });
     await expect(menu.getByRole("menuitem")).toHaveText([
-      "Show songs",
+      "Play",
       "Shuffle",
+      "Play next",
+      "Add to library",
+      "Add to playlist",
+      "Download",
       "Save this edition",
       "Hide this edition",
     ]);
     // The menu takes focus and the arrow keys move through it.
     await expect(
-      menu.getByRole("menuitem", { name: "Show songs" }),
+      menu.getByRole("menuitem", { name: "Play", exact: true }),
     ).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(menu.getByRole("menuitem", { name: "Shuffle" })).toBeFocused();
     await page.keyboard.press("ArrowUp");
-    await page.keyboard.press("Enter");
-    const dialog = page.getByRole("dialog", { name: "Daily blend" });
-    await expect(dialog).toBeVisible();
-    // #154: the mix dialog keeps its own width, not the generic 32rem cap.
-    const box = await dialog.boundingBox();
-    expect(box!.width).toBeGreaterThan(
-      Math.min(700, page.viewportSize()!.width - 40),
+    const playback = page.waitForRequest(
+      (request) =>
+        request.url().includes("/v1/playback/") && request.method() === "POST",
     );
-    await dialog.getByRole("button", { name: "Save this edition" }).click();
-    await expect(dialog.getByRole("status")).toContainText("Playlist saved");
-    await dialog.getByRole("button", { name: "Close mix" }).click();
-    await expect(dialog).not.toBeVisible();
-    // A right-click opens the same options: save without opening the songs.
+    await page.keyboard.press("Enter");
+    expect(decodeURIComponent((await playback).url())).toContain(
+      "mix:edition-0:0/url",
+    );
+    expect(
+      mock.unknown.filter((path) => path.includes("remote-playback")),
+    ).toEqual([]);
+    // A right-click opens the same menu: save without opening the songs.
     await page
-      .getByRole("button", { name: "Play Daily blend" })
+      .getByRole("link", { name: /Daily blend/ })
       .click({ button: "right" });
     await menu.getByRole("menuitem", { name: "Save this edition" }).click();
-    await expect(
-      page.getByRole("region", { name: "Your mixes" }).getByRole("status"),
-    ).toContainText("Playlist saved");
-    await page.getByRole("button", { name: "Options for Mix 1" }).click();
+    await expect(page.locator(".notice-area")).toContainText("Playlist saved");
+    await page.getByRole("button", { name: "More options for Mix 1" }).click();
     await page
       .getByRole("menu", { name: "Mix 1" })
       .getByRole("menuitem", { name: "Hide this edition" })
@@ -221,8 +212,78 @@ for (const appearance of ["light", "dark"]) {
   });
 }
 
-// #56: on a touchscreen, holding a mix opens its options instead of playing it.
-test("A long press on a mix opens its options; Shuffle plays it", async ({
+// D-118 (#249): a mix opens as a page with Play, Shuffle and its menu, and
+// its songs are the one song row.
+test("a mix opens as a page with Shuffle", async ({ page }) => {
+  const tracks = [0, 1, 2].map((i) => ({
+    ...album.tracks[0],
+    id: `mix:edition-0:${i}`,
+    title: "Mix song " + i,
+    server_state: "not_in_library",
+  }));
+  const played: string[] = [];
+  await mockApi(page, {
+    answers: {
+      "/v1/home/mixes": (route) =>
+        route.fulfill({
+          json: {
+            mixes: [
+              {
+                id: "edition-0",
+                kind: "daily",
+                title: "Daily blend",
+                day: "Tuesday",
+                reason: "Music close to your taste",
+                tracks,
+              },
+            ],
+            preparing: false,
+          },
+        }),
+    },
+  });
+  await page.route("**/api/v1/playback/*/url", (route) => {
+    played.push(decodeURIComponent(route.request().url()));
+    return route.fulfill({
+      json: { url: "/api/v1/playback/files/prepared", expires_in: 21600 },
+    });
+  });
+  await page.goto("/#/home");
+  await page.getByRole("link", { name: /Daily blend/ }).click();
+  await expect(page).toHaveURL(/#\/home\/mix\/edition-0$/);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Daily blend" }),
+  ).toBeVisible();
+  await expect(page.locator(".song-row")).toHaveCount(3);
+  // Save and Hide this edition are only in the mix's menu, not on the page.
+  await expect(
+    page.getByRole("button", { name: "Save this edition" }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Shuffle" }).click();
+  await expect.poll(() => played.length).toBeGreaterThan(0);
+  expect(played[0]).toMatch(/mix:edition-0:\d\/url/);
+  // A mix's song has Hide from mixes as the page's own item.
+  await page
+    .getByRole("button", { name: "More options for Mix song 1" })
+    .click();
+  await expect(
+    page
+      .getByRole("menu", { name: "Mix song 1" })
+      .getByRole("menuitem", { name: "Hide from mixes" }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  // A right-click on a song opens its menu only, not the mix's around it.
+  await page
+    .locator(".song-row", { hasText: "Mix song 2" })
+    .locator(".song-text")
+    .click({ button: "right" });
+  await expect(page.getByRole("menu", { name: "Mix song 2" })).toBeVisible();
+  await expect(page.getByRole("menu", { name: "Daily blend" })).toBeHidden();
+});
+
+// #56: on a touchscreen, holding a mix opens its menu instead of opening it.
+test("A long press on a mix opens its menu; Shuffle plays it", async ({
   page,
 }) => {
   const tracks = [0, 1, 2].map((i) => ({
@@ -259,15 +320,16 @@ test("A long press on a mix opens its options; Shuffle plays it", async ({
     });
   });
   await page.goto("/#/home");
-  const card = page.getByRole("button", { name: "Play Daily blend" });
+  const card = page.getByRole("link", { name: /Daily blend/ });
   await card.dispatchEvent("pointerdown", { pointerType: "touch" });
   const menu = page.getByRole("menu", { name: "Daily blend" });
   await expect(menu).toBeVisible();
-  // The finger lifting is not a tap: nothing plays.
+  // The finger lifting is not a tap: nothing plays and the page stays.
   await card.dispatchEvent("pointerup", { pointerType: "touch" });
   await card.dispatchEvent("click");
   await page.waitForTimeout(300);
   expect(played).toEqual([]);
+  await expect(page).toHaveURL(/#\/home$/);
   await menu.getByRole("menuitem", { name: "Shuffle" }).click();
   await expect.poll(() => played.length).toBeGreaterThan(0);
   expect(played[0]).toMatch(/mix:edition-0:\d\/url/);

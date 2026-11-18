@@ -1,4 +1,4 @@
-import { PlaylistPicker } from "./PlaylistPicker";
+import { PlaylistPicker, addToPlaylist } from "./PlaylistPicker";
 import { useEffect, useState } from "react";
 import { Star } from "lucide-react";
 import { api } from "./api";
@@ -13,7 +13,6 @@ export function PersonalSongActions({
   hidePlaylist?: boolean;
 }) {
   const [favourite, setFavourite] = useState(false);
-  const playlists: { id: string; name: string }[] = [];
   const [error, setError] = useState("");
   const body = songBody(song);
   const key = JSON.stringify(body);
@@ -51,28 +50,9 @@ export function PersonalSongActions({
       </button>
       {!hidePlaylist && (
         <PlaylistPicker
+          button
           title={song.title}
-          load={async () =>
-            (
-              await api<{ playlists: typeof playlists }>("/v1/playlists")
-            ).playlists.filter((p) => !p.id.startsWith("pig-favourites:"))
-          }
-          create={(name) =>
-            api("/v1/playlists", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name }),
-            })
-          }
-          add={(id) =>
-            api(`/v1/playlists/${id}/songs?allow_repeat=true`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(body),
-            }).then(() =>
-              window.dispatchEvent(new Event("music-library-changed")),
-            )
-          }
+          add={(id) => addToPlaylist(id, [body])}
         />
       )}
       {error && (

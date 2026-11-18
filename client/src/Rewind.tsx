@@ -8,6 +8,7 @@ import { MixArtwork, mixCoverKind } from "./Mixes";
 import { discoverUrl } from "./navigation";
 import { PageHeader } from "./PageHeader";
 import { usePlayer } from "./Player";
+import { SongRow } from "./SongRow";
 import { fromServerTrack } from "./songs";
 import type { Track } from "./types";
 import "./rewind.css";
@@ -301,26 +302,16 @@ export function Rewind({ period }: { period: RewindPeriod }) {
             {list === "songs" &&
               songs.map(({ track, plays }, i) => (
                 <li key={track.id + i}>
-                  <button
-                    type="button"
-                    className="rewind-row"
-                    disabled={track.available === false}
-                    onClick={() => playFrom(i)}
-                  >
-                    <Row
-                      rank={i + 1}
-                      cover={
-                        <Cover
-                          title={track.title}
-                          src={track.cover_url}
-                          sizes="48px"
-                        />
-                      }
-                      title={track.title}
-                      detail={`${track.artist} · ${count(plays, "play")}`}
-                      share={plays / (songs[0].plays || 1)}
-                    />
-                  </button>
+                  <SongRow
+                    song={fromServerTrack(track)}
+                    queue={[]}
+                    index={i}
+                    page="rewind"
+                    rank={i + 1}
+                    note={count(plays, "play")}
+                    unavailable={track.available === false}
+                    onPlay={() => playFrom(i)}
+                  />
                 </li>
               ))}
             {list === "artists" &&

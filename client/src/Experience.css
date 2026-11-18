@@ -15,10 +15,13 @@
   display: flex;
   flex-direction: column;
 }
+/* One row for every song (#248). Fixed slots after the text: the length on
+ * album pages, Up next's move buttons, the library mark and ⋯; a slot a row
+ * doesn't use takes no room. */
 .song-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) repeat(4, auto);
   align-items: center;
   min-height: 3.5rem;
   border-radius: var(--radius-control);
@@ -121,6 +124,49 @@
 }
 .song-state button {
   color: var(--text-accent);
+}
+.song-row > .playlist-picker {
+  display: contents;
+}
+.song-favourite {
+  margin-left: var(--space-4);
+  color: var(--text-accent);
+  vertical-align: baseline;
+}
+.song-length {
+  padding: 0 var(--space-8);
+  color: var(--secondary);
+  font-size: var(--type-footnote);
+}
+.song-rank {
+  flex: none;
+  width: 1.75rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  color: var(--secondary);
+}
+.song-rank.top {
+  color: var(--text-accent);
+}
+.song-tools {
+  display: flex;
+}
+.song-tools button {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--secondary);
+}
+.song-tools button:disabled {
+  opacity: 0.3;
 }
 .song-error {
   grid-column: 1 / -1;
@@ -433,40 +479,22 @@
   margin: 0;
   padding: 0;
 }
-.np-queue button {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  padding: var(--space-8) 0;
-  text-align: left;
+/* Up next sits on the media background; its menus keep their own colours. */
+.np-queue .song-row::after {
+  border-color: var(--media-border);
+}
+@media (hover: hover) {
+  .np-queue .song-row:hover {
+    background: var(--media-raised);
+  }
+}
+.np-queue .song-main,
+.np-queue .song-tools,
+.np-queue .song-state,
+.np-queue .song-more {
+  --text: var(--media-text);
+  --secondary: var(--media-secondary);
   color: var(--media-text);
-}
-.np-queue small {
-  color: var(--media-secondary);
-}
-.np-queue li {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-}
-.np-queue li > button {
-  flex: 1;
-  min-width: 0;
-}
-.np-queue-tools {
-  display: flex;
-  gap: var(--space-4);
-}
-.np-queue .np-queue-tools button {
-  width: 2.75rem;
-  height: 2.75rem;
-  padding: 0;
-  align-items: center;
-  justify-content: center;
-  color: var(--media-secondary);
-}
-.np-queue .np-queue-tools button:disabled {
-  opacity: 0.3;
 }
 .np-queue-group h4 {
   margin: var(--space-12) 0 var(--space-4);
@@ -500,7 +528,8 @@
 .shuffle-library {
   flex: none;
 }
-.personal-grid > a {
+.personal-grid > a,
+.personal-grid > .collection-card > a {
   display: block;
   padding: var(--space-8);
   color: var(--text);
