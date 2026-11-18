@@ -13,7 +13,10 @@ globalThis.document = Object.assign(new EventTarget(), {
 // A signed-in tab: every write names its session (#250).
 const { setSessionId } = await import("../src/sessionId.ts");
 setSessionId("session-1");
-const { defer, drainPending, isPending } = await import("../src/deferred.ts");
+const deferred = await import("../src/deferred.ts");
+const { defer, drainPending, isPending } = deferred;
+// Each sign-out here ends with the app taking actions again.
+test.afterEach(() => deferred.reopenDeferred?.());
 const { expectedSession } = await import("../src/sessionId.ts");
 const { signOutSession } = await import("../src/signOut.ts");
 const { answerConfirm, askToConfirm, subscribeConfirm } = await import(
@@ -199,10 +202,43 @@ test("a deferred write names the session it was scheduled under (Codex round 2)"
 test("with no session known, a deferred write isn't started at all", async () => {
   setSessionId(null);
   const sent = [];
-  const pending = defer("unknown-a", async () => sent.push("DELETE"), 5);
-  await assert.rejects(pending.done, /Couldn't tell who is signed in/);
+  // Refused before anything shows as done (Codex round 3).
+  assert.equal(
+    defer("unknown-a", async () => sent.push("DELETE"), 5),
+    null,
+  );
   assert.equal(isPending("unknown-a"), false);
   await wait(20);
   assert.deepEqual(sent, []);
   setSessionId("session-1");
+});
+
+test("an action started while signing out is refused and never sent (Codex round 3)", async () => {
+  setSessionId("session-1");
+  const sent = [];
+  let release = () => {};
+  defer(
+    "draining-a",
+    () =>
+      new Promise((resolve) => (release = resolve)).then(() =>
+        sent.push("first"),
+      ),
+    1,
+  );
+  await wait(5);
+  // The first is on its way; sign-out starts and waits for it.
+  const signingOut = signOutSession(
+    async (path) => sent.push(path),
+    "session-1",
+    storage,
+    drainPending,
+  );
+  const second = defer("draining-b", async () => sent.push("second"), 5);
+  // Refused: nothing shows as done, and it never reaches the network.
+  assert.equal(second, null);
+  assert.equal(isPending("draining-b"), false);
+  release();
+  await signingOut;
+  await wait(20);
+  assert.deepEqual(sent, ["first", "/v1/auth/logout"]);
 });

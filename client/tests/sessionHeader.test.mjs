@@ -78,3 +78,18 @@ test("a write refused as another sign-in's says so and ends this session", async
     ["music-session-changed", "This was started by another sign-in."],
   ]);
 });
+
+test("signed out, every write the server takes before sign-in is sent (Codex round 3)", async () => {
+  // Activating an invite or a password reset (/v1/setup) included.
+  const { PUBLIC_WRITES } = await import("../src/publicWrites.ts");
+  setSessionId(null);
+  const sent = serve();
+  for (const write of PUBLIC_WRITES) {
+    const [method, path] = write.split(" ");
+    await apiFetch(path, { method, body: "{}" });
+  }
+  assert.deepEqual(
+    sent.map(([method, path, session]) => [`${method} ${path}`, session]),
+    [...PUBLIC_WRITES].map((write) => [write, null]),
+  );
+});
