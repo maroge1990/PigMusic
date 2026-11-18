@@ -274,20 +274,13 @@ struct PlaylistView: View {
       if !household.isEmpty {
         added = try await model.performPersonal { try await $0.addMembership(trackIds: household) }
       }
-      var created = 0
-      var existing = 0
-      var skipped = 0
-      var downloadsEnabled = true
+      var batches: [AcquisitionResult] = []
       for batch in stride(from: 0, to: requested.count, by: 500) {
         let tracks = Array(requested[batch..<min(batch + 500, requested.count)])
-        let result = try await model.performPersonal { try await $0.requestMusic(tracks) }
-        created += result.created
-        existing += result.existing
-        skipped += result.skipped
-        downloadsEnabled = downloadsEnabled && result.downloadsEnabled
+        batches.append(try await model.performPersonal { try await $0.requestMusic(tracks) })
       }
-      let queued = AcquisitionResult(
-        created: created, existing: existing, skipped: skipped, downloadsEnabled: downloadsEnabled)
+      // Every batch's answer, paused songs included (Codex round 2 on batch D).
+      let queued = AcquisitionResult.combined(batches)
       let done = [
         added > 0 ? "Added \(added) song\(added == 1 ? "" : "s") to your library." : nil,
         requested.isEmpty ? nil : queued.sentence,

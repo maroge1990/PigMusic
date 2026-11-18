@@ -2008,17 +2008,21 @@ enum PlayOrigin: Hashable {
     let household = tracks.filter { $0.serverState == "household_available" }.map(\.id)
     let missing = tracks.filter { $0.serverState == "not_in_library" }
     do {
+      var results: [AcquisitionResult] = []
       if !household.isEmpty {
-        _ = try await performPersonal { try await $0.addMembership(trackIds: household) }
+        let added = try await performPersonal { try await $0.addMembership(trackIds: household) }
+        results.append(
+          AcquisitionResult(created: added, existing: 0, skipped: 0, downloadsEnabled: true))
       }
       if !missing.isEmpty {
-        let result = try await performPersonal { try await $0.requestMusic(missing) }
-        if !result.downloadsEnabled {
-          notify("Adding. Downloads are off on the server, so it will wait.")
-          return
-        }
+        results.append(try await performPersonal { try await $0.requestMusic(missing) })
       }
-      confirmations += 1
+      // The whole answer, paused songs included (Codex round 2 on batch D).
+      if let notice = AcquisitionResult.combined(results).menuNotice {
+        notify(notice)
+      } else {
+        confirmations += 1
+      }
     } catch is CancellationError {} catch { notify(error) }
   }
   /// Adds songs to a playlist, one edit each, in order (the collection menu).

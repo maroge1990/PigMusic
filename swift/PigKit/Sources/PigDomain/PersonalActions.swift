@@ -76,6 +76,28 @@ extension AcquisitionResult {
     return parts.isEmpty ? "Already in your library." : parts.joined(separator: " ")
   }
 }
+extension AcquisitionResult {
+  /// Several answers (a playlist's batches, a household add and a request)
+  /// as one, paused songs included (Codex round 2 on batch D).
+  public static func combined(_ results: [AcquisitionResult]) -> AcquisitionResult {
+    AcquisitionResult(
+      created: results.reduce(0) { $0 + $1.created },
+      existing: results.reduce(0) { $0 + $1.existing },
+      skipped: results.reduce(0) { $0 + $1.skipped },
+      paused: results.reduce(0) { $0 + $1.paused },
+      downloadsEnabled: results.allSatisfy(\.downloadsEnabled))
+  }
+  public static let downloadsOffNotice = "Adding. Downloads are off on the server, so it will wait."
+  /// What a menu's Add says: nil when a success haptic is enough; else that
+  /// downloads are off, or where to resume paused songs (alone or beside
+  /// added ones).
+  public var menuNotice: String? {
+    if !downloadsEnabled { return Self.downloadsOffNotice }
+    guard paused > 0 else { return nil }
+    return created + existing > 0 ? sentence : Self.pausedNotice
+  }
+}
+
 /// The one notice for a drain of the request outbox (#245): a refusal's
 /// reason (with how many songs when several), else the song left out; then
 /// the paused sentence when a song stayed paused (#264, Codex round 1 on
