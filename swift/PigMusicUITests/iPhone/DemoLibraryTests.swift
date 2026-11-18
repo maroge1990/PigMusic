@@ -34,10 +34,12 @@ final class DemoLibraryTests: XCTestCase {
   private func pause() {
     let pauses = app.buttons.matching(NSPredicate(format: "label == 'Pause'"))
     expect(pauses.firstMatch)
-    let all = pauses.allElementsBoundByIndex
-    if let shown = all.first(where: { $0.isHittable }) {
-      shown.tap()
-    } else if let drawn = all.first(where: { $0.frame.minX.isFinite && !$0.frame.isEmpty }) {
+    // Asking a hidden one whether it is hittable fails the test on iOS 26,
+    // so pick by frame and tap its middle.
+    let drawn = pauses.allElementsBoundByIndex.first {
+      $0.frame.minX.isFinite && $0.frame.minY.isFinite && !$0.frame.isEmpty
+    }
+    if let drawn {
       drawn.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     } else {
       XCTFail("No Pause button on screen")
