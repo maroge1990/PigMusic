@@ -5,7 +5,7 @@ import {
   peekCatalogue,
   writeFailure,
 } from "./api";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { formatDate } from "./format";
 import {
   ChevronLeft,
@@ -274,11 +274,29 @@ export function CatalogueBrowser({
       active = false;
     };
   }, [release]);
-  function reloadRelease() {
-    if (!release) return;
-    void request<Release>(`releases/${release.id}`)
-      .then(setRelease)
+  // Which release is on screen, and since when: a navigation (another
+  // album, another edition, back) starts a new generation (#262).
+  const shown = useRef({ id: "", generation: 0 });
+  useLayoutEffect(() => {
+    shown.current = {
+      id: release?.id || "",
+      generation: shown.current.generation + 1,
+    };
+  }, [release?.id]);
+  /** Reads a release again in the background. The answer is shown only
+   * while that release is still the one on screen, never over an album or
+   * edition opened since (#262, #263). */
+  function refreshRelease(id: string) {
+    const { generation } = shown.current;
+    return request<Release>(`releases/${id}`)
+      .then((data) => {
+        if (shown.current.generation === generation && shown.current.id === id)
+          setRelease(data);
+      })
       .catch(() => {});
+  }
+  function reloadRelease() {
+    if (release) void refreshRelease(release.id);
   }
   const [busy, setBusy] = useState(false);
   const groupBusy = listing.scope !== scope || listing.loading;
@@ -455,18 +473,13 @@ export function CatalogueBrowser({
         );
       notify(addedMessage((await response.json()) as AddResult));
       // Each song's state as the server now has it, not a guess.
-      await request<Release>(`releases/${release.id}`)
-        .then(setRelease)
-        .catch(() => {});
+      await refreshRelease(release.id);
       window.dispatchEvent(new Event("music-library-changed"));
       window.dispatchEvent(new Event("music-requests-changed"));
     } catch (e) {
       setError((e as Error).message);
       // It may have been requested: show each song's state as it is now.
-      if (isUnconfirmed(e))
-        void request<Release>(`releases/${release.id}`)
-          .then(setRelease)
-          .catch(() => {});
+      if (isUnconfirmed(e)) void refreshRelease(release.id);
     } finally {
       setBusy(false);
     }

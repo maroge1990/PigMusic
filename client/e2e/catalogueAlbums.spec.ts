@@ -1,0 +1,171 @@
+import { expect, test, type Page, type Route } from "@playwright/test";
+import { album, artist, mockApi } from "./mock";
+
+// Catalogue albums: an answer that arrives late belongs to the album or
+// edition it was asked for, never to the one now on screen (#262, #263).
+
+type Release = { id: string; title: string; song: string; explicit?: boolean };
+const track = (r: Release) => ({
+  id: "t-" + r.id,
+  title: r.song,
+  artist: artist.name,
+  album: r.title,
+  duration: 180,
+  track_number: 1,
+  disc_number: 1,
+  musicbrainz_release_id: r.id,
+  musicbrainz_recording_id: "rec-" + r.id,
+  explicit_edition: !!r.explicit,
+  server_state: "not_in_library",
+  saved_track: null,
+});
+const edition = (r: Release) => ({
+  id: r.id,
+  title: r.title,
+  date: "2025",
+  country: "",
+  description: "",
+  status: "Official",
+  formats: ["Digital Media"],
+  track_count: 1,
+});
+
+/** A library artist whose catalogue has these album groups, each with its
+ * editions (the first is the recommended one). `hold(id)` delays every
+ * read of that release after the first until `release()` is called. */
+async function catalogue(
+  page: Page,
+  groups: { id: string; title: string; editions: Release[] }[],
+  add: (route: Route) => Promise<void>,
+  lookup: (route: Route) => Promise<void> = (route) =>
+    route.fulfill({
+      json: {
+        tracks: JSON.parse(route.request().postData() || "{}").songs.map(
+          () => null,
+        ),
+      },
+    }),
+) {
+  const releases = new Map(
+    groups.flatMap((g) => g.editions).map((r) => [r.id, r]),
+  );
+  const reads = new Map<string, number>();
+  const held = new Set<string>();
+  const waiting: (() => void)[] = [];
+  const answers: Record<string, (route: Route) => Promise<void>> = {
+    [`/v1/artists/${artist.id}`]: (route) =>
+      route.fulfill({
+        json: {
+          ...artist,
+          albums: [album],
+          tracks: [],
+          compilation_tracks: [],
+        },
+      }),
+    [`/v1/catalogue/library-artists/${artist.id}`]: (route) =>
+      route.fulfill({ json: { id: "mb-1", name: artist.name } }),
+    "/v1/catalogue/artists/mb-1/releases": (route) =>
+      route.fulfill({
+        json: {
+          total: groups.length,
+          offset: 0,
+          releases: groups.map((g) => ({
+            id: g.id,
+            title: g.title,
+            date: "2025",
+            type: "Album",
+          })),
+        },
+      }),
+    "/v1/library/lookup": lookup,
+    "/v1/requests": (route) =>
+      route.request().method() === "POST"
+        ? add(route)
+        : route.fulfill({ json: { items: [], next_offset: null, active: 0 } }),
+  };
+  for (const g of groups)
+    answers[`/v1/catalogue/groups/${g.id}/editions`] = (route) =>
+      route.fulfill({
+        json: {
+          total: g.editions.length,
+          offset: 0,
+          editions: g.editions.map(edition),
+        },
+      });
+  for (const [id, r] of releases)
+    answers[`/v1/catalogue/releases/${id}`] = async (route) => {
+      const n = (reads.get(id) || 0) + 1;
+      reads.set(id, n);
+      if (n > 1 && held.has(id))
+        await new Promise<void>((resolve) => waiting.push(resolve));
+      await route
+        .fulfill({
+          json: {
+            id,
+            title: r.title,
+            artist: artist.name,
+            artist_id: "mb-1",
+            tracks: [track(r)],
+          },
+        })
+        .catch(() => {});
+    };
+  await mockApi(page, { answers });
+  await page.goto(`/#/library/artist/${artist.id}`);
+  await page
+    .getByRole("button", { name: `Find more by ${artist.name}` })
+    .click();
+  return {
+    reads: (id: string) => reads.get(id) || 0,
+    hold: (id: string) => held.add(id),
+    /** Answers the held reads, and waits until the page has had them. */
+    release: async () => {
+      waiting.splice(0).forEach((resolve) => resolve());
+      await page.waitForTimeout(300);
+    },
+  };
+}
+
+const UNCONFIRMED =
+  "The server was busy, so this may or may not have been saved. Check before trying again.";
+const unconfirmed = (route: Route) =>
+  route.fulfill({
+    status: 503,
+    json: {
+      code: "busy_unconfirmed",
+      detail:
+        "The server was busy. Check whether this was saved before trying again.",
+    },
+  });
+
+test("an unconfirmed album add's late re-read never replaces the album opened since (#262)", async ({
+  page,
+}) => {
+  const a = { id: "r-a", title: "Album A", song: "Song A" };
+  const b = { id: "r-b", title: "Album B", song: "Song B" };
+  const mock = await catalogue(
+    page,
+    [
+      { id: "g-a", title: "Album A", editions: [a] },
+      { id: "g-b", title: "Album B", editions: [b] },
+    ],
+    unconfirmed,
+  );
+  await page.getByRole("button", { name: /Album A/ }).click();
+  await expect(page.getByText("Song A")).toBeVisible();
+  mock.hold("r-a");
+  await page
+    .getByRole("button", { name: "Add to library", exact: true })
+    .click();
+  await expect(page.getByText(UNCONFIRMED)).toBeVisible();
+  await expect.poll(() => mock.reads("r-a")).toBe(2);
+  // Back to the artist, and on to album B while A's re-read is out.
+  await page.locator(".back-link").click();
+  await page.getByRole("button", { name: /Album B/ }).click();
+  await expect(page.getByText("Song B")).toBeVisible();
+  await mock.release();
+  await expect(page.getByRole("heading", { name: "Album B" })).toBeVisible();
+  await expect(page.getByText("Song B")).toBeVisible();
+  await expect(page.getByText("Song A")).toHaveCount(0);
+  expect(page.url()).toContain("r-b");
+});
