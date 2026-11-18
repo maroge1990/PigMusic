@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Play, Shuffle } from "lucide-react";
-import { api } from "./api";
+import { api, currentSession } from "./api";
 import { usePlayer } from "./Player";
 import { shuffled } from "./shuffle";
 import type { Track } from "./types";
@@ -20,6 +20,8 @@ export function PlayLibrary({ total }: { total: number }) {
   async function start(shuffle: boolean) {
     setBusy(true);
     setError("");
+    // Songs that arrive after this session ended belong to no one (Codex).
+    const generation = currentSession();
     try {
       const starts = new Set<number>(shuffle ? [] : [0]);
       const windows = Math.ceil(total / SAMPLE_SIZE);
@@ -32,13 +34,14 @@ export function PlayLibrary({ total }: { total: number }) {
           ),
         ),
       );
+      if (currentSession() !== generation) return;
       const songs = pages
         .flatMap((p) => p.items)
         .filter((t) => t.available !== false);
       const queue = shuffle ? shuffled(songs) : songs;
       if (queue.length) player.playSaved(queue[0], queue, 0);
     } catch (e) {
-      setError((e as Error).message);
+      if (currentSession() === generation) setError((e as Error).message);
     } finally {
       setBusy(false);
     }
