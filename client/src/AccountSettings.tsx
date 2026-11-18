@@ -1,3 +1,4 @@
+import { askToConfirm } from "./confirmDialog";
 import { notify } from "./notices";
 import { useEffect, useState } from "react";
 import {
@@ -254,11 +255,14 @@ export function AccountSettings({
         {sessions?.some((s) => !s.revoked_at && !s.current) && (
           <button
             className="secondary-button"
-            onClick={() => {
+            onClick={async () => {
               if (
-                confirm(
-                  "Sign out every other browser and app? This device stays signed in.",
-                )
+                await askToConfirm({
+                  title: "Sign out everywhere else?",
+                  body: "Every other browser and app signed in to your account is signed out at once. This device stays signed in.",
+                  action: "Sign out everywhere else",
+                  destructive: true,
+                })
               )
                 void action(async () => {
                   const result = await api<{ revoked: number }>(

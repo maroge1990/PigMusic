@@ -853,25 +853,36 @@ test("Reset password and Disable ask first, naming the person", async ({
       },
     },
   });
-  const asked: string[] = [];
-  let answer = false;
-  page.on("dialog", (dialog) => {
-    asked.push(dialog.message());
-    void (answer ? dialog.accept() : dialog.dismiss());
-  });
   await page.goto("/#/admin/people");
   const reset = page.getByRole("button", { name: "Reset password for Sam" });
   const disable = page.getByRole("button", { name: "Disable Sam" });
+  // #250: the app's own dialog asks, never the browser's.
+  page.on("dialog", () => {
+    throw new Error("The browser's confirm() was used");
+  });
+  const resetDialog = page.getByRole("dialog", {
+    name: "Reset Sam's password?",
+  });
+  const disableDialog = page.getByRole("dialog", {
+    name: "Disable Sam's account?",
+  });
   await reset.click();
+  await expect(resetDialog).toBeVisible();
+  await expect(
+    resetDialog.getByRole("button", { name: "Cancel" }),
+  ).toBeFocused();
+  await resetDialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(resetDialog).toHaveCount(0);
   await disable.click();
-  await expect.poll(() => asked.length).toBe(2);
-  expect(asked[0]).toContain("Reset Sam's password?");
-  expect(asked[1]).toContain("Disable Sam's account?");
+  await expect(disableDialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(disableDialog).toHaveCount(0);
   expect(calls).toEqual([]);
-  answer = true;
   await reset.click();
+  await resetDialog.getByRole("button", { name: "Reset password" }).click();
   await expect.poll(() => calls).toEqual(["reset"]);
   await disable.click();
+  await disableDialog.getByRole("button", { name: "Disable" }).click();
   await expect.poll(() => calls).toEqual(["reset", "disable"]);
 });
 
@@ -1152,6 +1163,15 @@ test("the owner reviews Trash and deletes exactly the listed songs for good", as
   await expect(panel).toContainText("Fleetwood Mac · Rumours · removed");
   expect(reviewed).toBe("45");
   await panel.getByRole("button", { name: "Delete 1 for good · 8 MB" }).click();
+  const ask = page.getByRole("dialog", {
+    name: "Delete 1 songs from Trash for good?",
+  });
+  await expect(ask.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await ask.getByRole("button", { name: "Cancel" }).click();
+  await expect(ask).toHaveCount(0);
+  expect(purged).toBeNull();
+  await panel.getByRole("button", { name: "Delete 1 for good · 8 MB" }).click();
+  await ask.getByRole("button", { name: "Delete for good" }).click();
   await expect(panel).toContainText("No removed music.");
   expect(purged).toEqual({ days: 45, fingerprint: "abc" });
 });

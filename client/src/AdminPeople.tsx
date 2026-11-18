@@ -1,3 +1,4 @@
+import { askToConfirm } from "./confirmDialog";
 import { notify } from "./notices";
 import { useEffect, useState } from "react";
 import { api } from "./api";
@@ -123,10 +124,13 @@ export function AdminPeople() {
               <>
                 <button
                   aria-label={`Reset password for ${p.display_name}`}
-                  onClick={() =>
-                    confirm(
-                      `Reset ${p.display_name}'s password? They are signed out everywhere at once and need the new invite link to choose a password.`,
-                    ) &&
+                  onClick={async () =>
+                    (await askToConfirm({
+                      title: `Reset ${p.display_name}'s password?`,
+                      body: `${p.display_name} is signed out everywhere at once and needs the new invite link to choose a password. This can't be undone.`,
+                      action: "Reset password",
+                      destructive: true,
+                    })) &&
                     void action(
                       async () =>
                         setInvite({
@@ -144,12 +148,15 @@ export function AdminPeople() {
                 </button>
                 <button
                   aria-label={`${p.disabled ? "Enable" : "Disable"} ${p.display_name}`}
-                  onClick={() =>
+                  onClick={async () =>
                     // Disabling signs them out everywhere: ask first (#72).
                     (p.disabled ||
-                      confirm(
-                        `Disable ${p.display_name}'s account? They are signed out everywhere and can't sign in until you enable it again.`,
-                      )) &&
+                      (await askToConfirm({
+                        title: `Disable ${p.display_name}'s account?`,
+                        body: `${p.display_name} is signed out everywhere and can't sign in until you enable the account again.`,
+                        action: "Disable",
+                        destructive: true,
+                      }))) &&
                     void action(
                       () =>
                         api(`/v1/people/${p.id}/disabled`, {

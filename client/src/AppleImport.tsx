@@ -1,4 +1,5 @@
 import { notify, notifyError } from "./notices";
+import { askToConfirm } from "./confirmDialog";
 import { useRef, useState } from "react";
 import { Upload } from "lucide-react";
 import { api } from "./api";
@@ -86,9 +87,12 @@ export function AppleImport({
       );
       if (
         current.stats?.selected &&
-        !window.confirm(
-          "This replaces the current whole-library review and clears its selections. Continue?",
-        )
+        !(await askToConfirm({
+          title: "Replace the whole-library review?",
+          body: "The new export replaces the current review and clears the songs selected in it. This can't be undone.",
+          action: "Replace review",
+          destructive: true,
+        }))
       )
         return;
       await api("/v1/admin/migration/import", {

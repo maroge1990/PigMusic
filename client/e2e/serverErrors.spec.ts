@@ -158,6 +158,10 @@ test("a Trash purge the server could not confirm doesn't claim nothing was delet
   await expect(panel).toContainText("Dreams");
   await panel.getByRole("button", { name: "Review" }).click();
   await panel.getByRole("button", { name: "Delete 1 for good · 8 MB" }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Delete for good" })
+    .click();
   await expect(page.locator(".notice-area")).toContainText(UNCONFIRMED);
   await expect(page.getByText("Nothing was deleted")).toHaveCount(0);
   // Trash is read again, so the owner sees the songs are gone.

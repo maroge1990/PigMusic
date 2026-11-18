@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { NoticeArea } from "./Notice";
 import {
   CircleArrowDown,
@@ -341,6 +342,7 @@ export function AppShell() {
           </div>
         )}
         <NoticeArea />
+        <ConfirmDialog />
         {(error || denied) && (
           <p className="error-banner" role="alert">
             {error || "You do not have access to that action."}
