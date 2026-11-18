@@ -1,3 +1,4 @@
+import { FolderTree } from "lucide-react";
 import { notify } from "./notices";
 import { apiFetch, detailOr, isUnconfirmed, writeFailure } from "./api";
 import { useEffect, useRef, useState } from "react";
@@ -138,8 +139,11 @@ export function Organisation() {
     }
   }
   return (
-    <section className="system-panel">
-      <h2>Organise existing music</h2>
+    <section className="system-panel library-tool">
+      <h2>
+        <FolderTree size={18} aria-hidden="true" />
+        Organise existing music
+      </h2>
       <p>
         Review naming changes before applying them. Album folders are retained.
         Originals are preserved.

@@ -373,3 +373,94 @@ test("D-120: People sits beside Unassigned music, each album with its cover", as
   // No explanatory paragraph (D-101).
   await expect(page.getByText("Newly scanned music waits")).toHaveCount(0);
 });
+
+test("D-120: the queue shows each song's cover, who asked and its progress", async ({
+  page,
+}) => {
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/people": (route: Route) => route.fulfill({ json: people() }),
+      "/v1/admin/queue": (route: Route) =>
+        route.fulfill({
+          json: {
+            library_revision: "1",
+            downloads_enabled: true,
+            items: [
+              {
+                id: "q1",
+                status: "downloading",
+                title: "One",
+                artist: "A",
+                album: "X",
+                musicbrainz_release_id: "rel-x",
+                requested_by: ["s"],
+                received_bytes: 512 * 1024,
+                total_bytes: 1024 * 1024,
+              },
+              {
+                id: "q2",
+                status: "waiting_for_sources",
+                title: "Two",
+                artist: "A",
+                album: "X",
+                requested_by: ["o"],
+              },
+              {
+                id: "q3",
+                status: "failed",
+                title: "Three",
+                artist: "A",
+                album: "X",
+              },
+            ],
+          },
+        }),
+      "/v1/catalogue/artwork/release/rel-x": (route: Route) =>
+        route.fulfill({
+          contentType: "image/svg+xml",
+          body: '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>',
+        }),
+    },
+  });
+  await page.goto("/#/admin/downloads");
+  const rows = page.locator(".queue-row");
+  await expect(rows).toHaveCount(3);
+  for (const row of await rows.all())
+    await expect(row.locator(".cover")).toHaveCount(1);
+  await expect(rows.nth(0).locator(".cover img")).toHaveCount(1);
+  await expect(rows.nth(0).locator(".queue-asker")).toHaveText("Sam");
+  await expect(rows.nth(1).locator(".queue-asker")).toHaveText("Pat");
+  await expect(
+    rows.nth(0).getByRole("progressbar", { name: "One: 50 percent" }),
+  ).toBeVisible();
+  await expect(rows.nth(1)).toContainText("Waiting");
+  await expect(rows.nth(2)).toContainText("Couldn't add");
+  await expect(
+    rows.nth(2).getByRole("button", { name: "Try again" }),
+  ).toBeVisible();
+});
+
+test("D-120: each Server library tool is a card with its icon", async ({
+  page,
+}) => {
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/admin/library/trash": (route: Route) => route.fulfill({ json: [] }),
+      "/v1/admin/library/organisation/history": (route: Route) =>
+        route.fulfill({ json: [] }),
+    },
+  });
+  await page.goto("/#/admin/library");
+  const tools = page.locator(".library-tools > .library-tool");
+  await expect(tools.locator("h2")).toHaveText([
+    "Library scan",
+    "Album editions",
+    "Duplicate songs",
+    "Removed music",
+    "Organise existing music",
+  ]);
+  for (const h2 of await tools.locator("h2").all())
+    await expect(h2.locator("svg")).toHaveCount(1);
+});

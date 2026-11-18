@@ -1,3 +1,4 @@
+import { Trash2 } from "lucide-react";
 import { sessionHeader } from "./sessionId";
 import { askToConfirm } from "./confirmDialog";
 import { notify, notifyError } from "./notices";
@@ -129,8 +130,11 @@ export function RemovedMusic() {
     }
   }
   return (
-    <section className="system-panel">
-      <h2>Removed music</h2>
+    <section className="system-panel library-tool">
+      <h2>
+        <Trash2 size={18} aria-hidden="true" />
+        Removed music
+      </h2>
       {!items.length ? (
         <EmptyLine>No removed music.</EmptyLine>
       ) : (

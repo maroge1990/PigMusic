@@ -1112,3 +1112,43 @@ main h1[tabindex="-1"]:focus {
   gap: var(--space-4);
   font-size: var(--type-footnote);
 }
+
+/* Admin › Server library (D-120, screen 23): each tool a card with its
+   icon; Admin › Downloads: each queued song with its cover and who asked. */
+.library-tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+  gap: 0 var(--space-16);
+  align-items: start;
+}
+.library-tool h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+.library-tool h2 svg {
+  color: var(--accent);
+}
+.queue-row {
+  align-items: center;
+}
+.queue-row > .cover {
+  flex: none;
+  width: 3rem;
+}
+.queue-status {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+.queue-row progress {
+  width: 100%;
+  max-width: 20rem;
+  accent-color: var(--accent);
+}
+.queue-asker {
+  color: var(--secondary);
+  font-size: var(--type-footnote);
+  white-space: nowrap;
+}

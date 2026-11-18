@@ -102,6 +102,20 @@ export function AdminTools({ route }: { route: Route }) {
   } | null>(null);
   const [publicOrigin, setPublicOrigin] = useState<string | null | undefined>();
   const queueSignature = useRef("");
+  // Who asked for each download, by name (D-120).
+  const [people, setPeople] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (section !== "downloads") return;
+    api<{ people: { id: string; display_name: string }[] }>("/v1/people")
+      .then((d) =>
+        setPeople(
+          Object.fromEntries(d.people.map((p) => [p.id, p.display_name])),
+        ),
+      )
+      .catch(() => {
+        /* Rows show no name. */
+      });
+  }, [section]);
 
   const loadLibrary = () =>
     api<Library>("/v1/admin/library")
@@ -777,10 +791,7 @@ export function AdminTools({ route }: { route: Route }) {
 
   return (
     <main className="personal-main admin-main">
-      <PageHeader
-        title="Admin"
-        subtitle="Manage people, music and the server."
-      />
+      <PageHeader title="Admin" />
       <nav className="personal-tabs" aria-label="Admin sections">
         {adminSections.map((s) => (
           <a
@@ -837,6 +848,7 @@ export function AdminTools({ route }: { route: Route }) {
           {downloadsView === "queue" && (
             <QueueView
               queue={queue}
+              people={people}
               busy={busy}
               clearQueue={clearQueue}
               queueAction={queueAction}
