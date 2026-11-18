@@ -41,6 +41,7 @@ import {
 import {
   goToAlbum,
   goToArtist,
+  PAUSED_NOTICE,
   requestSong,
   songBody,
   withLibrary,
@@ -48,6 +49,7 @@ import {
   type SongState,
 } from "./songs";
 import { InlineError } from "./EmptyState";
+import { notify } from "./notices";
 import { formatDuration } from "./format";
 
 const icons: Record<SongMenuItem, ReactNode> = {
@@ -138,7 +140,11 @@ export function SongRow({
       // The server's answer decides the mark, never the state before the tap:
       // the tick shows only once the song is confirmed in your library.
       const result = await requestSong(song);
-      if (result.created > 0) {
+      if (result.paused) {
+        // You paused it: Add leaves it so (#264).
+        setState("paused");
+        notify(PAUSED_NOTICE);
+      } else if (result.created > 0) {
         setState("pending");
         // The album reads it again, so its own Add and checks follow (#263).
         if (song.explicit_edition) refresh?.();
@@ -309,6 +315,8 @@ export function SongRow({
           <StateBadge state="library" iconOnly />
         ) : state === "pending" ? (
           <StateBadge state="requested" iconOnly />
+        ) : state === "paused" ? (
+          <StateBadge state="paused" iconOnly />
         ) : (
           <button
             aria-label={`Add ${song.title} to library`}

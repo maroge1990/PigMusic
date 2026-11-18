@@ -318,7 +318,48 @@ def test_asking_again_resumes_a_paused_request_but_automatic_paths_do_not(
     with store.connect() as conn:
         HouseholdPolicy(store).reconcile_pending(conn)
     assert status(store, key) == "paused"
-    # A person asking for the song now resumes it, whoever paused it.
+    # Another person asking for the song now resumes it (#228).
     result = store.user_libraries.request(owner, [wanted])
     assert result["existing"] == 1
+    assert status(store, key) == "waiting_for_sources"
+
+
+def test_an_add_leaves_a_request_the_person_paused_paused(tmp_path):
+    """#264: an ordinary Add (any page, any edition, a playlist's missing
+    songs) never resumes the person's own paused request; Resume in
+    Downloads does. Another member's Add still resumes it (#228)."""
+    store, owner, member = fixture(tmp_path)
+    users = store.user_libraries
+    deluxe = {
+        **song("Wanted"),
+        "musicbrainz_release_id": "deluxe",
+        "status": "missing",
+    }
+    users.request(member, [{**deluxe, "explicit_edition": True}])
+    with store.connect() as conn:
+        (key,) = conn.execute("SELECT id FROM queue").fetchone()
+    users.pause_request(member, key)
+    # The same song from the edition the album opens on.
+    plain = {**deluxe, "musicbrainz_release_id": "plain", "track_number": 4}
+    result = users.request(member, [plain])
+    assert (result["created"], result["existing"], result["paused"]) == (0, 0, 1)
+    assert status(store, key) == "paused"
+    # A playlist's missing songs go through the same path.
+    _, counts = users.add_apple_playlist(
+        member,
+        "pl.paused",
+        "Paused",
+        None,
+        [{"title": "Wanted", "artist": "Example", "album": "Studio", "duration": 3}],
+        True,
+    )
+    assert counts["requested"] == 0
+    assert status(store, key) == "paused"
+    assert len(store.queue()["items"]) == 1
+    # Resume in Downloads resumes it.
+    users.resume_request(member, key)
+    assert status(store, key) == "waiting_for_sources"
+    # Paused again: another member's Add still resumes it (#228).
+    users.pause_request(member, key)
+    assert users.request(owner, [plain])["existing"] == 1
     assert status(store, key) == "waiting_for_sources"

@@ -1259,9 +1259,11 @@ class UserLibrary:
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             result = conn.execute(
-                "UPDATE queue SET status='paused',updated_at=CURRENT_TIMESTAMP "
+                "UPDATE queue SET status='paused',updated_at=CURRENT_TIMESTAMP,"
+                # Whose pause it is: their own Add leaves it paused (#264).
+                "payload=json_set(payload,'$.paused_by',?) "
                 "WHERE id=? AND status IN " + sql(PAUSABLE) + " AND " + _MINE,
-                (request_id, user_id),
+                (user_id, request_id, user_id),
             )
             if result.rowcount:
                 return {"paused": True}

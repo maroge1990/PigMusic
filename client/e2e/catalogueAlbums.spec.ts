@@ -246,3 +246,32 @@ test("a row Add's late re-read never replaces the edition chosen since (#263)", 
   await expect(page.getByText("Song O")).toHaveCount(0);
   expect(page.url()).toContain("r-main");
 });
+
+test("adding a song you paused shows it paused and points to Downloads (#264)", async ({
+  page,
+}) => {
+  const a = { id: "r-a", title: "Album A", song: "Song A" };
+  await catalogue(
+    page,
+    [{ id: "g-a", title: "Album A", editions: [a] }],
+    (route) =>
+      route.fulfill({
+        json: {
+          created: 0,
+          existing: 0,
+          skipped: 0,
+          paused: 1,
+          downloads_enabled: true,
+        },
+      }),
+  );
+  await page.getByRole("button", { name: /Album A/ }).click();
+  await page.getByRole("button", { name: "Add Song A to library" }).click();
+  await expect(page.locator(".notice-area")).toContainText(
+    "Paused. Resume it in Downloads.",
+  );
+  await expect(page.getByRole("img", { name: "Paused" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Add Song A to library" }),
+  ).toHaveCount(0);
+});

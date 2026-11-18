@@ -37,6 +37,7 @@ import {
   songBody,
   withLibrary,
   type AddResult,
+  PAUSED_NOTICE,
   type Song as Row,
 } from "./songs";
 import type { Track } from "./types";
@@ -148,6 +149,7 @@ function addedMessage(result: AddResult) {
   const parts = [];
   if (adding > 0) parts.push(`Adding ${songs(adding)} to your library.`);
   if (result.skipped > 0) parts.push(`Skipped ${songs(result.skipped)}.`);
+  if (result.paused) parts.push(PAUSED_NOTICE);
   return parts.join(" ") || "Already in your library.";
 }
 export function CatalogueBrowser({

@@ -30,6 +30,11 @@
             "title": "Existing",
             "type": "integer"
           },
+          "paused": {
+            "default": 0,
+            "title": "Paused",
+            "type": "integer"
+          },
           "skipped": {
             "title": "Skipped",
             "type": "integer"

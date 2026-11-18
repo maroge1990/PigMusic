@@ -3,7 +3,7 @@ import { discoverUrl } from "./navigation";
 import type { Track } from "./types";
 
 /** Where a song stands for this person. */
-export type SongState = "saved" | "server" | "pending" | "missing";
+export type SongState = "saved" | "server" | "pending" | "paused" | "missing";
 
 /** One song row, from any source: your library, the server or the catalogue. */
 export type Song = {
@@ -138,7 +138,15 @@ export function songBody(s: Song) {
 
 /** What the server did with an Add to library: new jobs, songs already
  * on their way or now in your library, and songs it refused. */
-export type AddResult = { created: number; existing: number; skipped: number };
+export type AddResult = {
+  created: number;
+  existing: number;
+  skipped: number;
+  /** Songs you paused: Add leaves them paused (#264). */
+  paused?: number;
+};
+/** An Add that met a song you paused: only Downloads resumes it (#264). */
+export const PAUSED_NOTICE = "Paused. Resume it in Downloads.";
 
 export async function requestSong(s: Song): Promise<AddResult> {
   const result = await api<AddResult>("/v1/requests", {
