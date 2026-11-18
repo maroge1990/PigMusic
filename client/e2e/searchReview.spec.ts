@@ -187,3 +187,67 @@ test("Search opens when the browser refuses storage", async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByRole("group", { name: "Recent" })).toHaveCount(0);
 });
+
+// Codex round 2.
+test("the catalogue is usable while the ranked search is still waiting", async ({
+  page,
+}) => {
+  await mockApi(page, {
+    answers: {
+      // Never answers.
+      "/v1/search/results": () => new Promise(() => {}),
+      "/v1/catalogue/artists": (route) =>
+        route.fulfill({
+          json: {
+            artists: [{ id: "mb-x", name: "Charli Band", description: "" }],
+            offset: 0,
+            total: 1,
+            next_offset: null,
+          },
+        }),
+    },
+  });
+  await page.goto("/#/search?q=Charli");
+  const link = page
+    .getByRole("region", { name: "Artists" })
+    .getByRole("link", { name: /Charli Band/ });
+  await link.click();
+  await expect(page).toHaveURL(/#\/search\/artist\/mb-x\?/);
+});
+
+test("a catalogue artist stays when its server artist isn't shown", async ({
+  page,
+}) => {
+  // Eight artists show; the server's match for the catalogue's is ninth.
+  const ranked = Array.from({ length: 9 }, (_, i) => ({
+    ...artist,
+    id: `artist-${i}`,
+    name: `Charli ${i}`,
+    in_library: false,
+    musicbrainz_artist_id: `mb-${i}`,
+  }));
+  await mockApi(page, {
+    answers: {
+      "/v1/search/results": (route) =>
+        route.fulfill({ json: { ...nothing, artists: ranked } }),
+      "/v1/catalogue/artists": (route) =>
+        route.fulfill({
+          json: {
+            artists: [
+              { id: "mb-0", name: "Charli 0", description: "" },
+              { id: "mb-8", name: "Charli 8", description: "Ninth" },
+            ],
+            offset: 0,
+            total: 2,
+            next_offset: null,
+          },
+        }),
+    },
+  });
+  await page.goto("/#/search?q=Charli");
+  const artists = page.getByRole("region", { name: "Artists" });
+  // Eight from the server, plus the ninth's catalogue entry; Charli 0 once.
+  await expect(artists.getByRole("link")).toHaveCount(9);
+  await expect(artists.getByRole("link", { name: /Charli 8/ })).toHaveCount(1);
+  await expect(artists.getByRole("link", { name: /Charli 0/ })).toHaveCount(1);
+});

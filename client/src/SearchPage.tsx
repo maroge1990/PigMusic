@@ -283,11 +283,16 @@ export function SearchPage({
   const albums = (local?.albums || [])
     .filter((a) => a !== topAlbum)
     .slice(0, ALBUMS_SHOWN);
-  const serverArtists = (local?.artists || []).filter((a) => a !== topArtist);
-  // A catalogue artist the server already has is shown once, as the
-  // server's; a namesake (another catalogue identity) stays.
+  const serverArtists = (local?.artists || [])
+    .filter((a) => a !== topArtist)
+    .slice(0, ARTISTS_SHOWN);
+  // A catalogue artist the server already shows is listed once, as the
+  // server's; a namesake (another catalogue identity) stays, and so does
+  // one whose server artist isn't on screen.
   const known = new Set(
-    (local?.artists || []).map((a) => a.musicbrainz_artist_id).filter(Boolean),
+    [topArtist, ...serverArtists]
+      .map((a) => a?.musicbrainz_artist_id)
+      .filter(Boolean),
   );
   const catalogueArtists = (catalogue || []).filter((a) => !known.has(a.id));
   const playlists = (local?.playlists || []).filter((p) => p !== topPlaylist);
@@ -447,7 +452,7 @@ export function SearchPage({
         <BeforeTyping library={library} recent={recent} forget={forget} />
       )}
       {active && !local && !error && <Loading>Searching…</Loading>}
-      {active && (local || error) && (
+      {active && (
         <div
           className="search-results"
           // Opening a result keeps the search among the recent ones.
@@ -517,7 +522,7 @@ export function SearchPage({
               <SectionHeader id="search-artists" title="Artists" />
               {artistCount > 0 && (
                 <ul className="discover-list">
-                  {serverArtists.slice(0, ARTISTS_SHOWN).map((a) => (
+                  {serverArtists.map((a) => (
                     <ServerArtist
                       key={a.id}
                       artist={a}
