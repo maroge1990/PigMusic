@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { batches } from "./limits";
 import { expectedSession, withSession } from "./sessionId";
 import { notify, notifyError, offerUndo } from "./notices";
 import type { RemovalPreview } from "./removal";
@@ -55,23 +56,45 @@ export async function addSongsToLibrary(songs: Song[]) {
     (s) => s.state === "missing" || s.state === "server",
   );
   if (!wanted.length) return notify("Already in your library");
-  try {
-    const result = await api<AddResult>("/v1/requests", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tracks: wanted.map(songBody) }),
-    });
-    const adding = result.created + result.existing;
+  // A large collection goes in batches within the server's limit (Codex),
+  // every one under the session that asked.
+  const session = expectedSession();
+  const count = (n: number) => `${n} ${n === 1 ? "song" : "songs"}`;
+  async function send(rest: Song[], addedBefore: number): Promise<void> {
+    let adding = addedBefore;
+    const parts = batches(rest);
+    for (let i = 0; i < parts.length; i++) {
+      try {
+        const result = await withSession(session, () =>
+          api<AddResult>("/v1/requests", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tracks: parts[i].map(songBody) }),
+          }),
+        );
+        adding += result.created + result.existing;
+      } catch (e) {
+        const left = parts.slice(i).flat();
+        if (adding) changed();
+        notifyError(
+          adding
+            ? `Adding ${count(adding)} to your library. Couldn't add the other ${count(left.length)}. Try again.`
+            : (e as Error).message,
+          () => send(left, adding),
+        );
+        return;
+      }
+    }
     notify(
-      adding
-        ? `Adding ${adding} ${adding === 1 ? "song" : "songs"} to your library`
-        : "Nothing to add",
+      adding ? `Adding ${count(adding)} to your library` : "Nothing to add",
     );
+    changed();
+  }
+  function changed() {
     window.dispatchEvent(new Event("music-library-changed"));
     window.dispatchEvent(new Event("music-requests-changed"));
-  } catch (e) {
-    notifyError((e as Error).message);
   }
+  await send(wanted, 0);
 }
 
 /**

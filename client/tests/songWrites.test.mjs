@@ -104,3 +104,56 @@ test("a sign-in during the preview never sends the removal as the new account", 
     ["/api/v1/library/remove", "session-1"],
   ]);
 });
+
+test("a collection over the server's limit goes in batches; a failed one can be tried again", async () => {
+  setSessionId("session-1");
+  const { MAX_SONGS_PER_REQUEST } = await import("../src/limits.ts");
+  const many = Array.from(
+    { length: MAX_SONGS_PER_REQUEST * 2 + 1 },
+    (_, i) => ({
+      ...song,
+      key: "k" + i,
+      title: "Song " + i,
+    }),
+  );
+  const sent = [];
+  let failNext = false;
+  globalThis.fetch = async (path, options) => {
+    const size = JSON.parse(options.body).tracks.length;
+    sent.push([
+      size,
+      new Headers(options.headers).get("X-Pig-Expected-Session"),
+    ]);
+    // Another account signs in after the first batch: later ones still
+    // name the session that asked.
+    setSessionId("session-2");
+    if (failNext) {
+      failNext = false;
+      return Response.json({ detail: "Busy", code: "busy" }, { status: 400 });
+    }
+    failNext = sent.length === 1;
+    return Response.json({ created: size, existing: 0, skipped: 0 });
+  };
+  let shown = [];
+  const stop = subscribe((all) => (shown = all));
+  await addSongsToLibrary(many);
+  const max = MAX_SONGS_PER_REQUEST;
+  assert.deepEqual(sent, [
+    [max, "session-1"],
+    [max, "session-1"],
+  ]);
+  const error = shown.find((n) => n.kind === "error");
+  assert.equal(
+    error.text,
+    `Adding ${max} songs to your library. Couldn't add the other ${max + 1} songs. Try again.`,
+  );
+  assert.equal(error.action.label, "Try again");
+  await runAction(error.id);
+  stop();
+  assert.deepEqual(sent.slice(2), [
+    [max, "session-1"],
+    [1, "session-1"],
+  ]);
+  assert.match(shown.at(-1).text, new RegExp(`Adding ${max * 2 + 1} songs`));
+  clearNotices();
+});
