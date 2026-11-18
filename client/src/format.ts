@@ -74,3 +74,24 @@ export function formatDuration(
   const whole = Math.floor(seconds);
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
+
+/** "1 hr 32 min", "14 min" or "6 hr": how long a list plays, to the minute.
+ * Under a minute reads "1 min"; nothing to play gives `empty`. */
+export function formatLength(
+  seconds: number | null | undefined,
+  empty: string = "",
+): string {
+  if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return empty;
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes - hours * 60;
+  if (!hours) return `${rest} min`;
+  return rest ? `${hours} hr ${rest} min` : `${hours} hr`;
+}
+
+/** "24 songs · 1 hr 32 min": a list's size and length. */
+export function formatListSize(count: number, seconds?: number): string {
+  const songs = `${formatCount(count)} ${count === 1 ? "song" : "songs"}`;
+  const length = formatLength(seconds);
+  return length ? `${songs} · ${length}` : songs;
+}

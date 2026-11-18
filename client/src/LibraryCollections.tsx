@@ -1,16 +1,11 @@
-import { ListMusic } from "lucide-react";
 import type { ReactNode } from "react";
 import { AppleImport } from "./AppleImport";
 import { CollectionPages } from "./CollectionPages";
-import {
-  CollectionCard,
-  albumSongs,
-  artistSongs,
-  playlistSongList,
-} from "./CollectionMenu";
+import { CollectionCard, albumSongs, artistSongs } from "./CollectionMenu";
 import { Cover } from "./Cover";
 import { Empty } from "./EmptyState";
 import { OwnerLibraryLinks } from "./OwnerTools";
+import { PlaylistGrid } from "./PlaylistCards";
 import { ShuffleLibrary } from "./ShuffleLibrary";
 import type { Playlist, PlaylistSummary } from "./libraryTypes";
 import type { Album, Artist, Library, Track } from "./types";
@@ -54,7 +49,7 @@ export function LibraryCollections({
   favouriteList: Playlist | null;
   /** Renders a list of songs, as the detail pages do. */
   songs: (tracks: Track[], playlist?: Playlist) => ReactNode;
-  createPlaylist: (name: FormDataEntryValue | null) => Promise<void>;
+  createPlaylist: (name: string) => Promise<void>;
   refresh: () => Promise<void>;
 }) {
   const counts: Record<string, number> = {
@@ -168,60 +163,15 @@ export function LibraryCollections({
         ))}
       {tab === "playlists" && (
         <>
-          <form
-            className="search-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const form = e.currentTarget;
-              void createPlaylist(new FormData(form).get("name")).then(() =>
-                form.reset(),
-              );
-            }}
-          >
-            <label>
-              New playlist
-              <input name="name" required maxLength={100} />
-            </label>
-            <button type="submit" className="secondary-button">
-              Create
-            </button>
-          </form>
-          <div className="playlist-list">
-            {playlists
-              .filter((p) => !p.id.startsWith("pig-favourites:"))
-              .map((p) => (
-                <CollectionCard
-                  key={p.id}
-                  kind="playlist"
-                  title={p.name}
-                  songs={() => playlistSongList(p.id)}
-                  className="playlist-card"
-                >
-                  <a href={"#/library/playlist/" + p.id}>
-                    <ListMusic size={22} aria-hidden="true" />
-                    <strong>{p.name}</strong>
-                    <span>
-                      {p.track_count ?? 0} song
-                      {p.track_count === 1 ? "" : "s"}
-                      {p.track_count &&
-                      p.available_count !== undefined &&
-                      p.available_count < p.track_count
-                        ? ` · ${p.available_count} available`
-                        : ""}
-                    </span>
-                  </a>
-                </CollectionCard>
-              ))}
-          </div>
+          <PlaylistGrid
+            playlists={playlists}
+            favouriteList={favouriteList}
+            createPlaylist={createPlaylist}
+          />
           {!playlists.some((p) => !p.id.startsWith("pig-favourites:")) && (
-            <Empty
-              title="No playlists yet"
-              description="Create one above, or import your Apple Music playlists below."
-            />
+            <Empty title="No playlists yet" />
           )}
-          {tab === "playlists" && (
-            <AppleImport owner={owner} onImported={refresh} />
-          )}
+          <AppleImport owner={owner} onImported={refresh} />
         </>
       )}
       {owner && <OwnerLibraryLinks />}

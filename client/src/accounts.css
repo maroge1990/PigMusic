@@ -567,29 +567,6 @@ main h1[tabindex="-1"]:focus {
   border-color: var(--accent);
   color: var(--text-accent);
 }
-.playlist-list {
-  display: grid;
-  gap: var(--space-8);
-  margin: 0 0 var(--space-24);
-  padding: 0;
-  list-style: none;
-}
-.playlist-list a {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: var(--space-12);
-  padding: var(--space-12) var(--space-16);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  background: var(--surface);
-  color: var(--text);
-  text-decoration: none;
-}
-.playlist-list span {
-  font-size: var(--type-footnote);
-  color: var(--secondary);
-}
 /* Downloads: one card per request; its songs, source and quality inside. */
 .request-group {
   margin-bottom: var(--space-12);

@@ -116,13 +116,6 @@
   background: color-mix(in srgb, var(--surface) 82%, transparent);
   color: var(--text);
 }
-.playlist-card > .collection-more {
-  top: 50%;
-  transform: translateY(-50%);
-}
-.playlist-card > a {
-  padding-right: var(--space-48);
-}
 .album-card {
   padding: 0;
   text-align: left;

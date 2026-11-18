@@ -1,0 +1,40 @@
+/* Playlists as covers (D-120): four covers in a square, Favourites' star,
+ * and the dashed New playlist card. */
+.playlist-mosaic {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+.playlist-mosaic .cover {
+  border-radius: 0;
+}
+.favourites-cover {
+  color: var(--on-accent);
+  background: linear-gradient(
+    140deg,
+    color-mix(in srgb, var(--accent) 60%, var(--surface)),
+    var(--accent)
+  );
+}
+.favourites-cover svg {
+  width: 35%;
+  height: 35%;
+}
+.playlist-grid .new-playlist-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-accent);
+}
+.new-playlist-card .cover {
+  width: 100%;
+  background: none;
+  border: 2px dashed var(--accent);
+}
+.new-playlist-card .cover svg {
+  width: 25%;
+  height: 25%;
+}
