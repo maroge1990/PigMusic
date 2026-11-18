@@ -52,12 +52,20 @@ import {
   type SavedQueue,
 } from "./queue";
 
+/** The songs after a queue's end, read a page at a time; an empty answer
+ * means there are no more. */
+export type MoreSongs = () => Promise<Song[]>;
+/** A continued queue reads its next page once this few songs are left. */
+const MORE_LOW_WATER = 20;
+
 /** The Now Playing sheet's exit (sheet-out in Experience.css). */
 const SHEET_OUT_MS = 200;
 
 type Controls = {
-  /** Play `queue[index]`, then carry on through the queue. */
-  play: (queue: Song[], index?: number) => void;
+  /** Play `queue[index]`, then carry on through the queue. `more`, when
+   * given, reads the songs after the queue's end; it is asked before the
+   * queue runs out, until it answers none. */
+  play: (queue: Song[], index?: number, more?: MoreSongs) => void;
   /** One song, or a whole album or playlist in its order. */
   playNext: (song: Song | Song[]) => void;
   addToQueue: (song: Song) => void;
@@ -151,6 +159,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       cursor.current = -1;
       // A refill or continuation still on its way belongs to the old queue.
       radioRequest.current = null;
+      moreSource.current = null;
       similarRequestRef.current = null;
       setSong(null);
       setExpanded(false);
@@ -233,7 +242,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     // Like iPhone: as the last song starts, similar songs join Up next, so the
     // queue plays on as it does between songs instead of asking only once the
     // music has stopped (#202).
-    if (
+    // A queue with more pages to come reads the next one before it runs out;
+    // similar songs wait until it has no more.
+    if (moreFor(queue.current)) {
+      if (queue.current.length - 1 - cursor.current <= MORE_LOW_WATER)
+        void readMore();
+    } else if (
       continuesWithSimilar(
         queue.current,
         cursor.current,
@@ -289,6 +303,46 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     pending.generation === currentSession()
       ? pending.request
       : null;
+  /** Where a continued queue's next songs come from (#251, Codex). */
+  const moreSource = useRef<{
+    songs: Song[];
+    generation: number;
+    next: MoreSongs;
+    pending: Promise<number> | null;
+  } | null>(null);
+  /** The source still feeding this very queue in this session, if any. */
+  const moreFor = (songs: Song[]) => {
+    const source = moreSource.current;
+    return source &&
+      source.songs === songs &&
+      source.generation === currentSession()
+      ? source
+      : null;
+  };
+  /** Append the next page; resolves to how many songs arrived. */
+  function readMore(): Promise<number> {
+    const source = moreFor(queue.current);
+    if (!source) return Promise.resolve(0);
+    if (source.pending) return source.pending;
+    const request = source
+      .next()
+      .then((more) => {
+        // A new queue, a stop or another account in the meantime: these
+        // songs belong to no one.
+        if (moreFor(source.songs) !== source || queue.current !== source.songs)
+          return 0;
+        if (!more.length) moreSource.current = null;
+        source.songs.push(...more);
+        if (more.length) setQueueVersion((v) => v + 1);
+        return more.length;
+      })
+      .catch(() => 0)
+      .finally(() => {
+        if (source.pending === request) source.pending = null;
+      });
+    source.pending = request;
+    return request;
+  }
   const radioRequest = useRef<Pending | null>(null);
   /** Radio: append the next prepared songs; resolves to how many arrived. */
   function refillRadio(): Promise<number> {
@@ -370,12 +424,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       }).catch(() => undefined);
     step(1);
   }
-  function play(songs: Song[], index = 0) {
+  function play(songs: Song[], index = 0, more?: MoreSongs) {
     if (!songs[index]) return;
     resumeAt.current = 0;
     // The queue is its own copy: editing Up next never changes the page's
     // list it came from (Codex, #249).
     queue.current = [...songs];
+    moreSource.current = more
+      ? {
+          songs: queue.current,
+          generation: currentSession(),
+          next: more,
+          pending: null,
+        }
+      : null;
     cursor.current = index;
     setQueueVersion((v) => v + 1);
     void load(songs[index]);
@@ -439,7 +501,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     );
     const next = queue.current[index];
     if (!next) {
-      if (waitsForRadio(queue.current, cursor.current, delta)) {
+      if (delta > 0 && moreFor(queue.current)) {
+        // The next page is on its way: Next waits for it.
+        const songs = queue.current;
+        const at = cursor.current;
+        void readMore().then((added) => {
+          if (queue.current !== songs || cursor.current !== at) return;
+          // No more pages: the queue ends as any other does.
+          if (added || !moreFor(songs)) step(delta, action);
+        });
+      } else if (waitsForRadio(queue.current, cursor.current, delta)) {
         // The waiting Next belongs to this queue in this session too.
         const songs = queue.current;
         const at = cursor.current;
