@@ -29,13 +29,34 @@ public struct AcquisitionResult: Codable, Sendable {
   public let created: Int
   public let existing: Int
   public let skipped: Int
+  /// Songs the person paused before: Add leaves them paused (#264).
+  public let paused: Int
   public let downloadsEnabled: Bool
-  public init(created: Int, existing: Int, skipped: Int, downloadsEnabled: Bool) {
+  public init(
+    created: Int, existing: Int, skipped: Int, paused: Int = 0, downloadsEnabled: Bool
+  ) {
     self.created = created
     self.existing = existing
     self.skipped = skipped
+    self.paused = paused
     self.downloadsEnabled = downloadsEnabled
   }
+  private enum CodingKeys: String, CodingKey {
+    case created, existing, skipped, paused, downloadsEnabled
+  }
+  public init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    created = try values.decode(Int.self, forKey: .created)
+    existing = try values.decode(Int.self, forKey: .existing)
+    skipped = try values.decode(Int.self, forKey: .skipped)
+    // An older server doesn't say.
+    paused = try values.decodeIfPresent(Int.self, forKey: .paused) ?? 0
+    downloadsEnabled = try values.decode(Bool.self, forKey: .downloadsEnabled)
+  }
+  /// Nothing new was asked for and a paused song stays paused (#264): the
+  /// person is told where to resume it, never that it was left out.
+  public var onlyPaused: Bool { created == 0 && paused > 0 }
+  public static let pausedNotice = "Paused. Resume it in Downloads."
 }
 extension AcquisitionResult {
   /// What a request to add songs did, in the agreed words (D-115, #246):
@@ -44,10 +65,12 @@ extension AcquisitionResult {
   /// in your library) are counted as skipped.
   public var sentence: String {
     func songs(_ count: Int) -> String { "\(count) song\(count == 1 ? "" : "s")" }
+    if onlyPaused && existing == 0 { return Self.pausedNotice }
     let adding = created + existing
     let parts = [
       adding > 0 ? "Adding \(songs(adding)) to your library." : nil,
       skipped > 0 ? "Skipped \(songs(skipped))." : nil,
+      paused > 0 ? "\(songs(paused)) paused. Resume in Downloads." : nil,
     ].compactMap { $0 }
     return parts.isEmpty ? "Already in your library." : parts.joined(separator: " ")
   }

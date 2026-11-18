@@ -53,6 +53,21 @@ private struct Offline: Error {}
     #expect(await RequestOutbox.pending(store).isEmpty)
   }
 
+  /// #264: a song the person paused stays paused when added again; it is
+  /// reported paused, with where to resume it, never as excluded.
+  @Test func aSongPausedBeforeIsReportedPausedNotExcluded() async throws {
+    let (store, root) = try makeStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try await RequestOutbox.add(first, to: store)
+    let report = try await RequestOutbox.send(store: store, isCurrent: { true }) { _ in
+      AcquisitionResult(created: 0, existing: 0, skipped: 0, paused: 1, downloadsEnabled: true)
+    }
+    #expect(report.paused == ["first"])
+    #expect(report.skipped.isEmpty && report.requested.isEmpty)
+    #expect(report.notice(titles: ["first": "First"]) == "Paused. Resume it in Downloads.")
+    #expect(await RequestOutbox.pending(store).isEmpty)
+  }
+
   @Test func aLeftOutOrRefusedSongIsExplained() {
     var report = RequestOutbox.Report()
     #expect(report.notice(titles: [:]) == nil)

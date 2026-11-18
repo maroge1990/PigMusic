@@ -1247,7 +1247,11 @@ enum PlayOrigin: Hashable {
       drained.absorb(report)
       requestedSongs.sent(report.requested)
       requestedSongs.refused(report.skipped + report.refused)
-      if !report.requested.isEmpty || !report.skipped.isEmpty || !report.refused.isEmpty {
+      // Paused before, so left paused (#264): marked paused, never excluded.
+      requestedSongs.pausedOnServer(report.paused)
+      if !report.requested.isEmpty || !report.skipped.isEmpty || !report.refused.isEmpty
+        || !report.paused.isEmpty
+      {
         requestsRevision += 1
       }
       switch report.stop {

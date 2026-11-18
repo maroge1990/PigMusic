@@ -11,8 +11,16 @@ public struct RequestMarks: Sendable, Equatable {
   public private(set) var waiting: Set<String> = []
   /// Confirmed by the server since the request list last changed.
   public private(set) var sent: Set<String> = []
+  /// Added again while the person had paused it: still paused (#264).
+  public private(set) var paused: Set<String> = []
   public init(waiting: Set<String> = []) { self.waiting = waiting }
-  public func contains(_ id: String) -> Bool { waiting.contains(id) || sent.contains(id) }
+  public func contains(_ id: String) -> Bool {
+    waiting.contains(id) || sent.contains(id) || paused.contains(id)
+  }
+  /// The server left these songs paused, as the person had them (#264).
+  public mutating func pausedOnServer(_ ids: some Sequence<String>) {
+    for id in ids where waiting.remove(id) != nil { paused.insert(id) }
+  }
   public mutating func queued(_ id: String) { waiting.insert(id) }
   public mutating func sent(_ ids: some Sequence<String>) {
     for id in ids where waiting.remove(id) != nil { sent.insert(id) }
@@ -20,16 +28,22 @@ public struct RequestMarks: Sendable, Equatable {
   public mutating func refused(_ ids: some Sequence<String>) {
     waiting.subtract(ids)
     sent.subtract(ids)
+    paused.subtract(ids)
   }
-  /// A request was cancelled or cleared: forget every sent mark.
-  public mutating func requestsChanged() { sent = [] }
+  /// A request was cancelled or cleared (or resumed): forget every sent and
+  /// paused mark.
+  public mutating func requestsChanged() {
+    sent = []
+    paused = []
+  }
   /// Every marked song.
-  public var all: Set<String> { waiting.union(sent) }
+  public var all: Set<String> { waiting.union(sent).union(paused) }
   /// These songs are in the person's library now (#211): a request that
   /// finished must not leave them Requested.
   public mutating func settled(_ ids: some Sequence<String>) {
     waiting.subtract(ids)
     sent.subtract(ids)
+    paused.subtract(ids)
   }
   /// A fresh server answer about these songs (#211): one the server says is
   /// in the library, or whose request failed, is no longer marked, under

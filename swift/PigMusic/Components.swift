@@ -543,7 +543,12 @@ struct SongRow: View {
     model.deviceCopies(track.id)
   }
   /// Requested as soon as it is asked for here, as in its sheet (#206).
-  private var state: String? { track.shownState(requested: model.isRequested(track.id)) }
+  private var state: String? {
+    if track.serverState != "in_library", model.requestedSongs.paused.contains(track.id) {
+      return "paused"
+    }
+    return track.shownState(requested: model.isRequested(track.id))
+  }
   private var deviceLabels: [String] {
     let copies = copies
     func label(_ mark: DeviceCopyMark?, _ device: String) -> String? {
@@ -598,6 +603,9 @@ struct SongRow: View {
         EmptyView()
       case "requested":
         Image(systemName: "clock").foregroundStyle(.secondary)
+      case "paused":
+        // Paused by you; Add leaves it so (#264). Resume it in Downloads.
+        Image(systemName: "pause.circle").foregroundStyle(.secondary)
       case "failed":
         Image(systemName: "exclamationmark.circle").foregroundStyle(PigBrand.danger(scheme))
       default:
@@ -610,6 +618,7 @@ struct SongRow: View {
     case "household_available": "On the server, not in your library"
     case "not_in_library": "Not on the server"
     case "requested": "Adding"
+    case "paused": "Paused"
     case "failed": "Couldn't add"
     default: "In your library"
     }

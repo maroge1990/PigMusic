@@ -478,6 +478,8 @@ struct RequestsView: View {
         }
       }
     }
+    // A resumed song no longer shows paused on its row (#264).
+    if tap == .resume { model.requestedSongs.requestsChanged() }
     // Read the list first: reading it clears the page's message.
     await load(reset: true)
     if let failure, !(failure is CancellationError) { error = failure.userMessage }
