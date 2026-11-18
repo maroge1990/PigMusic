@@ -362,6 +362,11 @@ class Launch:
         self.result = (None, None)
         self.began = now
         self.said = False
+        # Set when the supervisor starts stopping: the start then spawns
+        # nothing, and an engine it spawned meanwhile is either handed over
+        # (`cancel`) or ended by the launcher itself, never left running.
+        self.cancelled = False
+        self.lock = threading.Lock()
         self.thread = threading.Thread(
             target=self.run, args=(root,), name="engine-launch", daemon=True
         )
@@ -370,9 +375,34 @@ class Launch:
 
     def run(self, root):
         try:
-            self.result = start_engine(root)
+            result = start_engine(root, lambda: not self.cancelled)
         except Exception:
-            self.result = (None, None)
+            result = (None, None)
+        with self.lock:
+            if not self.cancelled:
+                self.result = result
+                return
+        process, log = result
+        if process is not None:
+            process.terminate()
+            try:
+                process.wait(timeout=ENGINE_STOP_SECONDS)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+        if log:
+            log.close()
+
+    def cancel(self):
+        """Stop this start; the engine it already handed over, if any, for
+        the supervisor to end with the rest."""
+        with self.lock:
+            self.cancelled = True
+            taken, self.result = self.result, (None, None)
+        return taken
 
     def done(self):
         return not self.thread.is_alive()
@@ -408,7 +438,9 @@ class _Stopping(BaseException):
     """Raised by the stop signal to leave a probe that is still waiting."""
 
 
-def start_engine(root):
+def start_engine(root, proceed=None):
+    """Start the engine; `proceed()` is asked once its folders are ready and
+    just before it is spawned, and nothing is spawned when it says no."""
     log = None
     try:
         engine = root / "engine"
@@ -481,6 +513,8 @@ def start_engine(root):
                 or os.environ.get("PIG_MUSIC_ENGINE_NO_CONNECT") == "true"
             ):
                 command += ["--no-connect"]
+            if proceed is not None and not proceed():
+                return None, None
             logfile = engine / "runtime.log"
             if logfile.exists() and logfile.stat().st_size > 10_000_000:
                 logfile.replace(engine / "runtime.previous.log")
@@ -517,6 +551,8 @@ def main():
         stopping = True
         if first and signum is not None:
             stop_signal = signum
+        if launch:
+            launch.cancelled = True  # Set without the lock: a signal handler.
         for child in (engine, ending and ending.process, server):
             if child and child.poll() is None:
                 child.terminate()
@@ -661,11 +697,11 @@ def main():
         elif not failed:
             record_restart(history, time.time(), "stop", stop_reason(stop_signal))
         if launch:
-            # An engine started while stopping is ended with the rest; one
-            # still waiting on the mount is left to its daemon thread.
-            launch.thread.join(ENGINE_LAUNCH_WAIT)
-            if launch.done() and engine is None:
-                engine, log = launch.result
+            # An engine its start already handed over is ended with the
+            # rest; one spawned later is ended by the launcher itself.
+            taken = launch.cancel()
+            if taken[0] is not None and engine is None:
+                engine, log = taken
         stop(None, None)
         reap((engine, ending and ending.process, server), time.monotonic() + 25)
         return 1 if failed else 0
