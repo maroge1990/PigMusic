@@ -5,30 +5,28 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 17 Nov 2026 (Melbourne), night.*
+*Overwritten at the end of every session. 18 Nov 2026 (Melbourne), afternoon.*
 
-- **Live:** release `sayso-20261117-v1`, server `eb65d3d` (batch B, released 22:01; healthy, readiness ok). Before it,
-  `artwork-20261117-v1` (20:36): no lock or unavailable warnings in the 35 minutes after; artist photos are being
-  fetched again. **TestFlight:** 0.2.0 (1094) from `eb65d3d`, with the iPhone halves of the artwork batch and batch B.
-- **Batch B, "say what happened" (live, on TestFlight):** #239 web and iPhone halves (a busy server, a save that may or
-  may not have happened, and a server fault each say so; the iPhone drops a queued request only on the server's own
-  500), #245 (a failed action shows a notice on every iPhone page, above the Undo bar), #240 (an unreadable Trash,
-  organisation or tidy-up record is set aside instead of stopping start-up or breaking Trash, history and Undo), #241
-  (the admin System page shows how the last run ended, recent errors, busy answers, workers and set-aside records;
-  console log lines carry the time), #243 (Retry joins the song's newer job instead of making a second download) and
-  #244 (request matrix, faults, and any unhandled server error now fails the test suite). Codex: a round per fix,
-  every finding fixed and confirmed, plus a round over the batch. Findings filed: #257, #258.
-- **Artwork batch (#168):** live and on TestFlight; waiting on Mark's device check.
-- **Waiting on Mark's device check:** #168 artwork, #245 and #239 notices, #229 song menu, #219 Watch background delivery and battery figures,
-  #232 to #235.
-- **Next batch:** C, one vocabulary (#246), waiting on Mark's choice of words.
-- **Decisions:** none new. Next: D-115.
-- **Mac:** about 15 GB free; the TestFlight script needs 15 and refuses below it. PigMusic's own build caches can be
-  cleared to make room. Mark's PigTV project shares the simulators.
+- **Live:** release `words-20261118-v4`, server `3a51459` (batch C, released 12:50; healthy, readiness ok, no warnings).
+  **TestFlight:** 0.2.0 (1135) from `ad7e50d`, with batch C's iPhone and Watch half.
+- **Batch C, one word and one icon (#246, live, on TestFlight):** "Add to library" for asking the server for music (D-115),
+  one icon per meaning (D-116) and one word per thing (D-117) on web, iPhone and Watch; table in docs/DESIGN.md, guarded
+  by `tests/test_vocabulary.py`. Song rows and albums now report what the server did (Adding, Skipped). Reviews: Codex
+  round per half, confirmations and a final round; its high (album Add resent paused songs) fixed and confirmed by an Opus
+  stand-in review. Findings filed: #259 to #264.
+- **Codex usage is empty** (from 18 Nov 11:20): Opus adversarial reviews stand in; anything waiting for Codex is logged in
+  the session worktree's `.localdata/codex-review-log.md`. Mark says when Codex is available again.
+- **Release check:** the Unraid verify's test suite now gets 2 GB (its tmpfs counts; both the 17 and 18 Nov suites peak
+  at about 1.4 GB, #225).
+- **Waiting on Mark's device check:** build 1094's artwork and notices (#168, #245, #239), then build 1135's words and
+  icons (#246); #229 song menu, #219 Watch background delivery, #232 to #235.
+- **Decisions:** D-115 to D-119 today. Next: D-120.
+- **Mac:** at 192.168.1.35 (address changes; match the host key). PigMusic's build files are cleaned off after each use
+  (D-119); about 25 GB free. Mark's PigTV project shares the simulators.
 
 ## Now
 
-1. **Mark checks on his phone** (build 1094): the artwork (#168), batch B's notices (#245, #239), the song menu (#229), Watch background delivery
+1. **Mark checks on his phone** (build 1094, then 1135): the artwork (#168), batch B's notices (#245, #239), batch C's words and icons (#246), the song menu (#229), Watch background delivery
    with the phone locked (#219) then a diagnostics export the next day, #232 to #235, steps 17–18 of #184.
 2. **YouTube trial ends ~21 Nov** (#193): keep or remove, Mark's decision.
 3. **Retirement, 28 Nov** (#201): remove what batches 4, 6 and 8 replaced once #191's pass marks are met.
@@ -36,10 +34,10 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Next
 
-From the 17 Nov review, in the suggested order (Mark confirms): **C, one vocabulary** (Mark chooses the words): #246. **D, one of each:**
-#248, #249, #183, #250 (#247 parked by Mark, 18 Nov). **E, the plain screens:** #251, #252, #209, #255. Smaller: #242, #253, #256, #257, #258.
+**First: #265** (tap-through tests on GitHub Actions, TestFlight on Xcode Cloud; D-119). Then, from the 17 Nov review:
+**D, one of each** (designed, D-118): #248, #249, #183, #250 (#247 parked by Mark, 18 Nov). **E, the plain screens:** #251, #252, #209, #255. Smaller: #242, #253, #256, #257, #258, #259 to #264.
 
-First: #265 (tap-through tests on GitHub Actions, TestFlight on Xcode Cloud; D-119). Then: #226 (an unreadable download list or a source change must not empty the Watch), #230 and #231 (findings), #225
+Then: #226 (an unreadable download list or a source change must not empty the Watch), #230 and #231 (findings), #225
 (test workers' memory growth).
 
 ## Later
