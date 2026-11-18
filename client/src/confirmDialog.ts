@@ -19,17 +19,40 @@ export type AskedQuestion = ConfirmQuestion & { id: number };
 
 let asked: (AskedQuestion & { answer: (yes: boolean) => void }) | null = null;
 let next = 0;
+/** Counts sign-ins: a question belongs to the session that asked it. */
+let session = 0;
 const listeners = new Set<(question: AskedQuestion | null) => void>();
 
 function publish() {
   for (const listener of listeners) listener(asked);
 }
 
+/** The session a caller started under; pass it to askToConfirm after an
+ * await, so a question for an account that has gone is never shown. */
+export function confirmSession() {
+  return session;
+}
+
+/**
+ * The session ended (signed out, revoked or expired) or the dialog's host
+ * left: the open question is cancelled, and nothing asked for that session
+ * can be shown or approved afterwards.
+ */
+export function endConfirmSession() {
+  session++;
+  if (asked) answerConfirm(asked.id, false);
+}
+
 /**
  * Asks `question` in the app's dialog; resolves true for the action, false
- * for Cancel or Escape. A new question cancels one still open.
+ * for Cancel or Escape. A new question cancels one still open; a question
+ * for an ended `forSession` resolves false without being shown.
  */
-export function askToConfirm(question: ConfirmQuestion): Promise<boolean> {
+export function askToConfirm(
+  question: ConfirmQuestion,
+  forSession = session,
+): Promise<boolean> {
+  if (forSession !== session) return Promise.resolve(false);
   if (asked) answerConfirm(asked.id, false);
   return new Promise<boolean>((resolve) => {
     asked = { ...question, id: ++next, answer: resolve };
@@ -59,3 +82,6 @@ export function subscribeConfirm(
     listeners.delete(listener);
   };
 }
+
+if (typeof window !== "undefined")
+  window.addEventListener("music-session-cleared", endConfirmSession);

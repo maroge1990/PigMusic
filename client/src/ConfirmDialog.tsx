@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   answerConfirm,
+  endConfirmSession,
   subscribeConfirm,
   type AskedQuestion,
 } from "./confirmDialog";
@@ -14,7 +15,14 @@ export function ConfirmDialog() {
   const [question, setQuestion] = useState<AskedQuestion | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
-  useEffect(() => subscribeConfirm(setQuestion), []);
+  useEffect(() => {
+    const stop = subscribeConfirm(setQuestion);
+    return () => {
+      stop();
+      // The signed-in shell is going: its question must not outlive it.
+      endConfirmSession();
+    };
+  }, []);
   useEffect(() => {
     if (!question) return;
     if (!dialog.current?.open) dialog.current?.showModal();

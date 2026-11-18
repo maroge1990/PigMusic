@@ -1,5 +1,5 @@
 import { notify, notifyError } from "./notices";
-import { askToConfirm } from "./confirmDialog";
+import { askToConfirm, confirmSession } from "./confirmDialog";
 import { useRef, useState } from "react";
 import { Upload } from "lucide-react";
 import { api } from "./api";
@@ -82,17 +82,22 @@ export function AppleImport({
   const reviewWholeLibrary = () =>
     run(async () => {
       if (!file) return;
+      // Asked only if the same person is still signed in after the read.
+      const session = confirmSession();
       const current = await api<{ stats?: { selected?: number } }>(
         "/v1/admin/migration",
       );
       if (
         current.stats?.selected &&
-        !(await askToConfirm({
-          title: "Replace the whole-library review?",
-          body: "The new export replaces the current review and clears the songs selected in it. This can't be undone.",
-          action: "Replace review",
-          destructive: true,
-        }))
+        !(await askToConfirm(
+          {
+            title: "Replace the whole-library review?",
+            body: "The new export replaces the current review and clears the songs selected in it. This can't be undone.",
+            action: "Replace review",
+            destructive: true,
+          },
+          session,
+        ))
       )
         return;
       await api("/v1/admin/migration/import", {

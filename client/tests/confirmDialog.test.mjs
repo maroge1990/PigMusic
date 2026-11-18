@@ -4,9 +4,13 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 
-const { answerConfirm, askToConfirm, subscribeConfirm } = await import(
-  "../src/confirmDialog.ts"
-);
+const {
+  answerConfirm,
+  askToConfirm,
+  confirmSession,
+  endConfirmSession,
+  subscribeConfirm,
+} = await import("../src/confirmDialog.ts");
 
 const question = {
   title: "Disable Sam's account?",
@@ -56,6 +60,30 @@ test("a stale handler can't answer a newer question (Codex round 1)", async () =
   assert.equal(settled, false);
   answerConfirm(open.id, false);
   assert.equal(await second, false);
+  stop();
+});
+
+test("losing the session cancels an open question (Codex round 1)", async () => {
+  let open = null;
+  const stop = subscribeConfirm((q) => (open = q));
+  const asked = askToConfirm(question);
+  const id = open.id;
+  endConfirmSession();
+  assert.equal(await asked, false);
+  assert.equal(open, null);
+  // Its buttons can't bring it back for the next account.
+  answerConfirm(id, true);
+  assert.equal(open, null);
+  stop();
+});
+
+test("a question asked for an ended session is never shown", async () => {
+  const session = confirmSession();
+  endConfirmSession();
+  let open = null;
+  const stop = subscribeConfirm((q) => (open = q));
+  assert.equal(await askToConfirm(question, session), false);
+  assert.equal(open, null);
   stop();
 });
 

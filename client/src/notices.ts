@@ -169,3 +169,8 @@ export function clearNotices() {
   notices = [];
   publish();
 }
+
+// A notice, and above all its Undo, belongs to the account that acted: it
+// leaves when that session ends, as the old Undo bar left with the shell.
+if (typeof window !== "undefined")
+  window.addEventListener("music-session-cleared", clearNotices);
