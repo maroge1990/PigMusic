@@ -154,18 +154,15 @@
   width: 16px;
   height: 16px;
 }
-.search-top-play {
-  position: absolute;
-  right: var(--space-24);
-  bottom: var(--space-24);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 3rem;
-  height: 3rem;
-  border-radius: var(--radius-capsule);
-  background: var(--accent);
-  color: var(--on-accent);
+/* A top song is its song row, larger. */
+.search-top-song {
+  padding: var(--space-16);
+}
+.search-top-song .song-row .cover {
+  width: 6rem;
+}
+.search-top-song .song-text strong {
+  font-size: var(--type-headline);
 }
 .search-add-mark {
   color: var(--text-accent);

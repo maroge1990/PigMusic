@@ -3,7 +3,6 @@ import {
   Disc3,
   ListMusic,
   Music,
-  Play,
   Plus,
   Search,
   UserRound,
@@ -14,9 +13,13 @@ import { Cover, catalogueArtistCover } from "./Cover";
 import { discoverUrl } from "./navigation";
 import { go } from "./routes";
 import { SongRow } from "./SongRow";
-import { CollectionCard, albumSongs } from "./CollectionMenu";
+import {
+  CollectionCard,
+  albumSongs,
+  artistSongs,
+  playlistSongList,
+} from "./CollectionMenu";
 import { fromTrack } from "./songs";
-import { usePlayer } from "./Player";
 import { warmArtist, whenIdle } from "./prefetch";
 import { StateBadge } from "./StateBadge";
 import { formatCount } from "./format";
@@ -87,7 +90,6 @@ export function SearchPage({
   /** Whose recent searches to keep on this browser. */
   person: string;
 }) {
-  const player = usePlayer();
   const [text, setText] = useState(query);
   // The query being searched: the address's, then what is typed, once
   // typing pauses.
@@ -299,75 +301,81 @@ export function SearchPage({
     !artistCount &&
     !playlists.length;
 
+  // The top result is larger but keeps every action of its kind: the
+  // collection menu, or the song row's own (a tap plays only that song).
   function topResult(): ReactNode {
     if (topAlbum)
       return (
-        <a className="search-top-card" href={"#/library/album/" + topAlbum.id}>
-          <Cover
-            title={topAlbum.title}
-            src={topAlbum.cover_url}
-            sizes="160px"
-          />
-          <strong>{topAlbum.title}</strong>
-          <span className="search-top-detail">
-            Album · {topAlbum.artist}
-            <AlbumMark album={topAlbum} />
-          </span>
-        </a>
+        <CollectionCard
+          kind="album"
+          title={topAlbum.title}
+          songs={() => albumSongs(topAlbum.id)}
+        >
+          <a
+            className="search-top-card"
+            href={"#/library/album/" + topAlbum.id}
+          >
+            <Cover
+              title={topAlbum.title}
+              src={topAlbum.cover_url}
+              sizes="160px"
+            />
+            <strong>{topAlbum.title}</strong>
+            <span className="search-top-detail">
+              Album · {topAlbum.artist}
+              <AlbumMark album={topAlbum} />
+            </span>
+          </a>
+        </CollectionCard>
       );
     if (topArtist)
       return (
-        <a
-          className="search-top-card"
-          href={"#/search?q=" + encodeURIComponent(topArtist.name)}
-          onClick={(e) => openArtist(e, topArtist.id)}
+        <CollectionCard
+          kind="artist"
+          title={topArtist.name}
+          songs={() => artistSongs(topArtist.id)}
         >
-          <Cover
-            title={topArtist.name}
-            src={topArtist.cover_url}
-            artist
-            sizes="160px"
-          />
-          <strong>{topArtist.name}</strong>
-          <span className="search-top-detail">Artist</span>
-        </a>
+          <a
+            className="search-top-card"
+            href={"#/search?q=" + encodeURIComponent(topArtist.name)}
+            onClick={(e) => openArtist(e, topArtist.id)}
+          >
+            <Cover
+              title={topArtist.name}
+              src={topArtist.cover_url}
+              artist
+              sizes="160px"
+            />
+            <strong>{topArtist.name}</strong>
+            <span className="search-top-detail">Artist</span>
+          </a>
+        </CollectionCard>
       );
     if (topPlaylist)
       return (
-        <a
-          className="search-top-card"
-          href={"#/library/playlist/" + topPlaylist.id}
+        <CollectionCard
+          kind="playlist"
+          title={topPlaylist.name}
+          songs={() => playlistSongList(topPlaylist.id)}
         >
-          <Cover title={topPlaylist.name} sizes="160px" />
-          <strong>{topPlaylist.name}</strong>
-          <span className="search-top-detail">
-            Playlist · {plural(topPlaylist.track_count, "song")}
-          </span>
-        </a>
+          <a
+            className="search-top-card"
+            href={"#/library/playlist/" + topPlaylist.id}
+          >
+            <Cover title={topPlaylist.name} sizes="160px" />
+            <strong>{topPlaylist.name}</strong>
+            <span className="search-top-detail">
+              Playlist · {plural(topPlaylist.track_count, "song")}
+            </span>
+          </a>
+        </CollectionCard>
       );
     if (topSong) {
       const song = fromTrack(topSong);
       return (
-        <button
-          type="button"
-          className="search-top-card"
-          aria-label={`Play ${song.title}`}
-          onClick={() => player.play([song], 0)}
-        >
-          <Cover title={song.title} src={song.cover} sizes="160px" />
-          <strong>{song.title}</strong>
-          <span className="search-top-detail">
-            Song · {song.artist}
-            {song.state === "saved" ? (
-              <StateBadge state="library" iconOnly />
-            ) : song.state === "pending" ? (
-              <StateBadge state="requested" iconOnly />
-            ) : null}
-          </span>
-          <span className="search-top-play" aria-hidden="true">
-            <Play size={20} fill="currentColor" />
-          </span>
-        </button>
+        <div className="search-top-card search-top-song">
+          <SongRow song={song} queue={[song]} index={0} page="search" />
+        </div>
       );
     }
     return null;

@@ -39,6 +39,13 @@ test("a top song keeps the song menu and plays only itself", async ({
       "/v1/catalogue/artists": noCatalogue,
     },
   });
+  // Every song gets an address, so the queue is saved as it starts
+  // (after mockApi: the later route wins).
+  await page.route("**/api/v1/playback/*/url", (route) =>
+    route.fulfill({
+      json: { url: "/api/v1/playback/files/silence", expires_in: 60 },
+    }),
+  );
   await page.goto("/#/search?q=Von");
   const top = page.getByRole("region", { name: "Top result" });
   await expect(
