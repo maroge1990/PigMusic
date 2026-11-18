@@ -44,6 +44,15 @@ final class DemoLibraryTests: XCTestCase {
     drawn?.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
   }
 
+  /// The mini player's controls are reported erratically on iOS 26 (GitHub's
+  /// runners: on screen, off screen or missing from run to run); the tests
+  /// that drive them run on iOS 27, the development Mac's and Mark's.
+  private func skipBelowIOS27() throws {
+    try XCTSkipIf(
+      ProcessInfo.processInfo.operatingSystemVersion.majorVersion < 27,
+      "The mini player's controls need iOS 27 (#265)")
+  }
+
   private func playSunrise() {
     app.buttons["Sunrise, The Orchard"].tap()
     expect(app.buttons["Play"])
@@ -117,7 +126,8 @@ final class DemoLibraryTests: XCTestCase {
   }
 
   /// #108: the full player names the song and the artist, each on its line.
-  func testThePlayerNamesTheSongAndArtist() {
+  func testThePlayerNamesTheSongAndArtist() throws {
+    try skipBelowIOS27()
     launch()
     playSunrise()
     pause()
@@ -131,7 +141,8 @@ final class DemoLibraryTests: XCTestCase {
     XCTAssertTrue(app.staticTexts["Now playing"].waitForNonExistence(timeout: 5))
   }
 
-  func testNextSongMovesThroughTheAlbum() {
+  func testNextSongMovesThroughTheAlbum() throws {
+    try skipBelowIOS27()
     launch()
     playSunrise()
     pause()
@@ -141,7 +152,8 @@ final class DemoLibraryTests: XCTestCase {
 
   /// D-112 (#229): a song's ⋯ opens a pop-up menu, not a sheet, and a long
   /// press on the row opens the same menu.
-  func testASongsMenuOffersItsActions() {
+  func testASongsMenuOffersItsActions() throws {
+    try skipBelowIOS27()
     launch()
     playSunrise()
     pause()
