@@ -719,6 +719,7 @@ export function AdminTools({ route }: { route: Route }) {
             throw await writeFailure(r, "The queue couldn't be cleared.");
         }),
       );
+      if (!pending) return;
       clearing = new Set(entries.map((e) => e.id));
       setQueue(withoutClearing(queue));
       offerUndo(

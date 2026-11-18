@@ -1,4 +1,4 @@
-import { drainPending } from "./deferred";
+import { drainPending, reopenDeferred } from "./deferred";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { setSessionId } from "./sessionId";
@@ -254,9 +254,10 @@ export function AppShell() {
   /** One sign-out at a time: a second click joins the first. */
   const signingOut = useRef<Promise<void> | null>(null);
   function signOut() {
-    signingOut.current ??= signOutNow().finally(
-      () => (signingOut.current = null),
-    );
+    signingOut.current ??= signOutNow().finally(() => {
+      signingOut.current = null;
+      reopenDeferred();
+    });
     return signingOut.current;
   }
   async function signOutNow() {

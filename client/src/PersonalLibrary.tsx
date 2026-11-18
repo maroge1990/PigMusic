@@ -594,6 +594,8 @@ export function PersonalLibrary({
                       );
                   }),
                 );
+                // Refused (signing out): the playlist stays as it was.
+                if (!pending) return;
                 setPlaylists((old) => old.filter((v) => v.id !== p.id));
                 backToLibrary();
                 offerUndo(

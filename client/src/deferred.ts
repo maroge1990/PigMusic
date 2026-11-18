@@ -1,3 +1,4 @@
+import { notify, notifyError } from "./notices";
 import { SESSION_UNKNOWN, expectedSession, withSession } from "./sessionId";
 
 /**
@@ -25,6 +26,14 @@ type Entry = {
 };
 
 const pending = new Map<string, Entry>();
+/** Set while signing out (drainPending until reopenDeferred). */
+let signingOut = false;
+
+/** Takes new actions again once a sign-out has finished. */
+export function reopenDeferred() {
+  signingOut = false;
+}
+
 /** Sends under way (from the timer, page hide or a flush) until settled. */
 const inFlight = new Set<Promise<unknown>>();
 
@@ -61,17 +70,25 @@ export function defer(
   key: string,
   send: Send,
   delay = UNDO_DELAY_MS,
-): { undo: () => boolean; done: Promise<boolean>; started: Promise<void> } {
-  fire(key, false);
-  // Bound to the session it was started under; with none known, it isn't
-  // started at all (#250).
+): {
+  undo: () => boolean;
+  done: Promise<boolean>;
+  started: Promise<void>;
+} | null {
+  // Refused (null) before anything shows as done: while signing out only
+  // what was already accepted is sent, and with no session known nothing
+  // can say whose it is (#250). The caller changes nothing on screen.
+  if (signingOut) {
+    notify("Signing out…", "signing-out");
+    return null;
+  }
+  // Bound to the session it was started under.
   const session = expectedSession();
-  if (!session)
-    return {
-      undo: () => false,
-      done: Promise.reject(new Error(SESSION_UNKNOWN)),
-      started: Promise.resolve(),
-    };
+  if (!session) {
+    notifyError(SESSION_UNKNOWN);
+    return null;
+  }
+  fire(key, false);
   let resolve!: (sent: boolean) => void;
   let reject!: (error: unknown) => void;
   let start!: () => void;
@@ -116,6 +133,8 @@ export function flushPending(): Promise<void> {
  * the timer or a page hide included, so the logout never overtakes one.
  */
 export function drainPending(): Promise<void> {
+  // From here new actions are refused; only accepted ones are sent.
+  signingOut = true;
   for (const key of [...pending.keys()]) void fire(key, true);
   return Promise.allSettled([...inFlight]).then(() => {});
 }
