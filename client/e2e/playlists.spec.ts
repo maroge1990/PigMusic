@@ -190,3 +190,52 @@ test("a playlist card follows an edit that keeps its count", async ({
   );
   await expect(card).toContainText("4 songs · 4 min");
 });
+
+// Codex round 2: a failed read of an edited playlist shows a plain card,
+// not the old length, and the next refresh reads it again.
+test("a playlist card never shows an older version's length", async ({
+  page,
+}) => {
+  let revision = 1;
+  let failing = false;
+  const swapped = {
+    ...kitchen,
+    revision: 2,
+    entries: kitchen.entries.map((e) => ({ ...e, duration: 60 })),
+  };
+  await mockApi(page, {
+    answers: {
+      "/v1/playlists": (route) =>
+        route.fulfill({
+          json: {
+            playlists: [
+              { id: "p2", name: "Kitchen disco", track_count: 4, revision },
+            ],
+          },
+        }),
+      "/v1/playlists/p2": (route) =>
+        failing
+          ? route.fulfill({
+              status: 503,
+              json: { detail: "Busy", code: "busy" },
+            })
+          : route.fulfill({ json: revision === 1 ? kitchen : swapped }),
+    },
+  });
+  await page.goto("/#/library/playlists");
+  const card = page.locator(".playlist-grid .album-card", {
+    hasText: "Kitchen disco",
+  });
+  await expect(card).toContainText("4 songs · 1 hr 32 min");
+  revision = 2;
+  failing = true;
+  const changed = () =>
+    page.evaluate(() =>
+      window.dispatchEvent(new Event("music-library-changed")),
+    );
+  await changed();
+  await expect(card.locator("p")).toHaveText("4 songs");
+  failing = false;
+  await changed();
+  await expect(card).toContainText("4 songs · 4 min");
+});

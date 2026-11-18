@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Play, Plus, Shuffle, Star, X } from "lucide-react";
 import { api } from "./api";
 import {
@@ -73,27 +73,43 @@ export function FavouritesCover() {
 /** Each playlist's covers and length, read from its own page. Only the
  * playlists tab asks; the list itself carries counts only. */
 function usePlaylistFacts(playlists: PlaylistSummary[]) {
-  const [facts, setFacts] = useState<Record<string, PlaylistFacts>>({});
-  // A playlist edit moves its revision, even when its count stays (Codex).
-  const ids = playlists
-    .map((p) => `${p.id}@${p.revision ?? ""}:${p.track_count ?? 0}`)
-    .join(",");
+  // Facts are kept with the playlist version they were read for and shown
+  // only for that version: an edit moves the revision even when the count
+  // stays, and a failed read leaves a plain card, not the old facts (Codex).
+  const [stored, setStored] = useState<
+    Record<string, { version: string; facts: PlaylistFacts }>
+  >({});
+  const known = useRef(stored);
+  known.current = stored;
   useEffect(() => {
     const controller = new AbortController();
-    for (const p of playlists)
+    for (const p of playlists) {
+      const version = versionOf(p);
+      if (known.current[p.id]?.version === version) continue;
       void api<Playlist>("/v1/playlists/" + p.id, {
         signal: controller.signal,
       })
         .then((detail) => {
           if (!controller.signal.aborted)
-            setFacts((old) => ({ ...old, [p.id]: playlistFacts(detail) }));
+            setStored((old) => ({
+              ...old,
+              [p.id]: { version, facts: playlistFacts(detail) },
+            }));
         })
-        // A card without its covers still opens its playlist.
+        // A card without its covers still opens its playlist; the next
+        // refresh of the list reads it again.
         .catch(() => {});
+    }
     return () => controller.abort();
-  }, [ids]);
+  }, [playlists]);
+  const facts: Record<string, PlaylistFacts> = {};
+  for (const p of playlists)
+    if (stored[p.id]?.version === versionOf(p))
+      facts[p.id] = stored[p.id].facts;
   return facts;
 }
+const versionOf = (p: PlaylistSummary) =>
+  `${p.revision ?? ""}:${p.track_count ?? 0}`;
 
 /** The Playlists tab: Favourites first, then every playlist, then New playlist. */
 export function PlaylistGrid({
@@ -105,7 +121,10 @@ export function PlaylistGrid({
   favouriteList: Playlist | null;
   createPlaylist: (name: string) => Promise<void>;
 }) {
-  const own = playlists.filter((p) => !p.id.startsWith("pig-favourites:"));
+  const own = useMemo(
+    () => playlists.filter((p) => !p.id.startsWith("pig-favourites:")),
+    [playlists],
+  );
   const facts = usePlaylistFacts(own);
   const favourites = favouriteList ? playlistFacts(favouriteList) : null;
   return (
