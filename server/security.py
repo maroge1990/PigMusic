@@ -24,6 +24,17 @@ READY = "/api/health/ready"
 FORWARDED = ("forwarded", "x-forwarded-for", "x-real-ip", "cf-connecting-ip")
 
 
+def named_logout(request):
+    """A logout naming its session (the web, #250): no answer to it, success
+    or error, may set the cookie, which can belong to a newer sign-in by
+    the time it arrives."""
+    return (
+        request.method == "POST"
+        and request.url.path == "/api/v1/auth/logout"
+        and request.headers.get("x-pig-expected-session") is not None
+    )
+
+
 def local_probe(request):
     """A direct loopback connection, not one relayed by a proxy."""
     client = request.scope.get("client")
@@ -196,6 +207,7 @@ class Security:
             kind == "web"
             and token
             and self.auth.now() - session["last_seen_at"] >= 3600
+            and not named_logout(request)
         ):
             request.state.refresh_cookie = token
         # Members only reach personal-library routes and their own media. The

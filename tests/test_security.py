@@ -625,3 +625,38 @@ def test_a_named_logout_ends_its_session_and_leaves_the_cookie_alone(
         plain = client.post("/api/v1/auth/logout")
         assert plain.status_code == 200
         assert plain.headers["set-cookie"].startswith(COOKIE + '=""')
+
+
+def test_a_named_logout_that_fails_still_leaves_the_cookie_alone(tmp_path, monkeypatch):
+    # Codex round 4 (#250): the database is busy as this tab's logout is
+    # revoked, after another tab signed in. The error answer must not carry
+    # the old session's cookie back over the newer sign-in.
+    import sqlite3
+
+    app, _ = protected(tmp_path, monkeypatch)
+    auth = app.state.auth
+    started = auth.now()
+    with TestClient(
+        app, base_url="https://private.ts.net", headers={"X-Pig-Request": "1"}
+    ) as client:
+        login = {"username": "mark", "password": PASSWORD}
+        assert client.post("/api/v1/auth/login", json=login).status_code == 200
+        session = client.get("/api/v1/me").json()["session_id"]
+        old = client.cookies.get(COOKIE)
+        # The newer sign-in (another tab) completes first.
+        assert client.post("/api/v1/auth/login", json=login).status_code == 200
+        client.cookies.clear()
+        # An hour on, the old session's cookie would be renewed.
+        monkeypatch.setattr(auth, "now", lambda: started + 3700)
+
+        def busy(*args):
+            raise sqlite3.OperationalError("database is locked")
+
+        monkeypatch.setattr(auth, "revoke", busy)
+        # This tab's logout left with the old cookie.
+        failed = client.post(
+            "/api/v1/auth/logout",
+            headers={"X-Pig-Expected-Session": session, "Cookie": f"{COOKIE}={old}"},
+        )
+        assert failed.status_code >= 500
+        assert "set-cookie" not in failed.headers

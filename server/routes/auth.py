@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, SecretStr
 
 from ..auth import Auth, AuthError, COOKIE, DAY, browser_name
-from ..security import session_thread
+from ..security import named_logout, session_thread
 from ..api_models import (
     ActivationDTO,
     DeviceSessionDTO,
@@ -143,7 +143,11 @@ def auth_router(auth: Auth, security=None, origin: str | None = None):
             token, kind = request.cookies.get(COOKIE, ""), "web"
         result = await run(auth.authenticate, token, kind)
         person, session = result
-        if kind == "web" and auth.now() - session["last_seen_at"] >= 3600:
+        if (
+            kind == "web"
+            and auth.now() - session["last_seen_at"] >= 3600
+            and not named_logout(request)
+        ):
             set_cookie(response, token)
         request.state.user, request.state.session = person, session
         return result
@@ -257,10 +261,8 @@ def auth_router(auth: Auth, security=None, origin: str | None = None):
         if request.headers.get("x-pig-expected-session") is not None:
             # A logout naming its session (the web, #250) ends just that one
             # and leaves the cookie alone: a slow answer must not erase, or
-            # renew over, a newer sign-in another tab made meanwhile.
-            request.state.refresh_cookie = None
-            if "set-cookie" in response.headers:
-                del response.headers["set-cookie"]
+            # renew over, a newer sign-in another tab made meanwhile. Nothing
+            # renewed it on the way in either (named_logout).
             return {"logged_out": True}
         response.delete_cookie(
             COOKIE, path="/", secure=True, httponly=True, samesite="strict"
