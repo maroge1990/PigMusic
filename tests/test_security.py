@@ -532,3 +532,56 @@ def test_the_image_does_not_run_as_root():
     assert users and users[-1] == "99:100"
     # Without a mount the default data folder must still be writable by it.
     assert re.search(r"chown 99:100 /data", final)
+
+
+def test_a_write_started_by_another_sign_in_is_refused_unchanged(tmp_path, monkeypatch):
+    # Codex (#250, #183): web tabs share one cookie. A write names the
+    # session it was started under; if the cookie now holds another, the
+    # server refuses it and changes nothing. Without the header, as the
+    # native apps send, nothing changes.
+    app, _ = protected(tmp_path, monkeypatch)
+    auth = app.state.auth
+
+    def phone():
+        return auth.login(
+            "mark", PASSWORD, "device", "fixture phone", "ios", "fixture"
+        )["token"]
+
+    def signed_in(other):
+        return client.get(
+            "/api/v1/me", headers={"Authorization": "Bearer " + other}
+        ).status_code
+
+    with TestClient(
+        app, base_url="https://private.ts.net", headers={"X-Pig-Request": "1"}
+    ) as client:
+        assert (
+            client.post(
+                "/api/v1/auth/login", json={"username": "mark", "password": PASSWORD}
+            ).status_code
+            == 200
+        )
+        mine = client.get("/api/v1/me").json()["session_id"]
+        other = phone()
+        refused = client.delete(
+            "/api/v1/me/sessions",
+            headers={"X-Pig-Expected-Session": "an-earlier-sign-in"},
+        )
+        assert refused.status_code == 409
+        assert refused.json()["code"] == "session_changed"
+        assert refused.json()["detail"] == "This was started by another sign-in."
+        assert signed_in(other) == 200
+        # Reads are never refused: they change nothing.
+        assert (
+            client.get(
+                "/api/v1/me", headers={"X-Pig-Expected-Session": "an-earlier-sign-in"}
+            ).status_code
+            == 200
+        )
+        assert client.delete(
+            "/api/v1/me/sessions", headers={"X-Pig-Expected-Session": mine}
+        ).json() == {"revoked": 1}
+        assert signed_in(other) == 401
+        other = phone()
+        assert client.delete("/api/v1/me/sessions").json() == {"revoked": 1}
+        assert signed_in(other) == 401

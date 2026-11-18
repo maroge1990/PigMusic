@@ -1,3 +1,4 @@
+import { sessionHeader } from "./sessionId";
 import { askToConfirm } from "./confirmDialog";
 import { notify, notifyError } from "./notices";
 import { apiFetch, isUnconfirmed, writeFailure } from "./api";
@@ -85,20 +86,21 @@ export function RemovedMusic() {
     }
   }
   async function deleteForGood(plan: Purge) {
-    if (
-      !(await askToConfirm({
-        title: `Delete ${plan.items.length} songs from Trash for good?`,
-        body: "Their files are deleted from the server and can't be restored.",
-        action: "Delete for good",
-        destructive: true,
-      }))
-    )
-      return;
+    const session = await askToConfirm({
+      title: `Delete ${plan.items.length} songs from Trash for good?`,
+      body: "Their files are deleted from the server and can't be restored.",
+      action: "Delete for good",
+      destructive: true,
+    });
+    if (!session) return;
     setBusy(true);
     try {
       const r = await apiFetch("/api/v1/admin/library/trash/purge", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...sessionHeader(session),
+        },
         body: JSON.stringify({
           days: plan.days,
           fingerprint: plan.fingerprint,

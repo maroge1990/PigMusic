@@ -24,6 +24,9 @@ globalThis.window = { addEventListener() {}, dispatchEvent() {} };
 globalThis.document = { hidden: true };
 const originalInterval = globalThis.setInterval;
 globalThis.setInterval = () => 0;
+// A signed-in tab: every write names its session (#250).
+const { setSessionId } = await import("../src/sessionId.ts");
+setSessionId("session-1");
 const { flushListens, recordListen } = await import("../src/listens.ts");
 globalThis.setInterval = originalInterval;
 
@@ -71,6 +74,8 @@ test("signed-out, rate-limited and server failures keep listens for a retry", as
 
 test("listens older than the server's 30-day window are never sent", async () => {
   store.clear();
+  // The 401 above ended the session; this tab is signed in again.
+  setSessionId("session-1");
   store.set(
     KEY,
     JSON.stringify([listen("stale", now() - 31 * 86400), listen("fresh")]),

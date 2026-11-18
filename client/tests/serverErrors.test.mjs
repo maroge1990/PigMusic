@@ -7,6 +7,9 @@ globalThis.window = {
   addEventListener() {},
   dispatchEvent: (event) => events.push(event.type),
 };
+// A signed-in tab: every write names its session (#250).
+const { setSessionId } = await import("../src/sessionId.ts");
+setSessionId("session-1");
 const { api, clearSessionReads } = await import("../src/api.ts");
 
 const json = (status, body, headers = {}) =>
@@ -57,6 +60,7 @@ async function settle() {
 
 test.beforeEach(() => {
   clearSessionReads();
+  setSessionId("session-1");
   events.length = 0;
 });
 

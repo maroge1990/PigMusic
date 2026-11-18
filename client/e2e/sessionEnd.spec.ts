@@ -37,3 +37,84 @@ test("signing out sends a playlist delete still waiting for its Undo time first"
   await page.clock.runFor(20_000);
   expect(calls).toEqual(["DELETE p1", "logout"]);
 });
+
+test("sign-out runs once however often it is clicked, and names its session", async ({
+  page,
+}) => {
+  const logouts: (string | null)[] = [];
+  let answer: () => void = () => {};
+  const answered = new Promise<void>((resolve) => (answer = resolve));
+  await mockApi(page, {
+    answers: {
+      "/v1/auth/logout": async (route: Route) => {
+        logouts.push(route.request().headers()["x-pig-expected-session"]);
+        await answered;
+        return route.fulfill({ json: {} });
+      },
+    },
+  });
+  await page.goto("/#/account");
+  const signOut = page.getByRole("button", { name: "Sign out of PigMusic" });
+  await signOut.click();
+  await signOut.click();
+  await expect.poll(() => logouts.length).toBe(1);
+  answer();
+  await expect(page.getByLabel("Username")).toBeVisible();
+  expect(logouts).toEqual(["session-1"]);
+});
+
+test("a write refused as another sign-in's says so and is dropped", async ({
+  page,
+}) => {
+  const named: (string | null)[] = [];
+  await mockApi(page, {
+    answers: {
+      "/v1/me/sessions": (route: Route) => {
+        if (route.request().method() !== "DELETE")
+          return route.fulfill({
+            json: {
+              sessions: [
+                {
+                  id: "a",
+                  device_name: "Mac",
+                  client: "web",
+                  created_at: 0,
+                  last_seen_at: 0,
+                  current: true,
+                  revoked_at: null,
+                },
+                {
+                  id: "b",
+                  device_name: "iPhone",
+                  client: "app",
+                  created_at: 0,
+                  last_seen_at: 0,
+                  current: false,
+                  revoked_at: null,
+                },
+              ],
+            },
+          });
+        named.push(route.request().headers()["x-pig-expected-session"]);
+        // Another tab signed in meanwhile: the server refuses it unmade.
+        return route.fulfill({
+          status: 409,
+          json: {
+            code: "session_changed",
+            detail: "This was started by another sign-in.",
+          },
+        });
+      },
+    },
+  });
+  await page.goto("/#/account");
+  await page.getByRole("button", { name: "Sign out other devices" }).click();
+  await page
+    .getByRole("dialog", { name: "Sign out everywhere else?" })
+    .getByRole("button", { name: "Sign out everywhere else" })
+    .click();
+  await expect(page.locator(".notice-area")).toContainText(
+    "This was started by another sign-in.",
+  );
+  expect(named).toEqual(["session-1"]);
+});

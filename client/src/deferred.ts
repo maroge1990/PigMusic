@@ -1,3 +1,5 @@
+import { SESSION_UNKNOWN, expectedSession, withSession } from "./sessionId";
+
 /**
  * Undo for an action the server cannot take back (D-79, #183): it shows as
  * done at once and is sent after `UNDO_DELAY_MS` unless Undo is pressed. A
@@ -18,9 +20,13 @@ type Entry = {
   start: () => void;
   resolve: (sent: boolean) => void;
   reject: (error: unknown) => void;
+  /** The session it was scheduled under; its write names that one. */
+  session: string;
 };
 
 const pending = new Map<string, Entry>();
+/** Sends under way (from the timer, page hide or a flush) until settled. */
+const inFlight = new Set<Promise<unknown>>();
 
 function fire(key: string, keepalive: boolean): Promise<unknown> {
   const entry = pending.get(key);
@@ -29,10 +35,20 @@ function fire(key: string, keepalive: boolean): Promise<unknown> {
   clearTimeout(entry.timer);
   // From here it can no longer be undone.
   entry.start();
-  return entry.send(keepalive).then(
+  const sending = (() => {
+    try {
+      return withSession(entry.session, () => entry.send(keepalive));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  })();
+  const settled = sending.then(
     () => entry.resolve(true),
     (error: unknown) => entry.reject(error),
   );
+  inFlight.add(settled);
+  void settled.finally(() => inFlight.delete(settled));
+  return settled;
 }
 
 /**
@@ -47,6 +63,15 @@ export function defer(
   delay = UNDO_DELAY_MS,
 ): { undo: () => boolean; done: Promise<boolean>; started: Promise<void> } {
   fire(key, false);
+  // Bound to the session it was started under; with none known, it isn't
+  // started at all (#250).
+  const session = expectedSession();
+  if (!session)
+    return {
+      undo: () => false,
+      done: Promise.reject(new Error(SESSION_UNKNOWN)),
+      started: Promise.resolve(),
+    };
   let resolve!: (sent: boolean) => void;
   let reject!: (error: unknown) => void;
   let start!: () => void;
@@ -56,7 +81,7 @@ export function defer(
   });
   const started = new Promise<void>((yes) => (start = yes));
   const timer = setTimeout(() => fire(key, false), delay);
-  const entry = { send, timer, start, resolve, reject };
+  const entry = { send, timer, start, resolve, reject, session };
   pending.set(key, entry);
   return {
     /** True when it was still pending and is now cancelled. */
@@ -83,6 +108,16 @@ export function flushPending(): Promise<void> {
   return Promise.allSettled(
     [...pending.keys()].map((key) => fire(key, true)),
   ).then(() => {});
+}
+
+/**
+ * Before signing out: sends everything still waiting (keepalive) and
+ * resolves once every send under way has settled, those already started by
+ * the timer or a page hide included, so the logout never overtakes one.
+ */
+export function drainPending(): Promise<void> {
+  for (const key of [...pending.keys()]) void fire(key, true);
+  return Promise.allSettled([...inFlight]).then(() => {});
 }
 
 /** Cancels everything pending: the session it was made in has ended. Each

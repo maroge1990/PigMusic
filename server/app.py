@@ -25,7 +25,7 @@ from .auth_logging import install_validation_redaction
 from .errors import install as install_error_responses
 from .routes.auth import auth_router, set_cookie
 from .routes.personal import personal_router
-from .security import Security, audit_routes, legacy_test_enabled
+from .security import MESSAGES, Security, audit_routes, legacy_test_enabled
 from .request_limits import JsonBodyLimit
 from .request_timing import (
     RequestTiming,
@@ -445,7 +445,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             }.get(exc.status_code, "request_failed")
         )
         return JSONResponse(
-            {"detail": str(exc.detail), "code": code},
+            {"detail": MESSAGES.get(code, str(exc.detail)), "code": code},
             status_code=exc.status_code,
             headers=exc.headers,
         )

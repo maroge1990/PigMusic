@@ -61,19 +61,24 @@ test("the pending sign-out waits while the server is still unreachable", async (
   assert.equal(storage.items.size, 0);
 });
 
-test("a sign-out whose session was never known stays signed out until a fresh sign-in (Codex round 1)", async () => {
+test("a sign-out with no session known logs nothing out (Codex round 2)", async () => {
+  // The session was already lost (another tab signed in, or it was
+  // revoked): the cookie may be another sign-in's, which this tab must not
+  // end. This device signs out; nothing is left to finish later.
   const storage = memory();
   const calls = [];
-  const call = async (path) => {
-    calls.push(path);
-    throw unreachable;
-  };
-  assert.equal(await signOutSession(call, null, storage), false);
-  // Reopened with the server back: the old cookie must not sign back in.
+  const call = async (path) => calls.push(path);
+  assert.equal(await signOutSession(call, null, storage), true);
+  assert.deepEqual(calls, []);
+  assert.equal(storage.items.size, 0);
+});
+
+test("an unknown pending sign-out from before still waits for a fresh sign-in", async () => {
+  const storage = memory();
+  storage.setItem("pig-music-pending-sign-out", "unknown");
   assert.equal(await finishSignOut(async () => {}, storage), false);
   signedInAgain(storage);
   assert.equal(await finishSignOut(async () => {}, storage), true);
-  assert.deepEqual(calls, ["/v1/auth/logout"]);
 });
 
 test("a sign-in as someone else ends the pending sign-out (Codex round 1)", async () => {

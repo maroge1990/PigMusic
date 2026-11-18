@@ -1,3 +1,6 @@
+import { notifyError } from "./notices";
+import { SESSION_UNKNOWN, expectedSession } from "./sessionId";
+
 /**
  * The in-app confirmation for what cannot be undone (D-79, #250): emptying
  * Trash, signing out everywhere else, resetting or disabling a person. The
@@ -19,43 +22,18 @@ export type AskedQuestion = ConfirmQuestion & { id: number };
 
 let asked:
   | (AskedQuestion & {
-      answer: (yes: boolean) => void;
-      session: number;
-      identity: string | null;
+      answer: (session: string | null) => void;
+      generation: number;
+      session: string;
     })
   | null = null;
 let next = 0;
-/** Counts sign-ins: a question belongs to the session that asked it. */
-let session = 0;
+/** Counts session ends: a question belongs to the session that asked it. */
+let generation = 0;
 const listeners = new Set<(question: AskedQuestion | null) => void>();
-/** The server's id for this tab's session, and how to read it again. */
-let identity: string | null = null;
-let serverSession: (() => Promise<string | null>) | null = null;
-let checkFailed = () => {};
-
-/**
- * Says which server session this tab is signed in with, and how to ask the
- * server for the one it has now. Another tab can replace the shared cookie,
- * so a confirmed action rechecks it before it goes ahead.
- */
-export function setConfirmIdentity(
-  id: string | null,
-  read: (() => Promise<string | null>) | null,
-  failed: () => void = () => {},
-) {
-  identity = id;
-  serverSession = read;
-  checkFailed = failed;
-}
 
 function publish() {
   for (const listener of listeners) listener(asked);
-}
-
-/** The session a caller started under; pass it to askToConfirm after an
- * await, so a question for an account that has gone is never shown. */
-export function confirmSession() {
-  return session;
 }
 
 /**
@@ -64,48 +42,55 @@ export function confirmSession() {
  * can be shown or approved afterwards.
  */
 export function endConfirmSession() {
-  session++;
+  generation++;
   if (asked) answerConfirm(asked.id, false);
 }
 
 /**
- * Asks `question` in the app's dialog; resolves true for the action, false
- * for Cancel or Escape. A new question cancels one still open; a question
- * for an ended `forSession` resolves false without being shown.
+ * Asks `question` in the app's dialog. Resolves with the session it was
+ * asked under when the action is chosen (the write names it, so the server
+ * refuses it if another sign-in holds the cookie by then), or null for
+ * Cancel or Escape. `forSession` is the session the caller started under
+ * (default: now); with none known, or another one by now, nothing is asked.
+ * A new question cancels one still open.
  */
 export function askToConfirm(
   question: ConfirmQuestion,
-  forSession = session,
-): Promise<boolean> {
-  if (forSession !== session) return Promise.resolve(false);
+  forSession = expectedSession(),
+): Promise<string | null> {
+  if (!forSession) {
+    notifyError(SESSION_UNKNOWN);
+    return Promise.resolve(null);
+  }
+  if (forSession !== expectedSession()) return Promise.resolve(null);
   if (asked) answerConfirm(asked.id, false);
-  return new Promise<boolean>((resolve) => {
-    asked = { ...question, id: ++next, answer: resolve, session, identity };
+  return new Promise<string | null>((resolve) => {
+    asked = {
+      ...question,
+      id: ++next,
+      answer: resolve,
+      generation,
+      session: forSession,
+    };
     publish();
   });
 }
 
 /**
  * Answers question `id`. A handler left from an earlier question (its id no
- * longer open) is ignored, so it can never approve a newer one. Yes goes
- * ahead only once the server still has the session that asked; if it
- * can't be checked, nothing is done.
+ * longer open) is ignored, so it can never approve a newer one.
  */
 export function answerConfirm(id: number, yes: boolean) {
   const question = asked;
   if (!question || question.id !== id) return;
   asked = null;
   publish();
-  if (!yes) return question.answer(false);
-  const same = () => question.session === session;
-  const read = serverSession;
-  if (!read) return question.answer(same());
-  read().then(
-    (now) => question.answer(same() && now === question.identity),
-    () => {
-      question.answer(false);
-      checkFailed();
-    },
+  question.answer(
+    yes &&
+      question.generation === generation &&
+      question.session === expectedSession()
+      ? question.session
+      : null,
   );
 }
 
