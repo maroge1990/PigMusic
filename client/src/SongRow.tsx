@@ -138,8 +138,11 @@ export function SongRow({
       // The server's answer decides the mark, never the state before the tap:
       // the tick shows only once the song is confirmed in your library.
       const result = await requestSong(song);
-      if (result.created > 0) setState("pending");
-      else if (song.explicit_edition) {
+      if (result.created > 0) {
+        setState("pending");
+        // The album reads it again, so its own Add and checks follow (#263).
+        if (song.explicit_edition) refresh?.();
+      } else if (song.explicit_edition) {
         // The library lookup matches any edition, so for an explicit edition
         // only the server's own answer about this song counts.
         if (result.existing > 0) setState("pending");
@@ -209,6 +212,8 @@ export function SongRow({
   }).map((group) =>
     group
       .filter((item) => item !== "remove-from-library" || !!song.saved)
+      // Not until it is known whether the song is already yours (#263).
+      .filter((item) => item !== "add-to-library" || !song.checking)
       .map((item) => ({
         key: item,
         label:
@@ -308,6 +313,7 @@ export function SongRow({
           <button
             aria-label={`Add ${song.title} to library`}
             title="Add to library"
+            disabled={song.checking}
             onClick={() => void download()}
           >
             <Plus size={20} />

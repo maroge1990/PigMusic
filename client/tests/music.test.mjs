@@ -16,9 +16,8 @@ globalThis.window = { addEventListener() {}, dispatchEvent() {} };
 globalThis.document = { hidden: true };
 const interval = globalThis.setInterval;
 globalThis.setInterval = () => 0;
-const { playlistSongs, fromTrack, songBody, goToArtist } = await import(
-  "../src/songs.ts"
-);
+const { playlistSongs, fromTrack, songBody, goToArtist, withLibrary } =
+  await import("../src/songs.ts");
 globalThis.setInterval = interval;
 
 test("album requests normalise numeric years and retain release context", () => {
@@ -73,6 +72,44 @@ test("playlist queues retain cloud entries, duplicate positions and saved file i
   assert.equal(queue[0].saved.id, "file");
   assert.equal(queue[1].saved, undefined);
   assert.equal(songBody(queue[1]).album, "Album");
+});
+
+test("the library lookup asks about every song, 200 at a time, with its album, and tries a part again (#263)", async () => {
+  const songs = Array.from({ length: 450 }, (_, i) => ({
+    key: "k" + i,
+    title: "Song " + i,
+    artist: "Artist",
+    album: "Live at Leeds",
+    state: "missing",
+  }));
+  const { setSessionId } = await import("../src/sessionId.ts");
+  setSessionId("session-1");
+  const asked = [];
+  let failed = false;
+  globalThis.fetch = async (_path, options) => {
+    const body = JSON.parse(options.body);
+    if (!failed) {
+      failed = true;
+      return new Response('{"detail":"busy"}', { status: 500 });
+    }
+    asked.push(body.songs);
+    return new Response(
+      JSON.stringify({
+        tracks: body.songs.map((s) =>
+          s.title === "Song 449" ? { id: "mine", title: s.title } : null,
+        ),
+      }),
+      { headers: { "Content-Type": "application/json" } },
+    );
+  };
+  const found = await withLibrary(songs);
+  assert.deepEqual(
+    asked.map((part) => part.length),
+    [200, 200, 50],
+  );
+  assert.equal(asked[0][0].album, "Live at Leeds");
+  assert.equal(found[449].state, "saved");
+  assert.equal(found[448].state, "missing");
 });
 
 test("a catalogue artist ID opens the full artist page without consulting library membership", async () => {

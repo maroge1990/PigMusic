@@ -169,3 +169,80 @@ test("an unconfirmed album add's late re-read never replaces the album opened si
   await expect(page.getByText("Song A")).toHaveCount(0);
   expect(page.url()).toContain("r-b");
 });
+
+test("an album's songs can't be added until the library lookup says whose they are (#263)", async ({
+  page,
+}) => {
+  const a = { id: "r-a", title: "Album A", song: "Song A" };
+  let answer = () => {};
+  const answered = new Promise<void>((resolve) => (answer = resolve));
+  await catalogue(
+    page,
+    [{ id: "g-a", title: "Album A", editions: [a] }],
+    (route) => route.fulfill({ status: 500 }),
+    async (route) => {
+      await answered;
+      await route.fulfill({ json: { tracks: [null] } }).catch(() => {});
+    },
+  );
+  await page.getByRole("button", { name: /Album A/ }).click();
+  await expect(page.getByText("Song A")).toBeVisible();
+  const album = page.getByRole("button", {
+    name: "Add to library",
+    exact: true,
+  });
+  const row = page.getByRole("button", { name: "Add Song A to library" });
+  await expect(album).toBeDisabled();
+  await expect(row).toBeDisabled();
+  answer();
+  await expect(album).toBeEnabled();
+  await expect(row).toBeEnabled();
+});
+
+const main = { id: "r-main", title: "Main", song: "Song M" };
+const other = { id: "r-other", title: "Other", song: "Song O", explicit: true };
+async function onOtherEdition(
+  page: Page,
+  add: (route: Route) => Promise<void>,
+) {
+  const mock = await catalogue(
+    page,
+    [{ id: "g-x", title: "Main", editions: [main, other] }],
+    add,
+  );
+  await page.getByRole("button", { name: /Main/ }).click();
+  await expect(page.getByText("Song M")).toBeVisible();
+  await page.getByRole("button", { name: /Choose another edition/ }).click();
+  await page.getByRole("button", { name: /Other/ }).click();
+  await expect(page.getByText("Song O")).toBeVisible();
+  return mock;
+}
+const added = (created: number, existing: number) => (route: Route) =>
+  route.fulfill({
+    json: { created, existing, skipped: 0, downloads_enabled: true },
+  });
+
+test("a new request for an explicit edition reads the edition again (#263)", async ({
+  page,
+}) => {
+  const mock = await onOtherEdition(page, added(1, 0));
+  expect(mock.reads("r-other")).toBe(1);
+  await page.getByRole("button", { name: "Add Song O to library" }).click();
+  await expect.poll(() => mock.reads("r-other")).toBe(2);
+});
+
+test("a row Add's late re-read never replaces the edition chosen since (#263)", async ({
+  page,
+}) => {
+  const mock = await onOtherEdition(page, added(0, 1));
+  mock.hold("r-other");
+  await page.getByRole("button", { name: "Add Song O to library" }).click();
+  await expect.poll(() => mock.reads("r-other")).toBe(2);
+  await page.getByRole("button", { name: /Choose another edition/ }).click();
+  await page.getByRole("button", { name: /Main/ }).click();
+  await expect(page.getByText("Song M")).toBeVisible();
+  await mock.release();
+  await expect(page.getByText("Song M")).toBeVisible();
+  await expect(page.getByText("Song O")).toHaveCount(0);
+  expect(page.url()).toContain("r-main");
+});

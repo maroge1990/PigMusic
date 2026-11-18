@@ -134,7 +134,9 @@ type Release = {
 };
 // A song Add to library would add: not on the server yet, or a household
 // copy someone else already has.
-const addable = (row: Row) => row.state === "missing" || row.state === "server";
+// Not while it is still being looked up (#263).
+const addable = (row: Row) =>
+  !row.checking && (row.state === "missing" || row.state === "server");
 // A song the server is still adding for you.
 const pending = (song: { server_state?: string }) =>
   song.server_state === "requested";
@@ -256,10 +258,16 @@ export function CatalogueBrowser({
   useEffect(() => {
     if (!release) return setRows([]);
     const plain = releaseSongs(release, artist.id);
-    setRows(plain);
     // A song matches any edition unless it is an explicit edition: the
     // library lookup may mark the others yours (a compilation copy counts),
-    // but an explicit edition keeps the release answer's state.
+    // but an explicit edition keeps the release answer's state. Until the
+    // lookup answers, those songs can't be added: one you have on another
+    // album would be added again (#263).
+    setRows(
+      plain.map((r) =>
+        r.explicit_edition || !addable(r) ? r : { ...r, checking: true },
+      ),
+    );
     let active = true;
     void withLibrary(plain.filter((r) => !r.explicit_edition))
       .then((found) => {
@@ -623,7 +631,7 @@ export function CatalogueBrowser({
               </a>
             )}
           </div>
-          {rows.length > 0 && !rows.some(addable) && (
+          {rows.length > 0 && !rows.some((r) => addable(r) || r.checking) && (
             <p className="muted">
               {rows.every((r) => r.state === "saved")
                 ? "Already in your library: nothing to add."
