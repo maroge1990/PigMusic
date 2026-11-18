@@ -1949,14 +1949,16 @@ enum PlayOrigin: Hashable {
       }
     }
   }
-  /// Takes a song out of Up next at once, with Undo (D-79, D-118).
+  /// Takes a song out of Up next at once, so it can never become current
+  /// while its Undo waits; Undo puts it back at its old place, else at the
+  /// front of Up next (D-79, D-118). Nothing is sent: the queue is local.
   func removeFromUpNextLater(_ item: PlaybackOccurrence) {
     let player = player
-    let id = item.id
-    undo.schedule(Self.undoKey(upNext: id), label: "Removed " + item.track.title + " from Up next") {
-      player.removeUpcoming(id)
-      return true
-    }
+    guard let taken = player.takeUpcoming(item.id) else { return }
+    undo.schedule(
+      Self.undoKey(upNext: item.id), label: "Removed " + item.track.title + " from Up next",
+      undone: { player.putBack(taken.item, at: taken.position) }
+    ) { true }
   }
   /// Says something was done in the notice bar, with a tick (D-118: saving a
   /// mix, which used to be an alert on Home and a line on its page).

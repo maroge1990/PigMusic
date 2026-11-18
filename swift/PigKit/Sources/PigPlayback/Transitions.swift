@@ -39,6 +39,21 @@ public struct PlaybackQueue: Sendable, Codable {
     guard let position = items.firstIndex(where: { $0.id == id }), position > index else { return }
     items.remove(at: position)
   }
+  /// Takes a song out of Up next at once (D-79, D-118: it can never become
+  /// current while its Undo waits) and says where it was, for `putBack`.
+  public mutating func takeUpcoming(_ id: UUID) -> (item: PlaybackOccurrence, position: Int)? {
+    guard let position = items.firstIndex(where: { $0.id == id }), position > index else {
+      return nil
+    }
+    return (items.remove(at: position), position)
+  }
+  /// Undo of `takeUpcoming`: the song returns to its old place while that is
+  /// still in Up next, else to the front of Up next. Never twice.
+  public mutating func putBack(_ item: PlaybackOccurrence, at position: Int) {
+    guard !items.contains(where: { $0.id == item.id }) else { return }
+    let place = position > index && position <= items.count ? position : min(index + 1, items.count)
+    items.insert(item, at: place)
+  }
   public mutating func moveUpcoming(_ id: UUID, by delta: Int) {
     guard let position = items.firstIndex(where: { $0.id == id }), position > index else { return }
     let destination = position + delta
