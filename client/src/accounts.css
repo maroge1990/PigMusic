@@ -1051,12 +1051,12 @@ main h1[tabindex="-1"]:focus {
 .person-row + .person-row {
   border-top: 1px solid var(--border);
 }
-.person-row > div {
+.person-text {
   display: grid;
   flex: 1;
   min-width: 0;
 }
-.person-row > div > span,
+.person-text > span,
 .unassigned-text > span {
   color: var(--secondary);
   font-size: var(--type-footnote);
@@ -1136,11 +1136,15 @@ main h1[tabindex="-1"]:focus {
   flex: none;
   width: 3rem;
 }
-.queue-status {
-  display: inline-flex;
+.result-row.queue-row .queue-status {
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-4);
+}
+.result-row.queue-row .queue-status .state-badge {
+  display: inline-flex;
+  margin-top: 0;
 }
 .queue-row progress {
   width: 100%;
@@ -1151,4 +1155,11 @@ main h1[tabindex="-1"]:focus {
   color: var(--secondary);
   font-size: var(--type-footnote);
   white-space: nowrap;
+}
+.account-section .unassigned-text input[type="checkbox"] {
+  width: 1.125rem;
+  height: 1.125rem;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--accent);
 }

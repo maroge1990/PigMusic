@@ -143,7 +143,7 @@ function PersonRow({
       <span className="person-avatar" aria-hidden="true">
         {initials(p.display_name || p.username)}
       </span>
-      <div>
+      <div className="person-text">
         <strong>{p.display_name}</strong>
         <span>
           {p.disabled ? "Disabled" : p.role === "owner" ? "Owner" : "Member"}

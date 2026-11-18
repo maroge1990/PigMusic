@@ -351,6 +351,10 @@ test("D-120: People sits beside Unassigned music, each album with its cover", as
   await page.goto("/#/admin/people");
   const peopleList = page.getByRole("region", { name: "People" });
   await expect(peopleList.locator(".person-row")).toHaveCount(2);
+  // The person's ⋯ menu stays closed until asked for.
+  await expect(
+    page.getByRole("menuitem", { name: "Reset password" }),
+  ).toBeHidden();
   await expect(peopleList.locator(".person-row").first()).toContainText(
     "Owner",
   );

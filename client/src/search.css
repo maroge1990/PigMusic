@@ -1,6 +1,6 @@
 /* Search (D-120, screens 20 and 35): the box, what shows before typing, and
    one ranked list of results. */
-.search-box {
+.search-form .search-box {
   display: flex;
   flex: 1 1 16rem;
   align-items: center;
@@ -12,14 +12,16 @@
   background: var(--surface);
   color: var(--secondary);
 }
-.search-box:focus-within {
+.search-form .search-box:focus-within {
   border-color: var(--accent);
 }
-.search-box input {
+.search-form .search-box input {
   flex: 1;
   min-width: 0;
+  padding: 0;
   border: 0;
   background: none;
+  font-weight: 400;
   color: var(--text);
   font: inherit;
   font-size: var(--type-headline);
