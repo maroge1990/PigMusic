@@ -32,12 +32,7 @@ import type { Discography } from "./discography";
 import { SongRow } from "./SongRow";
 import { usePlayer } from "./Player";
 import { shuffled } from "./shuffle";
-import {
-  songBody,
-  withLibrary,
-  type AddResult,
-  type Song as Row,
-} from "./songs";
+import { songBody, type AddResult, type Song as Row } from "./songs";
 import type { Track } from "./types";
 import { EmptyLine, InlineError, Loading } from "./EmptyState";
 
@@ -256,15 +251,9 @@ export function CatalogueBrowser({
   const [rows, setRows] = useState<Row[]>([]);
   useEffect(() => {
     if (!release) return setRows([]);
-    const plain = releaseSongs(release, artist.id);
-    setRows(plain);
-    let active = true;
-    void withLibrary(plain)
-      .then((found) => active && setRows(found))
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
+    // The release answer already says, edition by edition, which songs are
+    // yours; an edition-blind lookup must not overrule it.
+    setRows(releaseSongs(release, artist.id));
   }, [release]);
   const [busy, setBusy] = useState(false);
   const groupBusy = listing.scope !== scope || listing.loading;
@@ -451,8 +440,8 @@ export function CatalogueBrowser({
       setError((e as Error).message);
       // It may have been requested: show each song's state as it is now.
       if (isUnconfirmed(e))
-        void withLibrary(releaseSongs(release, artist.id))
-          .then(setRows)
+        void request<Release>(`releases/${release.id}`)
+          .then(setRelease)
           .catch(() => {});
     } finally {
       setBusy(false);

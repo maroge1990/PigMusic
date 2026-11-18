@@ -195,7 +195,6 @@ test("a member is told the owner links an ambiguous artist", async ({
 test("a live release's songs are requested as live recordings", async ({
   page,
 }) => {
-  let looked: unknown;
   let requested: unknown;
   const live = {
     id: "t-live",
@@ -267,12 +266,10 @@ test("a live release's songs are requested as live recordings", async ({
             tracks: [requested ? { ...live, server_state: "requested" } : live],
           },
         }),
-      // The studio "Von dutch" is in the library: the lookup must be told
-      // this one is live (the server then finds no match).
-      "/v1/library/lookup": (route) => {
-        looked = route.request().postDataJSON();
-        return route.fulfill({ json: { tracks: [null] } });
-      },
+      // The studio "Von dutch" is in the library, and an edition-blind
+      // lookup would say so; the release's own answer keeps the live one apart.
+      "/v1/library/lookup": (route) =>
+        route.fulfill({ json: { tracks: [album.tracks[0]] } }),
       "/v1/requests": (route) => {
         requested = route.request().postDataJSON();
         return route.fulfill({
@@ -291,10 +288,6 @@ test("a live release's songs are requested as live recordings", async ({
     .getByRole("button", { name: `Find more by ${artist.name}` })
     .click();
   await page.getByRole("button", { name: /Concert Night/ }).click();
-  await expect.poll(() => looked).toBeTruthy();
-  expect(looked).toMatchObject({
-    songs: [{ title: "Von dutch", duration: 180, recording_kind: ["live"] }],
-  });
   // #246: a song not on the server offers Add to library with the plus.
   const add = page.getByRole("button", {
     name: "Add Von dutch to library",
@@ -554,4 +547,83 @@ test("a household-only catalogue album is added in one tap", async ({
     .click({ timeout: 5000 });
   await expect(page.getByText("Adding 2 songs to your library.")).toBeVisible();
   expect(sent.map((t) => t.title)).toEqual(["Shared one", "Shared two"]);
+});
+
+// #246 (Codex): a song you own from another release isn't yours on this
+// one when the release answer says so (explicit edition); an edition-blind
+// lookup must not turn the row into "In your library" and drop it from Add.
+test("a catalogue album trusts its own answer over another edition", async ({
+  page,
+}) => {
+  let sent: { title: string }[] = [];
+  await mockApi(page, {
+    answers: {
+      "/v1/catalogue/releases/r-deluxe": (route) =>
+        route.fulfill({
+          json: {
+            id: "r-deluxe",
+            title: "Deluxe album",
+            artist: artist.name,
+            artist_id: "mb-1",
+            tracks: [
+              {
+                id: "d1",
+                title: "Von dutch",
+                artist: artist.name,
+                duration: 180,
+                track_number: 1,
+                disc_number: 1,
+                musicbrainz_recording_id: "rec-1",
+                explicit_edition: true,
+                server_state: "not_in_library",
+              },
+            ],
+          },
+        }),
+      // Your copy is from the other release, with the same recording.
+      "/v1/library/lookup": (route) =>
+        route.fulfill({
+          json: {
+            tracks: [
+              {
+                ...album.tracks[0],
+                musicbrainz_recording_id: "rec-1",
+                musicbrainz_release_id: "r-standard",
+              },
+            ],
+          },
+        }),
+      "/v1/requests": (route) => {
+        if (route.request().method() !== "POST")
+          return route.fulfill({
+            json: { items: [], next_offset: null, active: 0 },
+          });
+        sent = route.request().postDataJSON().tracks;
+        return route.fulfill({
+          json: {
+            created: 1,
+            existing: 0,
+            skipped: 0,
+            downloads_enabled: true,
+          },
+        });
+      },
+    },
+  });
+  await page.goto(
+    `/#/library/discography/mb-1?name=${encodeURIComponent(artist.name)}&release=r-deluxe`,
+  );
+  const row = page.locator(".song-row", { hasText: "Von dutch" });
+  await expect(
+    row.getByRole("button", { name: "Add Von dutch to library", exact: true }),
+  ).toBeVisible();
+  // Long enough for a lookup answer to have landed.
+  await page.waitForTimeout(500);
+  await expect(row.getByRole("img", { name: "In your library" })).toHaveCount(
+    0,
+  );
+  await page
+    .getByRole("button", { name: "Add to library", exact: true })
+    .click({ timeout: 5000 });
+  await expect.poll(() => sent.map((t) => t.title)).toEqual(["Von dutch"]);
 });
