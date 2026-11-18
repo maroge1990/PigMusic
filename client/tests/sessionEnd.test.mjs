@@ -51,10 +51,15 @@ test("a session lost any other way cancels pending writes: never sent", async ()
   assert.deepEqual(sent, []);
 });
 
-test("another tab signing in cancels this tab's question and pending write", async () => {
+test("another tab signing in cancels this tab's question and pending write", async (t) => {
   const { openSessionChannel } = await import("../src/sessionChannel.ts");
   const here = openSessionChannel();
   const there = openSessionChannel();
+  // An open channel keeps Node running, even after a failed check.
+  t.after(() => {
+    here.close();
+    there.close();
+  });
   const stopListening = here.listen(sessionCleared);
   let open = null;
   const stop = subscribeConfirm((q) => (open = q));
@@ -76,20 +81,18 @@ test("another tab signing in cancels this tab's question and pending write", asy
   assert.deepEqual(sent, []);
   stop();
   stopListening();
-  here.close();
-  there.close();
 });
 
-test("a tab's own announcement doesn't end its own session", async () => {
+test("a tab's own announcement doesn't end its own session", async (t) => {
   const { openSessionChannel } = await import("../src/sessionChannel.ts");
   const here = openSessionChannel();
+  t.after(() => here.close());
   let heard = 0;
   const stopListening = here.listen(() => heard++);
   here.announce("signed-in");
   await wait(20);
   assert.equal(heard, 0);
   stopListening();
-  here.close();
 });
 
 test("without BroadcastChannel, other tabs hear it through storage", async () => {
