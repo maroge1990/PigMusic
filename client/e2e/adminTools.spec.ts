@@ -49,15 +49,18 @@ test("the owner adds a person and is shown their one-use invite", async ({
     },
   });
   await page.goto("/#/admin/people");
-  await expect(page.getByText("Sam · member")).toBeVisible();
+  const sam = page.locator(".person-row", { hasText: "Sam" });
+  await expect(sam).toContainText("Member");
+  await expect(sam.locator(".person-avatar")).toHaveText("S");
   await expect(page.getByText(/Sam · login succeeded/)).toBeVisible();
   // The owner's own account has no reset or disable.
-  await expect(page.getByRole("button", { name: "Disable Pat" })).toHaveCount(
-    0,
-  );
+  await expect(
+    page.getByRole("button", { name: "More actions for Pat" }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Add person" }).click();
   await page.getByLabel("Name", { exact: true }).fill("Alex");
   await page.getByLabel("Username").fill("alex");
-  await page.getByRole("button", { name: "Add person" }).click();
+  await page.getByRole("button", { name: "Add", exact: true }).click();
   const invite = page.getByRole("region", { name: "Invite for Alex" });
   await expect(invite).toContainText("Setup code: SETUP-123");
   await expect(page.getByRole("status").first()).toContainText("Person added");
@@ -89,13 +92,15 @@ test("enabling a disabled account doesn't ask first", async ({ page }) => {
     void dialog.dismiss();
   });
   await page.goto("/#/admin/people");
-  await page.getByRole("button", { name: "Enable Sam" }).click();
+  await page.getByRole("button", { name: "More actions for Sam" }).click();
+  await page.getByRole("menuitem", { name: "Enable" }).click();
   await expect(page.getByRole("status").first()).toContainText(
     "Account enabled",
   );
   expect(sent).toEqual([{ disabled: false }]);
   expect(asked).toEqual([]);
-  await expect(page.getByRole("button", { name: "Disable Sam" })).toBeVisible();
+  await page.getByRole("button", { name: "More actions for Sam" }).click();
+  await expect(page.getByRole("menuitem", { name: "Disable" })).toBeVisible();
 });
 
 test("People warns about wrong passwords tried against an account", async ({
@@ -307,4 +312,64 @@ test("an album removal that stops part way stays, says why and offers Undo", asy
   await expect(undo).toContainText("Part of");
   await undo.getByRole("button", { name: "Undo" }).click();
   await expect.poll(() => restored).toEqual([{ identities: ["r1"] }]);
+});
+
+test("D-120: People sits beside Unassigned music, each album with its cover", async ({
+  page,
+}) => {
+  const assigned: unknown[] = [];
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/people": (route: Route) => route.fulfill({ json: people(1) }),
+      "/v1/people/activity": (route: Route) =>
+        route.fulfill({ json: { events: [], warnings: [] } }),
+      "/v1/admin/unassigned": (route: Route) =>
+        route.fulfill({
+          json: {
+            albums: [
+              {
+                id: album.id,
+                title: "Brat",
+                artist: album.artist,
+                tracks: album.tracks.map((t) => ({
+                  ...t,
+                  cover_url: album.cover_url,
+                })),
+              },
+            ],
+            total: 1,
+            next_offset: null,
+          },
+        }),
+      "/v1/admin/unassigned/assign": (route: Route) => {
+        assigned.push(route.request().postDataJSON());
+        return route.fulfill({ json: { assigned: 2 } });
+      },
+    },
+  });
+  await page.goto("/#/admin/people");
+  const peopleList = page.getByRole("region", { name: "People" });
+  await expect(peopleList.locator(".person-row")).toHaveCount(2);
+  await expect(peopleList.locator(".person-row").first()).toContainText(
+    "Owner",
+  );
+  // A disabled person reads Disabled and can't be given music.
+  await expect(peopleList.locator(".person-row").nth(1)).toContainText(
+    "Disabled",
+  );
+  const inbox = page.getByRole("region", { name: /Unassigned music/ });
+  await expect(inbox.getByRole("heading")).toHaveText(
+    "Unassigned music1 album",
+  );
+  await expect(inbox.locator(".cover img")).toHaveCount(1);
+  await expect(inbox).toContainText(`${album.artist} · 2 songs`);
+  await expect(inbox.getByRole("checkbox")).toHaveCount(1);
+  await inbox.getByRole("checkbox", { name: "Pat" }).check();
+  await inbox.getByRole("button", { name: "Assign Brat" }).click();
+  await expect
+    .poll(() => assigned)
+    .toEqual([{ track_ids: ["t1", "t2"], user_ids: ["o"] }]);
+  // No explanatory paragraph (D-101).
+  await expect(page.getByText("Newly scanned music waits")).toHaveCount(0);
 });

@@ -1015,3 +1015,100 @@ main h1[tabindex="-1"]:focus {
 .account-start {
   justify-self: start;
 }
+
+/* Admin › People (D-120, screen 22): People beside Unassigned music. */
+.admin-people-grid {
+  display: grid;
+  gap: 0 var(--space-24);
+  align-items: start;
+}
+@media (min-width: 900px) {
+  .admin-people-grid {
+    grid-template-columns: 1.4fr 1fr;
+  }
+}
+.admin-count {
+  margin-left: var(--space-8);
+  color: var(--secondary);
+  font-size: var(--type-footnote);
+  font-weight: 400;
+}
+.admin-add-person {
+  margin-bottom: var(--space-16);
+}
+.person-list,
+.unassigned-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.person-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  min-height: 3.75rem;
+}
+.person-row + .person-row {
+  border-top: 1px solid var(--border);
+}
+.person-row > div {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.person-row > div > span,
+.unassigned-text > span {
+  color: var(--secondary);
+  font-size: var(--type-footnote);
+}
+.person-row.is-disabled strong {
+  color: var(--secondary);
+}
+.person-avatar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius-capsule);
+  background: var(--selected-fill);
+  color: var(--text-accent);
+  font-size: var(--type-footnote);
+  font-weight: 650;
+}
+.person-row.is-disabled .person-avatar {
+  background: var(--raised);
+  color: var(--secondary);
+}
+.unassigned-list li + li {
+  margin-top: var(--space-12);
+}
+.unassigned-list form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+}
+.unassigned-list .cover {
+  flex: none;
+  width: 3.25rem;
+}
+.unassigned-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.unassigned-text fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-12);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.account-section .unassigned-text label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: var(--type-footnote);
+}

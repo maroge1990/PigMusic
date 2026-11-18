@@ -48,9 +48,6 @@ const withoutClearing = (q: Queue) =>
 const AdminPeople = lazy(() =>
   import("./AdminPeople").then((m) => ({ default: m.AdminPeople })),
 );
-const UnassignedMusic = lazy(() =>
-  import("./AdminPeople").then((m) => ({ default: m.UnassignedMusic })),
-);
 
 const adminSections = [
   { id: "overview", label: "Overview" },
@@ -861,13 +858,10 @@ export function AdminTools({ route }: { route: Route }) {
           {section === "people" ? (
             <AdminPeople />
           ) : (
-            <>
-              <UnassignedMusic />
-              <ServerLibraryTools
-                library={library}
-                refresh={() => void loadLibrary()}
-              />
-            </>
+            <ServerLibraryTools
+              library={library}
+              refresh={() => void loadLibrary()}
+            />
           )}
         </Suspense>
       )}

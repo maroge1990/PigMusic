@@ -257,7 +257,7 @@ test("#155: empty lines look the same; errors use the inline error", async ({
     page.getByText(text).evaluate((el) => getComputedStyle(el).color);
   await page.goto("/#/search?q=Zzzz");
   const looks = [await colour(/Nothing matches/)];
-  await page.goto("/#/admin/library");
+  await page.goto("/#/admin/people");
   looks.push(await colour("No music is waiting for assignment."));
   expect(new Set(looks).size).toBe(1);
 

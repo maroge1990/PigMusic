@@ -408,7 +408,7 @@ export function AccountSettings({
           <h2>Admin</h2>
           <p>
             <a href="#/admin/people">People and account activity</a>
-            <a href="#/admin/library">Unassigned music</a>
+            <a href="#/admin/people">Unassigned music</a>
           </p>
         </section>
       )}
