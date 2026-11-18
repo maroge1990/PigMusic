@@ -145,7 +145,12 @@ final class DemoLibraryTests: XCTestCase {
     launch()
     playSunrise()
     pause()
-    app.buttons["More actions for First Light"].tap()
+    // Starting playback briefly covers the row (the mini player settling).
+    let more = app.buttons["More actions for First Light"]
+    let ready = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "hittable == true"), object: more)
+    XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 10), .completed, app.debugDescription)
+    more.tap()
     checkSongMenu()
     // The quality is chosen in the Download submenu (D-106).
     // The album page behind has its own Download button: take the one in
