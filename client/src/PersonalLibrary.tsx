@@ -457,10 +457,7 @@ export function PersonalLibrary({
         </button>
       )}
       {searching ? (
-        <PageHeader
-          title="Search"
-          subtitle="Your library, the server and the wider catalogue."
-        />
+        <PageHeader title="Search" />
       ) : detail?.artist ? (
         <ArtistHero
           artist={detail.artist}
@@ -486,7 +483,7 @@ export function PersonalLibrary({
         <SearchPage
           query={route.params.get("q") || ""}
           library={library}
-          songs={(tracks) => songs(tracks)}
+          person={user.id}
         />
       ) : detail ? (
         <>

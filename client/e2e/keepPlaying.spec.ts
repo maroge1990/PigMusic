@@ -219,8 +219,16 @@ test("a song played from search ends without similar songs", async ({
 }) => {
   const asked: unknown[] = [];
   await albumPlayer(page, {
-    "/v1/search": (route) =>
-      route.fulfill({ json: { tracks: album.tracks, household_tracks: [] } }),
+    "/v1/search/results": (route) =>
+      route.fulfill({
+        json: {
+          top: [],
+          songs: album.tracks,
+          albums: [],
+          artists: [],
+          playlists: [],
+        },
+      }),
     "/v1/catalogue/artists": (route) =>
       route.fulfill({
         json: { artists: [], offset: 0, total: 0, next_offset: null },

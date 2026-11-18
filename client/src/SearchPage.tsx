@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { CircleCheck } from "lucide-react";
+import {
+  Disc3,
+  ListMusic,
+  Music,
+  Play,
+  Plus,
+  Search,
+  UserRound,
+  X,
+} from "lucide-react";
 import { api, currentSession } from "./api";
 import { Cover, catalogueArtistCover } from "./Cover";
 import { discoverUrl } from "./navigation";
@@ -7,16 +16,25 @@ import { go } from "./routes";
 import { SongRow } from "./SongRow";
 import { CollectionCard, albumSongs } from "./CollectionMenu";
 import { fromTrack } from "./songs";
+import { usePlayer } from "./Player";
 import { warmArtist, whenIdle } from "./prefetch";
+import { StateBadge } from "./StateBadge";
+import { formatCount } from "./format";
 import {
   answer,
+  recentSearches,
   remember,
+  saveRecentSearches,
+  withRecent,
   type CatalogueArtist,
+  type FoundAlbum,
+  type FoundArtist,
   type Local,
 } from "./searchAnswers";
-import type { Album, Artist, Library, Track } from "./types";
+import type { Library } from "./types";
 import { SectionHeader } from "./PageHeader";
 import { EmptyLine, InlineError, Loading } from "./EmptyState";
+import "./search.css";
 
 const fold = (value: string) => value.toLocaleLowerCase().normalize("NFKD");
 const clean = (value: string) => value.trim().slice(0, 150);
@@ -31,17 +49,43 @@ const CATALOGUE_PAUSE_MS = 350;
  * passing prefixes ask the catalogue for nothing more. */
 const WARM_AFTER_MS = 1500;
 const CATALOGUE_MINIMUM = 2;
+const SONGS_SHOWN = 8;
+const ALBUMS_SHOWN = 12;
+const ARTISTS_SHOWN = 8;
 
-/** One search: your library first, then the server, then the catalogue. */
+/** An album's one mark: in your library, adding, or not in your library. */
+function AlbumMark({ album }: { album: FoundAlbum }) {
+  if (album.in_library && album.server_state === "requested")
+    return <StateBadge state="requested" iconOnly />;
+  if (album.in_library) return <StateBadge state="library" iconOnly />;
+  return (
+    <span
+      className="state-badge icon-only search-add-mark"
+      role="img"
+      aria-label="Not in your library"
+      title="Not in your library"
+    >
+      <Plus size={20} />
+    </span>
+  );
+}
+
+const plural = (n: number, one: string) =>
+  `${formatCount(n)} ${one}${n === 1 ? "" : "s"}`;
+
+/** One search: before typing, recent searches and your library; then one
+ * ranked list (Top result, Songs, Albums, Artists), each item once. */
 export function SearchPage({
   query,
   library,
-  songs,
+  person,
 }: {
   query: string;
   library: Library;
-  songs: (tracks: Track[]) => ReactNode;
+  /** Whose recent searches to keep on this browser. */
+  person: string;
 }) {
+  const player = usePlayer();
   const [text, setText] = useState(query);
   // The query being searched: the address's, then what is typed, once
   // typing pauses.
@@ -52,6 +96,18 @@ export function SearchPage({
   const shown = useRef(active);
   shown.current = active;
   const typed = useRef(false);
+  const [recent, setRecent] = useState(() => recentSearches(person));
+  useEffect(() => setRecent(recentSearches(person)), [person]);
+  const keepRecent = (q: string) => {
+    const next = withRecent(recentSearches(person), q);
+    saveRecentSearches(person, next);
+    setRecent(next);
+  };
+  const forget = (q?: string) => {
+    const next = q ? recent.filter((r) => r !== q) : [];
+    saveRecentSearches(person, next);
+    setRecent(next);
+  };
   useEffect(() => {
     // Arriving from elsewhere (a link, back): the address wins.
     if (clean(query) === active) return;
@@ -111,16 +167,19 @@ export function SearchPage({
     const signal = controller.signal;
     const asked = currentSession();
     const current = () => !signal.aborted && asked === currentSession();
-    // Local results arrive first; the catalogue can be slower or unavailable.
+    // Library results arrive first; the catalogue can be slower or unavailable.
     if (!saved?.local)
-      void api<{ tracks: Track[]; household_tracks: Track[] }>(
-        "/v1/search?q=" + encodeURIComponent(active),
+      void api<Local>(
+        "/v1/search/results?limit=20&q=" + encodeURIComponent(active),
         { signal },
       )
         .then((found) => {
-          const value = {
-            tracks: found.tracks,
-            household: found.household_tracks,
+          const value: Local = {
+            top: found.top || [],
+            songs: found.songs || [],
+            albums: found.albums || [],
+            artists: found.artists || [],
+            playlists: found.playlists || [],
           };
           remember(key, asked, (entry) => (entry.local = value));
           if (current()) setLocal(value);
@@ -175,19 +234,124 @@ export function SearchPage({
     };
   }, [settled, session]);
 
-  const needle = fold(active);
-  const artists = active
-    ? library.artists.filter((a: Artist) => fold(a.name).includes(needle))
-    : [];
-  const owned = new Set(library.artists.map((a) => fold(a.name)));
-  const albums = active
-    ? library.albums.filter(
-        (a: Album) =>
-          fold(a.title).includes(needle) || fold(a.artist).includes(needle),
-      )
-    : [];
-  const nothingLocal =
-    local && !artists.length && !albums.length && !local.tracks.length;
+  const openArtist = (event: React.MouseEvent, id: string) => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+      return;
+    event.preventDefault();
+    void api<CatalogueArtist>(`/v1/catalogue/library-artists/${id}`)
+      .then((identity) => go(discoverUrl(identity)))
+      .catch((e) => setError(e.message));
+  };
+
+  // The top result is shown once, as the top result only.
+  const top = local?.top[0];
+  const topSong =
+    top?.kind === "song" ? local?.songs.find((s) => s.id === top.id) : null;
+  const topAlbum =
+    top?.kind === "album" ? local?.albums.find((a) => a.id === top.id) : null;
+  const topArtist =
+    top?.kind === "artist" ? local?.artists.find((a) => a.id === top.id) : null;
+  const topPlaylist =
+    top?.kind === "playlist"
+      ? local?.playlists.find((p) => p.id === top.id)
+      : null;
+  const songs = (local?.songs || [])
+    .filter((s) => s !== topSong)
+    .slice(0, SONGS_SHOWN)
+    .map((t) => fromTrack(t));
+  const albums = (local?.albums || [])
+    .filter((a) => a !== topAlbum)
+    .slice(0, ALBUMS_SHOWN);
+  const serverArtists = (local?.artists || []).filter((a) => a !== topArtist);
+  // A catalogue artist the server already has is shown once, as the server's.
+  const named = new Set((local?.artists || []).map((a) => fold(a.name)));
+  const catalogueArtists = (catalogue || []).filter(
+    (a) => !named.has(fold(a.name)),
+  );
+  const playlists = (local?.playlists || []).filter((p) => p !== topPlaylist);
+  const artistCount = serverArtists.length + catalogueArtists.length;
+  const nothing =
+    local &&
+    catalogue !== null &&
+    !top &&
+    !songs.length &&
+    !albums.length &&
+    !artistCount &&
+    !playlists.length;
+
+  function topResult(): ReactNode {
+    if (topAlbum)
+      return (
+        <a className="search-top-card" href={"#/library/album/" + topAlbum.id}>
+          <Cover
+            title={topAlbum.title}
+            src={topAlbum.cover_url}
+            sizes="160px"
+          />
+          <strong>{topAlbum.title}</strong>
+          <span className="search-top-detail">
+            Album · {topAlbum.artist}
+            <AlbumMark album={topAlbum} />
+          </span>
+        </a>
+      );
+    if (topArtist)
+      return (
+        <a
+          className="search-top-card"
+          href={"#/search?q=" + encodeURIComponent(topArtist.name)}
+          onClick={(e) => openArtist(e, topArtist.id)}
+        >
+          <Cover
+            title={topArtist.name}
+            src={topArtist.cover_url}
+            artist
+            sizes="160px"
+          />
+          <strong>{topArtist.name}</strong>
+          <span className="search-top-detail">Artist</span>
+        </a>
+      );
+    if (topPlaylist)
+      return (
+        <a
+          className="search-top-card"
+          href={"#/library/playlist/" + topPlaylist.id}
+        >
+          <Cover title={topPlaylist.name} sizes="160px" />
+          <strong>{topPlaylist.name}</strong>
+          <span className="search-top-detail">
+            Playlist · {plural(topPlaylist.track_count, "song")}
+          </span>
+        </a>
+      );
+    if (topSong) {
+      const song = fromTrack(topSong);
+      return (
+        <button
+          type="button"
+          className="search-top-card"
+          aria-label={`Play ${song.title}`}
+          onClick={() => player.play([song], 0)}
+        >
+          <Cover title={song.title} src={song.cover} sizes="160px" />
+          <strong>{song.title}</strong>
+          <span className="search-top-detail">
+            Song · {song.artist}
+            {song.state === "saved" ? (
+              <StateBadge state="library" iconOnly />
+            ) : song.state === "pending" ? (
+              <StateBadge state="requested" iconOnly />
+            ) : null}
+          </span>
+          <span className="search-top-play" aria-hidden="true">
+            <Play size={20} fill="currentColor" />
+          </span>
+        </button>
+      );
+    }
+    return null;
+  }
 
   return (
     <>
@@ -200,15 +364,19 @@ export function SearchPage({
           const q = clean(text);
           typed.current = false;
           setActive(q);
-          if (q) go("/search?q=" + encodeURIComponent(q));
+          if (q) {
+            keepRecent(q);
+            go("/search?q=" + encodeURIComponent(q));
+          }
         }}
       >
-        <label>
-          Artists, albums or songs
+        <label className="search-box">
+          <Search size={22} aria-hidden="true" />
           <input
             name="q"
             type="search"
             aria-label="Search artists, albums or songs"
+            placeholder="Artists, albums, songs"
             value={text}
             onChange={(e) => {
               typed.current = true;
@@ -220,48 +388,58 @@ export function SearchPage({
             autoComplete="off"
           />
         </label>
-        <button type="submit" className="primary-button">
-          Search
-        </button>
       </form>
       {error && <InlineError>{error}</InlineError>}
+      {!active && (
+        <BeforeTyping library={library} recent={recent} forget={forget} />
+      )}
       {active && !local && !error && <Loading>Searching…</Loading>}
-      {active && (
-        <>
-          <section className="search-group" aria-labelledby="search-library">
-            <SectionHeader id="search-library" title="In your library" />
-            {nothingLocal && (
-              <EmptyLine>Nothing in your library yet.</EmptyLine>
-            )}
-            {(artists.length > 0 || albums.length > 0) && (
-              <div className="personal-grid">
-                {artists.slice(0, 6).map((a) => (
-                  <a
-                    key={a.id}
-                    className="album-card"
-                    href={"#/search?q=" + encodeURIComponent(a.name)}
-                    onClick={(event) => {
-                      if (
-                        event.metaKey ||
-                        event.ctrlKey ||
-                        event.shiftKey ||
-                        event.altKey
-                      )
-                        return;
-                      event.preventDefault();
-                      void api<CatalogueArtist>(
-                        `/v1/catalogue/library-artists/${a.id}`,
-                      )
-                        .then((identity) => go(discoverUrl(identity)))
-                        .catch((e) => setError(e.message));
-                    }}
-                  >
-                    <Cover title={a.name} src={a.cover_url} artist />
-                    <h3>{a.name}</h3>
-                    <p>Artist</p>
-                  </a>
-                ))}
-                {albums.slice(0, 12).map((a) => (
+      {active && local && (
+        <div
+          className="search-results"
+          // Opening a result keeps the search among the recent ones.
+          onClickCapture={(e) => {
+            if ((e.target as HTMLElement).closest("a, button"))
+              keepRecent(active);
+          }}
+        >
+          {(top || songs.length > 0) && (
+            <div className="search-lead">
+              {top && (
+                <section
+                  className="search-group search-top"
+                  aria-labelledby="search-top"
+                >
+                  <SectionHeader id="search-top" title="Top result" />
+                  {topResult()}
+                </section>
+              )}
+              {songs.length > 0 && (
+                <section
+                  className="search-group search-songs"
+                  aria-labelledby="search-songs"
+                >
+                  <SectionHeader id="search-songs" title="Songs" />
+                  <div className="song-list">
+                    {songs.map((song, i, all) => (
+                      <SongRow
+                        key={song.key}
+                        song={song}
+                        queue={all}
+                        index={i}
+                        page="search"
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
+          {albums.length > 0 && (
+            <section className="search-group" aria-labelledby="search-albums">
+              <SectionHeader id="search-albums" title="Albums" />
+              <div className="search-album-grid">
+                {albums.map((a) => (
                   <CollectionCard
                     key={a.id}
                     kind="album"
@@ -270,83 +448,233 @@ export function SearchPage({
                   >
                     <a className="album-card" href={"#/library/album/" + a.id}>
                       <Cover title={a.title} src={a.cover_url} />
-                      <h3>{a.title}</h3>
-                      <p>{a.artist}</p>
+                      <span className="card-name search-card-name">
+                        {a.title}
+                        <AlbumMark album={a} />
+                      </span>
+                      <span className="card-caption">{a.artist}</span>
                     </a>
                   </CollectionCard>
                 ))}
               </div>
-            )}
-            {local && local.tracks.length > 0 && songs(local.tracks)}
-          </section>
-          {local && local.household.length > 0 && (
-            <section className="search-group" aria-labelledby="search-server">
-              <SectionHeader id="search-server" title="On the server" />
-              <p className="muted">
-                Already on the server. Tap to play; adding to your library is
-                instant.
-              </p>
-              <div className="song-list">
-                {local.household.map((t, i, all) => (
-                  <SongRow
-                    key={t.id}
-                    song={fromTrack(t)}
-                    queue={all.map((x) => fromTrack(x))}
-                    index={i}
-                    page="search"
-                  />
-                ))}
-              </div>
             </section>
           )}
-          <section className="search-group" aria-labelledby="search-discover">
-            <SectionHeader id="search-discover" title="Discover" />
-            {catalogue === null ? (
-              <Loading>Searching the music catalogue…</Loading>
-            ) : catalogueFailed ? (
-              <p className="muted">
-                The music catalogue is unavailable right now. Your library
-                results above are unaffected.
-              </p>
-            ) : catalogue.length ? (
+          {(artistCount > 0 || catalogue === null || catalogueFailed) && (
+            <section className="search-group" aria-labelledby="search-artists">
+              <SectionHeader id="search-artists" title="Artists" />
+              {artistCount > 0 && (
+                <ul className="discover-list">
+                  {serverArtists.slice(0, ARTISTS_SHOWN).map((a) => (
+                    <ServerArtist
+                      key={a.id}
+                      artist={a}
+                      open={(e) => openArtist(e, a.id)}
+                    />
+                  ))}
+                  {catalogueArtists.map((artist) => (
+                    <li key={artist.id}>
+                      <a href={"#" + discoverUrl(artist)}>
+                        <Cover
+                          title={artist.name}
+                          src={catalogueArtistCover(artist.id)}
+                          artist
+                          sizes="48px"
+                        />
+                        <span className="discover-text">
+                          <strong>{artist.name}</strong>
+                          <span>
+                            {["Artist", artist.description]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </span>
+                        </span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {catalogue === null ? (
+                <Loading>Searching the music catalogue…</Loading>
+              ) : catalogueFailed ? (
+                <p className="muted">
+                  The music catalogue is unavailable right now.
+                </p>
+              ) : null}
+            </section>
+          )}
+          {playlists.length > 0 && (
+            <section
+              className="search-group"
+              aria-labelledby="search-playlists"
+            >
+              <SectionHeader id="search-playlists" title="Playlists" />
               <ul className="discover-list">
-                {catalogue.map((artist) => (
-                  <li key={artist.id}>
-                    <a href={"#" + discoverUrl(artist)}>
-                      <Cover
-                        title={artist.name}
-                        src={catalogueArtistCover(artist.id)}
-                        artist
-                        sizes="48px"
-                      />
+                {playlists.map((p) => (
+                  <li key={p.id}>
+                    <a href={"#/library/playlist/" + p.id}>
+                      <Cover title={p.name} sizes="48px" />
                       <span className="discover-text">
-                        <strong>{artist.name}</strong>
-                        <span>
-                          {["Artist", artist.description]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </span>
+                        <strong>{p.name}</strong>
+                        <span>Playlist · {plural(p.track_count, "song")}</span>
                       </span>
-                      {owned.has(fold(artist.name)) && (
-                        <span className="discover-owned">
-                          <CircleCheck size={14} aria-hidden="true" /> In your
-                          library
-                        </span>
-                      )}
                     </a>
                   </li>
                 ))}
               </ul>
-            ) : active.length < CATALOGUE_MINIMUM ? (
-              <p className="muted">
-                Type another letter to search the catalogue.
-              </p>
-            ) : (
-              <EmptyLine>No catalogue artists match “{active}”.</EmptyLine>
-            )}
-          </section>
-        </>
+            </section>
+          )}
+          {nothing && <EmptyLine>Nothing matches “{active}”.</EmptyLine>}
+          {active.length < CATALOGUE_MINIMUM && (
+            <p className="muted">
+              Type another letter to search the catalogue.
+            </p>
+          )}
+        </div>
       )}
     </>
+  );
+}
+
+function ServerArtist({
+  artist,
+  open,
+}: {
+  artist: FoundArtist;
+  open: (event: React.MouseEvent) => void;
+}) {
+  return (
+    <li>
+      <a href={"#/search?q=" + encodeURIComponent(artist.name)} onClick={open}>
+        <Cover title={artist.name} src={artist.cover_url} artist sizes="48px" />
+        <span className="discover-text">
+          <strong>{artist.name}</strong>
+          <span>
+            {artist.in_library && artist.album_count
+              ? `${plural(artist.album_count, "album")} in your library`
+              : "Artist"}
+          </span>
+        </span>
+        {artist.in_library && <StateBadge state="library" iconOnly />}
+      </a>
+    </li>
+  );
+}
+
+type RecentAlbum = {
+  id: string;
+  title: string;
+  artist: string;
+  cover_url?: string | null;
+};
+
+/** Before typing: recent searches, your library with counts, and what was
+ * added lately. */
+function BeforeTyping({
+  library,
+  recent,
+  forget,
+}: {
+  library: Library;
+  recent: string[];
+  forget: (q?: string) => void;
+}) {
+  const [albums, setAlbums] = useState<RecentAlbum[]>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void api<{ albums: RecentAlbum[] }>("/v1/home/recent", {
+      signal: controller.signal,
+    })
+      .then((d) => setAlbums(d.albums || []))
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
+  const shortcuts = [
+    {
+      id: "artists",
+      label: "Artists",
+      count: library.stats.artists,
+      icon: <UserRound size={24} />,
+    },
+    {
+      id: "albums",
+      label: "Albums",
+      count: library.stats.albums,
+      icon: <Disc3 size={24} />,
+    },
+    {
+      id: "songs",
+      label: "Songs",
+      count: library.stats.tracks,
+      icon: <Music size={24} />,
+    },
+    {
+      id: "playlists",
+      label: "Playlists",
+      count: library.playlist_count ?? 0,
+      icon: <ListMusic size={24} />,
+    },
+  ];
+  return (
+    <div className="search-start">
+      {recent.length > 0 && (
+        <div className="search-recent" role="group" aria-label="Recent">
+          <span className="search-recent-label">Recent</span>
+          {recent.map((q) => (
+            <span className="search-chip" key={q}>
+              <a href={"#/search?q=" + encodeURIComponent(q)}>{q}</a>
+              <button
+                type="button"
+                aria-label={`Remove ${q}`}
+                onClick={() => forget(q)}
+              >
+                <X size={14} aria-hidden="true" />
+              </button>
+            </span>
+          ))}
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => forget()}
+          >
+            Clear
+          </button>
+        </div>
+      )}
+      <section className="search-group" aria-labelledby="search-yours">
+        <SectionHeader id="search-yours" title="Your library" />
+        <div className="search-shortcuts">
+          {shortcuts.map((s) => (
+            <a key={s.id} href={"#/library/" + s.id}>
+              <span className="search-shortcut-icon" aria-hidden="true">
+                {s.icon}
+              </span>
+              <span className="search-shortcut-name">{s.label}</span>
+              <span className="pig-amount">{formatCount(s.count)}</span>
+            </a>
+          ))}
+        </div>
+      </section>
+      {albums.length > 0 && (
+        <section className="search-group" aria-labelledby="search-recent">
+          <SectionHeader id="search-recent" title="Recently added" />
+          <div className="search-shelf">
+            {albums.slice(0, 7).map((album) => (
+              <CollectionCard
+                key={album.id}
+                kind="album"
+                title={album.title}
+                songs={() => albumSongs(album.id)}
+              >
+                <a className="album-card" href={"#/library/album/" + album.id}>
+                  <Cover title={album.title} src={album.cover_url} />
+                  <span className="card-name">{album.title}</span>
+                  <span className="card-caption">{album.artist}</span>
+                </a>
+              </CollectionCard>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
   );
 }

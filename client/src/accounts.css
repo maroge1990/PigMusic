@@ -539,17 +539,9 @@ main h1[tabindex="-1"]:focus {
   gap: 0.125rem;
   min-width: 0;
 }
-.discover-text span,
-.discover-owned {
+.discover-text span {
   font-size: var(--type-footnote);
   color: var(--secondary);
-}
-.discover-owned {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-4);
-  color: var(--success);
-  white-space: nowrap;
 }
 .follow-artist {
   display: flex;

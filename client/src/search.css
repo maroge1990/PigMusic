@@ -1,0 +1,173 @@
+/* Search (D-120, screens 20 and 35): the box, what shows before typing, and
+   one ranked list of results. */
+.search-box {
+  display: flex;
+  flex: 1 1 16rem;
+  align-items: center;
+  gap: var(--space-12);
+  min-height: 3.5rem;
+  padding: 0 var(--space-16);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  color: var(--secondary);
+}
+.search-box:focus-within {
+  border-color: var(--accent);
+}
+.search-box input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--type-headline);
+  outline: none;
+  box-shadow: none;
+}
+.search-recent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+.search-recent-label {
+  margin-right: var(--space-4);
+  color: var(--secondary);
+  font-size: var(--type-footnote);
+  font-weight: 600;
+}
+.search-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.25rem;
+  padding-left: var(--space-12);
+  border-radius: var(--radius-capsule);
+  background: var(--raised);
+}
+.search-chip a {
+  color: var(--text);
+  text-decoration: none;
+}
+.search-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 0;
+  border-radius: var(--radius-capsule);
+  background: none;
+  color: var(--secondary);
+}
+.search-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-16);
+}
+.search-shortcuts a {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  padding: var(--space-16);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+}
+.search-shortcut-icon {
+  display: inline-flex;
+  color: var(--accent);
+}
+.search-shortcut-name {
+  flex: 1;
+  font-weight: 600;
+}
+.search-shortcuts .pig-amount {
+  color: var(--secondary);
+}
+.search-shelf,
+.search-album-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: var(--space-16);
+}
+.search-shelf .album-card > span,
+.search-album-grid .album-card > span {
+  display: block;
+}
+.search-card-name {
+  display: flex !important;
+  align-items: center;
+  gap: var(--space-4);
+}
+.search-card-name .state-badge.icon-only svg {
+  width: 14px;
+  height: 14px;
+}
+/* Top result beside Songs on a wide screen; stacked on a narrow one. */
+.search-lead {
+  display: grid;
+  gap: 0 var(--space-24);
+}
+@media (min-width: 900px) {
+  .search-lead {
+    grid-template-columns: minmax(16rem, 2fr) 3fr;
+    align-items: start;
+  }
+}
+.search-top-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  width: 100%;
+  padding: var(--space-24);
+  border: 0;
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+}
+.search-top-card .cover {
+  width: 8rem;
+  margin-bottom: var(--space-8);
+}
+.search-top-card strong {
+  font-size: var(--type-title);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.search-top-detail {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  color: var(--secondary);
+  font-size: var(--type-footnote);
+}
+.search-top-detail .state-badge.icon-only svg {
+  width: 16px;
+  height: 16px;
+}
+.search-top-play {
+  position: absolute;
+  right: var(--space-24);
+  bottom: var(--space-24);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: var(--radius-capsule);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.search-add-mark {
+  color: var(--text-accent);
+}
+.search-results > .muted {
+  margin-top: var(--space-16);
+}
