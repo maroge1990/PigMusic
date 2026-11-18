@@ -366,6 +366,9 @@ class Launch:
         # nothing, and an engine it spawned meanwhile is either handed over
         # (`cancel`) or ended by the launcher itself, never left running.
         self.cancelled = False
+        # Between the last check and the child being handed back: inside
+        # Popen, where the child may exist before the launcher has it.
+        self.spawning = False
         self.lock = threading.Lock()
         self.thread = threading.Thread(
             target=self.run, args=(root,), name="engine-launch", daemon=True
@@ -375,10 +378,11 @@ class Launch:
 
     def run(self, root):
         try:
-            result = start_engine(root, lambda: not self.cancelled)
+            result = start_engine(root, self.proceed)
         except Exception:
             result = (None, None)
         with self.lock:
+            self.spawning = False
             if not self.cancelled:
                 self.result = result
                 return
@@ -396,13 +400,22 @@ class Launch:
         if log:
             log.close()
 
+    def proceed(self):
+        """The last check before spawning: no once stopping has begun."""
+        with self.lock:
+            if self.cancelled:
+                return False
+            self.spawning = True
+            return True
+
     def cancel(self):
-        """Stop this start; the engine it already handed over, if any, for
-        the supervisor to end with the rest."""
+        """Stop this start: (the engine it already handed over, if any, for
+        the supervisor to end with the rest; whether a spawn is in flight,
+        whose child the launcher ends itself once Popen returns)."""
         with self.lock:
             self.cancelled = True
             taken, self.result = self.result, (None, None)
-        return taken
+            return taken, self.spawning
 
     def done(self):
         return not self.thread.is_alive()
@@ -513,13 +526,15 @@ def start_engine(root, proceed=None):
                 or os.environ.get("PIG_MUSIC_ENGINE_NO_CONNECT") == "true"
             ):
                 command += ["--no-connect"]
-            if proceed is not None and not proceed():
-                return None, None
             logfile = engine / "runtime.log"
             if logfile.exists() and logfile.stat().st_size > 10_000_000:
                 logfile.replace(engine / "runtime.previous.log")
             log = logfile.open("ab")
             os.chmod(logfile, 0o600)
+            # Nothing but the spawn itself after this last check.
+            if proceed is not None and not proceed():
+                log.close()
+                return None, None
             return (
                 subprocess.Popen(
                     command,
@@ -696,14 +711,18 @@ def main():
             record_restart(history, time.time(), "exit", reason)
         elif not failed:
             record_restart(history, time.time(), "stop", stop_reason(stop_signal))
+        deadline = time.monotonic() + 25
         if launch:
             # An engine its start already handed over is ended with the
-            # rest; one spawned later is ended by the launcher itself.
-            taken = launch.cancel()
+            # rest; one being spawned is ended by the launcher itself once
+            # Popen hands it back, which is waited for within the deadline.
+            taken, spawning = launch.cancel()
             if taken[0] is not None and engine is None:
                 engine, log = taken
+            if spawning:
+                launch.thread.join(max(0, deadline - time.monotonic()))
         stop(None, None)
-        reap((engine, ending and ending.process, server), time.monotonic() + 25)
+        reap((engine, ending and ending.process, server), deadline)
         return 1 if failed else 0
     finally:
         for child in (engine, ending and ending.process, server):

@@ -331,6 +331,49 @@ def test_an_engine_start_released_during_shutdown_leaves_no_engine_running(
     assert all(engine.returncode is not None for engine in engines)
 
 
+def test_an_engine_mid_spawn_at_shutdown_is_ended_before_the_supervisor_exits(
+    tmp_path, monkeypatch
+):
+    """Codex on 4753842: with the child created but Popen not yet returned
+    when SIGTERM came, shutdown saw no engine and exited, leaving it alive."""
+    clock = [0.0]
+    release = threading.Event()
+    handlers, engines = {}, []
+    server = FakeProcess(lifetime=None)
+
+    def popen(command, **kwargs):
+        if "uvicorn" in command:
+            return server
+        engines.append(FakeProcess(lifetime=None))  # The child exists now.
+        release.wait(5)  # Popen has not returned it yet.
+        return engines[-1]
+
+    def sleep(seconds):
+        clock[0] += 1
+        if clock[0] == 20:
+            threading.Timer(0.2, release.set).start()
+            handlers[runtime.signal.SIGTERM](runtime.signal.SIGTERM, None)
+
+    monkeypatch.setenv("PIG_MUSIC_DATA", str(tmp_path / "data"))
+    monkeypatch.setenv("PIG_MUSIC_EMBEDDED_ENGINE", "true")
+    monkeypatch.delenv("PIG_MUSIC_DOWNLOAD_ROOT", raising=False)
+    monkeypatch.setattr(runtime, "proxy_trust", lambda: "127.0.0.1")
+    monkeypatch.setattr(runtime.subprocess, "Popen", popen)
+    monkeypatch.setattr(runtime.time, "sleep", sleep)
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(runtime.signal, "signal", handlers.__setitem__)
+    monkeypatch.setattr(runtime, "probe", lambda: ("ok", []), raising=False)
+    try:
+        assert runtime.main() == 0
+        # Ended before main returned, not by a thread left behind.
+        assert len(engines) == 1 and engines[0].returncode is not None
+    finally:
+        release.set()
+        for thread in threading.enumerate():
+            if thread.name == "engine-launch":
+                thread.join(5)
+
+
 def test_an_engine_that_answers_is_never_ended(tmp_path, monkeypatch):
     # Nine silent probes, then any answer (even a refusal) starts the count again.
     engines, probes = engine_supervised(
