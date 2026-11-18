@@ -56,7 +56,21 @@
   gap: var(--space-8);
   width: max-content;
   max-width: 85vw;
+  /* An opened "N more" list scrolls inside the screen; its button stays. */
+  max-height: min(60dvh, calc(100dvh - 12rem));
   pointer-events: none;
+}
+.notice-list {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.notice-area.is-expanded .notice-list {
+  pointer-events: auto;
 }
 .notice {
   display: flex;
@@ -107,6 +121,7 @@
   box-shadow: var(--elevation-floating);
   cursor: pointer;
   pointer-events: auto;
+  flex: none;
 }
 .notice-close {
   min-width: 2.75rem;

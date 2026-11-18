@@ -167,29 +167,32 @@ export async function runAction(id: number) {
   }
 }
 
-/** The most kept notices (Undo, Try again, warnings) shown before the
- * older ones fold into "N more". */
-export const MAX_KEPT_SHOWN = 3;
+/** The most retries and warnings shown before the older ones fold into
+ * "N more". A live Undo never folds. */
+export const MAX_KEPT_SHOWN = 2;
 
 /**
- * The notices on screen, oldest first, and how many kept notices are folded
- * away (Codex, #249). Kept notices are never dropped: the newest
- * `MAX_KEPT_SHOWN` show, older ones fold into "N more" until `expanded`.
- * Routine notices fill what is left of `MAX_SHOWN`, and the newest one
- * always has a place, so a fresh error or success is never hidden.
+ * The notices on screen, oldest first, and how many are folded away
+ * (Codex, #249). Nothing kept is ever dropped:
+ * - every live Undo shows (it is short-lived and must stay reachable);
+ * - the newest `MAX_KEPT_SHOWN` retries and warnings show, older ones fold
+ *   into "N more" until `expanded`;
+ * - routine notices fill what is left of `MAX_SHOWN`, and the newest one
+ *   always has a place, so a fresh error or success is never hidden.
  */
 export function stack(all = notices, expanded = false) {
-  const keptAll = all.filter(kept);
-  const keptShown = expanded ? keptAll : keptAll.slice(-MAX_KEPT_SHOWN);
+  const undos = all.filter((n) => n.kind === "action");
+  const foldable = all.filter((n) => n.kind !== "action" && kept(n));
+  const foldShown = expanded ? foldable : foldable.slice(-MAX_KEPT_SHOWN);
   const routine = all.filter((n) => !kept(n));
   const room = Math.max(
     1,
-    MAX_SHOWN - Math.min(keptAll.length, MAX_KEPT_SHOWN),
+    MAX_SHOWN - undos.length - Math.min(foldable.length, MAX_KEPT_SHOWN),
   );
-  const showing = new Set([...keptShown, ...routine.slice(-room)]);
+  const showing = new Set([...undos, ...foldShown, ...routine.slice(-room)]);
   return {
     shown: all.filter((n) => showing.has(n)),
-    more: keptAll.length - keptShown.length,
+    more: foldable.length - foldShown.length,
   };
 }
 

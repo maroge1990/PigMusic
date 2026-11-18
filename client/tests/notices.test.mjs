@@ -142,8 +142,8 @@ test("a Check-the-playlist warning shows even with three retries live", () => {
   notify("Saved");
   assert.ok(area.shown().some((n) => n.id === warning));
   assert.ok(area.now().some((n) => n.id === warning));
-  // The oldest retry folds into "1 more"; nothing kept is dropped.
-  assert.equal(stack(area.now()).more, 1);
+  // The older retries fold into "2 more"; nothing kept is dropped.
+  assert.equal(stack(area.now()).more, 2);
   assert.equal(shown(area.now(), true).filter((n) => n.action).length, 3);
   area.stop();
 });
@@ -193,7 +193,7 @@ test("later notices never hide a live Undo before it is sent (Codex round 1)", (
   area.stop();
 });
 
-test("more live Undos than fit fold into N more; the newest routine notice shows", () => {
+test("every live Undo shows; routine notices keep the newest one", () => {
   const area = watch();
   notify("Saved");
   for (const name of ["A", "B", "C", "D"])
@@ -201,17 +201,38 @@ test("more live Undos than fit fold into N more; the newest routine notice shows
   notify("Moved up");
   assert.deepEqual(
     area.shown().map((n) => n.text),
-    ["B deleted.", "C deleted.", "D deleted.", "Moved up"],
-  );
-  assert.equal(stack(area.now()).more, 1);
-  assert.deepEqual(
-    shown(area.now(), true).map((n) => n.text),
     ["A deleted.", "B deleted.", "C deleted.", "D deleted.", "Moved up"],
   );
+  assert.equal(stack(area.now()).more, 0);
   area.stop();
 });
 
-test("eight warnings never hide a fresh error; five fold into 5 more", () => {
+test("a pending Undo stays in view while warnings arrive, until it is sent", async () => {
+  // Codex round 6: three warnings folded a live Undo away before its
+  // deletion was sent.
+  const area = watch();
+  let send;
+  const sent = new Promise((r) => (send = r));
+  const undo = offerUndo("Road trip deleted.", () => {}, "Back", sent);
+  for (let second = 1; second <= 3; second++) {
+    notifyWarning(
+      `Couldn't tell about copy ${second}. Check the playlist.`,
+      "w" + second,
+    );
+    mock.timers.tick(1_000);
+    assert.ok(
+      area.shown().some((n) => n.id === undo),
+      `at ${second} s`,
+    );
+  }
+  assert.equal(stack(area.now()).more, 1);
+  send();
+  await flush();
+  assert.ok(!area.now().some((n) => n.id === undo));
+  area.stop();
+});
+
+test("eight warnings never hide a fresh error; six fold into 6 more", () => {
   // Codex (#249): kept warnings filled the list and hid every new notice.
   const area = watch();
   for (let i = 1; i <= 8; i++)
@@ -221,8 +242,8 @@ test("eight warnings never hide a fresh error; five fold into 5 more", () => {
     );
   notifyError("Couldn't save your settings. Try again.");
   const { shown: visible, more } = stack(area.now());
-  assert.equal(more, 5);
-  assert.equal(visible.length, 4);
+  assert.equal(more, 6);
+  assert.equal(visible.length, 3);
   assert.equal(visible.at(-1).text, "Couldn't save your settings. Try again.");
   assert.equal(stack(area.now(), true).shown.length, 9);
   assert.equal(stack(area.now(), true).more, 0);

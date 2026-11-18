@@ -90,7 +90,7 @@ test("removing a song from a playlist says Removed, not Saved", async ({
 
 // Codex (#249): warnings that must stay never hide a fresh notice; older
 // ones fold into "N more", which opens them all in place.
-test("eight kept warnings fold into 5 more and a fresh error still shows", async ({
+test("eight kept warnings fold into 6 more and a fresh error still shows", async ({
   page,
 }) => {
   let saved = false;
@@ -123,7 +123,7 @@ test("eight kept warnings fold into 5 more and a fresh error still shows", async
     await page.getByRole("menuitem", { name: "Add to playlist" }).click();
     await page.getByRole("menuitem", { name: "Gym" }).click();
     await expect(notices(page).locator(".notice")).toHaveCount(
-      Math.min(i + 1, 3),
+      Math.min(i + 1, 2),
     );
   }
   expect(saved).toBe(true);
@@ -131,9 +131,9 @@ test("eight kept warnings fold into 5 more and a fresh error still shows", async
   await dots.click();
   await page.getByRole("menuitem", { name: "Favourite" }).click();
   await expect(notices(page)).toContainText("Favourites are unavailable");
-  const more = notices(page).getByRole("button", { name: "5 more" });
+  const more = notices(page).getByRole("button", { name: "6 more" });
   await expect(more).toHaveAttribute("aria-expanded", "false");
-  await expect(notices(page).locator(".notice")).toHaveCount(4);
+  await expect(notices(page).locator(".notice")).toHaveCount(3);
   await more.click();
   await expect(
     notices(page).getByRole("button", { name: "Show fewer" }),
@@ -141,4 +141,51 @@ test("eight kept warnings fold into 5 more and a fresh error still shows", async
   await expect(
     notices(page).locator(".notice", { hasText: "Check the playlist" }),
   ).toHaveCount(8);
+});
+
+// Codex round 6: an opened list stays inside a small screen; it scrolls,
+// and Show fewer stays in view.
+test("twelve warnings open in a list that scrolls on a small phone", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await mockApi(page, {
+    answers: {
+      "/v1/playlists": (route) =>
+        route.fulfill({ json: { playlists: [{ id: "p1", name: "Gym" }] } }),
+      "/v1/playlists/p1": (route) =>
+        route.fulfill({
+          json: { id: "p1", name: "Gym", revision: 1, entries: [] },
+        }),
+      "/v1/playlists/p1/songs": (route) =>
+        route.fulfill({ status: 502, body: "Bad gateway" }),
+    },
+  });
+  await page.goto(`/#/library/album/${album.id}`);
+  const dots = page.getByRole("button", { name: "More options for Von dutch" });
+  for (let i = 0; i < 12; i++) {
+    await dots.click();
+    await page.getByRole("menuitem", { name: "Add to playlist" }).click();
+    await page.getByRole("menuitem", { name: "Gym" }).click();
+    await expect(
+      page.getByRole("menu", { name: "Add Von dutch to playlist" }),
+    ).toBeHidden();
+  }
+  await notices(page).getByRole("button", { name: "10 more" }).click();
+  const fewer = notices(page).getByRole("button", { name: "Show fewer" });
+  const list = notices(page)
+    .locator(".notice")
+    .filter({ hasText: "Check the playlist" });
+  await expect(list).toHaveCount(12);
+  // The area stays within the screen, with Show fewer in view.
+  const box = (await notices(page).boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(568);
+  await expect(fewer).toBeInViewport();
+  // The oldest warning is reached by scrolling the list itself.
+  await list.first().scrollIntoViewIfNeeded();
+  await expect(list.first()).toBeInViewport();
+  await expect(fewer).toBeInViewport();
+  await fewer.click();
+  await expect(list).toHaveCount(2);
 });
