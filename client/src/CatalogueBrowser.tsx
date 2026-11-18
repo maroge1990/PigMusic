@@ -422,7 +422,16 @@ export function CatalogueBrowser({
     setBusy(true);
     setError("");
     try {
-      setRelease(await request<Release>(`releases/${id}`));
+      // The edition on screen chosen again: this read takes its turn with
+      // the view's other reads, so an older poll can't undo it.
+      const view = shown.current;
+      const sequence = view.id === id ? ++view.started : 0;
+      const data = await request<Release>(`releases/${id}`);
+      if (!sequence) setRelease(data);
+      else if (shown.current === view && sequence > view.applied) {
+        view.applied = sequence;
+        setRelease(data);
+      }
       history.replaceState(null, "", "#" + discoverUrl(artist, id));
       setChoose(false);
     } catch (e) {

@@ -13,6 +13,8 @@ type Release = {
   more?: string[];
   /** The songs the server says are being added, by read number. */
   requested?: (read: number) => string[];
+  /** The songs in your library, by read number. */
+  saved?: (read: number) => string[];
 };
 const track = (r: Release, title: string, n: number, read: number) => ({
   id: `t-${r.id}-${n}`,
@@ -25,10 +27,21 @@ const track = (r: Release, title: string, n: number, read: number) => ({
   musicbrainz_release_id: r.id,
   musicbrainz_recording_id: `rec-${r.id}-${n}`,
   explicit_edition: !!r.explicit,
-  server_state: r.requested?.(read).includes(title)
-    ? "requested"
-    : "not_in_library",
-  saved_track: null,
+  server_state: r.saved?.(read).includes(title)
+    ? "in_library"
+    : r.requested?.(read).includes(title)
+      ? "requested"
+      : "not_in_library",
+  saved_track: r.saved?.(read).includes(title)
+    ? {
+        id: `saved-${r.id}-${n}`,
+        title,
+        artist: artist.name,
+        album: r.title,
+        duration: 180,
+        server_state: "in_library",
+      }
+    : null,
 });
 const edition = (r: Release) => ({
   id: r.id,
@@ -431,4 +444,37 @@ test("a row Add answered after an edition switch doesn't drop the new edition's 
   await expect(
     page.getByRole("button", { name: "Add Song M to library" }),
   ).toHaveCount(0);
+});
+
+test("an older poll never undoes the edition chosen again (#263)", async ({
+  page,
+}) => {
+  const polled = {
+    ...main,
+    more: ["Song P"],
+    // Song M on its way (so the album polls), then in your library.
+    requested: (read: number) => (read <= 2 ? ["Song M"] : []),
+    saved: (read: number) => (read >= 3 ? ["Song M"] : []),
+  };
+  const mock = await catalogue(
+    page,
+    [{ id: "g-x", title: "Main", editions: [polled, other] }],
+    added(1, 0),
+  );
+  await page.getByRole("button", { name: /Main/ }).click();
+  await expect(page.getByText("Song M")).toBeVisible();
+  mock.hold("r-main");
+  await expect.poll(() => mock.reads("r-main"), { timeout: 8000 }).toBe(2);
+  // An Add meanwhile, so the next read of the album is a read of its own.
+  await page.getByRole("button", { name: "Add Song P to library" }).click();
+  await expect(page.getByRole("img", { name: "Adding" })).toHaveCount(2);
+  // The same edition chosen again while the poll is out.
+  await page.getByRole("button", { name: /Choose another edition/ }).click();
+  await page.getByRole("button", { name: /Main/ }).click();
+  await expect.poll(() => mock.reads("r-main")).toBe(3);
+  await mock.answer(3);
+  const saved = page.getByRole("img", { name: "In your library" });
+  await expect(saved).toBeVisible();
+  await mock.answer(2);
+  await expect(saved).toBeVisible();
 });
