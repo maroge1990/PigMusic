@@ -1,3 +1,4 @@
+import { PUBLIC_WRITES } from "./publicWrites";
 import {
   SESSION_HEADER,
   SESSION_UNKNOWN,
@@ -38,9 +39,6 @@ export function sessionMap<K, V>() {
 }
 let artworkRevision: number | undefined;
 
-/** Writes made before anyone is signed in: they name no session. */
-const UNBOUND_WRITES = new Set(["/api/v1/auth/login", "/api/v1/setup/owner"]);
-
 /** A request; `anySession` sends a write without naming a session (ending
  * an old session by its id after an offline sign-out). */
 export type ApiInit = RequestInit & { anySession?: boolean };
@@ -62,7 +60,8 @@ export async function apiFetch(
     if (
       !headers.has(SESSION_HEADER) &&
       !anySession &&
-      !UNBOUND_WRITES.has(path.split("?")[0])
+      // Writes the server takes before sign-in name no session.
+      !PUBLIC_WRITES.has(`${method} ${path.split("?")[0]}`)
     ) {
       const session = expectedSession();
       if (!session)
