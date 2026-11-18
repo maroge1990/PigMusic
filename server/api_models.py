@@ -524,6 +524,9 @@ class AcquisitionResultDTO(BaseModel):
     created: int
     existing: int
     skipped: int
+    # Songs the person paused themselves: Add leaves them paused; Resume in
+    # Downloads resumes them (#264).
+    paused: int = 0
     downloads_enabled: bool
 
 

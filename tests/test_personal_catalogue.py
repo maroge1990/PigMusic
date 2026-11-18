@@ -6,6 +6,7 @@ from server.catalogue import Catalogue, release_tracks
 from test_catalogue import fixture_release, RELEASE, ARTIST
 from server.auth import Auth
 from server.store import Store
+from server.routes.personal import TrackInput
 
 
 def test_member_catalogue_is_scoped_and_contract_published(tmp_path, monkeypatch):
@@ -199,3 +200,72 @@ def test_artist_search_forwards_paging_and_normalises_unknown_description(
         }
         assert calls == [("artist/", {"query": "Artist", "offset": 20, "limit": 1})]
         assert client.get("/api/v1/catalogue/artists?offset=-1").status_code == 422
+
+
+def test_a_paused_request_shows_as_requested_on_another_edition(tmp_path, monkeypatch):
+    """#264: a song a person asked for from one edition and paused is still
+    theirs on the edition the album opens on (the job matches any edition), so
+    it shows as requested there, not as one to add. Another member still sees
+    it as missing (#228)."""
+    monkeypatch.delenv("PIG_MUSIC_TEST_LEGACY_API", raising=False)
+    group = {"id": "22222222-2222-4222-8222-222222222222", "primary-type": "Album"}
+    other = "66666666-6666-4666-8666-666666666666"
+    # The deluxe edition, with the song at another position.
+    deluxe = {
+        **fixture_release(),
+        "status": "Official",
+        "disambiguation": "deluxe",
+        "release-group": group,
+    }
+    plain = {
+        **fixture_release(),
+        "id": other,
+        "status": "Official",
+        "release-group": group,
+    }
+    plain["media"] = [
+        {"position": 1, "tracks": [{**deluxe["media"][0]["tracks"][0], "position": 1}]}
+    ]
+    store = Store(tmp_path)
+    auth = Auth(store)
+    owner = auth.create_owner("mark", "catalogue fixture password")
+    tokens = {}
+    for name in ("one", "two"):
+        code = auth.setup_code(owner, name, name)
+        auth.activate(code["code"], "catalogue fixture password", "f")
+        tokens[name] = auth.login(
+            name, "catalogue fixture password", "device", "phone", "ios", "f"
+        )["token"]
+
+    async def provider(self, client, path, **params):
+        if path == "release":
+            return {"release-count": 2, "releases": [deluxe, plain]}
+        return {RELEASE: deluxe, other: plain}[path.split("/")[1]]
+
+    monkeypatch.setattr(Catalogue, "get", provider)
+    app = create_app(tmp_path)
+    with TestClient(app, base_url="https://private.ts.net") as client:
+
+        def get(name, release):
+            response = client.get(
+                f"/api/v1/catalogue/releases/{release}",
+                headers={"Authorization": "Bearer " + tokens[name]},
+            )
+            assert response.status_code == 200, response.text
+            return response.json()["tracks"][0]
+
+        one = {"Authorization": "Bearer " + tokens["one"]}
+        song = get("one", RELEASE)
+        assert song["explicit_edition"] is True
+        # As the web sends it (songBody).
+        fields = TrackInput.model_fields
+        body = {k: v for k, v in song.items() if k in fields and v is not None}
+        body["year"] = str(body["year"])
+        asked = client.post("/api/v1/requests", json={"tracks": [body]}, headers=one)
+        assert asked.status_code == 200 and asked.json()["created"] == 1, asked.text
+        (job,) = client.get("/api/v1/requests", headers=one).json()["items"]
+        paused = client.post(f"/api/v1/requests/{job['id']}/pause", headers=one)
+        assert paused.status_code == 200, paused.text
+        assert get("one", RELEASE)["server_state"] == "requested"
+        assert get("one", other)["server_state"] == "requested"
+        assert get("two", other)["server_state"] == "not_in_library"

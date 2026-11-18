@@ -3,7 +3,7 @@ import { batches } from "./limits";
 import { expectedSession, withSession } from "./sessionId";
 import { notify, notifyError, offerUndo } from "./notices";
 import type { RemovalPreview } from "./removal";
-import { songBody, type AddResult, type Song } from "./songs";
+import { PAUSED_NOTICE, songBody, type AddResult, type Song } from "./songs";
 
 /** The file the server holds for a song: yours, the household's or a mix's. */
 export function songFile(song: Song): string | null {
@@ -78,6 +78,7 @@ export async function addSongsToLibrary(
   // A large collection goes in batches within the server's limit (Codex),
   // every one under the session that asked.
   const count = (n: number) => `${n} ${n === 1 ? "song" : "songs"}`;
+  let paused = 0;
   async function send(rest: Song[], addedBefore: number): Promise<void> {
     let adding = addedBefore;
     const parts = batches(rest);
@@ -91,6 +92,7 @@ export async function addSongsToLibrary(
           }),
         );
         adding += result.created + result.existing;
+        paused += result.paused || 0;
       } catch (e) {
         const left = parts.slice(i).flat();
         if (adding) changed();
@@ -104,7 +106,12 @@ export async function addSongsToLibrary(
       }
     }
     notify(
-      adding ? `Adding ${count(adding)} to your library` : "Nothing to add",
+      [
+        adding && `Adding ${count(adding)} to your library.`,
+        paused && PAUSED_NOTICE,
+      ]
+        .filter(Boolean)
+        .join(" ") || "Nothing to add",
     );
     changed();
   }

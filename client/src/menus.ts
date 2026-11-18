@@ -31,7 +31,7 @@ export type SongPage =
 export type SongMenuFacts = {
   page: SongPage;
   /** Where the song stands for this person. */
-  state: "saved" | "server" | "pending" | "missing";
+  state: "saved" | "server" | "pending" | "paused" | "missing";
   /** The server holds a file for it (yours, the household's or a mix's). */
   hasFile: boolean;
   /** It names an album, and the row is not already on that album's page. */

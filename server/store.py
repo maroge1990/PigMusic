@@ -75,6 +75,15 @@ def join_member(payload, user_id, scope):
     return True
 
 
+def paused_by(payload):
+    """Who paused a paused job (#264): None once they withdrew from it (the
+    pause is then nobody's own). One paused before that was recorded counts
+    as its first requester's."""
+    if "paused_by" in payload:
+        return payload["paused_by"]
+    return next(iter(payload.get("requested_by") or []), None)
+
+
 class Store:
     """Durable application state and revisioned projection of the music library."""
 
@@ -1767,10 +1776,12 @@ class Store:
         self, tracks, preferred=None, user_id=None, resume_paused=False
     ):
         """Queue catalogue songs. `resume_paused` only for a person asking
-        for them now (#228): a song whose job they or another paused
-        resumes, and a song whose job finished but which is no longer in the
+        for them now (#228): a song whose job another person paused resumes,
+        and a song whose job finished but which is no longer in the
         household library (removed since) is queued again (#211). Automatic
-        paths (artist monitoring) leave both alone."""
+        paths (artist monitoring) leave both alone. A job the person paused
+        themselves stays paused and is counted as `paused`: only Resume in
+        Downloads resumes it, so a stale page's Add can't (#264)."""
         settings = self.download_settings()
         if preferred and tracks:
             album_id = self.album_key(tracks[0])
@@ -1782,7 +1793,7 @@ class Store:
                         json.dumps({"profile": preferred}),
                     ),
                 )
-        created = existing = skipped = 0
+        created = existing = skipped = paused = 0
         # Songs that already had an unfinished job: the queue is reconciled
         # for them once, after the last song, not once each (#237). Nothing
         # below reads what a reconcile writes (quality target, claim token,
@@ -1947,7 +1958,16 @@ class Store:
                     prior = conn.execute(
                         "SELECT status,payload FROM queue WHERE id=?", (key,)
                     ).fetchone()
-                if prior and prior[0] not in {"cancelled", "failed"}:
+                if (
+                    prior
+                    and prior[0] == PAUSED
+                    and user_id
+                    and user_id in (json.loads(prior[1]).get("requested_by") or [])
+                    and paused_by(json.loads(prior[1])) == user_id
+                ):
+                    # Their own pause: Add leaves it, Resume resumes (#264).
+                    paused += 1
+                elif prior and prior[0] not in {"cancelled", "failed"}:
                     if user_id:
                         previous = json.loads(prior[1])
                         if join_member(previous, user_id, scope):
@@ -1996,6 +2016,7 @@ class Store:
             "created": created,
             "existing": existing,
             "skipped": skipped,
+            "paused": paused,
             "downloads_enabled": settings["enabled"],
         }
 

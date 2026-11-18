@@ -318,7 +318,91 @@ def test_asking_again_resumes_a_paused_request_but_automatic_paths_do_not(
     with store.connect() as conn:
         HouseholdPolicy(store).reconcile_pending(conn)
     assert status(store, key) == "paused"
-    # A person asking for the song now resumes it, whoever paused it.
+    # Another person asking for the song now resumes it (#228).
     result = store.user_libraries.request(owner, [wanted])
     assert result["existing"] == 1
+    assert status(store, key) == "waiting_for_sources"
+
+
+def test_an_add_leaves_a_request_the_person_paused_paused(tmp_path):
+    """#264: an ordinary Add (any page, any edition, a playlist's missing
+    songs) never resumes the person's own paused request; Resume in
+    Downloads does. Another member's Add still resumes it (#228)."""
+    store, owner, member = fixture(tmp_path)
+    users = store.user_libraries
+    deluxe = {
+        **song("Wanted"),
+        "musicbrainz_release_id": "deluxe",
+        "status": "missing",
+    }
+    users.request(member, [{**deluxe, "explicit_edition": True}])
+    with store.connect() as conn:
+        (key,) = conn.execute("SELECT id FROM queue").fetchone()
+    users.pause_request(member, key)
+    # The same song from the edition the album opens on.
+    plain = {**deluxe, "musicbrainz_release_id": "plain", "track_number": 4}
+    result = users.request(member, [plain])
+    assert (result["created"], result["existing"], result["paused"]) == (0, 0, 1)
+    assert status(store, key) == "paused"
+    # A playlist's missing songs go through the same path.
+    _, counts = users.add_apple_playlist(
+        member,
+        "pl.paused",
+        "Paused",
+        None,
+        [{"title": "Wanted", "artist": "Example", "album": "Studio", "duration": 3}],
+        True,
+    )
+    assert counts["requested"] == 0
+    assert status(store, key) == "paused"
+    assert len(store.queue()["items"]) == 1
+    # Resume in Downloads resumes it.
+    users.resume_request(member, key)
+    assert status(store, key) == "waiting_for_sources"
+    # Paused again: another member's Add still resumes it (#228).
+    users.pause_request(member, key)
+    assert users.request(owner, [plain])["existing"] == 1
+    assert status(store, key) == "waiting_for_sources"
+
+
+def test_withdrawing_from_a_shared_pause_leaves_the_song_addable(tmp_path):
+    """Codex round 1 on #264: the pauser of a shared request withdraws.
+    The pause is then nobody's own: it stays paused for the other person,
+    and the pauser's next Add rejoins (and resumes) it like anyone's."""
+    store, owner, member = fixture(tmp_path)
+    users = store.user_libraries
+    wanted = {**song("Shared"), "status": "missing"}
+    users.request(member, [wanted])
+    with store.connect() as conn:
+        (key,) = conn.execute("SELECT id FROM queue").fetchone()
+    users.request(owner, [wanted])
+    users.pause_request(member, key)
+    assert users.cancel_request(member, key)["continues_for_others"]
+    assert status(store, key) == "paused"
+    result = users.request(member, [wanted])
+    assert (result["existing"], result["paused"]) == (1, 0)
+    assert status(store, key) == "waiting_for_sources"
+    # Theirs again: pause and Resume in Downloads both work for them.
+    users.pause_request(member, key)
+    assert users.resume_request(member, key) == {"resumed": True}
+    assert status(store, key) == "waiting_for_sources"
+
+
+def test_withdrawing_from_an_older_shared_pause_does_not_pass_it_on(tmp_path):
+    """Codex round 2 on #264: a pause from before paused_by was recorded is
+    its first requester's. When they withdraw, it becomes nobody's own, not
+    the next requester's, so that person's Add still resumes it."""
+    store, owner, member = fixture(tmp_path)
+    users = store.user_libraries
+    wanted = {**song("Older"), "status": "missing"}
+    users.request(member, [wanted])
+    users.request(owner, [wanted])
+    with store.connect() as conn:
+        (key,) = conn.execute("SELECT id FROM queue").fetchone()
+        # Paused before the pauser was recorded.
+        conn.execute("UPDATE queue SET status='paused' WHERE id=?", (key,))
+    users.cancel_request(member, key)
+    assert status(store, key) == "paused"
+    result = users.request(owner, [wanted])
+    assert (result["existing"], result["paused"]) == (1, 0)
     assert status(store, key) == "waiting_for_sources"

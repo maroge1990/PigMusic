@@ -1196,6 +1196,8 @@ class UserLibrary:
     @coordinated
     def cancel_request(self, user_id, request_id):
         """Withdraw one beneficiary; shared downloads continue for remaining people."""
+        from .store import paused_by
+
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
@@ -1206,6 +1208,13 @@ class UserLibrary:
             if row[0] not in CANCELLABLE:
                 raise ValueError("Only songs still being added can be cancelled")
             payload = json.loads(row[1])
+            if row[0] == PAUSED:
+                # Whose pause it is, read before they leave (an older pause
+                # is its first requester's). The pauser withdrawing makes it
+                # nobody's own, so any remaining or returning person's Add
+                # resumes it (#264); anyone else's withdrawal keeps it theirs.
+                owner = paused_by(payload)
+                payload["paused_by"] = None if owner == user_id else owner
             payload["requested_by"] = [
                 identity for identity in payload["requested_by"] if identity != user_id
             ]
@@ -1259,9 +1268,11 @@ class UserLibrary:
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             result = conn.execute(
-                "UPDATE queue SET status='paused',updated_at=CURRENT_TIMESTAMP "
+                "UPDATE queue SET status='paused',updated_at=CURRENT_TIMESTAMP,"
+                # Whose pause it is: their own Add leaves it paused (#264).
+                "payload=json_set(payload,'$.paused_by',?) "
                 "WHERE id=? AND status IN " + sql(PAUSABLE) + " AND " + _MINE,
-                (request_id, user_id),
+                (user_id, request_id, user_id),
             )
             if result.rowcount:
                 return {"paused": True}

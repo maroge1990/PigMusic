@@ -5,7 +5,7 @@ import {
   peekCatalogue,
   writeFailure,
 } from "./api";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { formatDate } from "./format";
 import {
   ChevronLeft,
@@ -24,7 +24,7 @@ import { ArtistPopular } from "./ArtistPopular";
 import { MusicLink } from "./MusicLink";
 import { mergePage } from "./discography";
 import { ArtistAcquisition } from "./ArtistAcquisition";
-import { notify } from "./notices";
+import { notify, notifyError } from "./notices";
 import { OwnerPanel } from "./OwnerTools";
 import { FollowArtist } from "./FollowArtist";
 import { ArtistHero } from "./ArtistHero";
@@ -37,6 +37,7 @@ import {
   songBody,
   withLibrary,
   type AddResult,
+  PAUSED_NOTICE,
   type Song as Row,
 } from "./songs";
 import type { Track } from "./types";
@@ -134,7 +135,9 @@ type Release = {
 };
 // A song Add to library would add: not on the server yet, or a household
 // copy someone else already has.
-const addable = (row: Row) => row.state === "missing" || row.state === "server";
+// Not while it is still being looked up (#263).
+const addable = (row: Row) =>
+  !row.checking && (row.state === "missing" || row.state === "server");
 // A song the server is still adding for you.
 const pending = (song: { server_state?: string }) =>
   song.server_state === "requested";
@@ -146,6 +149,7 @@ function addedMessage(result: AddResult) {
   const parts = [];
   if (adding > 0) parts.push(`Adding ${songs(adding)} to your library.`);
   if (result.skipped > 0) parts.push(`Skipped ${songs(result.skipped)}.`);
+  if (result.paused) parts.push(PAUSED_NOTICE);
   return parts.join(" ") || "Already in your library.";
 }
 export function CatalogueBrowser({
@@ -253,13 +257,21 @@ export function CatalogueBrowser({
   const [choose, setChoose] = useState(false);
   const player = usePlayer();
   const [rows, setRows] = useState<Row[]>([]);
+  // Try again after a failed library lookup asks again.
+  const [lookups, setLookups] = useState(0);
   useEffect(() => {
     if (!release) return setRows([]);
     const plain = releaseSongs(release, artist.id);
-    setRows(plain);
     // A song matches any edition unless it is an explicit edition: the
     // library lookup may mark the others yours (a compilation copy counts),
-    // but an explicit edition keeps the release answer's state.
+    // but an explicit edition keeps the release answer's state. Until the
+    // lookup answers, those songs can't be added: one you have on another
+    // album would be added again (#263).
+    setRows(
+      plain.map((r) =>
+        r.explicit_edition || !addable(r) ? r : { ...r, checking: true },
+      ),
+    );
     let active = true;
     void withLibrary(plain.filter((r) => !r.explicit_edition))
       .then((found) => {
@@ -269,16 +281,51 @@ export function CatalogueBrowser({
         );
         setRows(plain.map((r) => yours.get(r.key) || r));
       })
-      .catch(() => {});
+      .catch(() => {
+        // Add stays off until the lookup answers (#263).
+        if (active)
+          notifyError(
+            "Couldn't check your library. Try again.",
+            () => setLookups((n) => n + 1),
+            "library-lookup",
+          );
+      });
     return () => {
       active = false;
     };
-  }, [release]);
-  function reloadRelease() {
-    if (!release) return;
-    void request<Release>(`releases/${release.id}`)
-      .then(setRelease)
+  }, [release, lookups]);
+  // Which release is on screen, and since when: a navigation (another
+  // album, another edition, back) starts a new view (#262). Within a view,
+  // its reads are numbered as they start (`started`), and `applied` is the
+  // newest one shown.
+  const shown = useRef({ id: "", generation: 0, started: 0, applied: 0 });
+  useLayoutEffect(() => {
+    shown.current = {
+      id: release?.id || "",
+      generation: shown.current.generation + 1,
+      started: 0,
+      applied: 0,
+    };
+  }, [release?.id]);
+  /** Every background read of a release (a poll, the read after an Add, a
+   * row's refresh) goes through here. A read for a release no longer on
+   * screen is not made, and an answer is shown only in the view that asked
+   * and only when nothing that started later has been shown: an older
+   * answer would undo a newer song's state (#262, #263). */
+  function refreshRelease(id: string) {
+    const view = shown.current;
+    if (view.id !== id) return Promise.resolve();
+    const sequence = ++view.started;
+    return request<Release>(`releases/${id}`)
+      .then((data) => {
+        if (shown.current !== view || sequence <= view.applied) return;
+        view.applied = sequence;
+        setRelease(data);
+      })
       .catch(() => {});
+  }
+  function reloadRelease() {
+    if (release) void refreshRelease(release.id);
   }
   const [busy, setBusy] = useState(false);
   const groupBusy = listing.scope !== scope || listing.loading;
@@ -345,14 +392,9 @@ export function CatalogueBrowser({
       timer = setTimeout(() => {
         delay = Math.min(30000, delay * 1.5);
         if (document.hidden) return check();
-        void request<Release>(`releases/${id}`)
-          .then((data) => {
-            if (active) setRelease(data);
-          })
-          .catch(() => {})
-          .finally(() => {
-            if (active) check();
-          });
+        void refreshRelease(id).finally(() => {
+          if (active) check();
+        });
       }, delay);
     };
     check();
@@ -380,7 +422,16 @@ export function CatalogueBrowser({
     setBusy(true);
     setError("");
     try {
-      setRelease(await request<Release>(`releases/${id}`));
+      // The edition on screen chosen again: this read takes its turn with
+      // the view's other reads, so an older poll can't undo it.
+      const view = shown.current;
+      const sequence = view.id === id ? ++view.started : 0;
+      const data = await request<Release>(`releases/${id}`);
+      if (!sequence) setRelease(data);
+      else if (shown.current === view && sequence > view.applied) {
+        view.applied = sequence;
+        setRelease(data);
+      }
       history.replaceState(null, "", "#" + discoverUrl(artist, id));
       setChoose(false);
     } catch (e) {
@@ -455,18 +506,13 @@ export function CatalogueBrowser({
         );
       notify(addedMessage((await response.json()) as AddResult));
       // Each song's state as the server now has it, not a guess.
-      await request<Release>(`releases/${release.id}`)
-        .then(setRelease)
-        .catch(() => {});
+      await refreshRelease(release.id);
       window.dispatchEvent(new Event("music-library-changed"));
       window.dispatchEvent(new Event("music-requests-changed"));
     } catch (e) {
       setError((e as Error).message);
       // It may have been requested: show each song's state as it is now.
-      if (isUnconfirmed(e))
-        void request<Release>(`releases/${release.id}`)
-          .then(setRelease)
-          .catch(() => {});
+      if (isUnconfirmed(e)) void refreshRelease(release.id);
     } finally {
       setBusy(false);
     }
@@ -610,7 +656,7 @@ export function CatalogueBrowser({
               </a>
             )}
           </div>
-          {rows.length > 0 && !rows.some(addable) && (
+          {rows.length > 0 && !rows.some((r) => addable(r) || r.checking) && (
             <p className="muted">
               {rows.every((r) => r.state === "saved")
                 ? "Already in your library: nothing to add."
