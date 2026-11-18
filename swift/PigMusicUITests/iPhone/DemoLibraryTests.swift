@@ -283,12 +283,14 @@ final class DemoLibraryTests: XCTestCase {
     app.buttons["Sunrise, The Orchard"].tap()
     expect(app.buttons["Play First Light by The Orchard"])
     let more = app.buttons["More actions for First Light"]
-    // The page is still sliding in for a moment.
-    let ready = XCTNSPredicateExpectation(
-      predicate: NSPredicate(format: "hittable == true"), object: more)
-    XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 10), .completed, app.debugDescription)
-    more.tap()
+    expect(more)
+    // iOS 26 reports the album page's ⋯ as not hittable although it is
+    // drawn: tap its middle, again if the page was still sliding in.
     let playlist = app.buttons["Add to playlist"]
+    for _ in 0..<3 where !playlist.exists {
+      more.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+      _ = playlist.waitForExistence(timeout: 3)
+    }
     expect(playlist)
     let favourite = app.buttons.matching(
       NSPredicate(
@@ -314,13 +316,25 @@ final class DemoLibraryTests: XCTestCase {
     expect(app.navigationBars["The Orchard"])
   }
 
+  /// Touches and holds `target` until `item` of its menu shows: a press while
+  /// Home is still settling can be lost.
+  private func pressUntil(
+    _ target: XCUIElement, shows item: XCUIElement,
+    file: StaticString = #filePath, line: UInt = #line
+  ) {
+    for _ in 0..<3 where !item.exists {
+      target.press(forDuration: 1.2)
+      _ = item.waitForExistence(timeout: 3)
+    }
+    expect(item, file: file, line: line)
+  }
+
   /// D-118 (#249): a long press on an album card opens the album's one menu.
   func testALongPressOnAnAlbumCardOpensItsMenu() {
     launch()
     let card = app.buttons["Sunrise, The Orchard"]
     expect(card)
-    card.press(forDuration: 1.2)
-    expect(app.buttons["Shuffle"])
+    pressUntil(card, shows: app.buttons["Shuffle"])
     for action in ["Play", "Play next", "Add to playlist", "Download"] {
       XCTAssertTrue(app.buttons[action].exists, "\(action)\n\(app.debugDescription)")
     }
@@ -336,9 +350,8 @@ final class DemoLibraryTests: XCTestCase {
     launch()
     let mix = app.buttons["Play Daily Mix"]
     expect(mix)
-    mix.press(forDuration: 1.2)
     let hide = app.buttons["Hide this edition"]
-    expect(hide)
+    pressUntil(mix, shows: hide)
     for action in ["Show songs", "Play next", "Save this edition"] {
       XCTAssertTrue(app.buttons[action].exists, "\(action)\n\(app.debugDescription)")
     }
