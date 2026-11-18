@@ -56,6 +56,7 @@ from .store import Store
 from .downloader import Downloader
 from .workers import WorkerStatus, supervise
 from .readiness import ReadinessChecks
+from . import document_records
 from .providers.runtime import Runtime as SourceRuntime
 from .routes.download_sources import download_sources_router
 from .catalogue import (
@@ -109,6 +110,9 @@ TIDY_TRACKLISTS = 20
 # how long a worker may have been failing.
 READY_TIMEOUT = 5
 READY_WORKER_SECONDS = 300
+# /api/health (#256): how long its mount test may take before the answer says
+# storage is unavailable; the apps call it to test reachability.
+HEALTH_STORAGE_TIMEOUT = 2
 
 
 def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
@@ -505,12 +509,13 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         )
 
     @app.get("/api/health")
-    def health(request: Request):
-        try:
-            download_root(store)
-            storage_available = True
-        except (OSError, ValueError):
-            storage_available = False
+    async def health(request: Request):
+        # Never on a request's own thread (#256): an unresponsive mount would
+        # hold one for each caller. The readiness check's own thread, one
+        # call at a time, shared with /api/health/ready.
+        storage_available = await ready_checks.passes(
+            "storage", download_root, store, timeout=HEALTH_STORAGE_TIMEOUT
+        )
         if not security.legacy_test:
             return {
                 "status": "ok",
@@ -592,10 +597,12 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     ):
         """Operations that can be undone, newest first; `limit`/`offset` page
         them (#119)."""
-        return [
-            {"id": r["id"], "title": r["track"].get("title"), "status": r["status"]}
-            for r in organisation.undoable(limit, offset)
-        ]
+        return document_records.presentable(
+            [
+                {"id": r["id"], "title": r["track"].get("title"), "status": r["status"]}
+                for r in organisation.undoable(limit, offset)
+            ]
+        )
 
     @app.post("/api/v1/admin/library/organisation/{identity}/undo")
     async def undo_organisation(identity: str):
@@ -667,30 +674,34 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
 
     @app.get("/api/v1/admin/library/trash")
     def removed_music():
-        return [
-            {
-                k: v
-                for k, v in record.items()
-                if k
-                not in {
-                    "root",
-                    "original",
-                    "trash",
-                    "sha256",
-                    "quarantine",
-                    "quarantine_folder",
+        return document_records.presentable(
+            [
+                {
+                    k: v
+                    for k, v in record.items()
+                    if k
+                    not in {
+                        "root",
+                        "original",
+                        "trash",
+                        "sha256",
+                        "quarantine",
+                        "quarantine_folder",
+                    }
                 }
-            }
-            # A purge stopped part-way that recovery could not settle.
-            | {"needs_review": bool(record.get("quarantine"))}
-            for record in recovery.list()
-            if record["status"] != "restored" and not record.get("purged_at")
-        ]
+                # A purge stopped part-way that recovery could not settle.
+                | {"needs_review": bool(record.get("quarantine"))}
+                for record in recovery.list()
+                if record["status"] != "restored" and not record.get("purged_at")
+            ]
+        )
 
     @app.get("/api/v1/admin/library/trash/purge")
     async def trash_purge_plan(days: int = Query(30, ge=1, le=3650)):
         try:
-            return await asyncio.to_thread(recovery.purge_plan, days)
+            return document_records.presentable(
+                await asyncio.to_thread(recovery.purge_plan, days)
+            )
         except (ValueError, OSError):
             raise HTTPException(409, "Trash can't be read; check the library mount.")
 
@@ -754,14 +765,23 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
         history = await asyncio.to_thread(tidy.history)
         return {
             **plan,
-            "history": [
-                {
-                    k: r[k]
-                    for k in ("id", "artist", "title", "time", "status", "unresolved")
-                }
-                | {"error": r.get("error")}
-                for r in history
-            ],
+            "history": document_records.presentable(
+                [
+                    {
+                        k: r[k]
+                        for k in (
+                            "id",
+                            "artist",
+                            "title",
+                            "time",
+                            "status",
+                            "unresolved",
+                        )
+                    }
+                    | {"error": r.get("error")}
+                    for r in history
+                ]
+            ),
         }
 
     class TidyRequest(BaseModel):

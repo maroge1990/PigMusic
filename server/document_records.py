@@ -9,6 +9,8 @@ Each is logged and listed for the System page once per process.
 
 import json
 import logging
+import math
+import sqlite3
 import threading
 
 from . import startup_problems
@@ -52,6 +54,67 @@ def _rows(values, kinds, field):
             raise TypeError(field)
         if not all(isinstance(v, kind) for v, kind in zip(row, kinds)):
             raise TypeError(field)
+
+
+INTEGER = (-(2**63), 2**63 - 1)  # What SQLite binds.
+UNSIGNED = (0, 2**64 - 1)  # A device or inode number: compared, never bound.
+
+
+def _text(value):
+    """Text SQLite binds: it encodes as UTF-8 (json reads an escaped lone
+    surrogate, which SQLite refuses)."""
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("text that is not UTF-8") from None
+
+
+def _integer(value, field, bounds=INTEGER):
+    if not isinstance(value, bool) and not bounds[0] <= value <= bounds[1]:
+        raise ValueError(field + " out of range")
+
+
+def _finite(record, fields):
+    """A time compared and converted with int(): json also reads NaN and
+    Infinity, which int() refuses."""
+    for field in fields:
+        value = record.get(field)
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError(field + " out of range")
+
+
+# Only what a reader binds into SQL is held to SQLite's limits (#257): the
+# song snapshot, paths and other JSON metadata keep any value json stores
+# (a file's mtime_ns may pass 2**63; a file name need not be UTF-8).
+
+
+def bindable_removal(record):
+    for field in ("id", "track_id"):
+        _text(record[field])
+    for user, song, added, source in record.get("memberships", []):
+        for text in (user, song, source):
+            _text(text)
+        _integer(added, "memberships")
+    for number in record.get("quarantine_folder") or []:
+        _integer(number, "quarantine_folder", UNSIGNED)
+    _finite(record, ("removed_at", "purged_at"))
+
+
+def bindable_operation(record):
+    for field in ("id", "track_id"):
+        _text(record[field])
+
+
+def bindable_tidy(record):
+    _text(record["id"])
+    for text in (*record["moves"], *record["removals"]):
+        _text(text)
+    for row in record["memberships"]:
+        for text in row:
+            _text(text)
+    for item in record.get("unresolved", []):
+        _text(item["id"])
+    _finite(record, ("time",))
 
 
 def usable_removal(record):
@@ -142,6 +205,12 @@ SHAPES = {
     "tidy": usable_tidy,
 }
 
+BINDABLE = {
+    "removed": bindable_removal,
+    "organisation": bindable_operation,
+    "tidy": bindable_tidy,
+}
+
 _reported = set()
 _lock = threading.Lock()
 
@@ -155,6 +224,55 @@ def report(area, name, error):
         _reported.add(name)
     log.error("Skipped %s record %s", area, name, exc_info=error)
     startup_problems.report(area, name, error)
+
+
+# What a recovery step meets when the disk, the library mount or the
+# database refuses it for now (full, locked, busy, an I/O error): the
+# record stays and is tried again at the next start (#258).
+RETRYABLE = (OSError, ValueError, KeyError, sqlite3.OperationalError)
+
+
+def unfinished(area, name, error):
+    """A readable record whose file step failed again at startup (disk
+    full, permission denied, the library mount changed): logged and listed
+    once per process; it stays as it is and is tried at the next start."""
+    with _lock:
+        if ("unfinished", name) in _reported:
+            return
+        _reported.add(("unfinished", name))
+    log.error("Could not finish %s record %s yet", area, name, exc_info=error)
+    startup_problems.report(area, name, error, kind="unfinished")
+
+
+def presentable(value):
+    """`value` for a JSON answer: song snapshots keep what json stores,
+    including a lone surrogate (a file name that is not UTF-8) or NaN, which
+    a strict encoder refuses, aborting the whole list. Those become U+FFFD
+    and null here; the stored record is left as it is."""
+    if isinstance(value, dict):
+        return {presentable(k): presentable(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [presentable(item) for item in value]
+    if isinstance(value, str):
+        return "".join("\ufffd" if "\ud800" <= c <= "\udfff" else c for c in value)
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
+def check_new(name, record):
+    """Raise ValueError if `record`, about to be saved as `name`, would not
+    read back: checked before any file changes, so nothing is moved that
+    Restore or Undo could not find again."""
+    prefix = name.split(":", 1)[0]
+    try:
+        again = json.loads(json.dumps(record))
+        SHAPES[prefix](again)
+        BINDABLE[prefix](again)
+    except Exception:
+        raise ValueError(
+            "This song's details can't be saved for Restore; nothing was changed."
+        ) from None
 
 
 def clear():
@@ -171,6 +289,7 @@ def parse(name, payload):
         if not isinstance(record, dict):
             raise TypeError("record is not an object")
         SHAPES[prefix](record)
+        BINDABLE[prefix](record)
     except Exception as error:
         report(AREAS[prefix], name, error)
         return None

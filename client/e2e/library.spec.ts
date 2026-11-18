@@ -163,9 +163,9 @@ test("library and catalogue artist pages each link to the other", async ({
     .getByRole("button", { name: `Find more by ${artist.name}` })
     .click();
   await expect(page).toHaveURL(/#\/library\/discography\/mb-1\?/);
-  const brat = page.getByRole("button", { name: /Brat/ });
+  const brat = page.getByRole("button", { name: /^Brat/ });
   await expect(brat).toContainText("In your library");
-  await expect(page.getByRole("button", { name: /Crash/ })).not.toContainText(
+  await expect(page.getByRole("button", { name: /^Crash/ })).not.toContainText(
     "In your library",
   );
   await brat.click();

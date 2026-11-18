@@ -82,6 +82,9 @@ class Recovery:
                     "SELECT * FROM library_members WHERE track_id=?", (track_id,)
                 )
             ]
+        # Before any file changes: a record its reader would set aside
+        # would leave the song neither in the library nor in Trash.
+        document_records.check_new("removed:" + identity, record)
         return record, root
 
     def begin(self, conn, record, exclude=True):
@@ -522,31 +525,32 @@ class Recovery:
 
     @coordinated
     def recover(self):
-        # One record that cannot be settled is left as it is (#240).
+        # One record that cannot be read or settled is left as it is (#240);
+        # one whose file step fails again is listed as unfinished (#258).
         for name, record in document_records.rows(self.store, "removed"):
             try:
                 self.recover_one(record)
+            except document_records.RETRYABLE as error:
+                document_records.unfinished("trash", name, error)
             except Exception as error:
                 document_records.report("trash", name, error)
         self.store.refresh_library()
 
     def recover_one(self, record):
+        """Settle a purge or removal a restart interrupted; raises when it
+        can't be finished now (the record stays for the next start)."""
         if record.get("quarantine") and not record.get("purged_at"):
-            try:
-                _, root = saved_track(self.store, record["track_id"])
-                self.check_mount(root)
-                if str(root.resolve()) == record["root"]:
-                    contained(root, record["trash"])
-                    self.settle_purge(record, root.resolve())
-            except (OSError, ValueError, KeyError):
-                pass
+            _, root = saved_track(self.store, record["track_id"])
+            self.check_mount(root)
+            if str(root.resolve()) != record["root"]:
+                raise ValueError("Library mount changed.")
+            contained(root, record["trash"])
+            self.settle_purge(record, root.resolve())
             return
         if record["status"] != "removing":
             return
-        try:
-            _, root = saved_track(self.store, record["track_id"])
-            self.check_mount(root)
-            if str(root.resolve()) == record["root"]:
-                self.finish(record, root)
-        except (OSError, ValueError):
-            pass
+        _, root = saved_track(self.store, record["track_id"])
+        self.check_mount(root)
+        if str(root.resolve()) != record["root"]:
+            raise ValueError("Library mount changed.")
+        self.finish(record, root)
