@@ -239,3 +239,30 @@ test("a playlist card never shows an older version's length", async ({
   await changed();
   await expect(card).toContainText("4 songs · 4 min");
 });
+
+// Codex round 2: a refused New playlist keeps the dialog, the name and
+// says why.
+test("a refused new playlist keeps the dialog and its name", async ({
+  page,
+}) => {
+  await mockApi(page, {
+    answers: {
+      "/v1/playlists": (route) =>
+        route.request().method() === "POST"
+          ? route.fulfill({
+              status: 409,
+              json: { detail: "You already have that playlist.", code: "x" },
+            })
+          : route.fulfill({ json: { playlists: [] } }),
+    },
+  });
+  await page.goto("/#/library/playlists");
+  await page.getByRole("button", { name: "New playlist" }).click();
+  const dialog = page.getByRole("dialog", { name: "New playlist" });
+  const name = dialog.getByLabel("Playlist name");
+  await name.fill("Road trip");
+  await dialog.getByRole("button", { name: "Create playlist" }).click();
+  await expect(dialog).toContainText("You already have that playlist.");
+  await expect(dialog).toBeVisible();
+  await expect(name).toHaveValue("Road trip");
+});

@@ -646,17 +646,17 @@ export function PersonalLibrary({
           playlists={playlists}
           favouriteList={favouriteList}
           songs={songs}
-          createPlaylist={(name) =>
-            action(
-              () =>
-                api("/v1/playlists", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ name }),
-                }),
-              "Playlist created",
-            )
-          }
+          // A refusal reaches the dialog, which keeps the name and says why
+          // (Codex round 2); only a created playlist closes it.
+          createPlaylist={async (name) => {
+            await api("/v1/playlists", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name }),
+            });
+            notify("Playlist created");
+            void refresh().catch((e) => setError(e.message));
+          }}
           refresh={refresh}
         />
       )}
