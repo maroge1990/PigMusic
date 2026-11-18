@@ -146,10 +146,6 @@ test("removing a song returns to the library's address", async ({ page }) => {
     .getByRole("button", { name: "More options for Von dutch" })
     .click();
   await page.getByRole("menuitem", { name: "Remove from library" }).click();
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Remove" })
-    .click();
   await expect(page.getByRole("status").first()).toContainText(
     "Removed from your library",
   );
@@ -213,7 +209,8 @@ test("a playlist song moves up and leaves the playlist", async ({ page }) => {
   expect(calls[1]).toBe("DELETE 1?revision=4");
 });
 
-// Removing a song offers Undo, which puts it back and leaves the page.
+// D-118, D-79: Remove from library acts at once and offers Undo, which
+// puts it back; no dialog asks first.
 test("Undo puts a removed song back", async ({ page }) => {
   const calls: string[] = [];
   await mockApi(page, {
@@ -244,13 +241,7 @@ test("Undo puts a removed song back", async ({ page }) => {
     .getByRole("button", { name: "More options for Von dutch" })
     .click();
   await page.getByRole("menuitem", { name: "Remove from library" }).click();
-  const dialog = page.getByRole("dialog");
-  // Files someone else still wants stay on the server, and the dialog says so.
-  await expect(dialog).toContainText(
-    "The music files will stay on the server.",
-  );
-  await expect(dialog).toContainText("Kept for Sam.");
-  await dialog.getByRole("button", { name: "Remove" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect.poll(() => calls.length).toBe(1);
   expect(JSON.parse(calls[0].slice("remove ".length))).toEqual({
     track_ids: ["t1"],
@@ -262,41 +253,6 @@ test("Undo puts a removed song back", async ({ page }) => {
   await expect(page.getByRole("status").first()).toContainText("Restored");
   await expect(undo).toHaveCount(0);
   await expect(page).toHaveURL(/#\/library\/[a-z]+$/);
-});
-
-// Cancel leaves the song where it was.
-test("cancelling a removal keeps the song", async ({ page }) => {
-  const calls: string[] = [];
-  await mockApi(page, {
-    answers: {
-      "/v1/library/removal-preview": (route) =>
-        route.fulfill({
-          json: {
-            confirmation: "c",
-            delete_count: 1,
-            keep_count: 0,
-            items: [{ track_id: "t1", delete_file: true, kept_for: [] }],
-          },
-        }),
-      "/v1/library/remove": (route) => {
-        calls.push("remove");
-        return route.fulfill({ json: { id: "r", undo_until: 0 } });
-      },
-    },
-  });
-  await page.goto(`/#/library/album/${album.id}`);
-  await page
-    .getByRole("button", { name: "More options for Von dutch" })
-    .click();
-  await page.getByRole("menuitem", { name: "Remove from library" }).click();
-  const dialog = page.getByRole("dialog");
-  await expect(dialog).toContainText(
-    "1 music files will move to recoverable trash on the server.",
-  );
-  await dialog.getByRole("button", { name: "Cancel" }).click();
-  await expect(dialog).toHaveCount(0);
-  await expect(page).toHaveURL(/album\/album-1$/);
-  expect(calls).toEqual([]);
 });
 
 // Playlist options rename a playlist, and delete it only once confirmed.
@@ -336,7 +292,7 @@ test("a playlist is renamed, then deleted at once with Undo", async ({
   // Undo within the time: nothing is sent.
   await page.getByRole("button", { name: "Delete playlist" }).click();
   await expect(page).toHaveURL(/#\/library\/[a-z]+$/);
-  const undo = page.locator(".undo-bar");
+  const undo = page.locator(".notice-area");
   await expect(undo).toContainText("Road trip deleted.");
   await undo.getByRole("button", { name: "Undo" }).click();
   await expect(undo).toContainText("Road trip is back.");
@@ -380,10 +336,10 @@ test("two playlists deleted in a row each keep their own Undo", async ({
     await page.getByRole("button", { name: "Delete playlist" }).click();
     await expect(page).toHaveURL(/#\/library\/[a-z]+$/);
   }
-  const bar = page.locator(".undo-bar");
+  const bar = page.locator(".notice-area");
   await expect(bar.getByRole("button", { name: "Undo" })).toHaveCount(2);
   await bar
-    .locator("p", { hasText: "Road trip deleted." })
+    .locator(".notice", { hasText: "Road trip deleted." })
     .getByRole("button", { name: "Undo" })
     .click();
   await expect(bar).toContainText("Road trip is back.");

@@ -1,4 +1,4 @@
-import { api, apiFetch } from "./api";
+import { api, apiFetch, currentSession } from "./api";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Play, Pause, LoaderCircle } from "lucide-react";
@@ -58,7 +58,8 @@ const SHEET_OUT_MS = 200;
 type Controls = {
   /** Play `queue[index]`, then carry on through the queue. */
   play: (queue: Song[], index?: number) => void;
-  playNext: (song: Song) => void;
+  /** One song, or a whole album or playlist in its order. */
+  playNext: (song: Song | Song[]) => void;
   addToQueue: (song: Song) => void;
   playSaved: (track: Track, queue?: Track[], position?: number) => void;
   current: string | null;
@@ -148,14 +149,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       audio.current?.removeAttribute("src");
       queue.current = [];
       cursor.current = -1;
+      // A refill or continuation still on its way belongs to the old queue.
+      radioRequest.current = null;
+      similarRequestRef.current = null;
       setSong(null);
       setExpanded(false);
       setBusy(false);
       if ("mediaSession" in navigator) navigator.mediaSession.metadata = null;
     };
-    const signedOut = () => {
+    // Signed out or expired: the session's own end (below) forgets its
+    // listens; the player stops at once either way.
+    const signedOut = () => stop();
+    const sessionEnded = (event: Event) => {
       stop();
-      forgetListens();
+      forgetListens((event as CustomEvent<string | null>).detail ?? null);
     };
     const signedIn = () => {
       if (restoredQueue && cursor.current === restoredQueue.cursor)
@@ -168,6 +175,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     // Whoever signs in next must never send this account's unsent listens.
     window.addEventListener("music-auth-required", signedOut);
     window.addEventListener("music-signed-out", signedOut);
+    // Every end of a session (expiry, sign-out, another tab's sign-in or
+    // sign-out) clears the shared reads; the player ends with it, before
+    // the next account is read (Codex).
+    window.addEventListener("music-session-cleared", sessionEnded);
     // Listens saved while offline or before the tab closed.
     void flushListens();
     const online = () => void flushListens();
@@ -176,6 +187,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("music-signed-in", signedIn);
       window.removeEventListener("music-auth-required", signedOut);
       window.removeEventListener("music-signed-out", signedOut);
+      window.removeEventListener("music-session-cleared", sessionEnded);
       window.removeEventListener("online", online);
     };
   }, []);
@@ -263,37 +275,62 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ tracks: next.map(songBody) }),
     }).catch(() => undefined);
   }
-  const radioRequest = useRef<Promise<number> | null>(null);
+  /** A request still on its way, with the queue and session it is for. */
+  type Pending = {
+    request: Promise<number>;
+    songs: Song[];
+    generation: number;
+  };
+  /** Only a request for this very queue, in this session, is joined
+   * (Codex): a new queue starts its own. */
+  const joinable = (pending: Pending | null) =>
+    pending &&
+    pending.songs === queue.current &&
+    pending.generation === currentSession()
+      ? pending.request
+      : null;
+  const radioRequest = useRef<Pending | null>(null);
   /** Radio: append the next prepared songs; resolves to how many arrived. */
   function refillRadio(): Promise<number> {
-    if (radioRequest.current) return radioRequest.current;
+    const joined = joinable(radioRequest.current);
+    if (joined) return joined;
     const last = lastRadioSong(queue.current);
     if (!last?.cache_id) return Promise.resolve(0);
-    radioRequest.current = api<{ tracks: Track[] }>(
+    // The refill belongs to this queue in this session (Codex): a stop, a
+    // new queue or another account in the meantime discards it.
+    const songs = queue.current;
+    const generation = currentSession();
+    const request: Promise<number> = api<{ tracks: Track[] }>(
       "/v1/radio?after=" + encodeURIComponent(last.cache_id),
     )
       .then((batch) => {
+        if (queue.current !== songs || currentSession() !== generation)
+          return 0;
         const added = freshRadioSongs(
-          queue.current,
+          songs,
           batch.tracks.map((t) => fromMixTrack(t, true)),
         );
-        queue.current.push(...added);
+        songs.push(...added);
         if (added.length) setQueueVersion((v) => v + 1);
         return added.length;
       })
       .catch(() => 0)
       .finally(() => {
-        radioRequest.current = null;
+        if (radioRequest.current?.request === request)
+          radioRequest.current = null;
       });
-    return radioRequest.current;
+    radioRequest.current = { request, songs, generation };
+    return request;
   }
-  const similarRequestRef = useRef<Promise<number> | null>(null);
+  const similarRequestRef = useRef<Pending | null>(null);
   /** A queue that ended carries on with similar songs (#202); resolves to how
    * many arrived. */
   function continueWithSimilar(): Promise<number> {
-    if (similarRequestRef.current) return similarRequestRef.current;
+    const joined = joinable(similarRequestRef.current);
+    if (joined) return joined;
     const songs = queue.current;
-    similarRequestRef.current = api<{ tracks: Track[] }>(
+    const generation = currentSession();
+    const request: Promise<number> = api<{ tracks: Track[] }>(
       "/v1/radio/continuation",
       {
         method: "POST",
@@ -302,8 +339,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       },
     )
       .then((batch) => {
-        // A new queue or a stop while waiting: these songs belong to no one.
-        if (queue.current !== songs) return 0;
+        // A new queue, a stop or another account while waiting: these
+        // songs belong to no one.
+        if (queue.current !== songs || currentSession() !== generation)
+          return 0;
         const added = freshSimilarSongs(
           songs,
           batch.tracks.map(fromSimilarTrack),
@@ -314,9 +353,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => 0)
       .finally(() => {
-        similarRequestRef.current = null;
+        if (similarRequestRef.current?.request === request)
+          similarRequestRef.current = null;
       });
-    return similarRequestRef.current;
+    similarRequestRef.current = { request, songs, generation };
+    return request;
   }
   /** Skipping a radio or similar song before it counts as a listen steers
    * what comes next. */
@@ -332,7 +373,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   function play(songs: Song[], index = 0) {
     if (!songs[index]) return;
     resumeAt.current = 0;
-    queue.current = songs;
+    // The queue is its own copy: editing Up next never changes the page's
+    // list it came from (Codex, #249).
+    queue.current = [...songs];
     cursor.current = index;
     setQueueVersion((v) => v + 1);
     void load(songs[index]);
@@ -348,9 +391,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       Math.max(0, index),
     );
   }
-  function playNext(s: Song) {
-    if (!song) return play([s]);
-    insertNext(queue.current, cursor.current, s);
+  function playNext(s: Song | Song[]) {
+    const list = Array.isArray(s) ? s : [s];
+    if (!list.length) return;
+    if (!song) return play(list);
+    for (const next of [...list].reverse())
+      insertNext(queue.current, cursor.current, next);
     setQueueVersion((v) => v + 1);
   }
   function addToQueue(s: Song) {
@@ -393,9 +439,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     );
     const next = queue.current[index];
     if (!next) {
-      if (waitsForRadio(queue.current, cursor.current, delta))
-        void refillRadio().then((added) => added && step(delta, action));
-      else if (
+      if (waitsForRadio(queue.current, cursor.current, delta)) {
+        // The waiting Next belongs to this queue in this session too.
+        const songs = queue.current;
+        const at = cursor.current;
+        const generation = currentSession();
+        void refillRadio().then(
+          (added) =>
+            added &&
+            queue.current === songs &&
+            cursor.current === at &&
+            currentSession() === generation &&
+            step(delta, action),
+        );
+      } else if (
         continuesWithSimilar(
           queue.current,
           cursor.current,

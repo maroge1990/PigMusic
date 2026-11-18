@@ -22373,13 +22373,31 @@
               "title": "Allow Repeat",
               "type": "boolean"
             }
+          },
+          {
+            "in": "query",
+            "name": "revision",
+            "required": false,
+            "schema": {
+              "nullable": true,
+              "title": "Revision",
+              "type": "integer"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TrackInput"
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Tracks"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TrackInput"
+                  }
+                ],
+                "title": "Body"
               }
             }
           },

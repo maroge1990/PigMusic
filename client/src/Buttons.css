@@ -28,6 +28,7 @@
 }
 .primary-button,
 .secondary-button,
+.danger-button,
 .small-button,
 .account-section button:not([class]),
 .personal-main form button:not([class]),
@@ -68,6 +69,16 @@
   border-color: var(--hover);
   background: var(--hover);
 }
+/* What can't be undone: Delete for good, Empty Trash, Disable (D-79). */
+.danger-button {
+  border-color: var(--danger);
+  background: var(--danger-fill);
+  color: var(--danger);
+  font-weight: 600;
+}
+.danger-button:hover {
+  background: color-mix(in srgb, var(--danger) 24%, var(--surface));
+}
 .secondary-button:hover,
 .small-button:hover,
 .account-section button:not([class]):hover,
@@ -78,6 +89,7 @@
 }
 .primary-button:disabled,
 .secondary-button:disabled,
+.danger-button:disabled,
 .small-button:disabled {
   opacity: 0.35;
 }

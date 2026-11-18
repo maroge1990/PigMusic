@@ -5,6 +5,7 @@ import { Cover, catalogueArtistCover } from "./Cover";
 import { discoverUrl } from "./navigation";
 import { go } from "./routes";
 import { SongRow } from "./SongRow";
+import { CollectionCard, albumSongs } from "./CollectionMenu";
 import { fromTrack } from "./songs";
 import { warmArtist, whenIdle } from "./prefetch";
 import {
@@ -261,15 +262,18 @@ export function SearchPage({
                   </a>
                 ))}
                 {albums.slice(0, 12).map((a) => (
-                  <a
+                  <CollectionCard
                     key={a.id}
-                    className="album-card"
-                    href={"#/library/album/" + a.id}
+                    kind="album"
+                    title={a.title}
+                    songs={() => albumSongs(a.id)}
                   >
-                    <Cover title={a.title} src={a.cover_url} />
-                    <h3>{a.title}</h3>
-                    <p>{a.artist}</p>
-                  </a>
+                    <a className="album-card" href={"#/library/album/" + a.id}>
+                      <Cover title={a.title} src={a.cover_url} />
+                      <h3>{a.title}</h3>
+                      <p>{a.artist}</p>
+                    </a>
+                  </CollectionCard>
                 ))}
               </div>
             )}
@@ -289,6 +293,7 @@ export function SearchPage({
                     song={fromTrack(t)}
                     queue={all.map((x) => fromTrack(x))}
                     index={i}
+                    page="search"
                   />
                 ))}
               </div>

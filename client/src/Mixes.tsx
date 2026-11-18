@@ -1,24 +1,17 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import {
-  Ellipsis,
-  EyeOff,
-  ListMusic,
-  Play,
-  Plus,
-  Radio,
-  Shuffle,
-  X,
-} from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { ArrowLeft, Play, Radio, Shuffle } from "lucide-react";
 import { api } from "./api";
-import { focusMenuItem, menuKeys } from "./menuKeys";
+import { CollectionCard, useCollectionMenu } from "./CollectionMenu";
 import { shuffled } from "./shuffle";
 import { usePlayer } from "./Player";
 import { SongRow } from "./SongRow";
 import { fromMixTrack, type Song } from "./songs";
 import type { Track } from "./types";
 import "./mixes.css";
-import { SectionHeader } from "./PageHeader";
-import { Loading } from "./EmptyState";
+import { PageHeader, SectionHeader } from "./PageHeader";
+import { InlineError, Loading } from "./EmptyState";
+import { notify, notifyError } from "./notices";
+import { go } from "./routes";
 
 type Mix = {
   id: string;
@@ -189,182 +182,32 @@ function songs(mix: Mix): Song[] {
 const SAVED_NOTICE =
   "Playlist saved. Add songs to your library to keep their audio after this mix leaves rotation.";
 
-async function saveMix(id: string) {
-  await api("/v1/mixes/" + id + "/save", { method: "POST" });
-  window.dispatchEvent(new Event("music-library-changed"));
+/** Save and Hide this edition live only in a mix's menu (D-118). */
+function mixActions(mix: Mix, hidden: () => void) {
+  return {
+    save: () =>
+      void api("/v1/mixes/" + mix.id + "/save", { method: "POST" })
+        .then(() => {
+          notify(SAVED_NOTICE);
+          window.dispatchEvent(new Event("music-library-changed"));
+        })
+        .catch((e) => notifyError((e as Error).message)),
+    hide: () =>
+      void api("/v1/mixes/" + mix.id + "/hide", { method: "POST" })
+        .then(() => {
+          notify(`${mix.title} is hidden until the next daily rotation.`);
+          hidden();
+        })
+        .catch((e) => notifyError((e as Error).message)),
+  };
 }
 
-/** How long a touch must rest on a card before its options open. */
-const LONG_PRESS_MS = 500;
-
-/**
- * A Home mix: a click plays it (#56). Its options (Show songs, Shuffle, Save,
- * Hide) open from the ⋯ button, a right-click, or a long press on touch.
- */
-function MixCard({
-  mix,
-  onPlay,
-  onShow,
-  onSave,
-  onHide,
-  busy,
-}: {
-  mix: Mix;
-  onPlay: (shuffle: boolean) => void;
-  onShow: () => void;
-  onSave: () => void;
-  onHide: () => void;
-  busy: boolean;
-}) {
-  const trigger = useRef<HTMLButtonElement>(null);
-  const popup = useRef<HTMLDivElement>(null);
-  const press = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  // A long press already opened the options; the click that follows is not a play.
-  const swallowClick = useRef(false);
-  const [position, setPosition] = useState<{
-    left: number;
-    top: number;
-  }>({ left: 8, top: 8 });
-  function open(at?: { x: number; y: number }) {
-    const rect = trigger.current!.getBoundingClientRect();
-    const width = Math.min(272, window.innerWidth - 16);
-    const x = at?.x ?? rect.right - width;
-    const y = at?.y ?? rect.bottom + 4;
-    setPosition({
-      left: Math.max(8, Math.min(x, window.innerWidth - width - 8)),
-      top: Math.max(8, Math.min(y, window.innerHeight - 240)),
-    });
-    // A manual popover: an automatic one would be light-dismissed by the very
-    // pointerup that ends a right-click or a long press.
-    if (!popup.current?.matches(":popover-open")) popup.current?.showPopover();
-    setOpen(true);
-    focusMenuItem(popup.current, 0);
-  }
-  function close(refocus = false) {
-    if (popup.current?.matches(":popover-open")) popup.current.hidePopover();
-    setOpen(false);
-    if (refocus) trigger.current?.focus();
-  }
-  const [isOpen, setOpen] = useState(false);
-  useEffect(() => {
-    if (!isOpen) return;
-    const outside = (e: PointerEvent) => {
-      const target = e.target as Node;
-      if (
-        !popup.current?.contains(target) &&
-        !trigger.current?.contains(target)
-      )
-        close();
-    };
-    const escape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close(true);
-    };
-    document.addEventListener("pointerdown", outside, true);
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("pointerdown", outside, true);
-      document.removeEventListener("keydown", escape);
-    };
-  }, [isOpen]);
-  const cancelPress = () => clearTimeout(press.current);
-  useEffect(() => cancelPress, []);
-  const item = (label: string, icon: ReactNode, action: () => void) => (
-    <button
-      role="menuitem"
-      disabled={busy}
-      onClick={() => {
-        close();
-        action();
-      }}
-    >
-      <span>{label}</span>
-      {icon}
-    </button>
-  );
-  const empty = !mix.tracks.length;
-  return (
-    <div
-      className="mix-card-wrap"
-      onContextMenu={(e) => {
-        e.preventDefault();
-        cancelPress();
-        open({ x: e.clientX, y: e.clientY });
-      }}
-    >
-      <button
-        className="album-card mix-card"
-        aria-label={`Play ${mix.title}`}
-        title="Right-click or press and hold for more"
-        disabled={empty}
-        onPointerDown={(e) => {
-          if (e.pointerType === "mouse") return;
-          swallowClick.current = false;
-          const at = { x: e.clientX, y: e.clientY };
-          cancelPress();
-          press.current = setTimeout(() => {
-            swallowClick.current = true;
-            open(at);
-          }, LONG_PRESS_MS);
-        }}
-        onPointerUp={cancelPress}
-        onPointerLeave={cancelPress}
-        onPointerCancel={cancelPress}
-        onClick={() => {
-          if (swallowClick.current) {
-            swallowClick.current = false;
-            return;
-          }
-          onPlay(false);
-        }}
-      >
-        <MixArtwork kind={mix.kind} title={mix.title} />
-        <strong>{mix.title}</strong>
-        <span>
-          {[...new Set(mix.tracks.map((t) => t.artist))]
-            .slice(0, 3)
-            .join(" · ")}
-        </span>
-        <small>
-          {mix.tracks.length} {mix.tracks.length === 1 ? "song" : "songs"}
-        </small>
-      </button>
-      <button
-        ref={trigger}
-        className="song-more mix-more"
-        aria-label={`Options for ${mix.title}`}
-        aria-haspopup="menu"
-        aria-expanded={isOpen}
-        onClick={() => (isOpen ? close() : open())}
-      >
-        <Ellipsis size={20} />
-      </button>
-      <div
-        ref={popup}
-        popover="manual"
-        className="song-menu pig-glass"
-        role="menu"
-        aria-label={mix.title}
-        style={position}
-        onKeyDown={menuKeys}
-      >
-        <div className="song-menu-group">
-          {item("Show songs", <ListMusic size={18} />, onShow)}
-          {!empty && item("Shuffle", <Shuffle size={18} />, () => onPlay(true))}
-        </div>
-        <div className="song-menu-group">
-          {item("Save this edition", <Plus size={18} />, onSave)}
-          {item("Hide this edition", <EyeOff size={18} />, onHide)}
-        </div>
-      </div>
-    </div>
-  );
-}
+/** Where a mix's page lives. */
+export const mixUrl = (id: string) => "/home/mix/" + encodeURIComponent(id);
 
 export function Mixes() {
   const [feed, setFeed] = useState<MixFeed | null>(null);
-  const [selected, setSelected] = useState<Mix | null>(null);
   const [error, setError] = useState("");
-  const [revision, setRevision] = useState(0);
   const player = usePlayer();
   const [starting, setStarting] = useState(false);
   function startRadio() {
@@ -378,8 +221,6 @@ export function Mixes() {
       .catch((e) => setError(e.message))
       .finally(() => setStarting(false));
   }
-  const [notice, setNotice] = useState("");
-  const [busy, setBusy] = useState(false);
   function dropEdition(id: string) {
     setFeed(
       (value) =>
@@ -388,30 +229,6 @@ export function Mixes() {
           mixes: value.mixes.filter((mix) => mix.id !== id),
         },
     );
-  }
-  async function save(mix: Mix) {
-    setBusy(true);
-    setNotice("");
-    try {
-      await saveMix(mix.id);
-      setNotice(SAVED_NOTICE);
-    } catch (e) {
-      setNotice((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function hideEdition(mix: Mix) {
-    setBusy(true);
-    setNotice("");
-    try {
-      await api("/v1/mixes/" + mix.id + "/hide", { method: "POST" });
-      dropEdition(mix.id);
-    } catch (e) {
-      setNotice((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
   }
   useEffect(() => {
     const controller = new AbortController();
@@ -441,7 +258,7 @@ export function Mixes() {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [revision]);
+  }, []);
   return (
     <section className="home-section" aria-label="Your mixes">
       <SectionHeader title="Your mixes" />
@@ -462,19 +279,33 @@ export function Mixes() {
             </button>
           )}
           {feed.mixes.map((mix) => (
-            <MixCard
+            <CollectionCard
               key={mix.id}
-              mix={mix}
-              onPlay={(shuffle) => {
-                const queue = songs(mix);
-                if (queue.length)
-                  player.play(shuffle ? shuffled(queue) : queue);
-              }}
-              onShow={() => setSelected(mix)}
-              onSave={() => void save(mix)}
-              onHide={() => void hideEdition(mix)}
-              busy={busy}
-            />
+              kind="mix"
+              title={mix.title}
+              className="mix-card-wrap"
+              songs={async () => songs(mix)}
+              mix={mixActions(mix, () => dropEdition(mix.id))}
+            >
+              {/* A mix opens as its page, like an album (D-118). */}
+              <a
+                className="album-card mix-card"
+                href={"#" + mixUrl(mix.id)}
+                title="Right-click or press and hold for more"
+              >
+                <MixArtwork kind={mix.kind} title={mix.title} />
+                <strong>{mix.title}</strong>
+                <span>
+                  {[...new Set(mix.tracks.map((t) => t.artist))]
+                    .slice(0, 3)
+                    .join(" · ")}
+                </span>
+                <small>
+                  {mix.tracks.length}{" "}
+                  {mix.tracks.length === 1 ? "song" : "songs"}
+                </small>
+              </a>
+            </CollectionCard>
           ))}
         </div>
       ) : !feed && !error ? (
@@ -487,47 +318,62 @@ export function Mixes() {
               : "Your mixes appear as your library grows. Discoveries are prepared ahead of playback.")}
         </p>
       )}
-      {notice && <p role="status">{notice}</p>}
       {feed?.preparing && !!feed.mixes.length && (
         <small role="status">
           Preparing more mixes. These are ready to play.
         </small>
       )}
-      {selected && (
-        <MixDetails
-          key={selected.id}
-          mix={selected}
-          onClose={() => setSelected(null)}
-          onChange={() => setRevision((value) => value + 1)}
-          onHide={() => {
-            dropEdition(selected.id);
-            setSelected(null);
-          }}
-        />
-      )}
     </section>
   );
 }
 
-function MixDetails({
-  mix,
-  onClose,
-  onChange,
-  onHide,
-}: {
-  mix: Mix;
-  onClose: () => void;
-  onChange: () => void;
-  onHide: () => void;
-}) {
-  const dialog = useRef<HTMLDialogElement>(null);
+/** A mix's own page (#249): Play, Shuffle and the mix's menu over its songs. */
+export function MixPage({ id }: { id: string }) {
+  const [mix, setMix] = useState<Mix | null | undefined>(undefined);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const controller = new AbortController();
+    void api<MixFeed>("/v1/home/mixes", { signal: controller.signal })
+      .then((feed) => setMix(feed.mixes.find((m) => m.id === id) ?? null))
+      .catch((e) => {
+        if (!controller.signal.aborted) setError(e.message);
+      });
+    return () => controller.abort();
+  }, [id]);
+  const back = (
+    <a className="text-button back-link" href="#/home">
+      <ArrowLeft size={16} aria-hidden="true" /> Home
+    </a>
+  );
+  if (error || mix === null)
+    return (
+      <main className="personal-main">
+        {back}
+        <InlineError>
+          {error || "This mix has left rotation. Pick another from Home."}
+        </InlineError>
+      </main>
+    );
+  if (!mix)
+    return (
+      <main className="personal-main">
+        {back}
+        <Loading>Loading your mix…</Loading>
+      </main>
+    );
+  return <MixDetails key={mix.id} mix={mix} back={back} />;
+}
+
+function MixDetails({ mix, back }: { mix: Mix; back: ReactNode }) {
   const player = usePlayer();
   const [queue, setQueue] = useState(() => songs(mix));
-  const [notice, setNotice] = useState("");
-  const [saving, setSaving] = useState(false);
-  useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
+  const { menu, parts } = useCollectionMenu({
+    kind: "mix",
+    title: mix.title,
+    songs: async () => queue,
+    mix: mixActions(mix, () => go("/home")),
+    buttonClass: "round-action",
+  });
   async function hide(song: Song) {
     try {
       await api("/v1/mixes/hide", {
@@ -536,75 +382,43 @@ function MixDetails({
         body: JSON.stringify({ track_id: song.cache_id }),
       });
       setQueue((current) => current.filter((t) => t.key !== song.key));
-      setNotice("Hidden from future mixes.");
-      onChange();
+      notify("Hidden from future mixes.");
     } catch (e) {
-      setNotice((e as Error).message);
+      notifyError((e as Error).message);
     }
   }
   return (
-    <dialog
-      ref={dialog}
-      className="mix-dialog"
-      onClose={onClose}
-      aria-labelledby="mix-title"
-    >
-      <button
-        className="mix-close"
-        aria-label="Close mix"
-        onClick={() => dialog.current?.close()}
-      >
-        <X size={20} />
-      </button>
-      <div className="mix-heading">
-        <MixArtwork kind={mix.kind} title={mix.title} />
-        <div>
-          <small>{mix.day}</small>
-          <h2 id="mix-title">{mix.title}</h2>
-          <p>{mix.reason}</p>
-        </div>
-      </div>
-      <div className="mix-actions">
+    <main className="personal-main mix-page" {...menu.target}>
+      {back}
+      <PageHeader
+        cover={
+          <div className="cover">
+            <MixArtwork kind={mix.kind} title={mix.title} />
+          </div>
+        }
+        eyebrow={mix.day}
+        title={mix.title}
+        subtitle={mix.reason}
+      />
+      <div className="release-actions">
         <button
           className="primary-button"
           disabled={!queue.length}
-          onClick={() => {
-            player.play(queue);
-            dialog.current?.close();
-          }}
+          onClick={() => player.play(queue, 0)}
         >
-          <Play size={16} /> Play mix
+          <Play size={16} fill="currentColor" aria-hidden="true" /> Play
         </button>
         <button
-          disabled={saving}
-          onClick={() => {
-            setSaving(true);
-            void saveMix(mix.id)
-              .then(() => setNotice(SAVED_NOTICE))
-              .catch((e) => setNotice(e.message))
-              .finally(() => setSaving(false));
-          }}
+          className="round-action"
+          aria-label="Shuffle"
+          title="Shuffle"
+          disabled={!queue.length}
+          onClick={() => player.play(shuffled(queue), 0)}
         >
-          Save this edition
+          <Shuffle size={18} aria-hidden="true" />
         </button>
+        {parts}
       </div>
-      <details className="mix-options">
-        <summary>Mix options</summary>
-        <p>Hide this edition until the next daily rotation.</p>
-        <button
-          disabled={saving}
-          onClick={() => {
-            setSaving(true);
-            void api("/v1/mixes/" + mix.id + "/hide", { method: "POST" })
-              .then(onHide)
-              .catch((e) => setNotice(e.message))
-              .finally(() => setSaving(false));
-          }}
-        >
-          Hide this edition
-        </button>
-      </details>
-      {notice && <p role="status">{notice}</p>}
       <div className="song-list">
         {queue.map((song, index) => (
           <SongRow
@@ -612,14 +426,11 @@ function MixDetails({
             song={song}
             queue={queue}
             index={index}
-            menu={
-              <button role="menuitem" onClick={() => void hide(song)}>
-                Hide from mixes
-              </button>
-            }
+            page="mix"
+            onHide={() => void hide(song)}
           />
         ))}
       </div>
-    </dialog>
+    </main>
   );
 }

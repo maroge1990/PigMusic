@@ -24,6 +24,17 @@ READY = "/api/health/ready"
 FORWARDED = ("forwarded", "x-forwarded-for", "x-real-ip", "cf-connecting-ip")
 
 
+def named_logout(request):
+    """A logout naming its session (the web, #250): no answer to it, success
+    or error, may set the cookie, which can belong to a newer sign-in by
+    the time it arrives."""
+    return (
+        request.method == "POST"
+        and request.url.path == "/api/v1/auth/logout"
+        and request.headers.get("x-pig-expected-session") is not None
+    )
+
+
 def local_probe(request):
     """A direct loopback connection, not one relayed by a proxy."""
     client = request.scope.get("client")
@@ -34,6 +45,9 @@ def local_probe(request):
     )
 
 
+# The words for an error code the guard raises, where the code alone would
+# not say what happened.
+MESSAGES = {"session_changed": "This was started by another sign-in."}
 PUBLIC = frozenset(
     {
         ("GET", "/api/health"),
@@ -177,10 +191,23 @@ class Security:
                 or request.headers.get("x-pig-request") != "1"
             ):
                 raise HTTPException(403, "request_header_required")
+        # Web tabs share one cookie: a write names the session it was
+        # started under, and one started by another sign-in changes nothing
+        # (#250). Without the header (the native apps) nothing changes.
+        expected = request.headers.get("x-pig-expected-session")
+        if (
+            expected is not None
+            and request.method not in {"GET", "HEAD", "OPTIONS"}
+            and not hmac.compare_digest(
+                expected.encode(), str(session["public_id"]).encode()
+            )
+        ):
+            raise HTTPException(409, "session_changed")
         if (
             kind == "web"
             and token
             and self.auth.now() - session["last_seen_at"] >= 3600
+            and not named_logout(request)
         ):
             request.state.refresh_cookie = token
         # Members only reach personal-library routes and their own media. The

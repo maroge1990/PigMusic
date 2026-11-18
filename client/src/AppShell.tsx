@@ -1,5 +1,10 @@
+import { drainPending, reopenDeferred } from "./deferred";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { UndoBar } from "./UndoBar";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { setSessionId } from "./sessionId";
+import { notifyError } from "./notices";
+import { openSessionChannel } from "./sessionChannel";
+import { NoticeArea } from "./Notice";
 import {
   CircleArrowDown,
   House,
@@ -59,6 +64,8 @@ const sections: { id: Section; label: string; icon: LucideIcon }[] = [
   { id: "admin", label: "Admin", icon: ShieldCheck },
 ];
 
+/** This tab's line to the other PigMusic tabs (sign-in changes). */
+const tabs = openSessionChannel();
 export function AppShell() {
   const [user, setUser] = useState<Person | null>(null);
   // This tab's session id, to end it later if signing out happens offline.
@@ -170,9 +177,16 @@ export function AppShell() {
     return () => window.removeEventListener("hashchange", changed);
   }, []);
 
+  /** Each read of who is signed in; a session change starts a new one. */
+  const refreshes = useRef(0);
   async function refresh() {
+    // Only the latest read of who is signed in counts (Codex): one begun
+    // before another session change is ignored.
+    const run = ++refreshes.current;
+    const stale = () => run !== refreshes.current;
     try {
       const state = await api<{ setup_required: boolean }>("/v1/setup/owner");
+      if (stale()) return;
       setFirstRun(state.setup_required);
       if (state.setup_required) {
         setUser(null);
@@ -185,32 +199,65 @@ export function AppShell() {
         return;
       }
       const me = await api<Person & { session_id?: string }>("/v1/me");
+      if (stale()) return;
       session.current = me.session_id ?? null;
+      // Every write names this session; the server refuses it if another
+      // sign-in holds the cookie by the time it arrives.
+      setSessionId(session.current);
       setUser(me);
       setError("");
     } catch (e) {
+      if (stale()) return;
       setUser(null);
       if ((e as ApiError).code === "setup_required")
         setError("The administrator needs to finish the first account setup.");
       else if ((e as ApiError).code !== "authentication_required")
         setError((e as Error).message);
     } finally {
-      setReady(true);
+      if (!stale()) setReady(true);
     }
+  }
+
+  /**
+   * The one teardown for any lost or changed session, this tab's or
+   * another's (Codex): exactly what signing out does here. The shared
+   * reads, questions, deferred writes, notices, playback, queue and unsent
+   * listens go (clearSessionReads tells each), and the member views unmount
+   * before the next account is read.
+   */
+  function endSession() {
+    session.current = null;
+    clearSessionReads();
+    setUser(null);
   }
 
   useEffect(() => {
     void refresh();
-    const expired = () => {
-      setUser(null);
-      clearSessionReads();
-    };
+    const expired = () => endSession();
     const forbidden = () => setDenied(true);
     window.addEventListener("music-auth-required", expired);
     window.addEventListener("music-forbidden", forbidden);
+    // Another tab signed in or out: the shared cookie changed, so this
+    // tab's session is gone. Drop its questions and deferred writes, then
+    // read who is signed in now.
+    const lost = () => {
+      endSession();
+      setReady(false);
+      void refresh();
+    };
+    const stopListening = tabs.listen(lost);
+    // The server refused a write started under an earlier sign-in.
+    const changed = (event: Event) => {
+      lost();
+      // After the session's notices are cleared, so this one stays.
+      notifyError(String((event as CustomEvent).detail));
+    };
+    window.addEventListener("music-session-changed", changed);
     return () => {
       window.removeEventListener("music-auth-required", expired);
       window.removeEventListener("music-forbidden", forbidden);
+      window.removeEventListener("music-session-changed", changed);
+      stopListening();
     };
   }, []);
 
@@ -223,12 +270,23 @@ export function AppShell() {
   }, [user, route]);
   useEffect(() => setDenied(false), [user, route]);
 
-  async function signOut() {
-    // The server may be unreachable: this device is cleared anyway (#80).
-    if (!(await signOutSession(api, session.current)))
+  /** One sign-out at a time: a second click joins the first. */
+  const signingOut = useRef<Promise<void> | null>(null);
+  function signOut() {
+    signingOut.current ??= signOutNow().finally(() => {
+      signingOut.current = null;
+      reopenDeferred();
+    });
+    return signingOut.current;
+  }
+  async function signOutNow() {
+    // The server may be unreachable or slow: this device is cleared anyway,
+    // within a few seconds (#80). The logout names the session this click
+    // was made under.
+    if (!(await signOutSession(api, session.current, undefined, drainPending)))
       setError(OFFLINE_SIGN_OUT);
-    session.current = null;
-    clearSessionReads();
+    endSession();
+    tabs.announce("signed-out");
     window.dispatchEvent(new Event("music-signed-out"));
     setUser(null);
     location.hash = "/home";
@@ -246,6 +304,7 @@ export function AppShell() {
       <FirstRun
         complete={() => {
           setFirstRun(false);
+          tabs.announce("signed-in");
           void refresh();
         }}
       />
@@ -257,6 +316,7 @@ export function AppShell() {
         signedIn={() => {
           signedInAgain();
           setHint(installHintPending());
+          tabs.announce("signed-in");
           void refresh();
         }}
         initialError={error}
@@ -340,7 +400,8 @@ export function AppShell() {
             </button>
           </div>
         )}
-        <UndoBar />
+        <NoticeArea />
+        <ConfirmDialog />
         {(error || denied) && (
           <p className="error-banner" role="alert">
             {error || "You do not have access to that action."}

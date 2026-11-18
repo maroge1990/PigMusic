@@ -1,3 +1,6 @@
+import { sessionHeader } from "./sessionId";
+import { askToConfirm } from "./confirmDialog";
+import { notify, notifyError } from "./notices";
 import { apiFetch, isUnconfirmed, writeFailure } from "./api";
 import { formatCount, formatDateTime } from "./format";
 import { useEffect, useState } from "react";
@@ -20,7 +23,7 @@ type Purge = {
 const megabytes = (bytes: number) =>
   formatCount(Math.max(1, Math.round(bytes / 1_000_000))) + " MB";
 
-export function RemovedMusic({ notify }: { notify: (s: string) => void }) {
+export function RemovedMusic() {
   const [items, setItems] = useState<
     {
       id: string;
@@ -58,7 +61,7 @@ export function RemovedMusic({ notify }: { notify: (s: string) => void }) {
       window.dispatchEvent(new Event("music-library-changed"));
       notify("Song restored.");
     } catch (e) {
-      notify((e as Error).message);
+      notifyError((e as Error).message);
       // It may have come back: show Trash as it is now.
       if (isUnconfirmed(e)) {
         setPurge(null);
@@ -77,23 +80,27 @@ export function RemovedMusic({ notify }: { notify: (s: string) => void }) {
       if (!r.ok) throw new Error("Trash can't be read. Check the library.");
       setPurge(await r.json());
     } catch (e) {
-      notify((e as Error).message);
+      notifyError((e as Error).message);
     } finally {
       setBusy(false);
     }
   }
   async function deleteForGood(plan: Purge) {
-    if (
-      !confirm(
-        `Delete ${plan.items.length} songs from Trash for good? They can't be restored.`,
-      )
-    )
-      return;
+    const session = await askToConfirm({
+      title: `Delete ${plan.items.length} songs from Trash for good?`,
+      body: "Their files are deleted from the server and can't be restored.",
+      action: "Delete for good",
+      destructive: true,
+    });
+    if (!session) return;
     setBusy(true);
     try {
       const r = await apiFetch("/api/v1/admin/library/trash/purge", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...sessionHeader(session),
+        },
         body: JSON.stringify({
           days: plan.days,
           fingerprint: plan.fingerprint,
@@ -113,7 +120,7 @@ export function RemovedMusic({ notify }: { notify: (s: string) => void }) {
       await refresh();
       setPurge(null);
     } catch (e) {
-      notify((e as Error).message);
+      notifyError((e as Error).message);
       setPurge(null);
       // Songs may have been deleted: show what Trash holds now.
       if (isUnconfirmed(e)) void refresh().catch(() => {});
@@ -194,7 +201,7 @@ export function RemovedMusic({ notify }: { notify: (s: string) => void }) {
             </div>
           ))}
           <button
-            className="secondary-button"
+            className="danger-button"
             disabled={busy}
             onClick={() => void deleteForGood(purge)}
           >

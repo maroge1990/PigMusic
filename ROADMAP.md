@@ -25,7 +25,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 - **Waiting on Mark's device check:** build 1094's artwork and notices (#168, #245, #239), then build 1135's words and
   icons (#246); #229 song menu, #219 Watch background delivery, #232 to #235.
 - **Decisions:** D-115 to D-119 today. Next: D-120.
-- **Mac:** at 192.168.1.35 (address changes; match the host key). PigMusic's build files are cleaned off after each use
+- **Mac:** reachable as `ssh mac` (its address changes; match the host key). PigMusic's build files are cleaned off after each use
   (D-119); about 25 GB free. Mark's PigTV project shares the simulators.
 
 ## Now

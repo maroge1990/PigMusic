@@ -140,6 +140,13 @@ export async function mockApi(
         downloads_enabled: true,
       });
     if (path === "/v1/playlists") return json(route, { playlists: [] });
+    // Every album and artist page reads it; a failed read shows an error.
+    if (path === "/v1/quality")
+      return json(route, {
+        preferences: [],
+        options: [],
+        household_default: "",
+      });
     if (path === "/v1/home/mixes")
       return json(route, { mixes: [], preparing: false });
     if (path === "/v1/admin/mixes")

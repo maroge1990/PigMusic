@@ -1,3 +1,10 @@
+import { PUBLIC_WRITES } from "./publicWrites";
+import {
+  SESSION_HEADER,
+  SESSION_UNKNOWN,
+  expectedSession,
+  setSessionId,
+} from "./sessionId";
 /** Shared transport: deduplicate concurrent reads, clone responses for callers,
  * and invalidate reads after successful mutations. No browser credential cache.
  */
@@ -32,20 +39,57 @@ export function sessionMap<K, V>() {
 }
 let artworkRevision: number | undefined;
 
+/** A request; `anySession` sends a write without naming a session (ending
+ * an old session by its id after an offline sign-out). */
+export type ApiInit = RequestInit & { anySession?: boolean };
+
 export async function apiFetch(
   path: string,
-  options?: RequestInit,
+  init?: ApiInit,
 ): Promise<Response> {
+  const { anySession, ...rest } = init ?? {};
+  let options: RequestInit | undefined = init && rest;
   // U01-4: only the versioned API exists; an old path is a client bug.
   if (!path.startsWith("/api/v1/"))
     throw new Error(`Unversioned API path ${path.split("?")[0]}`);
   const method = options?.method?.toUpperCase() || "GET";
   const headers = new Headers(options?.headers);
-  if (method !== "GET" && method !== "HEAD") headers.set("X-Pig-Request", "1");
+  if (method !== "GET" && method !== "HEAD") {
+    headers.set("X-Pig-Request", "1");
+    // Every write names the session it was started under (#250).
+    if (
+      !headers.has(SESSION_HEADER) &&
+      !anySession &&
+      // Writes the server takes before sign-in name no session.
+      !PUBLIC_WRITES.has(`${method} ${path.split("?")[0]}`)
+    ) {
+      const session = expectedSession();
+      if (!session)
+        throw new ApiError(SESSION_UNKNOWN, "session_unknown", {}, "request");
+      headers.set(SESSION_HEADER, session);
+    }
+  }
   options = { ...options, headers, credentials: "same-origin" };
 
   if (method !== "GET" || options?.signal) {
+    // The session this request began in: a late refusal for an earlier one
+    // must not end the session signed in now (Codex).
+    const generation = sessionGeneration;
     const response = await readResponse(path, options);
+    if (response.status === 409)
+      // Another sign-in holds the cookie now: the write was refused unmade.
+      void response
+        .clone()
+        .json()
+        .then(
+          (body) =>
+            body?.code === "session_changed" &&
+            generation === sessionGeneration &&
+            window.dispatchEvent(
+              new CustomEvent("music-session-changed", { detail: body.detail }),
+            ),
+          () => {},
+        );
     if (
       response.ok &&
       method !== "GET" &&
@@ -134,6 +178,8 @@ export class ApiError extends Error {
   public code: string;
   public body: Record<string, unknown>;
   public kind: FailureKind;
+  /** The HTTP status, when the server or a proxy answered. */
+  public status?: number;
   constructor(
     message: string,
     code: string,
@@ -171,7 +217,7 @@ const accountErrors: Record<string, string> = {
   weak_password: "Choose a password between 12 and 256 characters.",
 };
 
-export async function api<T>(path: string, options?: RequestInit): Promise<T> {
+export async function api<T>(path: string, options?: ApiInit): Promise<T> {
   const response = await apiFetch("/api" + path, options);
   if (!response.ok)
     throw await responseError(
@@ -211,7 +257,9 @@ export async function responseError(
         ? `${SERVER_ERROR_MESSAGE} Reference ${id.slice(0, 8)}`
         : SERVER_ERROR_MESSAGE;
   }
-  return new ApiError(message, code, details, kind);
+  const error = new ApiError(message, code, details, kind);
+  error.status = response.status;
+  return error;
 }
 
 /** The error for a failed write sent with `apiFetch` (#239). Only a refusal
@@ -307,7 +355,13 @@ export function clearSessionReads() {
   cataloguePages.clear();
   for (const map of sessionMaps) map.clear();
   ++sessionGeneration;
-  window.dispatchEvent(new Event("music-session-cleared"));
+  // The session that ended: what belongs only to it can go with it.
+  const ended = expectedSession();
+  // Until /v1/me answers again, no write can say whose it is.
+  setSessionId(null);
+  window.dispatchEvent(
+    new CustomEvent("music-session-cleared", { detail: ended }),
+  );
 }
 
 const BUSY_RETRIES = 2;

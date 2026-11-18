@@ -191,6 +191,25 @@ yt-dlp is pinned in the image and used only by the YouTube instant-listen trial 
 
 ## TestFlight
 
+TestFlight builds come from Xcode Cloud (D-119). Its workflow "TestFlight" archives scheme **PigMusic** (with the
+Watch app and share extension) and sends it to internal testing whenever a branch whose name starts `testflight-` is
+pushed; tags and `main` never build. Push the commit to ship as a new branch, then watch the build in App Store
+Connect (Xcode Cloud) or Xcode's Report navigator:
+
+```sh
+git push origin <commit>:refs/heads/testflight-YYYYMMDD-bN
+```
+
+Xcode Cloud numbers its builds itself, from 2000 up. `swift/ci_scripts/ci_post_clone.sh` trusts the OpenAPI generator
+plugin and macros before the build. Workflow settings are changed only by Mark in Xcode (Integrate → Manage
+Workflows). Delete a `testflight-*` branch once its build is on TestFlight.
+
+### Fallback: the Mac script
+
+Only if Xcode Cloud is unavailable. Its build number is the commit count (about 1,150 in Nov 2026), below Xcode
+Cloud's 2000+, and App Store Connect refuses a lower build number for the same version, so bump the marketing version
+(0.2.0) before using it.
+
 `scripts/testflight.sh` archives the iPhone app (with its Watch app and share extension) and uploads it, run on the
 Mac's own git clone `~/pigmusic-release` over plain SSH: no keychain password. The archive is unsigned, then each
 bundle gets a local ad hoc signature holding its entitlements (without it the App Group is lost); the export

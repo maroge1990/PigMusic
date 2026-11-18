@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Play, ArrowLeft, Plus } from "lucide-react";
 import { api, apiFetch, detailOr, writeFailure } from "./api";
 import { defer, isPending } from "./deferred";
-import { offerUndo } from "./UndoBar";
+import { notify, offerUndo } from "./notices";
 import { formatCount } from "./format";
 import { PageHeader } from "./PageHeader";
 import { PersonalQuality } from "./PersonalQuality";
@@ -28,12 +28,6 @@ import type { Playlist, PlaylistSummary } from "./libraryTypes";
 import { LibrarySongs } from "./LibrarySongs";
 import { ArtistAlbums } from "./ArtistAlbums";
 import { PlaylistOptions } from "./PlaylistOptions";
-import {
-  RemovalDialog,
-  UndoRemoval,
-  type Removal,
-  type RemovalPreview,
-} from "./RemoveFromLibrary";
 import { go, type Route } from "./routes";
 import { OwnerAlbumTools, OwnerArtistTools } from "./OwnerTools";
 import { InlineError, Loading } from "./EmptyState";
@@ -114,12 +108,7 @@ export function PersonalLibrary({
   const openRoute = useRef("");
   const [playlists, setPlaylists] = useState<PlaylistSummary[]>([]);
   const [favouriteList, setFavouriteList] = useState<Playlist | null>(null);
-  const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const [removal, setRemoval] = useState<Removal | null>(null);
-  const [undo, setUndo] = useState<{ id: string; undo_until: number } | null>(
-    null,
-  );
   const player = usePlayer();
   /** Only the latest refresh may apply its answers (#97). */
   const refreshes = useRef(0);
@@ -206,19 +195,12 @@ export function PersonalLibrary({
       .querySelector(".personal-tabs [aria-current]")
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [tab, !!library]);
-  useEffect(() => {
-    if (!undo) return;
-    const timer = setTimeout(
-      () => setUndo(null),
-      Math.max(0, undo.undo_until * 1000 - Date.now()),
-    );
-    return () => clearTimeout(timer);
-  }, [undo]);
-  async function action(fn: () => Promise<unknown>, message = "Saved") {
+  /** Runs a change and says it worked; an offered Undo says so itself. */
+  async function action(fn: () => Promise<unknown>, message?: string) {
     setError("");
     try {
       await fn();
-      setNotice(message);
+      if (message) notify(message);
       await refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -358,18 +340,6 @@ export function PersonalLibrary({
         setError((e as Error).message);
     }
   }
-  async function preview(ids: string[]) {
-    try {
-      const data = await api<RemovalPreview>("/v1/library/removal-preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ track_ids: ids }),
-      });
-      setRemoval({ preview: data, ids });
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
   function songs(tracks: Track[], playlist?: Playlist) {
     return (
       <LibrarySongs
@@ -379,7 +349,12 @@ export function PersonalLibrary({
         cover={detail?.cover}
         albumPage={detail?.quality?.scope === "album"}
         artistName={detail?.artist?.name}
-        remove={(id) => void preview([id])}
+        page={searching ? "search" : undefined}
+        onRemoved={() => {
+          // Leave the page the songs were removed from, address too (#97).
+          if (openRoute.current) backToLibrary();
+          else setDetail(null);
+        }}
         moveUp={(playlist, entry) =>
           void action(async () => {
             await api(`/v1/playlists/${playlist.id}`, {
@@ -399,7 +374,7 @@ export function PersonalLibrary({
               }),
             });
             await openPlaylist(playlist.id);
-          })
+          }, "Moved up")
         }
         removeFromPlaylist={(playlist, entry) =>
           void action(async () => {
@@ -408,7 +383,7 @@ export function PersonalLibrary({
               { method: "DELETE" },
             );
             await openPlaylist(playlist.id);
-          })
+          }, "Removed from playlist")
         }
       />
     );
@@ -423,12 +398,10 @@ export function PersonalLibrary({
             // Return to the results that opened this artist, query included.
             history.length > 1 ? history.back() : go("/search")
           }
-          notify={setNotice}
           initialRelease={catalogue.release}
           initialGroup={catalogue.group}
           owner={owner}
         />
-        {notice && <p role="status">{notice}</p>}
       </main>
     );
   if (!library)
@@ -501,20 +474,6 @@ export function PersonalLibrary({
         />
       )}
       {error && <InlineError>{error}</InlineError>}
-      {notice && <p role="status">{notice}</p>}
-      {undo && (
-        <UndoRemoval
-          undo={() =>
-            void action(async () => {
-              await api(`/v1/library/removals/${undo.id}/undo`, {
-                method: "POST",
-              });
-              setUndo(null);
-              backToLibrary();
-            }, "Restored")
-          }
-        />
-      )}
       {searching ? (
         <SearchPage
           query={route.params.get("q") || ""}
@@ -605,7 +564,7 @@ export function PersonalLibrary({
                     body: JSON.stringify({ revision: p.revision, name }),
                   });
                   await openPlaylist(p.id);
-                })
+                }, "Playlist renamed")
               }
               remove={() => {
                 // Leaves at once; sent after the Undo time (D-79, #183).
@@ -622,6 +581,8 @@ export function PersonalLibrary({
                       );
                   }),
                 );
+                // Refused (signing out): the playlist stays as it was.
+                if (!pending) return;
                 setPlaylists((old) => old.filter((v) => v.id !== p.id));
                 backToLibrary();
                 offerUndo(
@@ -671,32 +632,6 @@ export function PersonalLibrary({
             )
           }
           refresh={refresh}
-        />
-      )}
-      {removal && (
-        <RemovalDialog
-          removal={removal}
-          cancel={() => setRemoval(null)}
-          confirm={() =>
-            void action(async () => {
-              const r = await api<{ id: string; undo_until: number }>(
-                "/v1/library/remove",
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    track_ids: removal.ids,
-                    confirmation: removal.preview.confirmation,
-                  }),
-                },
-              );
-              setUndo(r);
-              setRemoval(null);
-              // Leave the page the songs were removed from, address too (#97).
-              if (openRoute.current) backToLibrary();
-              else setDetail(null);
-            }, "Removed from your library")
-          }
         />
       )}
     </main>

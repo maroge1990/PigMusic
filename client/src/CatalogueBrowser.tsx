@@ -24,6 +24,7 @@ import { ArtistPopular } from "./ArtistPopular";
 import { MusicLink } from "./MusicLink";
 import { mergePage } from "./discography";
 import { ArtistAcquisition } from "./ArtistAcquisition";
+import { notify } from "./notices";
 import { OwnerPanel } from "./OwnerTools";
 import { FollowArtist } from "./FollowArtist";
 import { ArtistHero } from "./ArtistHero";
@@ -150,14 +151,12 @@ function addedMessage(result: AddResult) {
 export function CatalogueBrowser({
   artist,
   close,
-  notify,
   initialRelease,
   initialGroup,
   owner = false,
 }: {
   artist: { id: string; name: string };
   close: () => void;
-  notify: (text: string) => void;
   initialRelease?: string;
   initialGroup?: string;
   owner?: boolean;
@@ -816,7 +815,7 @@ export function CatalogueBrowser({
       )}
       {owner && !group && (
         <OwnerPanel label="artist monitoring">
-          <ArtistAcquisition id={artist.id} notify={notify} />
+          <ArtistAcquisition id={artist.id} />
         </OwnerPanel>
       )}
     </section>

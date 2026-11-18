@@ -518,18 +518,26 @@ def personal_router(store, artist_jobs, recovery, mixes=None):
 
     @router.post("/playlists/{playlist_id}/songs", response_model=PlaylistDTO)
     async def add_song(
-        playlist_id: str, body: TrackInput, request: Request, allow_repeat: bool = False
+        playlist_id: str,
+        # One song, or several appended together, all or none (#249).
+        body: Tracks | TrackInput,
+        request: Request,
+        allow_repeat: bool = False,
+        # The revision the client expects; refused (409) if it has moved.
+        revision: int | None = None,
     ):
+        songs = body.tracks if isinstance(body, Tracks) else [body]
         try:
             return playlist_dto(
                 await asyncio.to_thread(
-                    Playlists(store, identity(request)).add,
+                    Playlists(store, identity(request)).add_many,
                     playlist_id,
-                    body.model_dump(exclude_none=True),
+                    [song.model_dump(exclude_none=True) for song in songs],
                     allow_repeat=allow_repeat,
+                    revision=revision,
                 )
             )
-        except PlaylistFull as exc:
+        except (PlaylistFull, PlaylistConflict) as exc:
             raise HTTPException(409, str(exc))
         except ValueError:
             raise HTTPException(404, "Playlist not found")

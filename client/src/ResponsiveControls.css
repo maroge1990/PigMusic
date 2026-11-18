@@ -40,36 +40,8 @@
 .playlist-picker {
   display: inline-flex;
 }
-.playlist-popover {
-  position: fixed;
-  inset: auto;
-  margin: 0;
-  width: min(280px, calc(100vw - 16px));
-  max-height: min(300px, calc(100dvh - 32px));
-  overflow-y: auto;
-  padding: var(--space-12);
-  border: 1px solid var(--control-border);
-  border-radius: var(--radius-compact);
-  background: var(--surface);
-  color: var(--text);
-  box-shadow: var(--elevation-floating);
-}
-.playlist-popover > button {
-  display: flex;
-  width: 100%;
-  gap: var(--space-8);
-  align-items: center;
-  text-align: left;
-  padding: var(--space-12);
-  min-height: 44px;
-}
-.playlist-popover > button:hover {
-  background: var(--raised);
-}
-.new-playlist-option {
-  border-top: 1px solid var(--border);
-  margin-top: var(--space-8);
-}
+/* The playlist picker is drawn as a menu (.song-menu), like every list of
+ * actions. */
 .new-playlist-dialog,
 .personal-app dialog.new-playlist-dialog {
   width: min(440px, calc(100vw - 32px));

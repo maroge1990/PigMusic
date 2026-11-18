@@ -1,3 +1,4 @@
+import { notify, notifyError } from "./notices";
 import { useEffect, useState } from "react";
 import { ShieldCheck } from "lucide-react";
 import { api } from "./api";
@@ -28,7 +29,6 @@ export function OwnerPanel({
 
 export function OwnerAlbumTools({ id, title }: { id: string; title: string }) {
   const [category, setCategory] = useState("");
-  const [message, setMessage] = useState("");
   useEffect(() => {
     void api<{ category: string }>("/v1/admin/albums/" + id)
       .then((a) => setCategory(a.category))
@@ -50,10 +50,10 @@ export function OwnerAlbumTools({ id, title }: { id: string; title: string }) {
               })
                 .then(() => {
                   setCategory(value);
-                  setMessage("Library section saved");
+                  notify("Library section saved");
                   window.dispatchEvent(new Event("music-library-changed"));
                 })
-                .catch((error) => setMessage((error as Error).message));
+                .catch((error) => notifyError((error as Error).message));
             }}
           >
             <option value="album">Artists &amp; albums</option>
@@ -67,30 +67,27 @@ export function OwnerAlbumTools({ id, title }: { id: string; title: string }) {
           </small>
         </label>
       )}
-      <AlbumQuality id={id} notify={setMessage} embedded />
+      <AlbumQuality id={id} notify={notify} embedded />
       <RemoveFromServer
         kind="albums"
         id={id}
         title={title}
         removed={() => go("/library/albums")}
       />
-      {message && <p role="status">{message}</p>}
     </OwnerPanel>
   );
 }
 
 export function OwnerArtistTools({ id, title }: { id: string; title: string }) {
-  const [message, setMessage] = useState("");
   return (
     <OwnerPanel label="server settings for this artist">
-      <AlbumQuality kind="artist" id={id} notify={setMessage} />
+      <AlbumQuality kind="artist" id={id} notify={notify} />
       <RemoveFromServer
         kind="artists"
         id={id}
         title={title}
         removed={() => go("/library/artists")}
       />
-      {message && <p role="status">{message}</p>}
     </OwnerPanel>
   );
 }

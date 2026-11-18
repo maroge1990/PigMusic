@@ -1,3 +1,6 @@
+import { askToConfirm } from "./confirmDialog";
+import { sessionHeader } from "./sessionId";
+import { notify } from "./notices";
 import { useEffect, useState } from "react";
 import {
   QualitySelect,
@@ -36,7 +39,6 @@ export function AccountSettings({
   const [household, setHousehold] = useState("");
   // Undefined until the first answer: the list shows Loading, not "none".
   const [sessions, setSessions] = useState<Session[]>();
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [similar, setSimilar] = useState(keepPlaying);
   useEffect(() => {
@@ -99,7 +101,7 @@ export function AccountSettings({
     setError("");
     try {
       await fn();
-      if (text) setMessage(text);
+      if (text) notify(text);
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -120,7 +122,6 @@ export function AccountSettings({
         title="Your account"
         subtitle="Appearance, password, devices and your music settings."
       />
-      {message && <p role="status">{message}</p>}
       {error && <InlineError>{error}</InlineError>}
       <section className="account-section">
         <h2>Appearance</h2>
@@ -255,18 +256,20 @@ export function AccountSettings({
         {sessions?.some((s) => !s.revoked_at && !s.current) && (
           <button
             className="secondary-button"
-            onClick={() => {
-              if (
-                confirm(
-                  "Sign out every other browser and app? This device stays signed in.",
-                )
-              )
+            onClick={async () => {
+              const session = await askToConfirm({
+                title: "Sign out everywhere else?",
+                body: "Every other browser and app signed in to your account is signed out at once. This device stays signed in.",
+                action: "Sign out everywhere else",
+                destructive: true,
+              });
+              if (session)
                 void action(async () => {
                   const result = await api<{ revoked: number }>(
                     "/v1/me/sessions",
-                    { method: "DELETE" },
+                    { method: "DELETE", headers: sessionHeader(session) },
                   );
-                  setMessage(
+                  notify(
                     `Signed out ${result.revoked} other ${result.revoked === 1 ? "device" : "devices"}.`,
                   );
                 }, "");

@@ -44,57 +44,7 @@
 .mix-card small {
   color: var(--secondary);
 }
-/* Outranks the generic `.personal-app dialog` width, whose radius every
-   dialog keeps (#154). */
-.mix-dialog,
-.personal-app dialog.mix-dialog {
-  position: fixed;
-  max-height: 85dvh;
-  width: min(740px, calc(100% - 24px));
-  max-width: 740px;
-  padding: var(--space-24);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
-}
-.mix-dialog::backdrop {
-  background: var(--scrim);
-}
-.mix-close {
-  float: right;
-}
-.mix-heading {
-  display: flex;
-  align-items: center;
-  gap: var(--space-16);
-  clear: both;
-  padding-top: var(--space-8);
-}
-.mix-heading > .mix-artwork {
-  width: 110px;
-  flex: 0 0 110px;
-}
-.mix-heading h2 {
-  margin: var(--space-8) 0;
-}
-.mix-heading p {
-  color: var(--secondary);
-}
-.mix-actions {
-  display: flex;
-  gap: var(--space-12);
-  margin: var(--space-16) 0;
-  flex-wrap: wrap;
-}
-.mix-actions button {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-8);
-}
-.mix-options {
-  margin-block: var(--space-16);
-}
-/* A mix card plays on a click; its ⋯ sits over the cover's corner (#56). */
+/* A mix card opens the mix's page; its ⋯ sits over the cover's corner. */
 .mix-card-wrap {
   position: relative;
   flex: 0 0 170px;
@@ -106,19 +56,9 @@
   -webkit-touch-callout: none;
   user-select: none;
 }
-.mix-card-wrap > .mix-more {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-  color: var(--text);
-}
 @media (max-width: 600px) {
   .mix-card,
   .mix-card-wrap {
     flex-basis: 150px;
-  }
-  .mix-dialog {
-    padding: var(--space-16);
   }
 }

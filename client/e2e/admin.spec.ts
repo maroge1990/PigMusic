@@ -440,7 +440,7 @@ test("the owner reviews duplicate songs and moves them to Removed music", async 
   await expect(panel).toContainText("No duplicate songs.");
   expect(removed).toEqual(["dl"]);
   // D-79 (#183): no dialog first, and Undo puts them back.
-  const undo = page.locator(".undo-bar");
+  const undo = page.locator(".notice-area");
   await undo.getByRole("button", { name: "Undo" }).click();
   await expect.poll(() => restored).toEqual([{ identities: ["r-dl"] }]);
   await expect(undo).toContainText("1 duplicates put back.");
@@ -472,7 +472,7 @@ test("Cancel all clears the queue at once and Undo keeps every download", async 
   await expect(page.getByText("Two").first()).toBeVisible();
   await page.getByRole("button", { name: "Cancel all" }).click();
   await expect(page.getByText("Two")).toHaveCount(0);
-  const undo = page.locator(".undo-bar");
+  const undo = page.locator(".notice-area");
   await expect(undo).toContainText("Every unfinished download cancelled");
   await undo.getByRole("button", { name: "Undo" }).click();
   await expect(page.getByText("Two").first()).toBeVisible();
@@ -660,7 +660,7 @@ test("the owner joins an album split across two editions", async ({ page }) => {
   // D-79 (#183): it acts at once, and Undo puts the album back.
   expect(asked).toEqual([]);
   expect(joined).toEqual({ fingerprint: "a".repeat(64) });
-  const undo = page.locator(".undo-bar");
+  const undo = page.locator(".notice-area");
   await undo.getByRole("button", { name: "Undo" }).click();
   await expect.poll(() => undone).toBe(1);
   await expect(undo).toContainText("blink-182 · Dude Ranch put back.");
@@ -853,25 +853,36 @@ test("Reset password and Disable ask first, naming the person", async ({
       },
     },
   });
-  const asked: string[] = [];
-  let answer = false;
-  page.on("dialog", (dialog) => {
-    asked.push(dialog.message());
-    void (answer ? dialog.accept() : dialog.dismiss());
-  });
   await page.goto("/#/admin/people");
   const reset = page.getByRole("button", { name: "Reset password for Sam" });
   const disable = page.getByRole("button", { name: "Disable Sam" });
+  // #250: the app's own dialog asks, never the browser's.
+  page.on("dialog", () => {
+    throw new Error("The browser's confirm() was used");
+  });
+  const resetDialog = page.getByRole("dialog", {
+    name: "Reset Sam's password?",
+  });
+  const disableDialog = page.getByRole("dialog", {
+    name: "Disable Sam's account?",
+  });
   await reset.click();
+  await expect(resetDialog).toBeVisible();
+  await expect(
+    resetDialog.getByRole("button", { name: "Cancel" }),
+  ).toBeFocused();
+  await resetDialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(resetDialog).toHaveCount(0);
   await disable.click();
-  await expect.poll(() => asked.length).toBe(2);
-  expect(asked[0]).toContain("Reset Sam's password?");
-  expect(asked[1]).toContain("Disable Sam's account?");
+  await expect(disableDialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(disableDialog).toHaveCount(0);
   expect(calls).toEqual([]);
-  answer = true;
   await reset.click();
+  await resetDialog.getByRole("button", { name: "Reset password" }).click();
   await expect.poll(() => calls).toEqual(["reset"]);
   await disable.click();
+  await disableDialog.getByRole("button", { name: "Disable" }).click();
   await expect.poll(() => calls).toEqual(["reset", "disable"]);
 });
 
@@ -1152,6 +1163,15 @@ test("the owner reviews Trash and deletes exactly the listed songs for good", as
   await expect(panel).toContainText("Fleetwood Mac · Rumours · removed");
   expect(reviewed).toBe("45");
   await panel.getByRole("button", { name: "Delete 1 for good · 8 MB" }).click();
+  const ask = page.getByRole("dialog", {
+    name: "Delete 1 songs from Trash for good?",
+  });
+  await expect(ask.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await ask.getByRole("button", { name: "Cancel" }).click();
+  await expect(ask).toHaveCount(0);
+  expect(purged).toBeNull();
+  await panel.getByRole("button", { name: "Delete 1 for good · 8 MB" }).click();
+  await ask.getByRole("button", { name: "Delete for good" }).click();
   await expect(panel).toContainText("No removed music.");
   expect(purged).toEqual({ days: 45, fingerprint: "abc" });
 });
@@ -1268,6 +1288,6 @@ test("Cancel all spares a request submitted during its Undo time", async ({
   });
   // Its Undo left once it was sent.
   await expect(
-    page.locator(".undo-bar").getByRole("button", { name: "Undo" }),
+    page.locator(".notice-area").getByRole("button", { name: "Undo" }),
   ).toHaveCount(0);
 });

@@ -38,6 +38,9 @@ export type Song = {
   radio?: boolean;
   /** Similar songs that carried on when a queue ended (#202). */
   similar?: boolean;
+  /** Tapped in search, which plays only that song (D-118): nothing similar
+   * follows it on its own. Songs queued after it play on as usual. */
+  search_play?: boolean;
 };
 
 /** A prepared mix or radio entry; plays the library file when there is one. */

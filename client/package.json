@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --test tests/*.test.mjs",
+    "test": "node --import ./tests/resolveTs.mjs --test tests/*.test.mjs",
     "format": "prettier --write src tests e2e playwright.config.ts package.json tsconfig.json",
     "format:check": "prettier --check src tests e2e playwright.config.ts package.json tsconfig.json",
     "test:e2e": "playwright test"

@@ -127,7 +127,7 @@ test("small controls meet the 44 px target; shelf focus rings sit inside", async
     host.innerHTML = `
       <div class="tab-list"><button id="tab">Albums</button></div>
       <div class="popular-pager"><button class="icon-button" id="pager">›</button></div>
-      <div class="np-queue"><span class="np-queue-tools"><button id="queue">↑</button></span></div>`;
+      <div class="np-queue"><span class="song-tools"><button id="queue">↑</button></span></div>`;
     document.querySelector("main")!.append(host);
     return ["tab", "pager", "queue"].map((id) => {
       const box = document.getElementById(id)!.getBoundingClientRect();

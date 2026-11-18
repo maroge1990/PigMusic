@@ -1,12 +1,7 @@
+import { notify, notifyError } from "./notices";
 import { apiFetch, detailOr, isUnconfirmed, writeFailure } from "./api";
 import { useEffect, useRef, useState } from "react";
-export function ArtistAcquisition({
-  id,
-  notify,
-}: {
-  id: string;
-  notify: (s: string) => void;
-}) {
+export function ArtistAcquisition({ id }: { id: string }) {
   const editing = useRef(false);
   const [state, setState] = useState<{
     kinds: string[];
@@ -83,7 +78,7 @@ export function ArtistAcquisition({
         request ? "Adding albums to your library" : "Artist settings saved.",
       );
     } catch (e) {
-      notify((e as Error).message);
+      notifyError((e as Error).message);
       // It may have been saved: show the artist's settings as they are now.
       if (isUnconfirmed(e)) {
         editing.current = false;

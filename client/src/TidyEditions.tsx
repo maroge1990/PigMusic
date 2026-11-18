@@ -1,5 +1,5 @@
 import { apiFetch, detailOr, writeFailure } from "./api";
-import { offerUndo } from "./UndoBar";
+import { notify, offerUndo } from "./notices";
 import { useState } from "react";
 import { EmptyLine, InlineError } from "./EmptyState";
 
@@ -50,7 +50,7 @@ type Done = {
 };
 
 /** Albums the library has on several editions, tidied to the fullest. */
-export function TidyEditions({ notify }: { notify: (s: string) => void }) {
+export function TidyEditions() {
   const [albums, setAlbums] = useState<Album[] | null>(null);
   const [history, setHistory] = useState<Done[]>([]);
   const [busy, setBusy] = useState(false);
@@ -95,8 +95,8 @@ export function TidyEditions({ notify }: { notify: (s: string) => void }) {
         fingerprint: album.fingerprint,
       });
       const message = `${album.artist} · ${album.keep.title} tidied.`;
-      notify(message);
-      if (done?.id)
+      if (!done?.id) notify(message);
+      else
         offerUndo(
           message,
           async () => {

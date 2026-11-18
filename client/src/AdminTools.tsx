@@ -25,7 +25,7 @@ import { MediaSettings } from "./MediaSettings";
 import { AdminGlance } from "./AdminGlance";
 import { QueueView, type Queue, type QueueAction } from "./QueueView";
 import { defer, isPending } from "./deferred";
-import { offerUndo } from "./UndoBar";
+import { notify, offerUndo } from "./notices";
 import {
   DownloadSettingsPanel,
   ServerLibraryTools,
@@ -92,7 +92,6 @@ export function AdminTools({ route }: { route: Route }) {
   }, [handedOver]);
   const [migration, setMigration] = useState<Migration | null>(null);
   const [error, setError] = useState("");
-  const [toast, setToast] = useState("");
   const [busy, setBusy] = useState(false);
   const [migrationTab, setMigrationTab] = useState("artists");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -223,12 +222,6 @@ export function AdminTools({ route }: { route: Route }) {
     };
   }, [section]);
 
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(""), 3500);
-    return () => clearTimeout(timer);
-  }, [toast]);
-
   const toggleExpanded = (id: string) =>
     setExpanded((previous) => {
       const next = new Set(previous);
@@ -288,7 +281,7 @@ export function AdminTools({ route }: { route: Route }) {
       }>("/v1/admin/migration/submit", { method: "POST" });
 
       setReviewOpen(false);
-      setToast(
+      notify(
         `${result.created} added to queue · ${result.existing} already queued · ${result.skipped} skipped`,
       );
       go("/admin/downloads");
@@ -693,7 +686,7 @@ export function AdminTools({ route }: { route: Route }) {
           body: JSON.stringify(downloadSettings),
         }),
       );
-      setToast("Download settings saved");
+      notify("Download settings saved");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -726,6 +719,7 @@ export function AdminTools({ route }: { route: Route }) {
             throw await writeFailure(r, "The queue couldn't be cleared.");
         }),
       );
+      if (!pending) return;
       clearing = new Set(entries.map((e) => e.id));
       setQueue(withoutClearing(queue));
       offerUndo(
@@ -760,7 +754,7 @@ export function AdminTools({ route }: { route: Route }) {
           },
         ),
       );
-      setToast(
+      notify(
         finished
           ? "Finished entries cleared. Downloaded music kept."
           : "Queue cleared. Downloaded music kept.",
@@ -872,7 +866,6 @@ export function AdminTools({ route }: { route: Route }) {
               <ServerLibraryTools
                 library={library}
                 refresh={() => void loadLibrary()}
-                setToast={setToast}
               />
             </>
           )}
@@ -880,12 +873,6 @@ export function AdminTools({ route }: { route: Route }) {
       )}
       {section === "integrations" && <MediaSettings />}
       {section === "migration" && migrationPage()}
-      {toast && (
-        <div className="toast" role="status">
-          <CircleCheck size={17} />
-          {toast}
-        </div>
-      )}
 
       {reviewOpen && (
         <div

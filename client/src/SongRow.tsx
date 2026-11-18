@@ -1,23 +1,43 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
   AudioLines,
+  CircleArrowDown,
   Disc3,
-  Ellipsis,
+  EyeOff,
   ListEnd,
+  ListPlus,
   ListStart,
   Plus,
   Star,
   Trash2,
   UserRound,
+  X,
 } from "lucide-react";
 import { StateBadge } from "./StateBadge";
 import { api } from "./api";
 import { Cover } from "./Cover";
-import { PlaylistPicker } from "./PlaylistPicker";
+import { useFavourites, isFavourite } from "./favourites";
+import { MenuButton, MenuPopup, useMenu, type MenuEntry } from "./Menu";
+import {
+  songMenu,
+  songMenuLabels,
+  tapQueue,
+  type SongMenuItem,
+  type SongPage,
+} from "./menus";
+import { PlaylistPicker, type PlaylistPickerHandle } from "./PlaylistPicker";
 import { usePlayer } from "./Player";
+import { addToPlaylist } from "./playlists";
 import { RemoveFromServer } from "./Recovery";
-import { focusMenuItem, menuKeys } from "./menuKeys";
 import { useOwner } from "./person";
+import {
+  downloadSongs,
+  removeFromLibrary,
+  setFavourite,
+  songFile,
+} from "./songActions";
 import {
   goToAlbum,
   goToArtist,
@@ -30,38 +50,88 @@ import {
 import { InlineError } from "./EmptyState";
 import { formatDuration } from "./format";
 
-/** One song. Tap anywhere to play; download state and ⋯ sit on the right. */
+const icons: Record<SongMenuItem, ReactNode> = {
+  "play-next": <ListStart size={18} />,
+  "add-to-queue": <ListEnd size={18} />,
+  "add-to-library": <Plus size={18} />,
+  favourite: <Star size={18} />,
+  "add-to-playlist": <ListPlus size={18} />,
+  download: <CircleArrowDown size={18} />,
+  "go-to-album": <Disc3 size={18} />,
+  "go-to-artist": <UserRound size={18} />,
+  "move-up": <ArrowUp size={18} />,
+  "remove-from-playlist": <X size={18} />,
+  "hide-from-mixes": <EyeOff size={18} />,
+  "remove-from-up-next": <X size={18} />,
+  "remove-from-library": <Trash2 size={18} />,
+};
+
+/**
+ * One song row everywhere (D-118, #248). Fixed slots: cover (or the track
+ * number on album pages), title with a small star for a favourite, "Artist ·
+ * Album", then the length on album pages, the library mark and ⋯. A tap
+ * plays the song and carries on through its list (in search, only that
+ * song); right-click, a long press and ⋯ open the one song menu.
+ */
 export function SongRow({
   song,
   queue,
   index,
+  page = "library",
   onArtist = false,
   onAlbum = false,
   numbered = false,
-  menu,
-  onRemove,
+  playlist,
+  upNext,
+  onHide,
+  onPlay,
+  onRemoved,
+  rank,
+  note,
+  unavailable = false,
   refresh,
 }: {
   song: Song;
   /** What plays after this song: usually the list it appears in. */
   queue: Song[];
   index: number;
+  /** The page the row is on; it adds the page's own menu items. */
+  page?: SongPage;
   /** Already on this artist's or album's page: no "Go to" for it. */
   onArtist?: boolean;
   onAlbum?: boolean;
-  /** Album track lists show numbers instead of repeating the cover. */
+  /** Album pages show the track number and length instead of the cover. */
   numbered?: boolean;
-  /** Extra menu items for this context, e.g. playlist ordering. */
-  menu?: ReactNode;
-  onRemove?: () => void;
+  /** A playlist's own items: Move up and Remove from playlist. */
+  playlist?: {
+    editable: boolean;
+    first: boolean;
+    moveUp: () => void;
+    remove: () => void;
+  };
+  /** Up next: move the song or take it out of the queue. */
+  upNext?: { up?: () => void; down?: () => void; remove: () => void };
+  /** A mix's song: Hide from mixes. */
+  onHide?: () => void;
+  /** A tap does this instead of playing the list (Up next skips ahead). */
+  onPlay?: () => void;
+  /** After Remove from library (a page may leave). */
+  onRemoved?: () => void;
+  /** Rewind: the song's place in the chart, and its plays. */
+  rank?: number;
+  note?: string;
+  /** No longer on the server: shown, not playable. */
+  unavailable?: boolean;
   /** Reads this song's state from the server again, edition by edition. */
   refresh?: () => void;
 }) {
   const player = usePlayer();
+  const favourites = useFavourites();
   const [state, setState] = useState<SongState>(song.state);
   const [error, setError] = useState("");
   useEffect(() => setState(song.state), [song.state, song.key]);
   const current = player.current === song.key;
+  const favourite = isFavourite(song, favourites);
   async function download() {
     setError("");
     try {
@@ -84,23 +154,101 @@ export function SongRow({
       setError((e as Error).message);
     }
   }
-  const subtitle = [!onArtist && song.artist, !onAlbum && song.album]
+  function play() {
+    if (unavailable) return;
+    if (onPlay) return onPlay();
+    const tap = tapQueue(page, queue, index);
+    player.play(tap.queue, tap.index);
+  }
+  const subtitle = [song.artist, !onAlbum && song.album]
     .filter(Boolean)
     .join(" · ");
+  const menu = useMenu(() => lookUpFavourite());
+  const picker = useRef<PlaylistPickerHandle>(null);
+  const [favourited, setFavourited] = useState<boolean | null>(null);
+  function lookUpFavourite() {
+    setFavourited(null);
+    void api<{ favourited: boolean }>("/v1/favourites", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ track: songBody(song) }),
+    })
+      .then((d) => setFavourited(d.favourited))
+      .catch(() => setFavourited(false));
+  }
+  const owner = useOwner();
+  const actions: Record<SongMenuItem, () => void> = {
+    "play-next": () => player.playNext(song),
+    "add-to-queue": () => player.addToQueue(song),
+    "add-to-library": () => void download(),
+    favourite: () => void setFavourite(song, !favourited),
+    "add-to-playlist": () => picker.current?.open(menu.trigger.current!),
+    download: () => downloadSongs([song]),
+    "go-to-album": () =>
+      void goToAlbum(
+        song.album!,
+        song.album_artist || song.artist,
+        song.release_id,
+        song.artist_id,
+      ),
+    "go-to-artist": () => void goToArtist(song.artist, song.artist_id),
+    "move-up": () => playlist?.moveUp(),
+    "remove-from-playlist": () => playlist?.remove(),
+    "hide-from-mixes": () => onHide?.(),
+    "remove-from-up-next": () => upNext?.remove(),
+    "remove-from-library": () =>
+      void removeFromLibrary([song.saved!.id], onRemoved),
+  };
+  const groups: MenuEntry[][] = songMenu({
+    page,
+    state,
+    hasFile: !!songFile(song),
+    album: !onAlbum && !!song.album,
+    artist: !onArtist,
+    editablePlaylist: playlist?.editable,
+  }).map((group) =>
+    group
+      .filter((item) => item !== "remove-from-library" || !!song.saved)
+      .map((item) => ({
+        key: item,
+        label:
+          item === "favourite" && favourited
+            ? "Remove from favourites"
+            : songMenuLabels[item],
+        icon:
+          item === "favourite" ? (
+            <Star size={18} fill={favourited ? "currentColor" : "none"} />
+          ) : (
+            icons[item]
+          ),
+        run: actions[item],
+        disabled:
+          (item === "favourite" && favourited === null) ||
+          (item === "move-up" && playlist?.first),
+        danger: item === "remove-from-library",
+      })),
+  );
   return (
     <div
-      className={`song-row${current ? " is-current" : ""}`}
+      className={`song-row${current ? " is-current" : ""}${rank ? " is-ranked" : ""}`}
+      {...menu.target}
       onClick={(e) => {
         // The row is one big play target; its own buttons keep their action.
-        if (!(e.target as HTMLElement).closest("button, a, [popover]"))
-          player.play(queue, index);
+        if (!(e.target as HTMLElement).closest("button, a, [popover], dialog"))
+          play();
       }}
     >
       <button
         className="song-main"
-        aria-label={`Play ${song.title}${song.state === "saved" || song.cache_id ? "" : " (streams without downloading)"}`}
-        onClick={() => player.play(queue, index)}
+        disabled={unavailable}
+        aria-label={`Play ${song.title}${state === "saved" || song.cache_id || state === "server" ? "" : " (streams without downloading)"}`}
+        onClick={play}
       >
+        {rank !== undefined && (
+          <span className={rank <= 3 ? "song-rank top" : "song-rank"}>
+            {rank}
+          </span>
+        )}
         {numbered ? (
           <span className="song-number" aria-hidden="true">
             {current ? (
@@ -113,10 +261,44 @@ export function SongRow({
           <Cover title={song.title} src={song.cover} sizes="48px" />
         )}
         <span className="song-text">
-          <strong>{song.title}</strong>
-          <small>{subtitle || formatDuration(song.duration)}</small>
+          <strong>
+            {song.title}
+            {favourite && (
+              <Star
+                className="song-favourite"
+                size={12}
+                fill="currentColor"
+                aria-label="Favourite"
+                role="img"
+              />
+            )}
+          </strong>
+          <small>{note ? `${subtitle} · ${note}` : subtitle}</small>
         </span>
       </button>
+      {numbered && (
+        <span className="song-length pig-amount">
+          {formatDuration(song.duration)}
+        </span>
+      )}
+      {upNext && (
+        <span className="song-tools">
+          <button
+            aria-label={`Move ${song.title} up`}
+            disabled={!upNext.up}
+            onClick={() => upNext.up?.()}
+          >
+            <ArrowUp size={16} />
+          </button>
+          <button
+            aria-label={`Move ${song.title} down`}
+            disabled={!upNext.down}
+            onClick={() => upNext.down?.()}
+          >
+            <ArrowDown size={16} />
+          </button>
+        </span>
+      )}
       <span className="song-state">
         {state === "saved" ? (
           <StateBadge state="library" iconOnly />
@@ -132,201 +314,8 @@ export function SongRow({
           </button>
         )}
       </span>
-      <SongMenu
-        song={song}
-        state={state}
-        onArtist={onArtist}
-        onAlbum={onAlbum}
-        download={download}
-        onRemove={onRemove}
-        onError={setError}
-      >
-        {menu}
-      </SongMenu>
-      {error && <InlineError className="song-error">{error}</InlineError>}
-    </div>
-  );
-}
-
-function SongMenu({
-  song,
-  state,
-  onArtist,
-  onAlbum,
-  download,
-  onRemove,
-  onError,
-  children,
-}: {
-  song: Song;
-  state: SongState;
-  onArtist: boolean;
-  onAlbum: boolean;
-  download: () => Promise<void>;
-  onRemove?: () => void;
-  onError: (message: string) => void;
-  children?: ReactNode;
-}) {
-  const owner = useOwner();
-  const player = usePlayer();
-  const trigger = useRef<HTMLButtonElement>(null);
-  const popup = useRef<HTMLDivElement>(null);
-  const [favourite, setFavourite] = useState<boolean | null>(null);
-  const [position, setPosition] = useState<{
-    right: number;
-    top?: number;
-    bottom?: number;
-  }>({ right: 8, top: 8 });
-  const body = songBody(song);
-  function open() {
-    const rect = trigger.current!.getBoundingClientRect();
-    setPosition({
-      right: Math.max(8, window.innerWidth - rect.right),
-      ...(rect.top > window.innerHeight / 2
-        ? { bottom: window.innerHeight - rect.top + 4 }
-        : { top: rect.bottom + 4 }),
-    });
-    popup.current?.showPopover();
-    focusMenuItem(popup.current, 0);
-    setFavourite(null);
-    void api<{ favourited: boolean }>("/v1/favourites", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ track: body }),
-    })
-      .then((d) => setFavourite(d.favourited))
-      .catch(() => setFavourite(false));
-  }
-  const close = () => popup.current?.hidePopover();
-  const item = (
-    label: string,
-    icon: ReactNode,
-    action: () => void,
-    disabled = false,
-  ) => (
-    <button
-      role="menuitem"
-      disabled={disabled}
-      onClick={() => {
-        close();
-        action();
-      }}
-    >
-      <span>{label}</span>
-      {icon}
-    </button>
-  );
-  return (
-    <>
-      <button
-        ref={trigger}
-        className="song-more"
-        aria-label={`More options for ${song.title}`}
-        aria-haspopup="menu"
-        onClick={open}
-      >
-        <Ellipsis size={20} />
-      </button>
-      <div
-        ref={popup}
-        popover="auto"
-        className="song-menu pig-glass"
-        role="menu"
-        aria-label={song.title}
-        style={position}
-        onKeyDown={menuKeys}
-      >
-        <div className="song-menu-group">
-          {item("Play next", <ListStart size={18} />, () =>
-            player.playNext(song),
-          )}
-          {item("Add to queue", <ListEnd size={18} />, () =>
-            player.addToQueue(song),
-          )}
-        </div>
-        <div className="song-menu-group">
-          {item(
-            favourite ? "Remove from favourites" : "Favourite",
-            <Star size={18} fill={favourite ? "currentColor" : "none"} />,
-            () => {
-              onError("");
-              void api<{ favourited: boolean }>("/v1/favourites", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ track: body, favourite: !favourite }),
-              })
-                .then(() =>
-                  window.dispatchEvent(new Event("music-library-changed")),
-                )
-                .catch((e) => onError((e as Error).message));
-            },
-            favourite === null,
-          )}
-          <PlaylistPicker
-            title={song.title}
-            menuItem
-            load={async () =>
-              (
-                await api<{ playlists: { id: string; name: string }[] }>(
-                  "/v1/playlists",
-                )
-              ).playlists.filter((p) => !p.id.startsWith("pig-favourites:"))
-            }
-            create={(name) =>
-              api("/v1/playlists", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name }),
-              })
-            }
-            add={(id) =>
-              api(`/v1/playlists/${id}/songs?allow_repeat=true`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body),
-              }).then(() =>
-                window.dispatchEvent(new Event("music-library-changed")),
-              )
-            }
-          />
-          {state !== "saved" &&
-            state !== "pending" &&
-            item("Add to library", <Plus size={18} />, () => void download())}
-        </div>
-        {(!onArtist || (!onAlbum && song.album)) && (
-          <div className="song-menu-group">
-            {!onAlbum &&
-              song.album &&
-              item(
-                "Go to album",
-                <Disc3 size={18} />,
-                () =>
-                  void goToAlbum(
-                    song.album!,
-                    song.album_artist || song.artist,
-                    song.release_id,
-                    song.artist_id,
-                  ),
-              )}
-            {!onArtist &&
-              item(
-                "Go to artist",
-                <UserRound size={18} />,
-                () => void goToArtist(song.artist, song.artist_id),
-              )}
-          </div>
-        )}
-        {(children || (onRemove && state === "saved")) && (
-          <div className="song-menu-group" onClick={close}>
-            {children}
-            {onRemove && state === "saved" && (
-              <button role="menuitem" className="danger" onClick={onRemove}>
-                <span>Remove from library</span>
-                <Trash2 size={18} />
-              </button>
-            )}
-          </div>
-        )}
+      <MenuButton menu={menu} label={`More options for ${song.title}`} />
+      <MenuPopup menu={menu} label={song.title} groups={groups}>
         {owner && song.saved && (
           <div className="song-menu-group owner-menu-items">
             <span className="owner-label">Admin</span>
@@ -334,10 +323,18 @@ function SongMenu({
               kind="tracks"
               id={song.saved.id}
               title={song.title}
+              removed={() => menu.close()}
+              menuItem
             />
           </div>
         )}
-      </div>
-    </>
+      </MenuPopup>
+      <PlaylistPicker
+        ref={picker}
+        title={song.title}
+        add={(id) => addToPlaylist(id, [songBody(song)])}
+      />
+      {error && <InlineError className="song-error">{error}</InlineError>}
+    </div>
   );
 }

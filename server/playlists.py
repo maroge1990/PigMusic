@@ -1,10 +1,12 @@
 """Ordered, persistent playlist membership, independent of the migration inventory."""
 
 import json, uuid
+from collections import defaultdict
 from datetime import datetime, timezone
 from .library import identifier
 from .library import normalise
 from .lifecycle import coordinated
+from .matching import context
 
 
 class PlaylistConflict(ValueError):
@@ -183,8 +185,15 @@ class Playlists:
 
         return same_song(left, right)
 
-    @coordinated
     def add(self, playlist_id, track, *, allow_repeat=False):
+        return self.add_many(playlist_id, [track], allow_repeat=allow_repeat)
+
+    @coordinated
+    def add_many(self, playlist_id, tracks, *, allow_repeat=False, revision=None):
+        """Appends songs in order in one transaction: all of them or none, so
+        trying again after a failure never doubles the ones already in. With
+        `revision`, the append is refused unless the playlist is still at it,
+        so a client can tell whether an earlier batch of its own landed."""
         clause, params = self.clause()
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -195,11 +204,24 @@ class Playlists:
             if not row:
                 raise ValueError("Playlist not found.")
             payload = json.loads(row[0])
-            if (allow_repeat and not payload.get("favourites")) or not any(
-                self.same_song(t, track) for t in payload["tracks"]
-            ):
-                ensure_room(payload["tracks"])
-                payload["tracks"].append(track)
+            if revision is not None and payload.get("revision", 0) != revision:
+                raise PlaylistConflict("Playlist changed. Refresh before editing.")
+            repeat = allow_repeat and not payload.get("favourites")
+            entries = list(payload["tracks"])
+            # Same-song needs the same context, so only songs that share one
+            # are compared; a bulk append near the limit stays quick.
+            by_context = defaultdict(list)
+            if not repeat:
+                for entry in entries:
+                    by_context[context(entry)].append(entry)
+            for track in tracks:
+                bucket = by_context[context(track)] if not repeat else []
+                if repeat or not any(self.same_song(t, track) for t in bucket):
+                    # Raises before anything is written: the whole batch fails.
+                    ensure_room(entries)
+                    entries.append(track)
+                    bucket.append(track)
+            payload["tracks"] = entries
             payload["revision"] = payload.get("revision", 0) + 1
             conn.execute(
                 "UPDATE playlists SET payload=? WHERE id=?",

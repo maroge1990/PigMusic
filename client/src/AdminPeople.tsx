@@ -1,3 +1,6 @@
+import { expectedSession, sessionHeader } from "./sessionId";
+import { askToConfirm } from "./confirmDialog";
+import { notify } from "./notices";
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { formatDateTime } from "./format";
@@ -28,7 +31,6 @@ function useAdminData(inboxOffset = 0) {
   const [warnings, setWarnings] = useState<Activity[]>([]);
   const [inbox, setInbox] = useState<InboxAlbum[]>([]);
   const [inboxNext, setInboxNext] = useState<number | null>(null);
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   async function load() {
     setPeople((await api<{ people: Person[] }>("/v1/people")).people);
@@ -51,18 +53,13 @@ function useAdminData(inboxOffset = 0) {
     setError("");
     try {
       await fn();
-      setMessage(text);
+      notify(text);
       await load();
     } catch (e) {
       setError((e as Error).message);
     }
   }
-  const notices = (
-    <>
-      {message && <p role="status">{message}</p>}
-      {error && <InlineError>{error}</InlineError>}
-    </>
-  );
+  const notices = <>{error && <InlineError>{error}</InlineError>}</>;
   return { people, events, warnings, inbox, inboxNext, action, notices };
 }
 
@@ -128,42 +125,58 @@ export function AdminPeople() {
               <>
                 <button
                   aria-label={`Reset password for ${p.display_name}`}
-                  onClick={() =>
-                    confirm(
-                      `Reset ${p.display_name}'s password? They are signed out everywhere at once and need the new invite link to choose a password.`,
-                    ) &&
-                    void action(
-                      async () =>
-                        setInvite({
-                          invite: await api<Invite>(
-                            `/v1/people/${p.id}/setup-code`,
-                            { method: "POST" },
-                          ),
-                          name: p.display_name,
-                        }),
-                      "New invite created",
-                    )
-                  }
+                  onClick={async () => {
+                    const session = await askToConfirm({
+                      title: `Reset ${p.display_name}'s password?`,
+                      body: `${p.display_name} is signed out everywhere at once and needs the new invite link to choose a password. This can't be undone.`,
+                      action: "Reset password",
+                      destructive: true,
+                    });
+                    if (session)
+                      void action(
+                        async () =>
+                          setInvite({
+                            invite: await api<Invite>(
+                              `/v1/people/${p.id}/setup-code`,
+                              {
+                                method: "POST",
+                                headers: sessionHeader(session),
+                              },
+                            ),
+                            name: p.display_name,
+                          }),
+                        "New invite created",
+                      );
+                  }}
                 >
                   Reset password
                 </button>
                 <button
                   aria-label={`${p.disabled ? "Enable" : "Disable"} ${p.display_name}`}
-                  onClick={() =>
+                  onClick={async () => {
                     // Disabling signs them out everywhere: ask first (#72).
-                    (p.disabled ||
-                      confirm(
-                        `Disable ${p.display_name}'s account? They are signed out everywhere and can't sign in until you enable it again.`,
-                      )) &&
-                    void action(
-                      () =>
-                        api(`/v1/people/${p.id}/disabled`, {
-                          ...json({ disabled: !p.disabled }),
-                          method: "PUT",
-                        }),
-                      p.disabled ? "Account enabled" : "Account disabled",
-                    )
-                  }
+                    const session = p.disabled
+                      ? expectedSession()
+                      : await askToConfirm({
+                          title: `Disable ${p.display_name}'s account?`,
+                          body: `${p.display_name} is signed out everywhere and can't sign in until you enable the account again.`,
+                          action: "Disable",
+                          destructive: true,
+                        });
+                    if (session)
+                      void action(
+                        () =>
+                          api(`/v1/people/${p.id}/disabled`, {
+                            method: "PUT",
+                            headers: {
+                              "Content-Type": "application/json",
+                              ...sessionHeader(session),
+                            },
+                            body: JSON.stringify({ disabled: !p.disabled }),
+                          }),
+                        p.disabled ? "Account enabled" : "Account disabled",
+                      );
+                  }}
                 >
                   {p.disabled ? "Enable" : "Disable"}
                 </button>

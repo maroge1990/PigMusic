@@ -1,3 +1,4 @@
+import { notify, notifyError } from "./notices";
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import {
@@ -7,7 +8,7 @@ import {
   formatRelative,
 } from "./format";
 import { QualitySelect, defaultQualityOptions } from "./QualitySelect";
-import { EmptyLine, Loading } from "./EmptyState";
+import { EmptyLine, InlineError, Loading } from "./EmptyState";
 
 type Settings = {
   budget_bytes: number;
@@ -120,8 +121,8 @@ function MixPersonDetail({ detail }: { detail: PersonMixes }) {
 }
 
 export function MixCacheSettings() {
+  const [loadError, setLoadError] = useState("");
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [person, setPerson] = useState<string>();
   const [detail, setDetail] = useState<PersonMixes | null>(null);
@@ -134,7 +135,7 @@ export function MixCacheSettings() {
         setPerson((current) => current ?? value.people?.[0]?.id);
       })
       .catch((e) => {
-        if (!controller.signal.aborted) setNotice(e.message);
+        if (!controller.signal.aborted) setLoadError(e.message);
       });
     return () => controller.abort();
   }, []);
@@ -147,7 +148,7 @@ export function MixCacheSettings() {
     )
       .then(setDetail)
       .catch((e) => {
-        if (!controller.signal.aborted) setNotice(e.message);
+        if (!controller.signal.aborted) setLoadError(e.message);
       });
     return () => controller.abort();
   }, [person, revision]);
@@ -197,7 +198,7 @@ export function MixCacheSettings() {
                   ),
                 )
                 .then(() => setRevision((n) => n + 1))
-                .catch((e) => setNotice(e.message))
+                .catch((e) => notifyError(e.message))
                 .finally(() => setBusy(false));
             }}
           >
@@ -265,9 +266,9 @@ export function MixCacheSettings() {
               })
                 .then((value) => {
                   setSettings(value);
-                  setNotice("Mix preparation settings saved.");
+                  notify("Mix preparation settings saved.");
                 })
-                .catch((e) => setNotice(e.message))
+                .catch((e) => notifyError(e.message))
                 .finally(() => setBusy(false));
             }}
           >
@@ -330,7 +331,7 @@ export function MixCacheSettings() {
           </form>
         </>
       )}
-      {notice && <p role="status">{notice}</p>}
+      {loadError && <InlineError>{loadError}</InlineError>}
     </section>
   );
 }

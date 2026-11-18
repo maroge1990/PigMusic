@@ -1,3 +1,4 @@
+import { notify } from "./notices";
 import { apiFetch, detailOr, isUnconfirmed, writeFailure } from "./api";
 import { useEffect, useRef, useState } from "react";
 import { InlineError } from "./EmptyState";
@@ -16,7 +17,7 @@ const HISTORY = "/api/v1/admin/library/organisation/history";
 const PAGE = 50;
 type Undoable = { id: string; title: string };
 
-export function Organisation({ notify }: { notify: (s: string) => void }) {
+export function Organisation() {
   const [history, setHistory] = useState<Undoable[]>([]);
   const [more, setMore] = useState(false);
   async function loadHistory(offset: number) {

@@ -114,6 +114,7 @@ export function ArtistPopular({
                 queue={rows}
                 index={songPage * 5 + i}
                 onArtist
+                page="chart"
               />
             ))}
           </div>

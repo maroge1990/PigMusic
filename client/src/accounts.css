@@ -283,8 +283,7 @@
 .account-section form {
   max-width: 30rem;
 }
-.personal-notice,
-.personal-status {
+.personal-notice {
   margin: var(--space-16);
   padding: var(--space-12);
   border: 1px solid var(--border);

@@ -1,3 +1,5 @@
+import { InlineError } from "./EmptyState";
+import { notify, notifyError } from "./notices";
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import {
@@ -12,8 +14,8 @@ export function PersonalQuality({
   scope: "artist" | "album";
   itemId: string;
 }) {
+  const [loadError, setLoadError] = useState("");
   const [preferred, setPreferred] = useState("");
-  const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [options, setOptions] = useState<QualityOption[] | undefined>();
   const [fallback, setFallback] = useState("");
@@ -34,7 +36,7 @@ export function PersonalQuality({
             ?.preferred || "",
         );
       })
-      .catch((e) => setMessage(e.message));
+      .catch((e) => setLoadError(e.message));
   }, [scope, itemId]);
   function save(value: string) {
     setBusy(true);
@@ -49,12 +51,10 @@ export function PersonalQuality({
     })
       .then(() => {
         setPreferred(value);
-        setMessage(
-          "Saved. Shared files keep the highest quality anyone wants.",
-        );
+        notify("Saved. Shared files keep the highest quality anyone wants.");
         window.dispatchEvent(new Event("music-library-changed"));
       })
-      .catch((e) => setMessage(e.message))
+      .catch((e) => notifyError(e.message))
       .finally(() => setBusy(false));
   }
   return (
@@ -71,7 +71,7 @@ export function PersonalQuality({
             : "Use artist or your default"
         }
       />
-      {message && <small role="status">{message}</small>}
+      {loadError && <InlineError>{loadError}</InlineError>}
     </div>
   );
 }

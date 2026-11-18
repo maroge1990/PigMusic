@@ -167,12 +167,12 @@ test("Remove from server acts at once and Undo puts the song back", async ({
   const menu = page.getByRole("menu", { name: "Von dutch" });
   await open.click();
   const before = libraryReads;
-  await menu.getByRole("button", { name: "Remove from server" }).click();
+  await menu.getByRole("menuitem", { name: "Remove from server" }).click();
   await expect.poll(() => removed).toEqual(["POST"]);
   expect(asked).toEqual([]);
   // Every open library view reads the library again.
   await expect.poll(() => libraryReads).toBeGreaterThan(before);
-  const undo = page.locator(".undo-bar");
+  const undo = page.locator(".notice-area");
   await expect(undo).toContainText(
     "Von dutch removed from the server for everyone.",
   );
@@ -209,7 +209,7 @@ test("removing an album from the server returns to the albums, with Undo", async
   await expect(page).toHaveURL(/#\/library\/albums$/);
   // The Undo stays after leaving the album, and a song that can't come back
   // is said plainly.
-  const undo = page.locator(".undo-bar");
+  const undo = page.locator(".notice-area");
   await undo.getByRole("button", { name: "Undo" }).click();
   await expect.poll(() => restored).toEqual([{ identities: ["r1", "r2"] }]);
   await expect(undo).toContainText(
@@ -257,15 +257,15 @@ test("Removed music lists songs and restores one", async ({ page }) => {
   const row = (title: string) =>
     panel.locator(".result-row").filter({ hasText: title });
   await row("Dreams").getByRole("button", { name: "Restore" }).click();
-  await expect(page.locator(".toast")).toContainText("Song restored.");
+  await expect(page.locator(".notice-area")).toContainText("Song restored.");
   // #154: centred on the page, not offset by a sidebar the layout no longer has.
-  const toast = await page.locator(".toast").boundingBox();
+  const toast = await page.locator(".notice-area").boundingBox();
   const width = page.viewportSize()!.width;
   expect(Math.abs(toast!.x + toast!.width / 2 - width / 2)).toBeLessThan(2);
   await expect(panel).not.toContainText("Dreams");
   // A restore the server refuses keeps the song listed and says so.
   await row("Landslide").getByRole("button", { name: "Restore" }).click();
-  await expect(page.locator(".toast")).toContainText(
+  await expect(page.locator(".notice-area")).toContainText(
     "Restore stopped. Check the library folder.",
   );
   await expect(panel).toContainText("Landslide");
@@ -303,7 +303,7 @@ test("an album removal that stops part way stays, says why and offers Undo", asy
     "remaining files need review",
   );
   await expect(page).toHaveURL(new RegExp(`album/${album.id}$`));
-  const undo = page.locator(".undo-bar");
+  const undo = page.locator(".notice-area");
   await expect(undo).toContainText("Part of");
   await undo.getByRole("button", { name: "Undo" }).click();
   await expect.poll(() => restored).toEqual([{ identities: ["r1"] }]);

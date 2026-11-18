@@ -1,3 +1,6 @@
+import { notify, notifyError } from "./notices";
+import { askToConfirm } from "./confirmDialog";
+import { SESSION_UNKNOWN, expectedSession, sessionHeader } from "./sessionId";
 import { useRef, useState } from "react";
 import { Upload } from "lucide-react";
 import { api } from "./api";
@@ -32,7 +35,6 @@ export function AppleImport({
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
 
   function reset() {
     setFile(null);
@@ -42,11 +44,10 @@ export function AppleImport({
 
   async function run(fn: () => Promise<void>) {
     setBusy(true);
-    setMessage("");
     try {
       await fn();
     } catch (e) {
-      setMessage((e as Error).message);
+      notifyError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -75,26 +76,37 @@ export function AppleImport({
         body: file,
       });
       reset();
-      setMessage(`Imported ${count(result.playlists, "playlist")}`);
+      notify(`Imported ${count(result.playlists, "playlist")}`);
       await onImported();
     });
 
   const reviewWholeLibrary = () =>
     run(async () => {
       if (!file) return;
+      // Bound to the session it was started under: the replacing write
+      // names it, so it is refused if another sign-in holds the cookie.
+      const started = expectedSession();
+      if (!started) throw new Error(SESSION_UNKNOWN);
       const current = await api<{ stats?: { selected?: number } }>(
         "/v1/admin/migration",
       );
-      if (
-        current.stats?.selected &&
-        !window.confirm(
-          "This replaces the current whole-library review and clears its selections. Continue?",
-        )
-      )
-        return;
+      const session = current.stats?.selected
+        ? await askToConfirm(
+            {
+              title: "Replace the whole-library review?",
+              body: "The new export replaces the current review and clears the songs selected in it. This can't be undone.",
+              action: "Replace review",
+              destructive: true,
+            },
+            started,
+          )
+        : started;
+      // Not if the session ended during the read (the server would refuse
+      // it under another sign-in anyway).
+      if (!session || session !== expectedSession()) return;
       await api("/v1/admin/migration/import", {
         method: "POST",
-        headers: xml,
+        headers: { ...xml, ...sessionHeader(session) },
         body: file,
       });
       reset();
@@ -173,7 +185,6 @@ export function AppleImport({
           )}
         </>
       )}
-      {message && <p role="status">{message}</p>}
     </section>
   );
 }

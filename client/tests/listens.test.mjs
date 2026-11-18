@@ -24,7 +24,12 @@ globalThis.window = { addEventListener() {}, dispatchEvent() {} };
 globalThis.document = { hidden: true };
 const originalInterval = globalThis.setInterval;
 globalThis.setInterval = () => 0;
-const { flushListens, recordListen } = await import("../src/listens.ts");
+// A signed-in tab: every write names its session (#250).
+const { setSessionId } = await import("../src/sessionId.ts");
+setSessionId("session-1");
+const { flushListens, forgetListens, recordListen } = await import(
+  "../src/listens.ts"
+);
 globalThis.setInterval = originalInterval;
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -62,6 +67,8 @@ test("a batch the server refuses is dropped, so later listens still reach it (#6
 test("signed-out, rate-limited and server failures keep listens for a retry", async () => {
   for (const status of [401, 429, 503]) {
     store.clear();
+    // A 401 ends the session; the next round is signed in again.
+    setSessionId("session-1");
     serve(status);
     recordListen(listen("kept"));
     await settle();
@@ -71,12 +78,64 @@ test("signed-out, rate-limited and server failures keep listens for a retry", as
 
 test("listens older than the server's 30-day window are never sent", async () => {
   store.clear();
+  // The 401 above ended the session; this tab is signed in again.
+  setSessionId("session-1");
   store.set(
     KEY,
-    JSON.stringify([listen("stale", now() - 31 * 86400), listen("fresh")]),
+    JSON.stringify(
+      [listen("stale", now() - 31 * 86400), listen("fresh")].map((l) => ({
+        ...l,
+        session: "session-1",
+      })),
+    ),
   );
   const sent = serve(200);
   await flushListens();
   assert.deepEqual(sent, [["fresh"]]);
   assert.deepEqual(stored(), []);
+});
+
+test("a listen made under one account is never sent under the next", async () => {
+  // Codex: after another tab's sign-in, A's saved listen went out with B's
+  // session header.
+  store.clear();
+  setSessionId("session-1");
+  serve(503);
+  recordListen(listen("from-a"));
+  await settle();
+  assert.deepEqual(stored(), ["from-a"]);
+  setSessionId("session-2");
+  const sent = serve(200);
+  await flushListens();
+  assert.deepEqual(sent, []);
+  // Left for A's own session (or the age limit), never sent as B.
+  assert.deepEqual(stored(), ["from-a"]);
+});
+
+test("a stale tab sends its own listens and never deletes another session's", async () => {
+  // Codex: a flush under A's session deleted B's unsent listen, and the
+  // teardown emptied the whole store.
+  store.clear();
+  store.set(
+    KEY,
+    JSON.stringify([
+      { ...listen("from-a"), session: "session-1" },
+      { ...listen("from-b"), session: "session-2" },
+    ]),
+  );
+  setSessionId("session-1");
+  const sent = serve(200);
+  await flushListens();
+  assert.deepEqual(sent, [["from-a"]]);
+  assert.deepEqual(stored(), ["from-b"]);
+  store.set(
+    KEY,
+    JSON.stringify([
+      { ...listen("again-a"), session: "session-1" },
+      { ...listen("from-b"), session: "session-2" },
+    ]),
+  );
+  // A's session ends here: only A's listens go.
+  forgetListens("session-1");
+  assert.deepEqual(stored(), ["from-b"]);
 });

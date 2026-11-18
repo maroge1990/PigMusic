@@ -57,8 +57,11 @@ test("Your devices names each session and can sign out the others", async ({
   await expect(devices.nth(1)).toContainText(
     "iPhone or iPad app · Last used 2 h ago",
   );
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Sign out other devices" }).click();
+  await page
+    .getByRole("dialog", { name: "Sign out everywhere else?" })
+    .getByRole("button", { name: "Sign out everywhere else" })
+    .click();
   await expect(page.getByText("Signed out 1 other device.")).toBeVisible();
   await expect(devices).toHaveCount(1);
   await expect(

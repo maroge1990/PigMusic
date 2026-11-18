@@ -1,4 +1,7 @@
 import json
+import time
+
+import pytest
 import plistlib
 from server.store import Store
 from server.playlists import Playlists
@@ -100,3 +103,46 @@ def test_missing_snapshot_files_are_not_playlist_matches(tmp_path):
     store.import_apple(export())
     playlists = Playlists(store)
     assert playlists.detail(playlists.list()[0]["id"])["available_count"] == 0
+
+
+@pytest.mark.loop_timing
+def test_bulk_append_near_the_limit_stays_fast(tmp_path):
+    """Codex (#249): 500 songs into a 9,500-entry playlist compared every pair
+    and held the lifecycle lock for ~20 s; only songs with the same context
+    are compared now."""
+    store = Store(tmp_path)
+    playlists = Playlists(store)
+    created = playlists.create("Big")
+
+    def song(i):
+        return {
+            "title": f"Song {i}",
+            "artist": f"Artist {i % 97}",
+            "album": f"Album {i % 400}",
+            "duration": 200,
+        }
+
+    with store.connect() as conn:
+        payload = json.loads(
+            conn.execute(
+                "SELECT payload FROM playlists WHERE id=?", (created["id"],)
+            ).fetchone()[0]
+        )
+        payload["tracks"] = [song(i) for i in range(9500)]
+        conn.execute(
+            "UPDATE playlists SET payload=? WHERE id=?",
+            (json.dumps(payload), created["id"]),
+        )
+    # Half are already in (deduplicated), half are new.
+    batch = [song(i) for i in range(9250, 9750)]
+    started = time.perf_counter()
+    playlists.add_many(created["id"], batch)
+    elapsed = time.perf_counter() - started
+    with store.connect() as conn:
+        saved = json.loads(
+            conn.execute(
+                "SELECT payload FROM playlists WHERE id=?", (created["id"],)
+            ).fetchone()[0]
+        )
+    assert len(saved["tracks"]) == 9750
+    assert elapsed < 2, f"add_many took {elapsed:.1f}s"

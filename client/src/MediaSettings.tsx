@@ -1,3 +1,5 @@
+import { InlineError } from "./EmptyState";
+import { notify, notifyError } from "./notices";
 import { apiFetch, detailOr, isUnconfirmed, writeFailure } from "./api";
 import { useEffect, useState } from "react";
 type Settings = {
@@ -16,11 +18,12 @@ const regions: [string, string][] = [
   ["ie", "Ireland"],
 ];
 export function MediaSettings() {
+  // A failed read stays beside the settings; a failed save is a notice.
+  const [loadError, setLoadError] = useState("");
   const [settings, setSettings] = useState<Settings | null>(null);
   const [key, setKey] = useState("");
   const [listenToken, setListenToken] = useState("");
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
   useEffect(() => {
     let active = true;
     void apiFetch("/api/v1/admin/settings/media")
@@ -32,7 +35,7 @@ export function MediaSettings() {
         if (active) setSettings(s);
       })
       .catch((e) => {
-        if (active) setMessage(e.message);
+        if (active) setLoadError(e.message);
       });
     return () => {
       active = false;
@@ -41,7 +44,6 @@ export function MediaSettings() {
   async function save(clear?: "fanart" | "listenbrainz") {
     if (!settings) return;
     setBusy(true);
-    setMessage("");
     try {
       const response = await apiFetch("/api/v1/admin/settings/media", {
         method: "PUT",
@@ -64,9 +66,9 @@ export function MediaSettings() {
       setSettings(body);
       setKey("");
       setListenToken("");
-      setMessage("Saved. Library artwork is preloaded in the background.");
+      notify("Saved. Library artwork is preloaded in the background.");
     } catch (e) {
-      setMessage((e as Error).message);
+      notifyError((e as Error).message);
       // It may have been saved: show the settings the server holds now.
       if (isUnconfirmed(e))
         void apiFetch("/api/v1/admin/settings/media")
@@ -211,7 +213,7 @@ export function MediaSettings() {
           </div>
         </>
       )}
-      {message && <p role="status">{message}</p>}
+      {loadError && <InlineError>{loadError}</InlineError>}
     </section>
   );
 }
