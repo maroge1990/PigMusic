@@ -350,12 +350,24 @@ final class DemoLibraryTests: XCTestCase {
     launch()
     let mix = app.buttons["Play Daily Mix"]
     expect(mix)
+    // The card's menu opens the page; the page's ⋯ is the same menu, with
+    // room to show all of it (the card's preview can push Hide off screen).
+    let show = app.buttons["Show songs"]
+    pressUntil(mix, shows: show)
+    XCTAssertTrue(app.buttons["Play next"].exists, app.debugDescription)
+    show.tap()
+    let actions = app.buttons["Mix actions"]
+    expect(actions)
     let hide = app.buttons["Hide this edition"]
-    pressUntil(mix, shows: hide)
-    for action in ["Show songs", "Play next", "Save this edition"] {
-      XCTAssertTrue(app.buttons[action].exists, "\(action)\n\(app.debugDescription)")
+    for _ in 0..<3 where !hide.exists {
+      actions.tap()
+      _ = hide.waitForExistence(timeout: 3)
     }
+    expect(hide)
+    XCTAssertTrue(app.buttons["Save this edition"].exists, app.debugDescription)
+    XCTAssertFalse(app.buttons["Show songs"].exists, app.debugDescription)
     hide.tap()
+    // The page closes, and Home leaves the mix out while its Undo waits.
     expect(app.staticTexts["Hid Daily Mix"])
     XCTAssertTrue(mix.waitForNonExistence(timeout: 5), app.debugDescription)
     // No question was asked.
