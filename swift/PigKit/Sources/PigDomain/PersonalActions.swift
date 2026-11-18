@@ -96,6 +96,9 @@ public struct RequestGroupItem: Codable, Sendable, Identifiable {
   public let error: String?
   public let source: String?
   public let quality: String?
+  /// The song's own artist and album, to match the iPhone's marks.
+  public let artist: String?
+  public let album: String?
 }
 /// One request on the Downloads page: an album request, or a lone song.
 public struct RequestGroup: Codable, Sendable, Identifiable {

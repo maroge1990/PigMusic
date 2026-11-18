@@ -478,6 +478,7 @@ struct RequestsView: View {
   /// A song that changed first (it finished, say) doesn't stop the others;
   /// signing out or a cancelled task does.
   private func act(_ tap: TransferTap, ids: [String]) async {
+    var done: [String] = []
     let failure = await TransferBatch.run(
       ids, stops: { $0 is CancellationError || ($0 as? NativeFailure) == .authentication }
     ) { id in
@@ -488,9 +489,18 @@ struct RequestsView: View {
         case .retry: try await service.retryRequest(id: id)
         }
       }
+      done.append(id)
     }
-    // A resumed song no longer shows paused on its row (#264).
-    if tap == .resume { model.requestedSongs.requestsChanged() }
+    // Only a song whose Resume went through loses its paused mark; other
+    // songs' marks stay (Codex round 1 on batch D).
+    if tap == .resume {
+      let items = groups.flatMap { group in group.items.map { (group, $0) } }
+      for (group, item) in items where done.contains(item.id) {
+        model.requestedSongs.resumed(
+          title: item.title, artist: item.artist ?? group.artist,
+          album: item.album ?? (group.songs == 1 ? nil : group.title))
+      }
+    }
     // Read the list first: reading it clears the page's message.
     await load(reset: true)
     if let failure, !(failure is CancellationError) { error = failure.userMessage }

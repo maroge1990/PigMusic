@@ -1224,6 +1224,7 @@ enum PlayOrigin: Hashable {
     let stamp = account.generation
     var drained = RequestOutbox.Report()
     var titles: [String: String] = [:]
+    var sentTracks: [String: Track] = [:]
     defer {
       flushingRequests = false
       // Codex round 2: a song left out or refused says so.
@@ -1233,6 +1234,7 @@ enum PlayOrigin: Hashable {
     for _ in 0..<10 {
       for track in await RequestOutbox.pending(store) where titles[track.id] == nil {
         titles[track.id] = track.title
+        sentTracks[track.id] = track
       }
       let report: RequestOutbox.Report
       do {
@@ -1248,7 +1250,7 @@ enum PlayOrigin: Hashable {
       requestedSongs.sent(report.requested)
       requestedSongs.refused(report.skipped + report.refused)
       // Paused before, so left paused (#264): marked paused, never excluded.
-      requestedSongs.pausedOnServer(report.paused)
+      requestedSongs.pausedOnServer(report.paused.compactMap { sentTracks[$0] })
       if !report.requested.isEmpty || !report.skipped.isEmpty || !report.refused.isEmpty
         || !report.paused.isEmpty
       {

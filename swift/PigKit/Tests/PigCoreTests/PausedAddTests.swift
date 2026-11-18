@@ -35,13 +35,30 @@ struct PausedAddTests {
     #expect(result.sentence == "Already in your library.")
   }
 
+  private func song(_ id: String, _ title: String) -> Track {
+    Track(id: id, title: title, artist: "Artist", album: "Album")
+  }
+
   @Test func aPausedSongIsMarkedPausedUntilTheRequestsChange() {
     var marks = RequestMarks()
     marks.queued("song")
-    marks.pausedOnServer(["song"])
+    marks.pausedOnServer([song("song", "Song")])
     #expect(marks.paused == ["song"])
     #expect(marks.contains("song"))
     marks.requestsChanged()
     #expect(!marks.contains("song"))
+  }
+
+  /// Codex round 1 on batch D: resuming one request clears only that
+  /// song's paused mark; other paused songs and sent marks stay.
+  @Test func resumingOneSongKeepsTheOtherMarks() {
+    var marks = RequestMarks()
+    for id in ["one", "two", "sent"] { marks.queued(id) }
+    marks.sent(["sent"])
+    marks.pausedOnServer([song("one", "One"), song("two", "Two")])
+    marks.resumed(title: " one ", artist: "artist", album: "Album")
+    #expect(marks.paused == ["two"])
+    #expect(!marks.contains("one"))
+    #expect(marks.contains("two") && marks.contains("sent"))
   }
 }
