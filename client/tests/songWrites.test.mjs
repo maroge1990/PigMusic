@@ -49,7 +49,7 @@ test("collection menu writes name the session", async () => {
   await addToPlaylist("p1", [{ title: "Von dutch" }, { title: "360" }]);
   assert.deepEqual(sent, [
     ["POST", "/api/v1/requests", "session-1"],
-    ["POST", "/api/v1/playlists/p1/songs?allow_repeat=true", "session-1"],
+    // Codex (#249): one atomic append, not a request per song.
     ["POST", "/api/v1/playlists/p1/songs?allow_repeat=true", "session-1"],
   ]);
   clearNotices();

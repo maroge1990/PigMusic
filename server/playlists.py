@@ -183,8 +183,13 @@ class Playlists:
 
         return same_song(left, right)
 
-    @coordinated
     def add(self, playlist_id, track, *, allow_repeat=False):
+        return self.add_many(playlist_id, [track], allow_repeat=allow_repeat)
+
+    @coordinated
+    def add_many(self, playlist_id, tracks, *, allow_repeat=False):
+        """Appends songs in order in one transaction: all of them or none, so
+        trying again after a failure never doubles the ones already in."""
         clause, params = self.clause()
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -195,11 +200,14 @@ class Playlists:
             if not row:
                 raise ValueError("Playlist not found.")
             payload = json.loads(row[0])
-            if (allow_repeat and not payload.get("favourites")) or not any(
-                self.same_song(t, track) for t in payload["tracks"]
-            ):
-                ensure_room(payload["tracks"])
-                payload["tracks"].append(track)
+            repeat = allow_repeat and not payload.get("favourites")
+            entries = list(payload["tracks"])
+            for track in tracks:
+                if repeat or not any(self.same_song(t, track) for t in entries):
+                    # Raises before anything is written: the whole batch fails.
+                    ensure_room(entries)
+                    entries.append(track)
+            payload["tracks"] = entries
             payload["revision"] = payload.get("revision", 0) + 1
             conn.execute(
                 "UPDATE playlists SET payload=? WHERE id=?",

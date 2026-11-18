@@ -509,6 +509,33 @@ def test_playlist_size_limit_is_shared_by_web_and_favourites(tmp_path, monkeypat
         assert response.status_code == 400
 
 
+def test_playlist_append_of_several_songs_is_all_or_nothing(tmp_path, monkeypatch):
+    """Codex (#249): a collection's songs join a playlist in one request, so
+    a failure part way can't leave some in for a retry to double."""
+    from server import playlists
+
+    app, owner, member, token, track = household(tmp_path, monkeypatch)
+    monkeypatch.setattr(playlists, "MAX_PLAYLIST_ENTRIES", 3)
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token},
+    ) as client:
+        own = client.post("/api/v1/playlists", json={"name": "Mine"}).json()
+        path = "/api/v1/playlists/" + own["id"] + "/songs?allow_repeat=true"
+        song = lambda title: {"title": title, "artist": "Artist", "album": "S"}
+        added = client.post(path, json={"tracks": [song("A"), song("B")]})
+        assert added.status_code == 200
+        assert [e["title"] for e in added.json()["entries"]] == ["A", "B"]
+        # Two more would pass the limit: neither is added.
+        full = client.post(path, json={"tracks": [song("C"), song("D")]})
+        assert full.status_code == 409
+        entries = client.get("/api/v1/playlists/" + own["id"]).json()["entries"]
+        assert [e["title"] for e in entries] == ["A", "B"]
+        # One song on its own is still accepted, as before.
+        assert client.post(path, json=song("C")).status_code == 200
+
+
 def test_server_info_is_for_signed_in_apps(tmp_path, monkeypatch):
     app, owner, member, token, track = household(tmp_path, monkeypatch)
     monkeypatch.setenv("PIG_MUSIC_REVISION", "0123456789abcdef0123")

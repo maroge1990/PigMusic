@@ -22379,7 +22379,15 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TrackInput"
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Tracks"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TrackInput"
+                  }
+                ],
+                "title": "Body"
               }
             }
           },
