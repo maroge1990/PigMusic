@@ -1,3 +1,4 @@
+import { notify } from "./notices";
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, RotateCw } from "lucide-react";
 import { api } from "./api";
@@ -101,7 +102,6 @@ export function PersonalRequests() {
   const [page, setPage] = useState<GroupPage | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState("");
   const load = (at = offset) => {
     const serial = ++readSerial.current;
     return api<GroupPage>(`/v1/requests/groups?offset=${at}&limit=${PAGE}`)
@@ -122,7 +122,7 @@ export function PersonalRequests() {
       });
       setOffset(0);
       await load(0);
-      setNotice(
+      notify(
         `Cleared ${result.cleared} finished ${result.cleared === 1 ? "song" : "songs"}. Your music files are unchanged.`,
       );
       window.dispatchEvent(new Event("music-requests-changed"));
@@ -136,7 +136,6 @@ export function PersonalRequests() {
     ++readSerial.current;
     setBusy(true);
     setError("");
-    setNotice("");
     try {
       for (const item of items)
         await api("/v1/requests/" + encodeURIComponent(item.id) + "/retry", {
@@ -163,7 +162,6 @@ export function PersonalRequests() {
   return (
     <section className="request-groups">
       {error && <InlineError>{error}</InlineError>}
-      {notice && <p role="status">{notice}</p>}
       {page && !page.total && (
         <Empty
           title="No downloads"

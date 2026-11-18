@@ -1,6 +1,6 @@
 import { apiFetch, isUnconfirmed, writeFailure } from "./api";
 import { restoreFromTrash } from "./trashUndo";
-import { offerUndo } from "./UndoBar";
+import { notify, offerUndo } from "./notices";
 import { useState } from "react";
 import { EmptyLine, InlineError } from "./EmptyState";
 
@@ -13,7 +13,7 @@ type Duplicate = {
 };
 
 /** Downloaded songs the library already had on another album. */
-export function DuplicateSongs({ notify }: { notify: (s: string) => void }) {
+export function DuplicateSongs() {
   const [items, setItems] = useState<Duplicate[] | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -51,8 +51,8 @@ export function DuplicateSongs({ notify }: { notify: (s: string) => void }) {
       const message =
         `${d.removed} duplicates moved to Removed music` +
         (d.skipped ? `; ${d.skipped} left as they were.` : ".");
-      notify(message);
-      if (d.restorable?.length)
+      if (!d.restorable?.length) notify(message);
+      else
         offerUndo(
           message,
           async () => {

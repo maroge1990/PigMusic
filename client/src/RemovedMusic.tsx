@@ -1,3 +1,4 @@
+import { notify, notifyError } from "./notices";
 import { apiFetch, isUnconfirmed, writeFailure } from "./api";
 import { formatCount, formatDateTime } from "./format";
 import { useEffect, useState } from "react";
@@ -20,7 +21,7 @@ type Purge = {
 const megabytes = (bytes: number) =>
   formatCount(Math.max(1, Math.round(bytes / 1_000_000))) + " MB";
 
-export function RemovedMusic({ notify }: { notify: (s: string) => void }) {
+export function RemovedMusic() {
   const [items, setItems] = useState<
     {
       id: string;
@@ -58,7 +59,7 @@ export function RemovedMusic({ notify }: { notify: (s: string) => void }) {
       window.dispatchEvent(new Event("music-library-changed"));
       notify("Song restored.");
     } catch (e) {
-      notify((e as Error).message);
+      notifyError((e as Error).message);
       // It may have come back: show Trash as it is now.
       if (isUnconfirmed(e)) {
         setPurge(null);
@@ -77,7 +78,7 @@ export function RemovedMusic({ notify }: { notify: (s: string) => void }) {
       if (!r.ok) throw new Error("Trash can't be read. Check the library.");
       setPurge(await r.json());
     } catch (e) {
-      notify((e as Error).message);
+      notifyError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -113,7 +114,7 @@ export function RemovedMusic({ notify }: { notify: (s: string) => void }) {
       await refresh();
       setPurge(null);
     } catch (e) {
-      notify((e as Error).message);
+      notifyError((e as Error).message);
       setPurge(null);
       // Songs may have been deleted: show what Trash holds now.
       if (isUnconfirmed(e)) void refresh().catch(() => {});

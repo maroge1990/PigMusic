@@ -295,21 +295,19 @@ export function DownloadSettingsPanel({
 export function ServerLibraryTools({
   library,
   refresh,
-  setToast,
 }: {
   library: Library | null;
   refresh: () => void;
-  setToast: (message: string) => void;
 }) {
   return (
     <>
       <LibraryScan refresh={refresh} />
       <ToolBoundary>
         <Suspense fallback={<Loading>Loading library tools…</Loading>}>
-          <TidyEditions notify={setToast} />
-          <DuplicateSongs notify={setToast} />
-          <RemovedMusic notify={setToast} />
-          <Organisation notify={setToast} />
+          <TidyEditions />
+          <DuplicateSongs />
+          <RemovedMusic />
+          <Organisation />
         </Suspense>
       </ToolBoundary>
       {!!library?.snapshot.read_failures?.length && (

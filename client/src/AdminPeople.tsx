@@ -1,3 +1,4 @@
+import { notify } from "./notices";
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { formatDateTime } from "./format";
@@ -28,7 +29,6 @@ function useAdminData(inboxOffset = 0) {
   const [warnings, setWarnings] = useState<Activity[]>([]);
   const [inbox, setInbox] = useState<InboxAlbum[]>([]);
   const [inboxNext, setInboxNext] = useState<number | null>(null);
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   async function load() {
     setPeople((await api<{ people: Person[] }>("/v1/people")).people);
@@ -51,18 +51,13 @@ function useAdminData(inboxOffset = 0) {
     setError("");
     try {
       await fn();
-      setMessage(text);
+      notify(text);
       await load();
     } catch (e) {
       setError((e as Error).message);
     }
   }
-  const notices = (
-    <>
-      {message && <p role="status">{message}</p>}
-      {error && <InlineError>{error}</InlineError>}
-    </>
-  );
+  const notices = <>{error && <InlineError>{error}</InlineError>}</>;
   return { people, events, warnings, inbox, inboxNext, action, notices };
 }
 

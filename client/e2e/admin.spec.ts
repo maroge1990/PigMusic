@@ -440,7 +440,7 @@ test("the owner reviews duplicate songs and moves them to Removed music", async 
   await expect(panel).toContainText("No duplicate songs.");
   expect(removed).toEqual(["dl"]);
   // D-79 (#183): no dialog first, and Undo puts them back.
-  const undo = page.locator(".undo-bar");
+  const undo = page.locator(".notice-area");
   await undo.getByRole("button", { name: "Undo" }).click();
   await expect.poll(() => restored).toEqual([{ identities: ["r-dl"] }]);
   await expect(undo).toContainText("1 duplicates put back.");
@@ -472,7 +472,7 @@ test("Cancel all clears the queue at once and Undo keeps every download", async 
   await expect(page.getByText("Two").first()).toBeVisible();
   await page.getByRole("button", { name: "Cancel all" }).click();
   await expect(page.getByText("Two")).toHaveCount(0);
-  const undo = page.locator(".undo-bar");
+  const undo = page.locator(".notice-area");
   await expect(undo).toContainText("Every unfinished download cancelled");
   await undo.getByRole("button", { name: "Undo" }).click();
   await expect(page.getByText("Two").first()).toBeVisible();
@@ -660,7 +660,7 @@ test("the owner joins an album split across two editions", async ({ page }) => {
   // D-79 (#183): it acts at once, and Undo puts the album back.
   expect(asked).toEqual([]);
   expect(joined).toEqual({ fingerprint: "a".repeat(64) });
-  const undo = page.locator(".undo-bar");
+  const undo = page.locator(".notice-area");
   await undo.getByRole("button", { name: "Undo" }).click();
   await expect.poll(() => undone).toBe(1);
   await expect(undo).toContainText("blink-182 · Dude Ranch put back.");
@@ -1268,6 +1268,6 @@ test("Cancel all spares a request submitted during its Undo time", async ({
   });
   // Its Undo left once it was sent.
   await expect(
-    page.locator(".undo-bar").getByRole("button", { name: "Undo" }),
+    page.locator(".notice-area").getByRole("button", { name: "Undo" }),
   ).toHaveCount(0);
 });

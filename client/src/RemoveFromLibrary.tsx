@@ -43,12 +43,3 @@ export function RemovalDialog({
     </dialog>
   );
 }
-
-/** Shown after a removal until its undo window closes. */
-export function UndoRemoval({ undo }: { undo: () => void }) {
-  return (
-    <p className="personal-status" role="status">
-      Removed from your library. <button onClick={undo}>Undo</button>
-    </p>
-  );
-}

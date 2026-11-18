@@ -336,7 +336,7 @@ test("a playlist is renamed, then deleted at once with Undo", async ({
   // Undo within the time: nothing is sent.
   await page.getByRole("button", { name: "Delete playlist" }).click();
   await expect(page).toHaveURL(/#\/library\/[a-z]+$/);
-  const undo = page.locator(".undo-bar");
+  const undo = page.locator(".notice-area");
   await expect(undo).toContainText("Road trip deleted.");
   await undo.getByRole("button", { name: "Undo" }).click();
   await expect(undo).toContainText("Road trip is back.");
@@ -380,10 +380,10 @@ test("two playlists deleted in a row each keep their own Undo", async ({
     await page.getByRole("button", { name: "Delete playlist" }).click();
     await expect(page).toHaveURL(/#\/library\/[a-z]+$/);
   }
-  const bar = page.locator(".undo-bar");
+  const bar = page.locator(".notice-area");
   await expect(bar.getByRole("button", { name: "Undo" })).toHaveCount(2);
   await bar
-    .locator("p", { hasText: "Road trip deleted." })
+    .locator(".notice", { hasText: "Road trip deleted." })
     .getByRole("button", { name: "Undo" })
     .click();
   await expect(bar).toContainText("Road trip is back.");

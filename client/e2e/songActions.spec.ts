@@ -22,9 +22,11 @@ test("a failed favourite shows its error on the song", async ({ page }) => {
     .getByRole("button", { name: "More options for Von dutch" })
     .click();
   await page.getByRole("menuitem", { name: "Favourite" }).click();
-  await expect(page.getByRole("alert")).toContainText(
-    "Favourites are unavailable right now",
-  );
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Favourites" }),
+  ).toContainText("Favourites are unavailable right now");
+  // A failure is never also said as a success.
+  await expect(page.locator(".notice-area")).not.toContainText("favourites");
 });
 
 // #246: one icon for each meaning. A song in your library shows the tick

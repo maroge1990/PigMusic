@@ -1,3 +1,4 @@
+import { notify, notifyError } from "./notices";
 import { useRef, useState } from "react";
 import { Upload } from "lucide-react";
 import { api } from "./api";
@@ -32,7 +33,6 @@ export function AppleImport({
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
 
   function reset() {
     setFile(null);
@@ -42,11 +42,10 @@ export function AppleImport({
 
   async function run(fn: () => Promise<void>) {
     setBusy(true);
-    setMessage("");
     try {
       await fn();
     } catch (e) {
-      setMessage((e as Error).message);
+      notifyError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -75,7 +74,7 @@ export function AppleImport({
         body: file,
       });
       reset();
-      setMessage(`Imported ${count(result.playlists, "playlist")}`);
+      notify(`Imported ${count(result.playlists, "playlist")}`);
       await onImported();
     });
 
@@ -173,7 +172,6 @@ export function AppleImport({
           )}
         </>
       )}
-      {message && <p role="status">{message}</p>}
     </section>
   );
 }

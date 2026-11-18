@@ -29,6 +29,7 @@ import {
 } from "./songs";
 import { InlineError } from "./EmptyState";
 import { formatDuration } from "./format";
+import { notify } from "./notices";
 
 /** One song. Tap anywhere to play; download state and ⋯ sit on the right. */
 export function SongRow({
@@ -255,9 +256,15 @@ function SongMenu({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ track: body, favourite: !favourite }),
               })
-                .then(() =>
-                  window.dispatchEvent(new Event("music-library-changed")),
-                )
+                .then(() => {
+                  notify(
+                    favourite
+                      ? "Removed from favourites"
+                      : "Added to favourites",
+                    "favourite",
+                  );
+                  window.dispatchEvent(new Event("music-library-changed"));
+                })
                 .catch((e) => onError((e as Error).message));
             },
             favourite === null,

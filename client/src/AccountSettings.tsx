@@ -1,3 +1,4 @@
+import { notify } from "./notices";
 import { useEffect, useState } from "react";
 import {
   QualitySelect,
@@ -36,7 +37,6 @@ export function AccountSettings({
   const [household, setHousehold] = useState("");
   // Undefined until the first answer: the list shows Loading, not "none".
   const [sessions, setSessions] = useState<Session[]>();
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [similar, setSimilar] = useState(keepPlaying);
   useEffect(() => {
@@ -99,7 +99,7 @@ export function AccountSettings({
     setError("");
     try {
       await fn();
-      if (text) setMessage(text);
+      if (text) notify(text);
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -120,7 +120,6 @@ export function AccountSettings({
         title="Your account"
         subtitle="Appearance, password, devices and your music settings."
       />
-      {message && <p role="status">{message}</p>}
       {error && <InlineError>{error}</InlineError>}
       <section className="account-section">
         <h2>Appearance</h2>
@@ -266,7 +265,7 @@ export function AccountSettings({
                     "/v1/me/sessions",
                     { method: "DELETE" },
                   );
-                  setMessage(
+                  notify(
                     `Signed out ${result.revoked} other ${result.revoked === 1 ? "device" : "devices"}.`,
                   );
                 }, "");

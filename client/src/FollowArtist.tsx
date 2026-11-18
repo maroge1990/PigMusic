@@ -1,3 +1,4 @@
+import { notify, notifyError } from "./notices";
 import { useEffect, useState } from "react";
 import { Bell, BellOff } from "lucide-react";
 import { api } from "./api";
@@ -6,7 +7,6 @@ import { api } from "./api";
 export function FollowArtist({ id, name }: { id: string; name: string }) {
   const [following, setFollowing] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
   useEffect(() => {
     void api<{ monitor?: boolean }>(`/v1/artists/${id}/acquisition`)
       .then((state) => setFollowing(!!state.monitor))
@@ -14,7 +14,6 @@ export function FollowArtist({ id, name }: { id: string; name: string }) {
   }, [id]);
   async function toggle() {
     setBusy(true);
-    setMessage("");
     try {
       if (following)
         await api(`/v1/artists/${id}/acquisition`, { method: "DELETE" });
@@ -29,13 +28,13 @@ export function FollowArtist({ id, name }: { id: string; name: string }) {
           }),
         });
       setFollowing(!following);
-      setMessage(
+      notify(
         following
           ? `Stopped following ${name}`
           : `Following new albums from ${name}`,
       );
     } catch (e) {
-      setMessage((e as Error).message);
+      notifyError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -52,7 +51,6 @@ export function FollowArtist({ id, name }: { id: string; name: string }) {
         {following ? <BellOff size={16} /> : <Bell size={16} />}
         {following ? "Following" : "Follow new albums"}
       </button>
-      {message && <span role="status">{message}</span>}
     </div>
   );
 }

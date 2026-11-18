@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ListPlus, Plus, X } from "lucide-react";
 import { EmptyLine, InlineError } from "./EmptyState";
+import { notify } from "./notices";
 
 type Playlist = { id: string; name: string };
 export function PlaylistPicker({
@@ -23,7 +24,6 @@ export function PlaylistPicker({
   const [items, setItems] = useState<Playlist[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState("");
   const [creating, setCreating] = useState(false);
   const [position, setPosition] = useState<{
     left: number;
@@ -48,7 +48,7 @@ export function PlaylistPicker({
     try {
       await add(id);
       popup.current?.hidePopover();
-      setNotice("Added to playlist");
+      notify("Added to playlist");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -65,7 +65,6 @@ export function PlaylistPicker({
         : { top: rect.bottom + 8 }),
     });
     setError("");
-    setNotice("");
     popup.current?.showPopover();
     try {
       setItems(await load());
@@ -139,8 +138,8 @@ export function PlaylistPicker({
               void create(name)
                 .then((p) => add(p.id))
                 .then(() => {
-                  setNotice("Playlist created and song added");
                   dialog.current?.close();
+                  notify("Playlist created and song added");
                 })
                 .catch((e) => setError(e.message))
                 .finally(() => setBusy(false));
@@ -158,9 +157,6 @@ export function PlaylistPicker({
           {error && <InlineError>{error}</InlineError>}
         </dialog>
       )}
-      <span className="sr-only" role="status">
-        {notice}
-      </span>
     </span>
   );
 }

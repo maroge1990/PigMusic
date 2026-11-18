@@ -1,6 +1,6 @@
 import { api } from "./api";
 import { restoreFromTrash } from "./trashUndo";
-import { offerUndo } from "./UndoBar";
+import { offerUndo } from "./notices";
 import { useState } from "react";
 
 /** Owner-only: move the server's files to recoverable trash for everyone. */

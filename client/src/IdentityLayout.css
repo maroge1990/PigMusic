@@ -25,16 +25,13 @@
     margin-top: var(--space-24);
     gap: var(--space-8);
   }
-  .toast,
-  .has-player .toast {
+  .notice-area,
+  .has-player .notice-area {
     bottom: calc(
       var(--mobile-nav-height, 4rem) + var(--player-height, 0px) +
         var(--space-16)
     );
-    font-size: var(--type-caption);
-    padding: var(--space-12) var(--space-16);
-    width: max-content;
-    max-width: 90vw;
+    max-width: calc(100vw - 2 * var(--space-16));
   }
 
   .page-header h1 {
