@@ -1208,14 +1208,17 @@ class UserLibrary:
             if row[0] not in CANCELLABLE:
                 raise ValueError("Only songs still being added can be cancelled")
             payload = json.loads(row[1])
+            if row[0] == PAUSED:
+                # Whose pause it is, read before they leave (an older pause
+                # is its first requester's). The pauser withdrawing makes it
+                # nobody's own, so any remaining or returning person's Add
+                # resumes it (#264); anyone else's withdrawal keeps it theirs.
+                owner = paused_by(payload)
+                payload["paused_by"] = None if owner == user_id else owner
             payload["requested_by"] = [
                 identity for identity in payload["requested_by"] if identity != user_id
             ]
             remaining = bool(payload["requested_by"])
-            if row[0] == PAUSED and paused_by(payload) == user_id:
-                # The pauser withdrew: the pause is nobody's own now, so any
-                # remaining or returning person's Add resumes it (#264).
-                payload["paused_by"] = None
             conn.execute(
                 "UPDATE queue SET payload=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (json.dumps(payload), row[0] if remaining else "cancelled", request_id),

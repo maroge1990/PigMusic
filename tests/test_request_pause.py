@@ -386,3 +386,23 @@ def test_withdrawing_from_a_shared_pause_leaves_the_song_addable(tmp_path):
     users.pause_request(member, key)
     assert users.resume_request(member, key) == {"resumed": True}
     assert status(store, key) == "waiting_for_sources"
+
+
+def test_withdrawing_from_an_older_shared_pause_does_not_pass_it_on(tmp_path):
+    """Codex round 2 on #264: a pause from before paused_by was recorded is
+    its first requester's. When they withdraw, it becomes nobody's own, not
+    the next requester's, so that person's Add still resumes it."""
+    store, owner, member = fixture(tmp_path)
+    users = store.user_libraries
+    wanted = {**song("Older"), "status": "missing"}
+    users.request(member, [wanted])
+    users.request(owner, [wanted])
+    with store.connect() as conn:
+        (key,) = conn.execute("SELECT id FROM queue").fetchone()
+        # Paused before the pauser was recorded.
+        conn.execute("UPDATE queue SET status='paused' WHERE id=?", (key,))
+    users.cancel_request(member, key)
+    assert status(store, key) == "paused"
+    result = users.request(owner, [wanted])
+    assert (result["existing"], result["paused"]) == (1, 0)
+    assert status(store, key) == "waiting_for_sources"
