@@ -374,6 +374,128 @@ def test_an_engine_mid_spawn_at_shutdown_is_ended_before_the_supervisor_exits(
                 thread.join(5)
 
 
+class Uvicorn:
+    """A web server that needs `grace` seconds after SIGTERM to exit."""
+
+    def __init__(self, clock, grace):
+        self.clock, self.grace = clock, grace
+        self.terminated = None
+        self.killed = False
+        self.returncode = None
+
+    def poll(self):
+        if self.returncode is None and self.terminated is not None:
+            if self.clock() >= self.terminated + self.grace:
+                self.returncode = 0
+        return self.returncode
+
+    def terminate(self):
+        if self.terminated is None:
+            self.terminated = self.clock()
+
+    def kill(self):
+        self.killed = True
+        self.returncode = -9
+
+    def wait(self, timeout=None):
+        began = self.clock()
+        while self.poll() is None:
+            if timeout is not None and self.clock() - began >= timeout:
+                raise runtime.subprocess.TimeoutExpired("uvicorn", timeout)
+            threading.Event().wait(0.005)
+        return self.returncode
+
+
+def stopping_with_a_spawn_pending(tmp_path, monkeypatch, returns_after):
+    """main() stopped by its watchdog (the server never answers) while the
+    engine's start is inside Popen, returning `returns_after` seconds after
+    the watchdog gives up (None: only once main has returned). The clock
+    runs ten times faster than real time and a tick of sleep adds 1 s."""
+    real, base, ticks = time.monotonic, time.monotonic(), [0.0]
+
+    def clock():
+        return ticks[0] + (real() - base) * 10
+
+    release, gave_up = threading.Event(), []
+    server = Uvicorn(clock, grace=2)
+    engines = []
+
+    def popen(command, **kwargs):
+        if "uvicorn" in command:
+            return server
+        engines.append(FakeProcess(lifetime=None))  # The child exists now.
+        while not release.is_set():
+            if returns_after is not None and gave_up:
+                if clock() >= gave_up[0] + returns_after:
+                    break
+            release.wait(0.005)
+        return engines[-1]
+
+    def probe():
+        dog = runtime.WATCHDOG_SILENT_SECONDS // runtime.WATCHDOG_INTERVAL
+        probes.append(clock())
+        if len(probes) == dog:
+            gave_up.append(clock())
+        return "silent", []
+
+    probes = []
+
+    def sleep(seconds):
+        ticks[0] += 1
+
+    monkeypatch.setenv("PIG_MUSIC_DATA", str(tmp_path / "data"))
+    monkeypatch.setenv("PIG_MUSIC_EMBEDDED_ENGINE", "true")
+    monkeypatch.delenv("PIG_MUSIC_DOWNLOAD_ROOT", raising=False)
+    monkeypatch.setattr(runtime, "proxy_trust", lambda: "127.0.0.1")
+    monkeypatch.setattr(runtime.subprocess, "Popen", popen)
+    monkeypatch.setattr(runtime.time, "sleep", sleep)
+    monkeypatch.setattr(runtime.time, "monotonic", clock)
+    monkeypatch.setattr(runtime.time, "time", lambda: 1_000_000 + clock())
+    monkeypatch.setattr(runtime.signal, "signal", lambda *a: None)
+    monkeypatch.setattr(runtime, "probe", probe, raising=False)
+    try:
+        assert runtime.main() == 1
+        ended = clock()
+        alive_at_exit = [e for e in engines if e.returncode is None]
+    finally:
+        release.set()
+        for thread in threading.enumerate():
+            if thread.name == "engine-launch":
+                thread.join(5)
+    return server, engines, gave_up[0], ended, alive_at_exit
+
+
+def test_a_watchdog_restart_signals_the_server_before_waiting_on_a_spawn(
+    tmp_path, monkeypatch
+):
+    """Codex on a138b4a: stopped by the watchdog, the supervisor waited up
+    to 25 s for the engine's start before it signalled Uvicorn, which then
+    had no time left to exit and was killed."""
+    server, engines, gave_up, ended, alive = stopping_with_a_spawn_pending(
+        tmp_path, monkeypatch, returns_after=24
+    )
+    assert server.terminated is not None and server.terminated - gave_up < 5
+    assert not server.killed and server.returncode == 0
+    assert len(engines) == 1 and alive == []
+
+
+def test_a_spawn_still_pending_at_the_deadline_is_ended_by_its_launcher(
+    tmp_path, monkeypatch, capsys
+):
+    server, engines, gave_up, ended, alive = stopping_with_a_spawn_pending(
+        tmp_path, monkeypatch, returns_after=None
+    )
+    # The supervisor did not wait past its deadline for the start.
+    assert ended - gave_up < getattr(runtime, "STOP_SECONDS", 25) + 10
+    assert not server.killed
+    assert "still being started; it is ended as soon as its start returns" in (
+        capsys.readouterr().err
+    )
+    # Released after main returned: the launcher ends what it was handed.
+    (engine,) = engines
+    assert engine.returncode is not None
+
+
 def test_an_engine_that_answers_is_never_ended(tmp_path, monkeypatch):
     # Nine silent probes, then any answer (even a refusal) starts the count again.
     engines, probes = engine_supervised(

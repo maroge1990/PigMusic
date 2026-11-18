@@ -49,6 +49,8 @@ ENGINE_STOP_SECONDS = 10
 # the NAS first, which can hang: it runs on a thread of its own, one at a
 # time, and the supervisor waits for it at most half a second each time.
 ENGINE_LAUNCH_WAIT = 0.5
+# How long stopping waits for the server and the engine before killing them.
+STOP_SECONDS = 25
 ENGINE_LAUNCH_SLOW = 30
 # The history also says how each run of the server ended (#241): "start"
 # when it is started, then "stop" (asked to stop: a release or a container
@@ -711,17 +713,25 @@ def main():
             record_restart(history, time.time(), "exit", reason)
         elif not failed:
             record_restart(history, time.time(), "stop", stop_reason(stop_signal))
-        deadline = time.monotonic() + 25
+        deadline = time.monotonic() + STOP_SECONDS
+        spawning = False
         if launch:
             # An engine its start already handed over is ended with the
             # rest; one being spawned is ended by the launcher itself once
-            # Popen hands it back, which is waited for within the deadline.
+            # Popen hands it back.
             taken, spawning = launch.cancel()
             if taken[0] is not None and engine is None:
                 engine, log = taken
-            if spawning:
-                launch.thread.join(max(0, deadline - time.monotonic()))
+        # Every known child is asked to stop first, on every path (a signal
+        # or the watchdog), so none waits on the engine's start.
         stop(None, None)
+        while spawning and launch.thread.is_alive() and time.monotonic() < deadline:
+            launch.thread.join(0.05)
+        if spawning and launch.thread.is_alive():
+            say(
+                "The source engine was still being started; it is ended as"
+                " soon as its start returns"
+            )
         reap((engine, ending and ending.process, server), deadline)
         return 1 if failed else 0
     finally:
