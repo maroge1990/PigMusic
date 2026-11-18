@@ -1,3 +1,20 @@
+/* A list's sort: the arrows, the word and the choices (D-120). */
+.sort-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  color: var(--secondary);
+  font-size: var(--type-subhead);
+}
+.sort-control select {
+  min-height: 2.75rem;
+  background: var(--raised);
+  color: var(--text);
+  border: 1px solid var(--control-border);
+  padding: 0 var(--space-8);
+  border-radius: var(--radius-compact);
+  max-width: 100%;
+}
 .library-controls {
   display: flex;
   align-items: center;

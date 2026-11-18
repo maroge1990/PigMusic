@@ -122,3 +122,29 @@ test("a playlist page shows its count and length with Play, Shuffle and more", a
     "Download",
   ]);
 });
+
+// D-120 (#251): Favourites has its star, count and length, Play, Shuffle and
+// a Sort that starts with the newest.
+test("Favourites shows its count and length with Play, Shuffle and Sort", async ({
+  page,
+}) => {
+  await playlists(page);
+  await page.goto("/#/library/favourites");
+  const header = page.locator(".list-header");
+  await expect(header.locator("h2")).toHaveText("Favourites");
+  await expect(header).toContainText("3 songs · 1 hr 9 min");
+  await expect(header.getByRole("button", { name: "Play" })).toBeEnabled();
+  await expect(
+    header.getByRole("button", { name: "Shuffle", exact: true }),
+  ).toBeEnabled();
+  const titles = page.locator(".song-list .song-text strong");
+  await expect(titles).toHaveText(["Song 2", "Song 1", "Song 0"]);
+  const sort = header.getByLabel("Sort");
+  await expect(sort.locator("option")).toHaveText([
+    "Recently added",
+    "Title",
+    "Artist",
+  ]);
+  await sort.selectOption({ label: "Title" });
+  await expect(titles).toHaveText(["Song 0", "Song 1", "Song 2"]);
+});

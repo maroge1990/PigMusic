@@ -5,7 +5,7 @@ import { CollectionCard, albumSongs, artistSongs } from "./CollectionMenu";
 import { Cover } from "./Cover";
 import { Empty } from "./EmptyState";
 import { OwnerLibraryLinks } from "./OwnerTools";
-import { PlaylistGrid } from "./PlaylistCards";
+import { FavouritesList, PlaylistGrid } from "./PlaylistCards";
 import { ShuffleLibrary } from "./ShuffleLibrary";
 import type { Playlist, PlaylistSummary } from "./libraryTypes";
 import type { Album, Artist, Library, Track } from "./types";
@@ -147,20 +147,9 @@ export function LibraryCollections({
           )}
         </CollectionPages>
       )}
-      {tab === "favourites" &&
-        (favouriteList?.entries.length ? (
-          songs(
-            favouriteList.entries.map(
-              (e) => e.saved_track || e.household_track || e,
-            ),
-            favouriteList,
-          )
-        ) : (
-          <Empty
-            title="No favourites yet"
-            description="Choose Favourite from a song's … menu to keep it here. Favourites never download anything by themselves."
-          />
-        ))}
+      {tab === "favourites" && (
+        <FavouritesList playlist={favouriteList} songs={songs} />
+      )}
       {tab === "playlists" && (
         <>
           <PlaylistGrid

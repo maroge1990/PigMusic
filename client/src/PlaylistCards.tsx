@@ -9,7 +9,9 @@ import {
 import { Cover } from "./Cover";
 import { formatListSize } from "./format";
 import type { Entry, Playlist, PlaylistSummary } from "./libraryTypes";
-import { InlineError } from "./EmptyState";
+import { Empty, InlineError } from "./EmptyState";
+import { SortControl, byName } from "./SortControl";
+import type { Track } from "./types";
 import { usePlayer } from "./Player";
 import { shuffled } from "./shuffle";
 import { playlistSongs } from "./songs";
@@ -203,6 +205,69 @@ function NewPlaylistCard({
           {error && <InlineError>{error}</InlineError>}
         </dialog>
       )}
+    </>
+  );
+}
+
+type FavouritesSort = "recent" | "title" | "artist";
+const favouritesSorts = [
+  ["recent", "Recently added"],
+  ["title", "Title"],
+  ["artist", "Artist"],
+] as const;
+
+/** Favourites in the order chosen: newest first, or by title or artist. */
+export function sortedFavourites(
+  playlist: Playlist,
+  sort: FavouritesSort,
+): Playlist {
+  const entries = [...playlist.entries];
+  const title = (e: Entry) => playable(e).title;
+  const artist = (e: Entry) => playable(e).artist;
+  if (sort === "recent") entries.sort((a, b) => b.position - a.position);
+  else if (sort === "title") entries.sort((a, b) => byName(title(a), title(b)));
+  else
+    entries.sort(
+      (a, b) => byName(artist(a), artist(b)) || byName(title(a), title(b)),
+    );
+  return { ...playlist, entries };
+}
+
+/** The Favourites tab (D-120): the star, count and length, Play, Shuffle
+ * and Sort over the songs. */
+export function FavouritesList({
+  playlist,
+  songs,
+}: {
+  playlist: Playlist | null;
+  songs: (tracks: Track[], playlist: Playlist) => ReactNode;
+}) {
+  const player = usePlayer();
+  const [sort, setSort] = useState<FavouritesSort>("recent");
+  if (!playlist?.entries.length) return <Empty title="No favourites yet" />;
+  const shown = sortedFavourites(playlist, sort);
+  const queue = playlistSongs(shown.entries);
+  return (
+    <>
+      <div className="list-header">
+        <FavouritesCover />
+        <div className="list-header-text">
+          <h2>Favourites</h2>
+          <p>{playlistSize(playlist)}</p>
+          <ListActions
+            disabled={!queue.length}
+            play={(shuffle) =>
+              player.play(shuffle ? shuffled(queue) : queue, 0)
+            }
+          />
+        </div>
+        <SortControl
+          value={sort}
+          options={favouritesSorts}
+          onChange={setSort}
+        />
+      </div>
+      {songs(shown.entries.map(playable), shown)}
     </>
   );
 }

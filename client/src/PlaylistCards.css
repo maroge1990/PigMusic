@@ -38,3 +38,28 @@
   width: 25%;
   height: 25%;
 }
+.list-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-16) var(--space-24);
+  margin-bottom: var(--space-16);
+}
+.list-header > .cover {
+  width: 7rem;
+  flex-shrink: 0;
+}
+.list-header-text {
+  flex: 1;
+  min-width: 12rem;
+}
+.list-header-text h2 {
+  font-size: var(--type-title);
+}
+.list-header-text p {
+  margin: var(--space-4) 0 0;
+  color: var(--secondary);
+}
+.list-header .release-actions {
+  margin: var(--space-12) 0 0;
+}
