@@ -498,3 +498,34 @@ test("D-120: each Server library tool is a card with its icon", async ({
     page.getByRole("button", { name: "Scan library" }),
   ).toBeVisible();
 });
+
+test("the overview's albums-awaiting tile leads to Assign", async ({
+  page,
+}) => {
+  await mockApi(page, {
+    role: "owner",
+    answers: {
+      "/v1/people": (route: Route) => route.fulfill({ json: people() }),
+      "/v1/people/activity": (route: Route) =>
+        route.fulfill({ json: { events: [], warnings: [] } }),
+      "/v1/admin/unassigned": (route: Route) =>
+        route.fulfill({
+          json: {
+            albums: [
+              {
+                id: album.id,
+                title: "Brat",
+                artist: album.artist,
+                tracks: album.tracks,
+              },
+            ],
+            total: 1,
+            next_offset: null,
+          },
+        }),
+    },
+  });
+  await page.goto("/#/admin");
+  await page.getByRole("link", { name: /Albums awaiting an owner/ }).click();
+  await expect(page.getByRole("button", { name: "Assign Brat" })).toBeVisible();
+});
