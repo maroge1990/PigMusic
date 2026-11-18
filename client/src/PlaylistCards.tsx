@@ -157,7 +157,7 @@ function NewPlaylistCard({
         className="album-card new-playlist-card"
         onClick={() => setOpen(true)}
       >
-        <span className="cover" aria-hidden="true">
+        <span className="cover new-playlist-cover" aria-hidden="true">
           <Plus />
         </span>
         <span className="grid-card-title">New playlist</span>
@@ -249,7 +249,7 @@ export function FavouritesList({
   const queue = playlistSongs(shown.entries);
   return (
     <>
-      <div className="list-header">
+      <header className="section-title list-header">
         <FavouritesCover />
         <div className="list-header-text">
           <h2>Favourites</h2>
@@ -266,7 +266,7 @@ export function FavouritesList({
           options={favouritesSorts}
           onChange={setSort}
         />
-      </div>
+      </header>
       {songs(shown.entries.map(playable), shown)}
     </>
   );
