@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Play, Plus, Shuffle, Star, X } from "lucide-react";
 import { api } from "./api";
-import { CollectionCard, playlistSongList } from "./CollectionMenu";
+import {
+  CollectionCard,
+  playlistSongList,
+  useCollectionMenu,
+} from "./CollectionMenu";
 import { Cover } from "./Cover";
 import { formatListSize } from "./format";
 import type { Entry, Playlist, PlaylistSummary } from "./libraryTypes";
 import { InlineError } from "./EmptyState";
+import { usePlayer } from "./Player";
+import { shuffled } from "./shuffle";
+import { playlistSongs } from "./songs";
 import "./PlaylistCards.css";
 
 /** The song a playlist entry plays: yours, the household's, or as saved. */
@@ -197,6 +204,26 @@ function NewPlaylistCard({
         </dialog>
       )}
     </>
+  );
+}
+
+/** A playlist page's Play, Shuffle and ⋯, over its playable songs. */
+export function PlaylistActions({ playlist }: { playlist: Playlist }) {
+  const player = usePlayer();
+  const songs = playlistSongs(playlist.entries);
+  const { parts } = useCollectionMenu({
+    kind: "playlist",
+    title: playlist.name,
+    songs: async () => songs,
+    buttonClass: "round-action",
+  });
+  return (
+    <ListActions
+      disabled={!songs.length}
+      play={(shuffle) => player.play(shuffle ? shuffled(songs) : songs, 0)}
+    >
+      {!playlist.favourites && parts}
+    </ListActions>
   );
 }
 

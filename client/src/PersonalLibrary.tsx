@@ -13,13 +13,7 @@ import { PageHeader } from "./PageHeader";
 import { PersonalQuality } from "./PersonalQuality";
 import { SearchPage } from "./SearchPage";
 import { Cover } from "./Cover";
-import {
-  fromTrack,
-  PAUSED_NOTICE,
-  playlistSongs,
-  songBody,
-  type AddResult,
-} from "./songs";
+import { fromTrack, PAUSED_NOTICE, songBody, type AddResult } from "./songs";
 import { albumSummary, mergeAlbumTracks } from "./albumTracks";
 import { warmCovers, whenIdle } from "./prefetch";
 import { usePlayer } from "./Player";
@@ -37,6 +31,13 @@ import { PlaylistOptions } from "./PlaylistOptions";
 import { go, type Route } from "./routes";
 import { OwnerAlbumTools, OwnerArtistTools } from "./OwnerTools";
 import { InlineError, Loading } from "./EmptyState";
+import {
+  FavouritesCover,
+  PlaylistActions,
+  PlaylistCover,
+  playlistFacts,
+  playlistSize,
+} from "./PlaylistCards";
 
 function albumMeta(info: {
   artist?: string;
@@ -473,6 +474,22 @@ export function PersonalLibrary({
           title={detail.title}
           subtitle={albumMeta(detail.albumInfo)}
         />
+      ) : detail?.playlist ? (
+        <PageHeader
+          cover={
+            detail.playlist.favourites ? (
+              <FavouritesCover />
+            ) : (
+              <PlaylistCover
+                title={detail.title}
+                covers={playlistFacts(detail.playlist).covers}
+              />
+            )
+          }
+          eyebrow="PLAYLIST"
+          title={detail.title}
+          subtitle={playlistSize(detail.playlist)}
+        />
       ) : detail ? (
         <PageHeader title={detail.title} />
       ) : (
@@ -490,14 +507,15 @@ export function PersonalLibrary({
         />
       ) : detail ? (
         <>
-          {(detail.playlist || detail.quality) && (
+          {detail.playlist && (
+            <PlaylistActions key={detail.route} playlist={detail.playlist} />
+          )}
+          {detail.quality && (
             <div className="release-actions">
               {[false, true].map((shuffle) => {
-                const playable = detail.playlist
-                  ? playlistSongs(detail.playlist.entries, detail.cover)
-                  : (detail.tracks || [])
-                      .filter((t) => t.available !== false)
-                      .map((t) => fromTrack(t, detail.cover));
+                const playable = (detail.tracks || [])
+                  .filter((t) => t.available !== false)
+                  .map((t) => fromTrack(t, detail.cover));
                 return (
                   <button
                     key={String(shuffle)}

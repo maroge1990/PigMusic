@@ -91,3 +91,34 @@ test("the Playlists tab shows Favourites first, then covers with count and lengt
     { name: "Sunday morning" },
   ]);
 });
+
+// D-120 (#251): a playlist page leads with its covers, count and length,
+// then Play, Shuffle and its ⋯.
+test("a playlist page shows its count and length with Play, Shuffle and more", async ({
+  page,
+}) => {
+  await playlists(page);
+  await page.goto("/#/library/playlist/p2");
+  const header = page.locator(".page-header");
+  await expect(header.locator("h1")).toHaveText("Kitchen disco");
+  await expect(header).toContainText("4 songs · 1 hr 32 min");
+  await expect(header.locator(".playlist-mosaic .cover")).toHaveCount(4);
+  const actions = page.locator(".release-actions");
+  await expect(actions.getByRole("button", { name: "Play" })).toBeEnabled();
+  await expect(
+    actions.getByRole("button", { name: "Shuffle", exact: true }),
+  ).toHaveText("Shuffle");
+  await actions
+    .getByRole("button", { name: "More options for Kitchen disco" })
+    .click();
+  await expect(
+    page.getByRole("menu", { name: "Kitchen disco" }).getByRole("menuitem"),
+  ).toHaveText([
+    "Play",
+    "Shuffle",
+    "Play next",
+    "Add to library",
+    "Add to playlist",
+    "Download",
+  ]);
+});
