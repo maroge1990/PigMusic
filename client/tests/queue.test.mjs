@@ -160,12 +160,19 @@ test("a saved queue resumes at its song and position", () => {
   assert.equal(q.serializeQueue(songs, -1, 0), null);
 });
 
-test("a long queue saves its first 500 songs and stays inside them", () => {
-  const songs = Array.from({ length: 600 }, (_, i) => song("s" + i));
-  const saved = q.parseSavedQueue(q.serializeQueue(songs, 550, 7));
-  assert.equal(saved.songs.length, 500);
-  assert.equal(saved.cursor, 499);
-  assert.equal(saved.songs[saved.cursor].key, "s499");
+// Codex round 1, finding 7: a song past the 500th resumed as the 500th.
+test("a long queue saves 500 songs around the one playing", () => {
+  const songs = Array.from({ length: 1200 }, (_, i) => song("s" + i));
+  for (const [cursor, first] of [
+    [10, 0],
+    [550, 500],
+    [1150, 700],
+  ]) {
+    const saved = q.parseSavedQueue(q.serializeQueue(songs, cursor, 7));
+    assert.equal(saved.songs.length, 500);
+    assert.equal(saved.songs[0].key, "s" + first);
+    assert.equal(saved.songs[saved.cursor].key, "s" + cursor);
+  }
 });
 
 test("a damaged or empty saved queue is ignored", () => {

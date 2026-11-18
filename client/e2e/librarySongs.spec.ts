@@ -112,3 +112,43 @@ test("a Songs page that fails offers Try again for that page", async ({
   await expect(rows(page)).toHaveCount(250);
   await expect(notices).not.toContainText("busy");
 });
+
+// Codex round 1, finding 7: a song past the 500th in its list resumes as
+// itself after a reload, not as the 500th.
+test("a Songs row beyond 500 resumes as itself after a reload", async ({
+  page,
+}) => {
+  await mockApi(page, {
+    answers: {
+      "/v1/library-pages/tracks": (route) =>
+        route.fulfill({ json: songPage(offsetOf(route), 600) }),
+      "/v1/playback/lib-550/url": (route) =>
+        route.fulfill({
+          json: { url: "/api/v1/playback/files/silence", expires_in: 60 },
+        }),
+    },
+  });
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = () => Promise.resolve();
+  });
+  await page.goto("/#/library/songs");
+  for (const count of [200, 400, 600]) {
+    await expect(rows(page)).toHaveCount(count);
+    await scrollToEnd(page);
+  }
+  await rows(page).filter({ hasText: "Song 550" }).click();
+  const mini = page.locator(".mini-player");
+  await expect(mini).toContainText("Song 550");
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const saved = JSON.parse(
+          localStorage.getItem("pig-music-queue") || "null",
+        );
+        return saved?.songs[saved.cursor]?.title;
+      }),
+    )
+    .toBe("Song 550");
+  await page.reload();
+  await expect(mini).toContainText("Song 550");
+});
