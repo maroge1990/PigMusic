@@ -9,6 +9,7 @@ const {
   askToConfirm,
   confirmSession,
   endConfirmSession,
+  setConfirmIdentity,
   subscribeConfirm,
 } = await import("../src/confirmDialog.ts");
 
@@ -84,6 +85,32 @@ test("a question asked for an ended session is never shown", async () => {
   const stop = subscribeConfirm((q) => (open = q));
   assert.equal(await askToConfirm(question, session), false);
   assert.equal(open, null);
+  stop();
+});
+
+test("a confirmed question checks the server still has the asking session (Codex)", async () => {
+  let open = null;
+  const stop = subscribeConfirm((q) => (open = q));
+  // Another tab signed in as Sam, replacing the shared cookie.
+  let server = "s-pat";
+  setConfirmIdentity("s-pat", async () => server);
+  const asked = askToConfirm(question);
+  server = "s-sam";
+  answerConfirm(open.id, true);
+  assert.equal(await asked, false);
+  // Still Pat's session: the action goes ahead.
+  server = "s-pat";
+  const again = askToConfirm(question);
+  answerConfirm(open.id, true);
+  assert.equal(await again, true);
+  // The check couldn't be made: nothing is done.
+  setConfirmIdentity("s-pat", async () => {
+    throw new Error("offline");
+  });
+  const offline = askToConfirm(question);
+  answerConfirm(open.id, true);
+  assert.equal(await offline, false);
+  setConfirmIdentity(null, null);
   stop();
 });
 

@@ -190,3 +190,43 @@ test("a question left open when the session ends is gone for the next account (C
   await expect(page.getByRole("dialog")).toHaveCount(0);
   expect(deletes).toEqual([]);
 });
+
+test("another tab signing in closes the question in this one (Codex)", async ({
+  page,
+}) => {
+  const deletes: string[] = [];
+  const session = (id: string, current: boolean) => ({
+    id,
+    device_name: current ? "Mac" : "iPhone",
+    client: "web",
+    created_at: 0,
+    last_seen_at: 0,
+    current,
+    revoked_at: null,
+  });
+  await mockApi(page, {
+    answers: {
+      "/v1/me/sessions": (route) => {
+        if (route.request().method() === "DELETE") {
+          deletes.push("DELETE");
+          return route.fulfill({ json: { revoked: 1 } });
+        }
+        return route.fulfill({
+          json: { sessions: [session("a", true), session("b", false)] },
+        });
+      },
+    },
+  });
+  await page.goto("/#/account");
+  await page.getByRole("button", { name: "Sign out other devices" }).click();
+  const ask = page.getByRole("dialog", { name: "Sign out everywhere else?" });
+  await expect(ask).toBeVisible();
+  // What another tab's sign-in sends.
+  await page.evaluate(() => {
+    const other = new BroadcastChannel("pig-music-session");
+    other.postMessage({ change: "signed-in", tab: "other", at: 1 });
+    other.close();
+  });
+  await expect(ask).toHaveCount(0);
+  expect(deletes).toEqual([]);
+});

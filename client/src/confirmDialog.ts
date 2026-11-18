@@ -17,11 +17,36 @@ export type ConfirmQuestion = {
 
 export type AskedQuestion = ConfirmQuestion & { id: number };
 
-let asked: (AskedQuestion & { answer: (yes: boolean) => void }) | null = null;
+let asked:
+  | (AskedQuestion & {
+      answer: (yes: boolean) => void;
+      session: number;
+      identity: string | null;
+    })
+  | null = null;
 let next = 0;
 /** Counts sign-ins: a question belongs to the session that asked it. */
 let session = 0;
 const listeners = new Set<(question: AskedQuestion | null) => void>();
+/** The server's id for this tab's session, and how to read it again. */
+let identity: string | null = null;
+let serverSession: (() => Promise<string | null>) | null = null;
+let checkFailed = () => {};
+
+/**
+ * Says which server session this tab is signed in with, and how to ask the
+ * server for the one it has now. Another tab can replace the shared cookie,
+ * so a confirmed action rechecks it before it goes ahead.
+ */
+export function setConfirmIdentity(
+  id: string | null,
+  read: (() => Promise<string | null>) | null,
+  failed: () => void = () => {},
+) {
+  identity = id;
+  serverSession = read;
+  checkFailed = failed;
+}
 
 function publish() {
   for (const listener of listeners) listener(asked);
@@ -55,21 +80,33 @@ export function askToConfirm(
   if (forSession !== session) return Promise.resolve(false);
   if (asked) answerConfirm(asked.id, false);
   return new Promise<boolean>((resolve) => {
-    asked = { ...question, id: ++next, answer: resolve };
+    asked = { ...question, id: ++next, answer: resolve, session, identity };
     publish();
   });
 }
 
 /**
  * Answers question `id`. A handler left from an earlier question (its id no
- * longer open) is ignored, so it can never approve a newer one.
+ * longer open) is ignored, so it can never approve a newer one. Yes goes
+ * ahead only once the server still has the session that asked; if it
+ * can't be checked, nothing is done.
  */
 export function answerConfirm(id: number, yes: boolean) {
   const question = asked;
   if (!question || question.id !== id) return;
   asked = null;
-  question.answer(yes);
   publish();
+  if (!yes) return question.answer(false);
+  const same = () => question.session === session;
+  const read = serverSession;
+  if (!read) return question.answer(same());
+  read().then(
+    (now) => question.answer(same() && now === question.identity),
+    () => {
+      question.answer(false);
+      checkFailed();
+    },
+  );
 }
 
 /** Calls `listener` with the open question (or null) on every change. */
