@@ -199,3 +199,35 @@ test("a collection action keeps the session it was chosen under", async () => {
   assert.deepEqual(sent, [["POST", "/api/v1/requests", "session-1"]]);
   clearNotices();
 });
+
+test("a removal answered after an account change offers no Undo", async () => {
+  // Codex: a delayed answer restored A's Undo in B's session.
+  const { clearSessionReads } = await import("../src/api.ts");
+  globalThis.navigator ??= {};
+  setSessionId("session-1");
+  let release;
+  const sent = [];
+  globalThis.fetch = async (path) => {
+    sent.push(path);
+    if (path === "/api/v1/library/remove")
+      await new Promise((r) => (release = r));
+    return Response.json(
+      path === "/api/v1/library/removal-preview"
+        ? { confirmation: "c", items: [] }
+        : { id: "r9", undo_until: Date.now() / 1000 + 60 },
+    );
+  };
+  let shown = [];
+  const stop = subscribe((all) => (shown = all));
+  let after = 0;
+  const removing = removeFromLibrary(["t1"], () => after++);
+  while (!release) await new Promise((r) => setImmediate(r));
+  clearSessionReads();
+  setSessionId("session-2");
+  release();
+  await removing;
+  stop();
+  clearNotices();
+  assert.deepEqual(shown, []);
+  assert.equal(after, 0);
+});

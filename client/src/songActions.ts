@@ -1,4 +1,4 @@
-import { api } from "./api";
+import { api, currentSession } from "./api";
 import { batches } from "./limits";
 import { expectedSession, withSession } from "./sessionId";
 import { notify, notifyError, offerUndo } from "./notices";
@@ -124,6 +124,10 @@ export async function removeFromLibrary(ids: string[], after?: () => void) {
   // asked (#250, Codex): a sign-in in between can't receive any of them.
   const session = expectedSession();
   const bound = <T>(start: () => Promise<T>) => withSession(session, start);
+  // An answer that arrives after a sign-out or account change ends here
+  // without a word: no Undo, error or refresh reaches the next session.
+  const generation = currentSession();
+  const ended = () => currentSession() !== generation;
   try {
     const preview = await bound(() =>
       api<RemovalPreview>("/v1/library/removal-preview", {
@@ -132,6 +136,7 @@ export async function removeFromLibrary(ids: string[], after?: () => void) {
         body: JSON.stringify({ track_ids: ids }),
       }),
     );
+    if (ended()) return;
     const removed = await bound(() =>
       api<{ id: string; undo_until: number }>("/v1/library/remove", {
         method: "POST",
@@ -142,6 +147,7 @@ export async function removeFromLibrary(ids: string[], after?: () => void) {
         }),
       }),
     );
+    if (ended()) return;
     offerUndo(
       "Removed from your library.",
       async () => {
@@ -157,6 +163,6 @@ export async function removeFromLibrary(ids: string[], after?: () => void) {
     after?.();
     window.dispatchEvent(new Event("music-library-changed"));
   } catch (e) {
-    notifyError((e as Error).message);
+    if (!ended()) notifyError((e as Error).message);
   }
 }
