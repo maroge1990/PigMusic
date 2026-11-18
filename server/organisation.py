@@ -504,7 +504,7 @@ class Organisation:
         for name, record in document_records.rows(self.store, "organisation"):
             try:
                 self.recover_one(record)
-            except (OSError, ValueError, KeyError) as error:
+            except document_records.RETRYABLE as error:
                 document_records.unfinished("organisation", name, error)
             except Exception as error:
                 document_records.report("organisation", name, error)

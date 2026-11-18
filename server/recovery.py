@@ -530,7 +530,7 @@ class Recovery:
         for name, record in document_records.rows(self.store, "removed"):
             try:
                 self.recover_one(record)
-            except (OSError, ValueError, KeyError) as error:
+            except document_records.RETRYABLE as error:
                 document_records.unfinished("trash", name, error)
             except Exception as error:
                 document_records.report("trash", name, error)

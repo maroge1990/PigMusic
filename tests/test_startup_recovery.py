@@ -6,6 +6,7 @@ import errno
 import json
 import os
 import shutil
+import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
@@ -697,3 +698,53 @@ def test_the_system_page_lists_an_unfinished_task(tmp_path, monkeypatch):
         "sentence": UNFINISHED.format("trash"),
     } in problems
     assert "/music" not in answer.text and "removed:x" not in answer.text
+
+
+def locked_on(monkeypatch, prefix, status):
+    """The final journal save of a `prefix` record reaching `status` meets
+    a locked database, once."""
+    save, failed = Recovery.save, []
+
+    def locked(self, key, value):
+        if key.startswith(prefix) and value.get("status") == status and not failed:
+            failed.append(key)
+            raise sqlite3.OperationalError("database is locked")
+        return save(self, key, value)
+
+    monkeypatch.setattr(Recovery, "save", locked)
+    return failed
+
+
+def test_a_locked_database_during_trash_recovery_is_retried_not_set_aside(
+    tmp_path, monkeypatch
+):
+    """Codex on 438047f: a retryable SQLite failure was listed as a record
+    set aside rather than a task to be tried again."""
+    store, root, path, track = setup(tmp_path, monkeypatch)
+    recovery = Recovery(store)
+    record = recovery.remove("saved")
+    record["status"] = "removing"
+    recovery.save("removed:" + record["id"], record)
+    failed = locked_on(monkeypatch, "removed:", "removed")
+    Recovery(Store(store.directory)).recover()
+    name = "removed:" + record["id"]
+    assert failed == [name]
+    assert unfinished("trash") == {name} and reported("trash") == {name}
+    assert store.read_document(name)["status"] == "removing"
+    Recovery(Store(store.directory)).recover()
+    assert store.read_document(name)["status"] == "removed"
+
+
+def test_a_locked_database_during_organisation_recovery_is_retried_not_set_aside(
+    tmp_path, monkeypatch
+):
+    tidy, identity, operation = interrupted_tidy(tmp_path, monkeypatch)
+    name = "organisation:" + operation
+    failed = locked_on(monkeypatch, "organisation:", "completed")
+    tidy.organisation.recover()
+    assert failed == [name]
+    assert unfinished("organisation") == {name}
+    assert reported("organisation") == {name}
+    assert tidy.store.read_document(name)["status"] == "publishing"
+    tidy.organisation.recover()
+    assert tidy.store.read_document(name)["status"] == "completed"

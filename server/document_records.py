@@ -10,6 +10,7 @@ Each is logged and listed for the System page once per process.
 import json
 import logging
 import math
+import sqlite3
 import threading
 
 from . import startup_problems
@@ -223,6 +224,12 @@ def report(area, name, error):
         _reported.add(name)
     log.error("Skipped %s record %s", area, name, exc_info=error)
     startup_problems.report(area, name, error)
+
+
+# What a recovery step meets when the disk, the library mount or the
+# database refuses it for now (full, locked, busy, an I/O error): the
+# record stays and is tried again at the next start (#258).
+RETRYABLE = (OSError, ValueError, KeyError, sqlite3.OperationalError)
 
 
 def unfinished(area, name, error):
