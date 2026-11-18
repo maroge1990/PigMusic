@@ -39,7 +39,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 From the 17 Nov review, in the suggested order (Mark confirms): **C, one vocabulary** (Mark chooses the words): #246. **D, one of each:**
 #248, #249, #183, #250 (#247 parked by Mark, 18 Nov). **E, the plain screens:** #251, #252, #209, #255. Smaller: #242, #253, #256, #257, #258.
 
-Then: #226 (an unreadable download list or a source change must not empty the Watch), #230 and #231 (findings), #225
+First: #265 (tap-through tests on GitHub Actions, TestFlight on Xcode Cloud; D-119). Then: #226 (an unreadable download list or a source change must not empty the Watch), #230 and #231 (findings), #225
 (test workers' memory growth).
 
 ## Later
