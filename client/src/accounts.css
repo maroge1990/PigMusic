@@ -582,12 +582,41 @@ main h1[tabindex="-1"]:focus {
   font-size: var(--type-footnote);
   color: var(--secondary);
 }
-/* Downloads: one card per request; its songs, source and quality inside. */
-.request-group {
-  margin-bottom: var(--space-12);
-  border: 1px solid var(--border);
+/* Downloads: requests grouped into panels (Adding, Couldn't add, Added);
+   one row per request, its songs, source and quality inside. */
+.download-section {
+  margin-bottom: var(--space-16);
+  padding: var(--space-8) var(--space-16);
   border-radius: var(--radius-card);
   background: var(--surface);
+}
+.download-section .section-title h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+.download-section[data-section="failed"] .section-title h2 {
+  color: var(--danger);
+}
+.download-count {
+  color: var(--secondary);
+  font-size: var(--type-footnote);
+  font-weight: 400;
+}
+.download-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-12);
+}
+.download-row + .download-row {
+  border-top: 1px solid var(--border);
+}
+.download-retry {
+  margin-top: var(--space-16);
+}
+.request-group {
+  min-width: 0;
 }
 .request-group > summary {
   display: grid;

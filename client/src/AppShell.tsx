@@ -413,10 +413,7 @@ export function AppShell() {
           <PersonalLibrary user={user} route={{ ...route, section }} />
         ) : section === "downloads" ? (
           <main className="personal-main">
-            <PageHeader
-              title="Downloads"
-              subtitle="Music you asked the server to get, newest first."
-            />
+            <PageHeader title="Downloads" />
             <PersonalRequests />
           </main>
         ) : section === "account" ? (
