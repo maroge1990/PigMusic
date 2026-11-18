@@ -78,8 +78,10 @@ class PersonalRemoval:
                     stat.st_mtime_ns,
                 )
             )
+        # The token names the member it was made for, so another member who
+        # owns the same songs can never send it as theirs (Codex, #248).
         token = hashlib.sha256(
-            json.dumps(signature, sort_keys=True).encode()
+            json.dumps({"user": user_id, "items": signature}, sort_keys=True).encode()
         ).hexdigest()
         return {
             "confirmation": token,

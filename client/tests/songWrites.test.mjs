@@ -81,3 +81,26 @@ test("Remove from library and its Undo name the session that removed", async () 
     ["POST", "/api/v1/library/removals/r1/undo", "session-1"],
   ]);
 });
+
+test("a sign-in during the preview never sends the removal as the new account", async () => {
+  setSessionId("session-1");
+  const sent = [];
+  globalThis.fetch = async (path, options) => {
+    sent.push([
+      path,
+      new Headers(options?.headers).get("X-Pig-Expected-Session"),
+    ]);
+    if (path === "/api/v1/library/removal-preview") {
+      // Another account signs in while the preview is on its way.
+      setSessionId("session-2");
+      return Response.json({ confirmation: "c", items: [] });
+    }
+    return Response.json({ id: "r2", undo_until: Date.now() / 1000 + 60 });
+  };
+  await removeFromLibrary(["t1"]);
+  clearNotices();
+  assert.deepEqual(sent, [
+    ["/api/v1/library/removal-preview", "session-1"],
+    ["/api/v1/library/remove", "session-1"],
+  ]);
+});

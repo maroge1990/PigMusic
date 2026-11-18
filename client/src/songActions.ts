@@ -79,29 +79,32 @@ export async function addSongsToLibrary(songs: Song[]) {
  * the files stay on the server for anyone else who has them.
  */
 export async function removeFromLibrary(ids: string[], after?: () => void) {
+  // The preview, the removal and its Undo all belong to the session that
+  // asked (#250, Codex): a sign-in in between can't receive any of them.
+  const session = expectedSession();
+  const bound = <T>(start: () => Promise<T>) => withSession(session, start);
   try {
-    const preview = await api<RemovalPreview>("/v1/library/removal-preview", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ track_ids: ids }),
-    });
-    // Undo belongs to the session that removed the songs (#250).
-    const session = expectedSession();
-    const removed = await api<{ id: string; undo_until: number }>(
-      "/v1/library/remove",
-      {
+    const preview = await bound(() =>
+      api<RemovalPreview>("/v1/library/removal-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ track_ids: ids }),
+      }),
+    );
+    const removed = await bound(() =>
+      api<{ id: string; undo_until: number }>("/v1/library/remove", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           track_ids: ids,
           confirmation: preview.confirmation,
         }),
-      },
+      }),
     );
     offerUndo(
       "Removed from your library.",
       async () => {
-        await withSession(session, () =>
+        await bound(() =>
           api(`/v1/library/removals/${removed.id}/undo`, { method: "POST" }),
         );
         window.dispatchEvent(new Event("music-library-changed"));

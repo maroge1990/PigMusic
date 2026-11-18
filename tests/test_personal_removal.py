@@ -52,6 +52,18 @@ def test_shared_then_final_removal_and_private_undo(tmp_path, monkeypatch):
     assert removal.undo(owner, first["id"]) == {"restored": 0}
 
 
+def test_confirmation_is_for_its_own_member_only(tmp_path, monkeypatch):
+    # Codex (#248): two members who own the same song got the same token, so
+    # one member's removal could be sent with the other's preview.
+    store, _, path, track, owner, member, removal = household(tmp_path, monkeypatch)
+    store.user_libraries.add(member, ["saved"])
+    mine = removal.preview(owner, ["saved"])["confirmation"]
+    assert removal.preview(member, ["saved"])["confirmation"] != mine
+    with pytest.raises(RemovalChanged):
+        removal.remove(member, ["saved"], mine)
+    assert store.user_libraries.contains(member, "saved")
+
+
 def test_playlist_does_not_retain_file_and_owner_restore_restores_membership(
     tmp_path, monkeypatch
 ):
