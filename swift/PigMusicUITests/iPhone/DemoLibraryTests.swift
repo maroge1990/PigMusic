@@ -323,8 +323,13 @@ final class DemoLibraryTests: XCTestCase {
     file: StaticString = #filePath, line: UInt = #line
   ) {
     for _ in 0..<3 where !item.exists {
-      target.press(forDuration: 1.2)
-      _ = item.waitForExistence(timeout: 3)
+      // A slow runner can take the press for a tap and open the page: back.
+      if !target.exists, app.navigationBars.buttons.firstMatch.exists {
+        app.navigationBars.buttons.firstMatch.tap()
+        _ = target.waitForExistence(timeout: 5)
+      }
+      target.press(forDuration: 1.5)
+      _ = item.waitForExistence(timeout: 5)
     }
     expect(item, file: file, line: line)
   }
@@ -334,8 +339,9 @@ final class DemoLibraryTests: XCTestCase {
     launch()
     let card = app.buttons["Sunrise, The Orchard"]
     expect(card)
-    pressUntil(card, shows: app.buttons["Shuffle"])
-    for action in ["Play", "Play next", "Add to playlist", "Download"] {
+    // Only the menu has Add to playlist; the album page has its own Shuffle.
+    pressUntil(card, shows: app.buttons["Add to playlist"])
+    for action in ["Play", "Shuffle", "Play next", "Download"] {
       XCTAssertTrue(app.buttons[action].exists, "\(action)\n\(app.debugDescription)")
     }
     // Save and Hide this edition belong to mixes alone.
