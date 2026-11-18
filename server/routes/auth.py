@@ -252,8 +252,16 @@ def auth_router(auth: Auth, security=None, origin: str | None = None):
         return {"revoked": True}
 
     @router.post("/auth/logout")
-    async def logout(response: Response, result=Depends(current)):
+    async def logout(request: Request, response: Response, result=Depends(current)):
         await write(auth.revoke, result[0]["id"], result[1]["public_id"])
+        if request.headers.get("x-pig-expected-session") is not None:
+            # A logout naming its session (the web, #250) ends just that one
+            # and leaves the cookie alone: a slow answer must not erase, or
+            # renew over, a newer sign-in another tab made meanwhile.
+            request.state.refresh_cookie = None
+            if "set-cookie" in response.headers:
+                del response.headers["set-cookie"]
+            return {"logged_out": True}
         response.delete_cookie(
             COOKIE, path="/", secure=True, httponly=True, samesite="strict"
         )

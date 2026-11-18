@@ -11,7 +11,7 @@ import pytest
 
 from server import app as server_app, media
 from server.app import create_app
-from server.auth import AuthError
+from server.auth import COOKIE, AuthError
 from server.security import PUBLIC, api_routes, audit_routes, secret_file
 
 PASSWORD = "security fixture password"
@@ -585,3 +585,43 @@ def test_a_write_started_by_another_sign_in_is_refused_unchanged(tmp_path, monke
         other = phone()
         assert client.delete("/api/v1/me/sessions").json() == {"revoked": 1}
         assert signed_in(other) == 401
+
+
+def test_a_named_logout_ends_its_session_and_leaves_the_cookie_alone(
+    tmp_path, monkeypatch
+):
+    # Codex round 3 (#250): a slow logout answer must not erase (or renew
+    # over) a newer sign-in another tab made meanwhile. A logout naming its
+    # session ends just that one and doesn't touch the cookie; without the
+    # header (native apps, older clients) it still clears it.
+    app, _ = protected(tmp_path, monkeypatch)
+    auth = app.state.auth
+    started = auth.now()
+
+    def signed_in_client():
+        client = TestClient(
+            app, base_url="https://private.ts.net", headers={"X-Pig-Request": "1"}
+        )
+        assert (
+            client.post(
+                "/api/v1/auth/login", json={"username": "mark", "password": PASSWORD}
+            ).status_code
+            == 200
+        )
+        return client
+
+    with signed_in_client() as client:
+        session = client.get("/api/v1/me").json()["session_id"]
+        # An hour on, a request would renew the cookie.
+        monkeypatch.setattr(auth, "now", lambda: started + 3700)
+        named = client.post(
+            "/api/v1/auth/logout", headers={"X-Pig-Expected-Session": session}
+        )
+        assert named.status_code == 200
+        assert "set-cookie" not in named.headers
+        assert client.get("/api/v1/me").status_code == 401
+    monkeypatch.setattr(auth, "now", lambda: started)
+    with signed_in_client() as client:
+        plain = client.post("/api/v1/auth/logout")
+        assert plain.status_code == 200
+        assert plain.headers["set-cookie"].startswith(COOKIE + '=""')
