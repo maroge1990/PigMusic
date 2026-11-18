@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "./api";
+import { api, currentSession } from "./api";
 import type { Song } from "./songs";
 import type { Track } from "./types";
 
@@ -43,6 +43,8 @@ export function isFavourite(song: Song, favourites: Set<string> | null) {
 }
 
 async function load() {
+  // An answer for someone who has since signed out is never kept (Codex).
+  const session = currentSession();
   const { playlists } = await api<{ playlists: { id: string }[] }>(
     "/v1/playlists",
   );
@@ -50,14 +52,20 @@ async function load() {
   const entries = list
     ? (await api<{ entries: Entry[] }>("/v1/playlists/" + list.id)).entries
     : [];
+  if (session !== currentSession()) return;
   known = new Set(entries.flatMap(keysOf));
+  publish();
+}
+
+function publish() {
   for (const listener of listeners) listener();
 }
 
-function refresh() {
+/** Reads the favourites again; resolves once the latest read is done. */
+export function refreshFavourites(): Promise<void> {
   if (loading) {
     stale = true;
-    return;
+    return loading;
   }
   loading = load()
     .catch(() => {})
@@ -65,16 +73,32 @@ function refresh() {
       loading = null;
       if (stale) {
         stale = false;
-        refresh();
+        return refreshFavourites();
       }
     });
+  return loading;
+}
+
+/** The favourites as last read, for tests and the rows. */
+export const currentFavourites = () => known;
+
+/** Another account signed in or out: forget the last one's stars at once,
+ * then read the new account's while rows still show. */
+function sessionCleared() {
+  known = null;
+  publish();
+  if (listeners.size) void refreshFavourites();
 }
 
 let watching = false;
-function watch() {
+/** Starts following library and account changes (once). */
+export function watchFavourites() {
   if (watching) return;
   watching = true;
-  window.addEventListener("music-library-changed", refresh);
+  window.addEventListener("music-library-changed", () => {
+    void refreshFavourites();
+  });
+  window.addEventListener("music-session-cleared", sessionCleared);
 }
 
 /** The favourites, shared by every row; null until first read. */
@@ -83,8 +107,8 @@ export function useFavourites() {
   useEffect(() => {
     const listener = () => setValue(known);
     listeners.add(listener);
-    watch();
-    if (!known && !loading) refresh();
+    watchFavourites();
+    if (!known && !loading) void refreshFavourites();
     else setValue(known);
     return () => {
       listeners.delete(listener);
