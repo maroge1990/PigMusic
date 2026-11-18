@@ -100,6 +100,35 @@ test("a new error replaces the last one", () => {
   area.stop();
 });
 
+test("an error offering Try again stays when another error comes", () => {
+  // Codex (#249): a partial copy's only way to resume lived in an error
+  // notice that the next unrelated error replaced.
+  const area = watch();
+  const kept = notifyError(
+    "Added 500 of 501 songs. Try again.",
+    () => {},
+    "copy",
+  );
+  notifyError("Couldn't save. Try again.");
+  notifyError("Couldn't add. Try again.");
+  for (let i = 0; i < 3; i++) notify("Saved " + i);
+  assert.deepEqual(
+    area.now().map((n) => n.text),
+    [
+      "Added 500 of 501 songs. Try again.",
+      "Couldn't add. Try again.",
+      "Saved 0",
+      "Saved 1",
+      "Saved 2",
+    ],
+  );
+  assert.ok(area.shown().some((n) => n.id === kept));
+  // Its own next failure replaces it.
+  notifyError("Added 500 of 501 songs. Try again.", () => {}, "copy");
+  assert.equal(area.now().filter((n) => n.key === "copy").length, 1);
+  area.stop();
+});
+
 test("every kind can be closed", () => {
   const area = watch();
   for (const id of [

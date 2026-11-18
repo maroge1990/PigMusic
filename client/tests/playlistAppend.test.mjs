@@ -13,7 +13,7 @@ globalThis.Event = class {
 const { setSessionId } = await import("../src/sessionId.ts");
 const { MAX_SONGS_PER_REQUEST } = await import("../src/limits.ts");
 const { ReportedFailure, addToPlaylist } = await import("../src/playlists.ts");
-const { clearNotices, runAction, subscribe } = await import(
+const { clearNotices, notifyError, runAction, subscribe } = await import(
   "../src/notices.ts"
 );
 
@@ -159,3 +159,25 @@ for (const status of [500, 502])
     assert.equal(server.appends, 1);
     assert.equal(server.playlist.entries.length, 2);
   });
+
+test("an unrelated error keeps a partial copy's Try again", async () => {
+  setSessionId("session-1");
+  const server = playlistServer();
+  const notices = watch();
+  const copy = songs(MAX_SONGS_PER_REQUEST + 1);
+  // The last batch meets a playlist that moved (409).
+  const original = globalThis.fetch;
+  globalThis.fetch = async (path, options) => {
+    if (options?.method === "POST" && server.appends === 1)
+      server.playlist.revision += 1;
+    return original(path, options);
+  };
+  await assert.rejects(addToPlaylist("p1", copy), ReportedFailure);
+  const retry = notices.error();
+  assert.match(retry.text, /Added 500 of 501 songs/);
+  notifyError("Couldn't save your settings. Try again.");
+  await runAction(retry.id);
+  notices.stop();
+  clearNotices();
+  assert.equal(server.playlist.entries.length, MAX_SONGS_PER_REQUEST + 1);
+});

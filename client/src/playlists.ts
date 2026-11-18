@@ -64,6 +64,7 @@ export async function addToPlaylist(
         sendFrom(at).catch((e) => {
           if (!(e instanceof ReportedFailure)) throw e;
         }),
+      "playlist-copy:" + id,
     );
     throw new ReportedFailure((error as Error).message);
   }

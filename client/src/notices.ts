@@ -60,7 +60,9 @@ function add(notice: Omit<Notice, "id">, shownFor?: number): number {
   for (const old of notices)
     if (
       (notice.key && old.key === notice.key) ||
-      (notice.kind === "error" && old.kind === "error")
+      // An error offering Try again is kept, like a live Undo: only its own
+      // key replaces it, or the person closes it (Codex, #249).
+      (notice.kind === "error" && old.kind === "error" && !old.action)
     )
       remove(old.id);
   notices = [...notices, { ...notice, id }];
@@ -82,11 +84,14 @@ export function notify(text: string, key?: string) {
 export function notifyError(
   text: string,
   tryAgain?: () => Promise<unknown> | unknown,
+  /** Names the failure: its next failure replaces this notice. */
+  key?: string,
 ) {
   return add({
     kind: "error",
     text,
     action: tryAgain && { label: "Try again", run: tryAgain },
+    key,
   });
 }
 
@@ -150,15 +155,16 @@ export async function runAction(id: number) {
 
 /**
  * The notices on screen, oldest first. A live Undo is never hidden while
- * its change can still be taken back: every Undo shows, and the newest
- * other notices fill what is left of `MAX_SHOWN`.
+ * its change can still be taken back, nor an error's Try again: those
+ * show, and the newest other notices fill what is left of `MAX_SHOWN`.
  */
 export function shown(all = notices) {
-  const undos = all.filter((n) => n.kind === "action");
+  const kept = (n: Notice) => n.kind === "action" || !!n.action;
+  const undos = all.filter(kept);
   const room = Math.max(0, MAX_SHOWN - undos.length);
-  const others = all.filter((n) => n.kind !== "action");
-  const kept = new Set([...undos, ...(room ? others.slice(-room) : [])]);
-  return all.filter((n) => kept.has(n));
+  const others = all.filter((n) => !kept(n));
+  const showing = new Set([...undos, ...(room ? others.slice(-room) : [])]);
+  return all.filter((n) => showing.has(n));
 }
 
 /** Calls `listener` with every change; returns the unsubscribe. */
