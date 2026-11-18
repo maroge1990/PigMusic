@@ -163,10 +163,6 @@ export function RemovedMusic() {
         ))
       )}
       <h3>Empty Trash</h3>
-      <p>
-        Review the songs in Trash longer than a number of days, then delete
-        exactly those for good. Nothing is deleted automatically.
-      </p>
       <label>
         In Trash longer than (days)
         <input

@@ -83,10 +83,6 @@ export function DuplicateSongs() {
         <Copy size={18} aria-hidden="true" />
         Duplicate songs
       </h2>
-      <p>
-        Downloaded songs the library already had on another album. Your own
-        files and editions chosen from Other versions are never listed.
-      </p>
       <button
         className="secondary-button"
         disabled={busy}

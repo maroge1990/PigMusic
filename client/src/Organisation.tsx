@@ -144,10 +144,6 @@ export function Organisation() {
         <FolderTree size={18} aria-hidden="true" />
         Organise existing music
       </h2>
-      <p>
-        Review naming changes before applying them. Album folders are retained.
-        Originals are preserved.
-      </p>
       <button
         className="secondary-button"
         disabled={busy || active(job)}
