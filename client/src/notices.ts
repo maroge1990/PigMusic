@@ -82,6 +82,12 @@ export function notify(text: string, key?: string) {
   return add({ kind: "info", text, key }, NOTICE_SHOWN_MS);
 }
 
+/** Folds into "N more" and scrolls when opened: an error offering Try again
+ * or a warning. A live Undo never folds. */
+export function folds(n: Notice) {
+  return n.kind !== "action" && kept(n);
+}
+
 /** Kept on screen and never replaced by an unrelated error: a live Undo, an
  * error offering Try again, and a warning the person must act on. */
 function kept(n: Omit<Notice, "id">) {

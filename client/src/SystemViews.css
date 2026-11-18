@@ -69,6 +69,13 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+.notice-actions {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+}
 .notice-area.is-expanded .notice-list {
   pointer-events: auto;
 }

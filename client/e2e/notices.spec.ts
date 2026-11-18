@@ -189,3 +189,62 @@ test("twelve warnings open in a list that scrolls on a small phone", async ({
   await fewer.click();
   await expect(list).toHaveCount(2);
 });
+
+// Codex round 7: on a short screen the warnings scroll, but a live Undo
+// stays in view below them and works.
+test("on a short screen a live Undo stays in view below the warnings", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 667, height: 320 });
+  await page.clock.install();
+  const deleted: string[] = [];
+  await mockApi(page, {
+    answers: {
+      "/v1/playlists": (route) =>
+        route.fulfill({
+          json: {
+            playlists: [
+              { id: "p1", name: "Gym" },
+              { id: "p3", name: "Old" },
+            ],
+          },
+        }),
+      "/v1/playlists/p1": (route) =>
+        route.fulfill({
+          json: { id: "p1", name: "Gym", revision: 1, entries: [] },
+        }),
+      "/v1/playlists/p1/songs": (route) =>
+        route.fulfill({ status: 502, body: "Bad gateway" }),
+      "/v1/playlists/p3": (route) => {
+        if (route.request().method() === "DELETE") deleted.push("p3");
+        return route.fulfill({
+          json: { id: "p3", name: "Old", revision: 1, entries: [] },
+        });
+      },
+    },
+  });
+  await page.goto(`/#/library/album/${album.id}`);
+  const dots = page.getByRole("button", {
+    name: "More options for Von dutch",
+  });
+  for (let i = 0; i < 2; i++) {
+    await dots.click();
+    await page.getByRole("menuitem", { name: "Add to playlist" }).click();
+    await page.getByRole("menuitem", { name: "Gym" }).click();
+    await expect(
+      page.getByRole("menu", { name: "Add Von dutch to playlist" }),
+    ).toBeHidden();
+  }
+  await page.goto("/#/library/playlist/p3");
+  await page.getByText("Playlist options").click();
+  await page.getByRole("button", { name: "Delete playlist" }).click();
+  const undo = notices(page).getByRole("button", { name: "Undo" });
+  await expect(undo).toBeInViewport({ ratio: 1 });
+  await expect(
+    notices(page).locator(".notice", { hasText: "Check the playlist" }),
+  ).toHaveCount(2);
+  await undo.click();
+  await expect(notices(page)).toContainText("Old is back.");
+  await page.clock.runFor(20_000);
+  expect(deleted).toEqual([]);
+});
