@@ -21,10 +21,12 @@ export function ConfirmDialog() {
     cancel.current?.focus();
   }, [question?.id]);
   if (!question) return null;
+  // Bound to the question these buttons were drawn for.
+  const id = question.id;
   const finish = (yes: boolean) => {
     // Closing first hands focus back to what opened the dialog.
     dialog.current?.close();
-    answerConfirm(yes);
+    answerConfirm(id, yes);
   };
   return (
     <dialog

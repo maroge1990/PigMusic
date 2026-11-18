@@ -30,17 +30,20 @@ function publish() {
  * for Cancel or Escape. A new question cancels one still open.
  */
 export function askToConfirm(question: ConfirmQuestion): Promise<boolean> {
-  answerConfirm(false);
+  if (asked) answerConfirm(asked.id, false);
   return new Promise<boolean>((resolve) => {
     asked = { ...question, id: ++next, answer: resolve };
     publish();
   });
 }
 
-/** Answers the open question, if any. */
-export function answerConfirm(yes: boolean) {
+/**
+ * Answers question `id`. A handler left from an earlier question (its id no
+ * longer open) is ignored, so it can never approve a newer one.
+ */
+export function answerConfirm(id: number, yes: boolean) {
   const question = asked;
-  if (!question) return;
+  if (!question || question.id !== id) return;
   asked = null;
   question.answer(yes);
   publish();

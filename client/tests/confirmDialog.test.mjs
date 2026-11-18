@@ -20,21 +20,43 @@ test("the action resolves true and Cancel false", async () => {
   const stop = subscribeConfirm((q) => (open = q));
   const yes = askToConfirm(question);
   assert.equal(open.title, "Disable Sam's account?");
-  answerConfirm(true);
+  answerConfirm(open.id, true);
   assert.equal(await yes, true);
   assert.equal(open, null);
   const no = askToConfirm(question);
-  answerConfirm(false);
+  answerConfirm(open.id, false);
   assert.equal(await no, false);
   stop();
 });
 
 test("a new question cancels one still open", async () => {
+  let open = null;
+  const stop = subscribeConfirm((q) => (open = q));
   const first = askToConfirm(question);
   const second = askToConfirm({ ...question, title: "Reset Sam's password?" });
   assert.equal(await first, false);
-  answerConfirm(true);
+  answerConfirm(open.id, true);
   assert.equal(await second, true);
+  stop();
+});
+
+test("a stale handler can't answer a newer question (Codex round 1)", async () => {
+  let open = null;
+  const stop = subscribeConfirm((q) => (open = q));
+  const first = askToConfirm(question);
+  const firstId = open.id;
+  const second = askToConfirm({ ...question, title: "Reset Sam's password?" });
+  assert.equal(await first, false);
+  // The first question's buttons, still on screen for a moment, answer.
+  answerConfirm(firstId, true);
+  assert.equal(open?.title, "Reset Sam's password?");
+  let settled = false;
+  void second.then(() => (settled = true));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(settled, false);
+  answerConfirm(open.id, false);
+  assert.equal(await second, false);
+  stop();
 });
 
 test("no page uses the browser's own confirm dialog", () => {
