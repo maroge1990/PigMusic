@@ -337,3 +337,72 @@ test("album, artist and playlist cards have the collection menu", async ({
     .click();
   await expect.poll(() => queued(page)).toEqual(["Von dutch", "360"]);
 });
+
+// Codex (#249): Up next is the player's own copy; editing it leaves the mix
+// page's list, and what its menu plays, as they were.
+test("editing Up next leaves the mix page and its menu unchanged", async ({
+  page,
+}) => {
+  const tracks = [0, 1, 2, 3].map((i) => ({
+    ...album.tracks[0],
+    id: `mix:edition-0:${i}`,
+    title: "Mix song " + i,
+    server_state: "not_in_library",
+  }));
+  await mockApi(page, {
+    answers: {
+      "/v1/home/mixes": (route) =>
+        route.fulfill({
+          json: {
+            mixes: [
+              {
+                id: "edition-0",
+                kind: "daily",
+                title: "Daily blend",
+                day: "Tuesday",
+                reason: "Music close to your taste",
+                tracks,
+              },
+            ],
+            preparing: false,
+          },
+        }),
+    },
+  });
+  await playable(page);
+  await page.goto("/#/home/mix/edition-0");
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await page.locator(".mini-player").getByRole("button").first().click();
+  const upNext = page.getByRole("region", { name: "Up next" });
+  // Remove one, move one, and put one in to play next.
+  await upNext
+    .getByRole("button", { name: "More options for Mix song 1" })
+    .click();
+  await page
+    .getByRole("menu", { name: "Mix song 1", exact: true })
+    .getByRole("menuitem", { name: "Remove from Up next" })
+    .click();
+  await upNext.getByRole("button", { name: "Move Mix song 3 up" }).click();
+  await upNext
+    .getByRole("button", { name: "More options for Mix song 2" })
+    .click();
+  await page
+    .getByRole("menu", { name: "Mix song 2", exact: true })
+    .getByRole("menuitem", { name: "Play next" })
+    .click();
+  await expect
+    .poll(() => queued(page))
+    .toEqual(["Mix song 0", "Mix song 2", "Mix song 3", "Mix song 2"]);
+  await page.keyboard.press("Escape");
+  await expect(upNext).toBeHidden();
+  const titles = ["Mix song 0", "Mix song 1", "Mix song 2", "Mix song 3"];
+  await expect(page.locator("main .song-row strong")).toHaveText(titles);
+  await page
+    .getByRole("button", { name: "More options for Daily blend" })
+    .click();
+  await page
+    .getByRole("menu", { name: "Daily blend" })
+    .getByRole("menuitem", { name: "Play", exact: true })
+    .click();
+  await expect.poll(() => queued(page)).toEqual(titles);
+});

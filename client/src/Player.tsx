@@ -333,7 +333,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   function play(songs: Song[], index = 0) {
     if (!songs[index]) return;
     resumeAt.current = 0;
-    queue.current = songs;
+    // The queue is its own copy: editing Up next never changes the page's
+    // list it came from (Codex, #249).
+    queue.current = [...songs];
     cursor.current = index;
     setQueueVersion((v) => v + 1);
     void load(songs[index]);
