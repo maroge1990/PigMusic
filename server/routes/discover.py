@@ -11,7 +11,7 @@ from ..artist_identity import Ambiguous, cached_identities, resolve_artist
 from ..catalogue import RELEASE_INC, release_tracks, credit, edition_rank
 from ..library import normalise
 from ..queue_states import PENDING
-from ..matching import title_key as matching_title_key
+from ..matching import delivers, song_key, title_key as matching_title_key
 from ..releases import release_query
 from ..api_models import (
     CatalogueGroupsDTO,
@@ -309,17 +309,21 @@ def discover_router(store, catalogue, popularity=None, warmer=None, http_client=
         ranked = sorted(editions.get("releases", []), key=edition_rank)
         return not ranked or ranked[0].get("id") == release.get("id")
 
-    def requested_from(user_id, release_id):
-        """This person's unfinished requests from one release (not the whole
-        household queue)."""
+    def requested_from(user_id, release_id, tracks):
+        """This person's unfinished requests (not the whole household queue)
+        from one release, or for one of its songs from any edition: a job
+        matches any edition unless only its own will do (#264)."""
+        keys = sorted({json.dumps(list(song_key(t))) for t in tracks})
         with store.connect() as conn:
             rows = conn.execute(
                 "SELECT payload FROM queue WHERE status IN ("
                 + ",".join("?" * len(PENDING))
-                + ") AND json_extract(payload,'$.musicbrainz_release_id')=? AND "
-                "EXISTS (SELECT 1 FROM json_each(queue.payload,'$.requested_by') "
-                "WHERE value=?)",
-                (*sorted(PENDING), release_id, user_id),
+                + ") AND (json_extract(payload,'$.musicbrainz_release_id')=? OR "
+                "json_extract(payload,'$.song_key') IN ("
+                + ",".join(["json(?)"] * len(keys))
+                + ")) AND EXISTS (SELECT 1 FROM "
+                "json_each(queue.payload,'$.requested_by') WHERE value=?)",
+                (*sorted(PENDING), release_id, *keys, user_id),
             ).fetchall()
         return [json.loads(row[0]) for row in rows]
 
@@ -381,11 +385,13 @@ def discover_router(store, catalogue, popularity=None, warmer=None, http_client=
         user = request.state.user["id"]
         projection = await asyncio.to_thread(store.user_libraries.projection, user)
         personal = {t["id"] for t in projection["tracks"]}
-        active = await asyncio.to_thread(requested_from, user, result["id"])
         explicit = not await recommended(request, result)
+        listed = [
+            {**raw, "explicit_edition": explicit} for raw in release_tracks(result)
+        ]
+        active = await asyncio.to_thread(requested_from, user, result["id"], listed)
         tracks = []
-        for raw in release_tracks(result):
-            raw = {**raw, "explicit_edition": explicit}
+        for raw in listed:
             matched = store.index.match(raw)
             state = "not_in_library"
             if matched.track and matched.status == "downloaded":
@@ -395,9 +401,15 @@ def discover_router(store, catalogue, popularity=None, warmer=None, http_client=
                     else "household_available"
                 )
             elif any(
-                j.get("musicbrainz_recording_id") == raw.get("musicbrainz_recording_id")
-                and j.get("track_number") == raw["track_number"]
-                and j.get("disc_number") == raw["disc_number"]
+                (
+                    j.get("musicbrainz_release_id") == result["id"]
+                    and j.get("musicbrainz_recording_id")
+                    == raw.get("musicbrainz_recording_id")
+                    and j.get("track_number") == raw["track_number"]
+                    and j.get("disc_number") == raw["disc_number"]
+                )
+                # The job an Add here would join, from any edition (#264).
+                or delivers(j, raw)
                 for j in active
             ):
                 state = "requested"
