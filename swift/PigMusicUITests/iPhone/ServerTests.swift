@@ -86,12 +86,17 @@ final class ServerTests: XCTestCase {
   /// and the household default says its quality in words.
   func testYourMusicQualitySavesOnATap() throws {
     try signIn()
-    tap(app.buttons["Account"].firstMatch)
     let quality = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Your music quality'"))
       .firstMatch
-    tap(quality)
     let aac = app.buttons["AAC 256 kbps"]
-    expect(aac, timeout: 30)
+    // Just after sign-in the Account sheet can be sent away (iOS's password
+    // prompt): open it again until the page shows.
+    for _ in 0..<4 where !aac.exists {
+      if !quality.exists { tap(app.buttons["Account"].firstMatch) }
+      tap(quality)
+      _ = aac.waitForExistence(timeout: 15)
+    }
+    expect(aac)
     XCTAssertFalse(app.buttons["Save preference"].exists)
     let household = app.buttons.matching(
       NSPredicate(format: "label BEGINSWITH 'Household default, '")
