@@ -2048,17 +2048,27 @@ enum PlayOrigin: Hashable {
   /// (D-118), on every menu.
   var watchPaired: Bool { watch?.link?.paired == true }
   /// Every song of a library artist, album by album, less those waiting for
-  /// their removal's Undo (the artist's collection menu).
-  func artistTracks(_ artist: Artist) async -> [Track] {
-    guard let store else { return [] }
+  /// their removal's Undo (the artist's collection menu). Nil when any part
+  /// couldn't be read: a partial list is never played as the whole (Codex
+  /// confirmation on batch D).
+  func artistTracks(_ artist: Artist) async -> [Track]? {
+    guard let store else { return nil }
     var albums: [Album] = []
-    while let page = try? await store.albums(artistId: artist.id, offset: albums.count) {
+    while true {
+      guard let page = try? await store.albums(artistId: artist.id, offset: albums.count) else {
+        return nil
+      }
       albums += page
       if page.count < 100 { break }
     }
-    var tracks: [Track] = []
-    for album in albums { tracks += await albumTracks(album) }
-    return undo.withoutRemoved(tracks)
+    let read = await CollectionRead.gather(albums) { try await store.tracks(albumId: $0.id) }
+    return read.map { undo.withoutRemoved($0) }
+  }
+  /// A library album's songs for its menu; nil when they couldn't be read.
+  func readAlbumTracks(_ album: Album) async -> [Track]? {
+    guard let store else { return nil }
+    let read = await CollectionRead.gather([album]) { try await store.tracks(albumId: $0.id) }
+    return read.map { undo.withoutRemoved($0) }
   }
   func signOut() async {
     // Removals still showing Undo belong to this account: send them first.

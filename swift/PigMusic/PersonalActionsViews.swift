@@ -283,7 +283,7 @@ struct AlbumActionsMenu: View {
   let album: Album
   var body: some View {
     CollectionActionsMenu(model: model, kind: .album, name: album.title) {
-      model.undo.withoutRemoved(await model.albumTracks(album))
+      await model.readAlbumTracks(album)
     }
   }
 }

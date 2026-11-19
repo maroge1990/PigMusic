@@ -144,6 +144,23 @@ public enum CollectionPlay: Equatable, Sendable {
   }
 }
 
+/// Reads a collection's songs part by part (an artist's albums): any part
+/// that can't be read fails the whole read, nil, so a partial list is
+/// never played as the whole (Codex confirmation on batch D).
+public enum CollectionRead {
+  public static func gather<Part: Sendable>(
+    _ parts: [Part], isolation: isolated (any Actor)? = #isolation,
+    read: (Part) async throws -> [Track]
+  ) async -> [Track]? {
+    var songs: [Track] = []
+    for part in parts {
+      guard let found = try? await read(part) else { return nil }
+      songs += found
+    }
+    return songs
+  }
+}
+
 /// What the one collection menu offers (D-118): Play, Shuffle, Play next;
 /// Add to library (when some songs aren't yours), Add to playlist; Download,
 /// Send to Apple Watch; and for a mix, Save and Hide this edition.
