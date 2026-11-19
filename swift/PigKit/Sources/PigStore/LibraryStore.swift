@@ -325,6 +325,16 @@ public actor LibraryStore {
       }
     }
   }
+  /// Up to `limit` songs from the whole library in a random order, for
+  /// Shuffle your library (D-120): not only the first page by title.
+  public func shuffledTracks(limit: Int = 200) throws -> [Track] {
+    guard (1...200).contains(limit) else { throw StoreSearchFailure.invalidPage }
+    return try database.read { db in
+      try Row.fetchAll(
+        db, sql: "SELECT payload FROM tracks ORDER BY RANDOM() LIMIT ?", arguments: [limit]
+      ).map { try LibraryCodec.decoder().decode(Track.self, from: $0["payload"] as Data) }
+    }
+  }
   public func albums(artistId: String, offset: Int = 0, limit: Int = 100) throws -> [Album] {
     guard offset >= 0, (1...200).contains(limit) else { throw StoreSearchFailure.invalidPage }
     return try database.read { db in
