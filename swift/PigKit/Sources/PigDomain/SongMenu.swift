@@ -142,6 +142,18 @@ public enum CollectionPlay: Equatable, Sendable {
     guard let songs else { return .notice("Couldn't load \(name). Try again.") }
     return songs.isEmpty ? .nothing : .play(songs)
   }
+  /// Reads the songs for the account that asked: if it ended before or
+  /// while they were read, nothing at all happens, no queue change and no
+  /// notice (Codex confirmation on batch D).
+  public static func read(
+    name: String, isolation: isolated (any Actor)? = #isolation, isCurrent: () -> Bool,
+    songs: () async -> [Track]?
+  ) async -> CollectionPlay {
+    guard isCurrent() else { return .nothing }
+    let found = await songs()
+    guard isCurrent() else { return .nothing }
+    return decide(found, name: name)
+  }
 }
 
 /// Reads a collection's songs part by part (an artist's albums): any part

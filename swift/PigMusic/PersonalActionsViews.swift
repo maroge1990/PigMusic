@@ -193,16 +193,31 @@ struct CollectionActionsMenu: View {
   private var empty: Bool { known == 0 }
   /// Plays only what was read: nothing leaves what plays alone, and a read
   /// that failed says so (Codex round 2 on batch D).
+  /// Each action belongs to the account that chose it: one that ended
+  /// before or while the songs were read does nothing at all (Codex
+  /// confirmation on batch D).
   private func playing(_ act: @escaping @MainActor ([Track]) -> Void) {
+    let stamp = model.currentGeneration
     Task {
-      switch CollectionPlay.decide(await songs(), name: name) {
+      let outcome = await CollectionPlay.read(
+        name: name, isCurrent: { model.isCurrent(stamp) }, songs: { await songs() })
+      switch outcome {
       case .play(let tracks): act(tracks)
       case .nothing: break
       case .notice(let text): model.notify(text)
       }
     }
   }
-  private func everySong() async -> [Track] { await songs() ?? [] }
+  /// Add, Download, Send to Apple Watch: the songs read for this account.
+  private func withSongs(_ act: @escaping @MainActor ([Track]) async -> Void) {
+    let stamp = model.currentGeneration
+    Task {
+      guard model.isCurrent(stamp) else { return }
+      let found = await songs() ?? []
+      guard model.isCurrent(stamp) else { return }
+      await act(found)
+    }
+  }
   var body: some View {
     let sections = CollectionMenu.sections(
       kind, missing: missing, watch: model.watchPaired, opens: open != nil)
@@ -237,29 +252,31 @@ struct CollectionActionsMenu: View {
       }.disabled(empty)
     case .addToLibrary:
       Button("Add \(missing) song\(missing == 1 ? "" : "s") to library", systemImage: "plus") {
-        Task {
-          if let addMissing { await addMissing() } else { await model.addToLibrary(await everySong()) }
+        if let addMissing {
+          Task { await addMissing() }
+        } else {
+          withSongs { await model.addToLibrary($0) }
         }
       }.disabled(!model.canMutate)
     case .addToPlaylist:
       let playlists = model.playlists.filter { $0.favourites != true && $0.id != playlistId }
       Menu("Add to playlist", systemImage: "text.badge.plus") {
         ForEach(playlists) { playlist in
-          Button(playlist.name) { Task { await model.add(await everySong(), to: playlist) } }
+          Button(playlist.name) { withSongs { await model.add($0, to: playlist) } }
         }
         if playlists.isEmpty { Text("No playlists yet") }
       }.disabled(!model.canMutate)
     case .download:
       // Worded as a song's Download (D-106, D-118).
       Menu("Download", systemImage: "arrow.down.circle") {
-        Button("Original") { Task { await model.download(await everySong(), origin: origin) } }
+        Button("Original") { withSongs { await model.download($0, origin: origin) } }
         Button("Smaller AAC copy") {
-          Task { await model.download(await everySong(), quality: "aac", origin: origin) }
+          withSongs { await model.download($0, quality: "aac", origin: origin) }
         }
       }
     case .sendToWatch:
       Button("Send to Apple Watch", systemImage: "applewatch") {
-        Task { await model.sendToWatch(await everySong(), origin: origin) }
+        withSongs { await model.sendToWatch($0, origin: origin) }
       }
     case .saveMix:
       Button("Save this edition", systemImage: "plus") {
