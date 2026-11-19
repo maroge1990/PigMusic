@@ -95,6 +95,56 @@ public struct PlaybackQueue: Sendable, Codable {
     let known = Set(restored.map(\.id))
     items = Array(items.prefix(index + 1)) + restored + upcoming.filter { !known.contains($0.id) }
   }
+  /// What `refreshSongs` did to the queue.
+  public struct SongRefresh: Equatable, Sendable {
+    public enum Current: Equatable, Sendable { case same, fresh, removed }
+    /// The song playing: untouched, given its fresh copy, or removed (it
+    /// stays in the queue; the player decides).
+    public var current: Current = .same
+    /// Another occurrence took its fresh copy or left.
+    public var others = false
+    /// Occurrences before the current one left, so its place moved.
+    public var shifted = false
+  }
+  /// The server changed or removed these songs (#76; Codex round 2 on batch
+  /// E): every other occurrence takes its fresh copy (a new revision, so
+  /// neither its stale cached audio nor its stale download is used) or
+  /// leaves when the song was removed, keeping its occurrence id. The
+  /// current occurrence keeps its place; it takes its fresh copy only when
+  /// it changed itself, which the result says.
+  public mutating func refreshSongs(_ changed: Set<String>, fresh: [String: Track]) -> SongRefresh {
+    var result = SongRefresh()
+    guard items.contains(where: { changed.contains($0.track.id) }) else { return result }
+    let playing = current?.id
+    var kept: [PlaybackOccurrence] = []
+    var newIndex = 0
+    for (position, item) in items.enumerated() {
+      if position == index { newIndex = kept.count }
+      guard changed.contains(item.track.id) else {
+        kept.append(item)
+        continue
+      }
+      if item.id == playing {
+        if let track = fresh[item.track.id] {
+          kept.append(PlaybackOccurrence(track: track, id: item.id))
+          result.current = .fresh
+        } else {
+          kept.append(item)
+          result.current = .removed
+        }
+        continue
+      }
+      result.others = true
+      if let track = fresh[item.track.id] {
+        kept.append(PlaybackOccurrence(track: track, id: item.id))
+      } else if position < index {
+        result.shifted = true
+      }
+    }
+    items = kept
+    index = min(newIndex, max(0, items.count - 1))
+    return result
+  }
   @discardableResult public mutating func next() -> Bool {
     guard index + 1 < items.count else { return false }
     index += 1

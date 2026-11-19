@@ -287,12 +287,29 @@ import PigSync
   /// Fresh connections for the songs fetched next (see `RenewableSession`).
   func renewConnections() { preparer?.renewConnections() }
   func cachedRevisions() async -> [String: String?] { await repository?.savedRevisions() ?? [:] }
-  /// The server changed or removed these songs. Playback stops only when one
-  /// is in the queue; otherwise just their cached audio goes (#76, D-56).
-  /// Returns whether playback stopped.
+  /// The server changed or removed these songs (#76, D-56); `fresh` holds the
+  /// library's new copy of each, absent when it was removed. Queued songs
+  /// take their fresh copy, or leave, by occurrence (Codex round 2 on batch
+  /// E): the song playing carries on where it is, and the engine's prepared
+  /// audio for the others is rebuilt before their old cached audio goes.
+  /// Only the song playing changing itself restarts it, at the same place;
+  /// playback stops only when it was removed. Returns whether it stopped.
   @discardableResult
-  func invalidateSources(changed: Set<String>) async -> Bool {
+  func invalidateSources(changed: Set<String>, fresh: [String: Track]) async -> Bool {
     guard queue.items.contains(where: { changed.contains($0.track.id) }) else {
+      await repository?.forget(ids: changed)
+      return false
+    }
+    let refresh = queue.refreshSongs(changed, fresh: fresh)
+    if refresh.current != .removed {
+      let byId = Dictionary(queue.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+      originalOrder = originalOrder.compactMap { byId[$0.id] }
+      if refresh.current == .fresh || refresh.shifted {
+        // The song's own audio, or its place, changed: start it again where it was.
+        restartInCurrentMode()
+      } else if refresh.others {
+        engineQueueChanged()
+      }
       await repository?.forget(ids: changed)
       return false
     }

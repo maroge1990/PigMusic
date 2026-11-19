@@ -681,12 +681,18 @@ enum PlayOrigin: Hashable {
             changed.insert(record.id)
           }
         }
-        if !changed.isEmpty { invalid = await player.invalidateSources(changed: changed) }
+        if !changed.isEmpty {
+          let fresh = await freshQueued(changed)
+          guard account.isCurrent(stamp) else { return }
+          invalid = await player.invalidateSources(changed: changed, fresh: fresh)
+        }
         await downloads.reconcile(allowed)
         guard account.isCurrent(stamp) else { return }
         downloads.resume(automatic: true)
       } else if !changed.isEmpty {
-        invalid = await player.invalidateSources(changed: changed)
+        let fresh = await freshQueued(changed)
+        guard account.isCurrent(stamp) else { return }
+        invalid = await player.invalidateSources(changed: changed, fresh: fresh)
       }
       guard account.isCurrent(stamp) else { return }
       await adoptServerPreferences(service, generation: stamp)
@@ -968,6 +974,16 @@ enum PlayOrigin: Hashable {
   func clearRecentSearches() {
     recentSearches.clear()
     saveRecentSearches()
+  }
+  /// The library's copy of each changed song in the queue, absent when it
+  /// was removed: the queue swaps them in by occurrence (Codex round 2).
+  private func freshQueued(_ changed: Set<String>) async -> [String: Track] {
+    guard let store else { return [:] }
+    var fresh: [String: Track] = [:]
+    for id in Set(player.queue.items.map(\.track.id)).intersection(changed) {
+      if let track = try? await store.track(id: id) { fresh[id] = track }
+    }
+    return fresh
   }
   /// Songs' Play, Shuffle and a row's tap (D-120): the whole library in the
   /// chosen sort, read for the account that asked, less songs waiting for
