@@ -523,8 +523,13 @@ import UIKit
         "sync", "\(envelope.kind) rejected: \(error.localizedDescription)")
       if envelope.kind == "audio", let ticket = envelope.file {
         // Shown with the song and in Storage's status, not as a passing notice.
-        problems[ticket.songId] =
-          (error as? CompanionFailure) == .quota ? .storageFull : .unreadable
+        if (error as? CompanionFailure) == .quota {
+          problems[ticket.songId] = .overLimit
+        } else if (error as? CompanionArchiveFailure) == .deviceFull {
+          problems[ticket.songId] = .deviceFull
+        } else {
+          problems[ticket.songId] = .unreadable
+        }
       } else {
         notices.post(error.localizedDescription)
       }

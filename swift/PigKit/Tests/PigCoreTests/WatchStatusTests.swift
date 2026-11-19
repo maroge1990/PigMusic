@@ -68,12 +68,29 @@ struct WatchStatusTests {
     #expect(full.advice?.contains("Storage limit in Storage") == true)
     #expect(full.storageAdvice?.contains("Storage limit below") == true)
     #expect(away.storageAdvice == away.advice)
-    // The Watch turned a song away for space, though it would fit now.
-    #expect(
-      WatchLibraryStatus(
-        songs: songs, stored: stored, usedBytes: 0, limitBytes: gigabyte,
-        problems: ["b": .storageFull]
-      ).headline == .storageFull)
+    #expect(full.marks == ["b": .storageFull])
+    // Apple Watch itself is full: a larger limit won't help.
+    let device = WatchLibraryStatus(
+      songs: songs, stored: stored, usedBytes: 0, limitBytes: gigabyte,
+      problems: ["b": .deviceFull])
+    #expect(device.headline == .storageFull)
+    #expect(device.storageAdvice?.contains("Storage limit") == false)
+  }
+
+  /// Codex round 1: a song turned away for the Storage limit stayed "Storage
+  /// full" after a larger limit or a removal made room for it.
+  @Test func overTheLimitClearsOnceTheSongFits() {
+    let songs = [song("a"), song("b", bytes: 300_000_000)]
+    let stored = ["a": "sum-a"]
+    let tight = WatchLibraryStatus(
+      songs: songs, stored: stored, usedBytes: gigabyte - 100_000_000, limitBytes: gigabyte,
+      problems: ["b": .overLimit], iPhoneReachable: true)
+    #expect(tight.headline == .storageFull)
+    let roomy = WatchLibraryStatus(
+      songs: songs, stored: stored, usedBytes: gigabyte - 100_000_000, limitBytes: 2 * gigabyte,
+      problems: ["b": .overLimit], iPhoneReachable: true)
+    #expect(roomy.headline == .arriving)
+    #expect(roomy.marks.isEmpty)
   }
 
   /// No hard-coded "failed: 0": songs the Watch couldn't save are counted.

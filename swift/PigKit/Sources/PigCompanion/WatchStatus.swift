@@ -23,10 +23,19 @@ public struct WatchSongState: Equatable, Sendable {
 
 /// Why a song the Watch stored was turned away, as the Watch saw it.
 public enum WatchSaveProblem: Equatable, Sendable {
-  /// It didn't fit under the Storage limit.
-  case storageFull
+  /// It didn't fit under the Storage limit then; weighed again against the
+  /// room under the limit now, so a larger limit or a removal clears it.
+  case overLimit
+  /// Apple Watch itself had no room left.
+  case deviceFull
   /// Its file didn't match what the iPhone listed.
   case unreadable
+}
+
+/// What a waiting song's row says in place of "Waiting for Apple Watch".
+public enum WatchSongMark: Equatable, Sendable {
+  case storageFull
+  case couldntSave
 }
 
 public struct WatchLibraryStatus: Equatable, Sendable {
@@ -50,6 +59,10 @@ public struct WatchLibraryStatus: Equatable, Sendable {
   public var waiting: Int
   public var couldntSave: Int
   public var headline: Headline
+  /// Waiting songs that are held back, and why (the rest are on their way).
+  public var marks: [String: WatchSongMark]
+  /// Apple Watch itself is full: a larger Storage limit won't help.
+  public var deviceFull: Bool
 
   /// `stored`: the receipt's song id → checksum of verified files;
   /// `removing`: songs whose removal is on its way to the iPhone (left out
@@ -73,15 +86,30 @@ public struct WatchLibraryStatus: Equatable, Sendable {
     readySeconds = readySongs.reduce(0) { $0 + $1.seconds }
     readyBytes = readySongs.reduce(Int64(0)) { $0 + $1.bytes }
     waiting = waitingSongs.count
-    let unreadable = waitingSongs.filter { problems[$0.id] == .unreadable }
-    couldntSave = unreadable.count
     let free = max(0, limitBytes - usedBytes)
-    let turnedAway = waitingSongs.contains { problems[$0.id] == .storageFull }
-    let tooBig = waitingSongs.contains { problems[$0.id] == nil && $0.bytes > free }
+    var marks: [String: WatchSongMark] = [:]
+    var deviceFull = false
+    for song in waitingSongs {
+      switch problems[song.id] {
+      case .unreadable: marks[song.id] = .couldntSave
+      case .deviceFull:
+        marks[song.id] = .storageFull
+        deviceFull = true
+      case .overLimit, nil:
+        // Over the limit only while it still doesn't fit (it used to stay
+        // "Storage full" after room was made).
+        if song.bytes > free { marks[song.id] = .storageFull }
+      }
+    }
+    self.marks = marks
+    self.deviceFull = deviceFull
+    let unreadable = marks.values.filter { $0 == .couldntSave }
+    couldntSave = unreadable.count
+    let full = marks.values.contains(.storageFull)
     if waitingSongs.isEmpty {
       // A new library announced and not yet here is still on its way.
       headline = manifestApplied ? .ready : (iPhoneReachable == false ? .iPhoneAway : .arriving)
-    } else if turnedAway || tooBig {
+    } else if full {
       headline = .storageFull
     } else if !unreadable.isEmpty {
       headline = .couldntSave(unreadable.count)
@@ -110,14 +138,18 @@ public struct WatchLibraryStatus: Equatable, Sendable {
   public var advice: String? {
     switch headline {
     case .ready, .arriving: nil
-    case .storageFull: "Choose a larger Storage limit in Storage, or remove songs."
+    case .storageFull:
+      deviceFull
+        ? "Apple Watch has no space left. Remove songs or free up space on Apple Watch."
+        : "Choose a larger Storage limit in Storage, or remove songs."
     case .couldntSave: "Refresh from iPhone in Storage to try again."
     case .iPhoneAway: "The rest arrive when your iPhone is nearby."
     }
   }
   /// The same on Storage, where the Storage limit sits below.
   public var storageAdvice: String? {
-    headline == .storageFull ? "Choose a larger Storage limit below, or remove songs." : advice
+    headline == .storageFull && !deviceFull
+      ? "Choose a larger Storage limit below, or remove songs." : advice
   }
 }
 

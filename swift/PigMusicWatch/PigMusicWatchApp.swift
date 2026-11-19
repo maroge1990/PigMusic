@@ -415,6 +415,7 @@ private struct WatchSongs: View {
     all.filter { !model.undo.hides(WatchModel.undoKey($0)) && !model.removing.contains($0) }
   }
   var body: some View {
+    let marks = model.status.marks
     List {
       // The latest removal, with its Undo, until it is sent.
       if let item = model.undo.items.last {
@@ -448,7 +449,7 @@ private struct WatchSongs: View {
             Task { await model.play(ids, at: index) }
           } label: {
             WatchRow(
-              title: song.track.title, detail: ready ? song.track.artist : waiting(id),
+              title: song.track.title, detail: ready ? song.track.artist : waiting(marks[id]),
               symbol: "music.note")
           }
           .disabled(!ready)
@@ -470,10 +471,10 @@ private struct WatchSongs: View {
       }
   }
   /// Why a song isn't on the Watch yet, in the row's second line.
-  private func waiting(_ id: String) -> String {
-    switch model.problems[id] {
+  private func waiting(_ mark: WatchSongMark?) -> String {
+    switch mark {
     case .storageFull: "Storage full"
-    case .unreadable: "Couldn't save on Apple Watch"
+    case .couldntSave: "Couldn't save on Apple Watch"
     case nil: "Waiting for Apple Watch"
     }
   }

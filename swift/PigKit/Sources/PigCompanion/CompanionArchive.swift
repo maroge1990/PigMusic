@@ -13,6 +13,21 @@ public enum CompanionArrival: Equatable, Sendable {
   case stale
 }
 
+/// The Watch archive's own failures.
+public enum CompanionArchiveFailure: Error, LocalizedError, Equatable {
+  /// Apple Watch has no room left for the song.
+  case deviceFull
+  /// The saved library (context or manifest) is there but can't be read;
+  /// it is left in place.
+  case unreadable(String)
+  public var errorDescription: String? {
+    switch self {
+    case .deviceFull: "Apple Watch has no space left. Remove songs or free up space on Apple Watch."
+    case .unreadable: "Couldn't read the music saved on this Apple Watch. Try again."
+    }
+  }
+}
+
 /// A bounded, credential-free Watch archive. Removal is driven by a confirmed phone context.
 ///
 /// The last applied manifest is the committed, playable library. A new revision for
@@ -290,8 +305,10 @@ public actor CompanionArchive {
     let exists = FileManager.default.fileExists(atPath: url(ticket.checksum).path)
     guard exists || used + song.bytes <= budgetBytes else { throw CompanionFailure.quota }
     let capacity = try VolumeSpace.available(at: directory)
+    // Apple Watch itself is full, not the Storage limit: told apart so the
+    // Watch doesn't point to a limit that wouldn't help.
     guard exists || capacity == nil || capacity! > song.bytes + 32 * 1024 * 1024 else {
-      throw CompanionFailure.quota
+      throw CompanionArchiveFailure.deviceFull
     }
     let handle = try FileHandle(forReadingFrom: file)
     defer { try? handle.close() }
