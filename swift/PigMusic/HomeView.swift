@@ -3,8 +3,10 @@ import PigBrand
 import PigDomain
 import SwiftUI
 
-/// Home, as on the web: recently added albums, recommendations (artists and
-/// albums only) and the popular chart, each as a shelf of artwork cards.
+/// Home, as on the web: Rewind, mixes, recently added albums, recommendations
+/// (artists and albums only) and the popular chart. A section shows only when
+/// it has something, with one quiet placeholder row while it first loads
+/// (D-120); a new member's empty library offers Find music above Popular.
 struct HomeView: View {
   @Bindable var model: AppModel
   /// The mix whose songs a long press asked to see (#56).
@@ -14,94 +16,29 @@ struct HomeView: View {
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 28) {
+        if EmptyPage.library(
+          songs: model.songCount, loading: model.syncing, failed: model.syncFailed) != nil
+        {
+          EmptyPageView(page: .library, systemImage: "music.note.house") { model.openSearch() }
+        }
         // Rewind (#216): this week at a glance, hidden until something played.
         if let week, week.plays > 0 {
           NavigationLink {
             RewindView(model: model)
           } label: {
-            RewindCard(model: model, rewind: week).environment(\.colorScheme, .dark)
+            RewindHomeCard(model: model, rewind: week)
           }
           .buttonStyle(.plain).padding(.horizontal)
           .accessibilityLabel(
             "Rewind. This week: \(RewindFigures.minutes(week.minutes)), "
               + RewindFigures.plays(week.plays))
         }
-        // Less an edition hidden and waiting for its Undo (D-79).
-        let mixes = (model.homeContent[.mixes]?.mixes ?? []).filter {
-          !model.undo.hides(AppModel.undoKey(mixEdition: $0.id))
-        }
-        let radio = model.homeContent[.mixes]?.radio
-        if !mixes.isEmpty || radio != nil {
-          Shelf(title: "Your mixes") {
-            if let radio {
-              Button {
-                Task { await model.startRadio() }
-              } label: {
-                VStack(alignment: .leading, spacing: 6) {
-                  MixArtwork(kind: "radio").frame(width: 150, height: 150)
-                  Text(radio.title).font(PigType.cardTitle).lineLimit(2)
-                }.frame(width: 150, alignment: .leading)
-              }.buttonStyle(.plain)
-            }
-            ForEach(mixes) { mix in
-              // Tap plays the mix; a long press offers its songs and options (#56).
-              Button {
-                model.play(mix.tracks)
-              } label: {
-                VStack(alignment: .leading, spacing: 6) {
-                  MixArtwork(kind: mix.kind, title: mix.title).frame(width: 150, height: 150)
-                  Text(mix.title).font(PigType.cardTitle).lineLimit(2)
-                  Text(
-                    (["\(mix.tracks.count) \(mix.tracks.count == 1 ? "song" : "songs")"]
-                      + Array(Set(mix.tracks.map(\.artist))).sorted().prefix(3))
-                      .joined(separator: " · ")
-                  )
-                  .font(PigType.caption).foregroundStyle(.secondary).lineLimit(2)
-                }.frame(width: 150, alignment: .leading)
-              }
-              .buttonStyle(.plain)
-              .disabled(mix.tracks.isEmpty)
-              .accessibilityLabel("Play \(mix.title)")
-              .accessibilityHint("Touch and hold for the songs and more options")
-              .accessibilityAction(named: "Show songs") { openedMix = mix.id }
-              // The mix's one menu, as on its page (D-118).
-              .contextMenu {
-                CollectionActionsMenu(
-                  model: model, kind: .mix, name: mix.title, known: mix.tracks.count,
-                  missing: CollectionMenu.missing(mix.tracks).count,
-                  open: { openedMix = mix.id }, mix: mix
-                ) { mix.tracks }
-              }
-            }
-          }
-        } else {
-          VStack(alignment: .leading, spacing: 6) {
-            Text("Your mixes").font(PigType.sectionTitle)
-            if let error = model.homeErrors[.mixes] {
-              StatusText(error, kind: .error)
-            } else {
-              StatusText(
-                model.homeContent[.mixes]?.mixesPreparing == true
-                  ? "Preparing your mixes. They'll appear once their audio is ready."
-                  : "Your mixes appear as your library grows. Discoveries are prepared ahead of playback."
-              )
-            }
-          }.padding(.horizontal)
-        }
-        if let recent = model.homeContent[.recent]?.albums, !recent.isEmpty {
-          Shelf(title: "Recently added") {
-            ForEach(recent) { album in
-              NavigationLink {
-                AlbumView(model: model, album: album)
-              } label: {
-                CollectionCard(
-                  model: model, source: album.artworkSource, title: album.title,
-                  caption: album.artist
-                ).frame(width: 150)
-              }.buttonStyle(.plain)
-                .contextMenu { AlbumActionsMenu(model: model, album: album) }
-            }
-          }
+        mixes
+        let recent = model.homeContent[.recent]?.albums ?? []
+        switch ShelfState(hasItems: !recent.isEmpty, loading: model.homeLoading.contains(.recent)) {
+        case .shown: RecentlyAddedShelf(model: model, albums: recent)
+        case .placeholder: ShelfPlaceholder(title: "Recently added", size: 120)
+        case .hidden: EmptyView()
         }
         discovery(.recommended, title: "Recommended for you", songs: false)
         discovery(.popular, title: "Popular", songs: true)
@@ -122,6 +59,61 @@ struct HomeView: View {
     }
   }
 
+  @ViewBuilder private var mixes: some View {
+    // Less an edition hidden and waiting for its Undo (D-79).
+    let mixes = (model.homeContent[.mixes]?.mixes ?? []).filter {
+      !model.undo.hides(AppModel.undoKey(mixEdition: $0.id))
+    }
+    let radio = model.homeContent[.mixes]?.radio
+    let loading =
+      model.homeLoading.contains(.mixes) || model.homeContent[.mixes]?.mixesPreparing == true
+    switch ShelfState(hasItems: !mixes.isEmpty || radio != nil, loading: loading) {
+    case .shown:
+      Shelf(title: "Mixes") {
+        if let radio {
+          Button {
+            Task { await model.startRadio() }
+          } label: {
+            VStack(alignment: .leading, spacing: 6) {
+              MixArtwork(kind: "radio").frame(width: 150, height: 150).overlay(alignment: .bottomTrailing) {
+                PlayBadge()
+              }
+              Text(radio.title).font(PigType.cardTitle).lineLimit(2)
+            }.frame(width: 150, alignment: .leading)
+          }.buttonStyle(.plain)
+            .accessibilityLabel("Play \(radio.title)")
+        }
+        ForEach(mixes) { mix in
+          // Tap plays the mix; a long press offers its songs and options (#56).
+          Button {
+            model.play(mix.tracks)
+          } label: {
+            VStack(alignment: .leading, spacing: 6) {
+              MixArtwork(kind: mix.kind, title: mix.title).frame(width: 150, height: 150)
+                .overlay(alignment: .bottomTrailing) { PlayBadge() }
+              Text(mix.title).font(PigType.cardTitle).lineLimit(2)
+            }.frame(width: 150, alignment: .leading)
+          }
+          .buttonStyle(.plain)
+          .disabled(mix.tracks.isEmpty)
+          .accessibilityLabel("Play \(mix.title)")
+          .accessibilityHint("Touch and hold for the songs and more options")
+          .accessibilityAction(named: "Show songs") { openedMix = mix.id }
+          // The mix's one menu, as on its page (D-118).
+          .contextMenu {
+            CollectionActionsMenu(
+              model: model, kind: .mix, name: mix.title, known: mix.tracks.count,
+              missing: CollectionMenu.missing(mix.tracks).count,
+              open: { openedMix = mix.id }, mix: mix
+            ) { mix.tracks }
+          }
+        }
+      }
+    case .placeholder: ShelfPlaceholder(title: "Mixes")
+    case .hidden: EmptyView()
+    }
+  }
+
   /// Offline or failing, the card is simply not shown.
   private func loadWeek() async {
     do {
@@ -134,92 +126,125 @@ struct HomeView: View {
   {
     let feed = model.homeContent[section]?.feed
     let heading = feed?.title ?? title
-    VStack(alignment: .leading, spacing: 18) {
-      if let feed, !feed.artists.isEmpty {
-        Shelf(title: heading) {
-          ForEach(feed.artists) { item in
-            NavigationLink {
-              CatalogueArtistView(model: model, artistId: item.id, name: item.name)
-            } label: {
-              CollectionCard(
-                model: model, source: .artist(item.id), title: item.name, circle: true
-              ).frame(width: 140)
-            }.buttonStyle(.plain)
-          }
-        }
-      }
-      if let feed, !feed.albums.isEmpty {
-        Shelf(title: feed.artists.isEmpty ? heading : "Albums") {
-          ForEach(feed.albums) { item in
-            NavigationLink {
-              CatalogueAlbumView(
-                model: model, groupId: item.id, title: item.name, artist: item.artist)
-            } label: {
-              CollectionCard(
-                model: model, source: .releaseGroup(item.id), title: item.name,
-                caption: item.artist
-              ).frame(width: 150)
-            }.buttonStyle(.plain)
-          }
-        }
-      }
-      if songs, let feed, !feed.songs.isEmpty {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Songs").font(PigType.sectionTitle)
-          let all = feed.songs.compactMap(\.playbackTrack)
-          let tracks = Array(all.prefix(10))
-          // Packed like an album's songs, without the stack's gap around
-          // each divider (#126).
-          VStack(spacing: 0) {
-            ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
-              SongRow(model: model, track: track) { model.play(all, at: index) }
-              RowSeparator()
+    let empty = feed.map { $0.artists.isEmpty && $0.albums.isEmpty && (!songs || $0.songs.isEmpty) } ?? true
+    let loading = model.homeLoading.contains(section) || feed?.state == .preparing
+    switch ShelfState(hasItems: !empty, loading: loading) {
+    case .placeholder: ShelfPlaceholder(title: heading, size: songs ? 120 : 150)
+    case .hidden: EmptyView()
+    case .shown:
+      VStack(alignment: .leading, spacing: 18) {
+        if let feed, !feed.artists.isEmpty {
+          Shelf(title: heading) {
+            ForEach(feed.artists) { item in
+              NavigationLink {
+                CatalogueArtistView(model: model, artistId: item.id, name: item.name)
+              } label: {
+                CollectionCard(
+                  model: model, source: .artist(item.id), title: item.name, circle: true
+                ).frame(width: 140)
+              }.buttonStyle(.plain)
             }
           }
-          // The chart holds up to 100 songs (#55); the rest are a tap away.
-          if all.count > tracks.count {
-            NavigationLink("See all popular songs") {
-              ChartSongsView(model: model, title: heading, tracks: all)
-            }.padding(.vertical, 8)
-          }
-        }.padding(.horizontal)
-      }
-      status(section, feed: feed, heading: heading)
-    }
-  }
-
-  @ViewBuilder private func status(_ section: HomeSection, feed: DiscoveryFeed?, heading: String)
-    -> some View
-  {
-    let empty = feed.map { $0.artists.isEmpty && $0.albums.isEmpty && $0.songs.isEmpty } ?? true
-    if empty || model.homeErrors[section] != nil {
-      VStack(alignment: .leading, spacing: 6) {
-        Text(heading).font(PigType.sectionTitle)
-        if model.homeLoading.contains(section) {
-          ProgressView("Finding music…")
-        } else if let error = model.homeErrors[section] {
-          StatusText(error, kind: .error)
-          Button("Try again", systemImage: "arrow.clockwise") {
-            Task { await model.refreshHome(force: true) }
-          }
-            .buttonStyle(.pigSecondary)
-        } else if let feed {
-          Text(message(section, feed)).font(PigType.footnote).foregroundStyle(.secondary)
         }
-      }.padding(.horizontal)
+        if let feed, !feed.albums.isEmpty {
+          Shelf(title: feed.artists.isEmpty ? heading : "Albums") {
+            ForEach(feed.albums) { item in
+              NavigationLink {
+                CatalogueAlbumView(
+                  model: model, groupId: item.id, title: item.name, artist: item.artist)
+              } label: {
+                CollectionCard(
+                  model: model, source: .releaseGroup(item.id), title: item.name,
+                  caption: item.artist
+                ).frame(width: 150)
+              }.buttonStyle(.plain)
+            }
+          }
+        }
+        if songs, let feed, !feed.songs.isEmpty {
+          let all = feed.songs.compactMap(\.playbackTrack)
+          let tracks = Array(all.prefix(10))
+          VStack(alignment: .leading, spacing: 4) {
+            SectionHeading(title: feed.artists.isEmpty && feed.albums.isEmpty ? heading : "Songs") {
+              // The chart holds up to 100 songs (#55); the rest are a tap away.
+              if all.count > tracks.count {
+                NavigationLink("See all") {
+                  ChartSongsView(model: model, title: heading, tracks: all)
+                }
+                .font(PigType.subhead)
+                .accessibilityLabel("See all popular songs")
+              }
+            }
+            // Packed like an album's songs, without the stack's gap around
+            // each divider (#126).
+            VStack(spacing: 0) {
+              ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
+                SongRow(model: model, track: track) { model.play(all, at: index) }
+                RowSeparator()
+              }
+            }
+          }.padding(.horizontal)
+        }
+      }
     }
   }
+}
 
-  private func message(_ section: HomeSection, _ feed: DiscoveryFeed) -> String {
-    if feed.state == .preparing { return "Finding what’s popular…" }
-    if feed.state == .noSeeds {
-      return "Recommendations appear once PigMusic has matched artists in your library."
+/// The Play mark on a mix cover (D-120).
+private struct PlayBadge: View {
+  @Environment(\.colorScheme) private var scheme
+  var body: some View {
+    Image(systemName: "play.fill").font(.system(size: 15, weight: .bold))
+      .foregroundStyle(PigBrand.accent(scheme))
+      .frame(width: 40, height: 40)
+      .background(.white, in: Circle())
+      .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+      .padding(8)
+      .accessibilityHidden(true)
+  }
+}
+
+/// Rewind on Home (#216, D-120), in the page's own look: its icon, this
+/// week's listening time and the top three covers.
+struct RewindHomeCard: View {
+  let model: AppModel
+  let rewind: Rewind
+  @ScaledMetric(relativeTo: .body) private var cover: CGFloat = 30
+  @ScaledMetric(relativeTo: .body) private var icon: CGFloat = 44
+  @Environment(\.colorScheme) private var scheme
+  var body: some View {
+    HStack(spacing: 12) {
+      Image(systemName: "clock.arrow.circlepath").font(.title3.weight(.semibold))
+        .foregroundStyle(PigBrand.accent(scheme))
+        .frame(width: icon, height: icon)
+        .background(
+          PigBrand.accent(scheme).opacity(0.12),
+          in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+      VStack(alignment: .leading, spacing: 2) {
+        Text("Rewind").font(.body.weight(.semibold)).foregroundStyle(PigBrand.text(scheme))
+        Text("This week · " + (CollectionFacts.length(Double(rewind.minutes) * 60) ?? "0 min"))
+          .font(PigType.footnote).pigFigures().foregroundStyle(PigBrand.secondary(scheme))
+      }
+      Spacer(minLength: 0)
+      HStack(spacing: -cover / 3) {
+        ForEach(Array(rewind.topSongs.prefix(3).enumerated()), id: \.offset) { index, song in
+          Artwork(
+            model: model, source: song.track.artworkSource, title: song.track.title, width: 128
+          )
+          .frame(width: cover, height: cover)
+          .overlay(
+            RoundedRectangle(cornerRadius: PigRadius.artwork, style: .continuous)
+              .strokeBorder(PigBrand.surface(scheme), lineWidth: 2)
+          )
+          .zIndex(Double(3 - index))
+        }
+      }.accessibilityHidden(true)
     }
-    if feed.unavailable || feed.state == .unavailable {
-      return section == .popular
-        ? "Charts are temporarily unavailable." : "Recommendations are temporarily unavailable."
-    }
-    return "Nothing here yet. Try again later."
+    .padding(14)
+    .background(PigBrand.surface(scheme), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    .overlay(
+      RoundedRectangle(cornerRadius: 16, style: .continuous)
+        .strokeBorder(PigBrand.border(scheme), lineWidth: 1))
   }
 }
 
@@ -227,13 +252,15 @@ struct MixDetailView: View {
   @Environment(\.dismiss) private var dismiss
   let model: AppModel
   let mix: PersonalMix
+  /// Show hidden songs (D-120): the page lists the songs hidden from it again.
+  @State private var showingHidden = false
   /// Without songs hidden, or waiting for their Undo (#183), nor songs
   /// being removed from the library (D-108).
   private var tracks: [Track] {
     model.undo.withoutRemoved(
       mix.tracks.filter {
         let key = AppModel.undoKey(mix: mix.id, song: $0.id)
-        return !model.hiddenMixSongs.contains(key) && !model.undo.hides(key)
+        return showingHidden || (!model.hiddenMixSongs.contains(key) && !model.undo.hides(key))
       })
   }
   var body: some View {
@@ -245,12 +272,17 @@ struct MixDetailView: View {
           model: model, source: nil, eyebrow: "MIX", title: mix.title,
           subtitle: [mix.reason, mix.day].filter { !$0.isEmpty }.joined(separator: " · "),
           art: AnyView(MixArtwork(kind: mix.kind, title: mix.title)))
-        HStack(spacing: 10) {
-          PlayCapsule { model.play(tracks) }.disabled(tracks.isEmpty)
-          RoundIcon(label: "Shuffle", systemImage: "shuffle") { model.play(tracks.shuffled()) }
-            .disabled(tracks.isEmpty)
-          Spacer()
-        }.buttonStyle(.plain)
+        if let empty = EmptyPage.mix(songs: mix.tracks.count, shown: tracks.count) {
+          // Every song hidden (D-120): the cover stays, with one way back.
+          EmptyPageView(page: empty, systemImage: "eye.slash") { showingHidden = true }
+        } else {
+          PlayShuffleRow {
+            model.play(tracks)
+          } shuffle: {
+            model.play(tracks.shuffled())
+          }
+          .disabled(tracks.isEmpty)
+        }
       }.listRowSeparator(.hidden).listRowBackground(Color.clear)
       Section {
         ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
@@ -407,23 +439,41 @@ struct MixArtwork: View {
 }
 
 /// Every song in the popular chart, in chart order (#55), in the album
-/// page's compact rows rather than taller list cells (#126).
-private struct ChartSongsView: View {
+/// page's compact rows rather than taller list cells (#126). A header of the
+/// top four covers, the chart's name and size, then Play and Shuffle (D-120).
+struct ChartSongsView: View {
   let model: AppModel
   let title: String
   let tracks: [Track]
+  private var covers: [Track] { Array(tracks.prefix(4)) }
   var body: some View {
     ScrollView {
-      AlbumSongList(
-        model: model, tracks: tracks, number: { index, _ in index + 1 }, albumPage: false
-      ) {
-        model.play(tracks, at: $0)
-      }.padding(.horizontal)
+      VStack(alignment: .leading, spacing: 12) {
+        HStack(spacing: 6) {
+          ForEach(covers, id: \.id) { track in
+            Artwork(model: model, source: track.artworkSource, title: track.title, width: 256)
+          }
+        }
+        .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(title).font(.title2.weight(.bold)).accessibilityAddTraits(.isHeader)
+          Text("Top " + CollectionFacts.songs(tracks.count))
+            .font(PigType.subhead).pigFigures().foregroundStyle(.secondary)
+        }
+        PlayShuffleRow {
+          model.play(tracks)
+        } shuffle: {
+          model.play(tracks.shuffled())
+        }
+        .disabled(tracks.isEmpty)
+        AlbumSongList(
+          model: model, tracks: tracks, number: { index, _ in index + 1 }, albumPage: false
+        ) {
+          model.play(tracks, at: $0)
+        }
+      }.padding(.horizontal).padding(.bottom, 24)
     }
-    .pigCanvas().navigationTitle(title).navigationBarTitleDisplayMode(.inline)
-    .toolbar {
-      Button("Play", systemImage: "play.fill") { model.play(tracks) }
-    }
+    .pigCanvas().navigationBarTitleDisplayMode(.inline)
   }
 }
 
@@ -529,45 +579,6 @@ struct RewindFigureCard<Header: View, Trailing: View, Footer: View>: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(
       PigBrand.canvas(scheme), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-  }
-}
-
-/// The Home card (#216): this week's minutes and plays, the top three song
-/// covers and a bar for each day, Monday to Sunday.
-struct RewindCard: View {
-  let model: AppModel
-  let rewind: Rewind
-  @ScaledMetric(relativeTo: .body) private var cover: CGFloat = 44
-  @Environment(\.colorScheme) private var scheme
-  var body: some View {
-    RewindFigureCard(rewind: rewind) {
-      HStack {
-        Label {
-          Text("Rewind").font(PigType.subhead.weight(.semibold))
-            .foregroundStyle(PigBrand.text(scheme))
-        } icon: {
-          Image(systemName: "clock.arrow.circlepath").foregroundStyle(PigBrand.accent(scheme))
-        }
-        Spacer()
-        Text("This week").font(PigType.footnote).foregroundStyle(PigBrand.secondary(scheme))
-      }
-    } trailing: {
-      HStack(spacing: -cover / 3) {
-        ForEach(Array(rewind.topSongs.prefix(3).enumerated()), id: \.offset) { index, song in
-          Artwork(
-            model: model, source: song.track.artworkSource, title: song.track.title, width: 128
-          )
-          .frame(width: cover, height: cover)
-          .overlay(
-            RoundedRectangle(cornerRadius: PigRadius.artwork, style: .continuous)
-              .strokeBorder(PigBrand.canvas(scheme), lineWidth: 2)
-          )
-          .zIndex(Double(3 - index))
-        }
-      }.accessibilityHidden(true)
-    } footer: {
-      RewindWeekBars(bars: rewind.weekBars, minutes: rewind.minutes)
-    }
   }
 }
 
