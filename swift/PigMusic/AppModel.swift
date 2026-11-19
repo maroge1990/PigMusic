@@ -1297,6 +1297,26 @@ enum PlayOrigin: Hashable {
     _ = await flushEdits()
     await refresh()
   }
+  /// Couldn't send. Try again. (D-120): the refused change waits once more
+  /// and is sent at once.
+  func retryEdit(_ id: String) async {
+    guard !flushingEdits, let store,
+      let pending = pendingEdits.first(where: { $0.id == id })
+    else { return }
+    try? await store.updateMutation(pending.retried())
+    pendingEdits = (try? await store.pendingMutations()) ?? []
+    _ = await flushEdits()
+    await refresh()
+  }
+  /// Shuffle your library (D-120): songs from the whole library, not only
+  /// the first page by title.
+  func shuffleLibrary() async {
+    guard let store else { return }
+    let stamp = account.generation
+    guard let tracks = try? await store.shuffledTracks(limit: 200), account.isCurrent(stamp)
+    else { return }
+    play(tracks)
+  }
   func cachedCatalogue<T: Codable & Sendable>(
     key: String, load: @Sendable (NativeService) async throws -> T
   ) async throws -> T {
