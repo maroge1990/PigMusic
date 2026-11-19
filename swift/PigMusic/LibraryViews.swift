@@ -440,52 +440,81 @@ struct DownloadMenu: View {
 }
 
 
+/// Account (D-120): your initials, name and song count, then the links in
+/// groups with an icon each, Refresh library, and Sign out last. Seamless
+/// playback and Crossfade live in Preferences; nothing explains itself in a
+/// paragraph (D-101).
 struct AccountView: View {
   @Bindable var model: AppModel
   @State private var signingOut = false
+  /// Your music quality in words, once the server says.
+  @State private var quality: String?
+  /// How many devices are signed in, once the server says.
+  @State private var devices: Int?
+  @Environment(\.colorScheme) private var scheme
+  @ScaledMetric(relativeTo: .title) private var avatarSize: CGFloat = 64
+  private var name: String { model.person?.displayName ?? model.person?.username ?? "" }
   var body: some View {
     Form {
       Section {
-        VStack(alignment: .leading, spacing: 2) {
-          Text(model.person?.displayName ?? "").font(.headline)
-          Text(model.server).font(PigType.footnote).foregroundStyle(.secondary)
-            .textSelection(.enabled)
+        HStack(spacing: 14) {
+          Text(
+            name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined()
+              .uppercased()
+          )
+          .font(.title2.weight(.bold)).foregroundStyle(PigBrand.textAccent(scheme))
+          .frame(width: avatarSize, height: avatarSize)
+          .background(PigBrand.accent(scheme).opacity(0.16), in: Circle())
+          .accessibilityHidden(true)
+          VStack(alignment: .leading, spacing: 2) {
+            Text(name).font(.title2.weight(.bold))
+            Text("\(model.songCount.formatted()) song\(model.songCount == 1 ? "" : "s") in your library")
+              .font(PigType.subhead).foregroundStyle(.secondary).pigFigures()
+          }
         }
-        NavigationLink("Preferences") { PreferencesView(model: model) }
-        NavigationLink("Password") { PasswordView(model: model) }
-        NavigationLink("Devices and sessions") { SessionsView(model: model) }
-        NavigationLink("Your music quality") { QualityView(model: model) }
-        NavigationLink("Changes not sent yet (\(model.pendingEdits.count))") {
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+      }
+      Section {
+        link("Preferences", symbol: "slider.horizontal.3", tint: PigBrand.accent(scheme)) {
+          PreferencesView(model: model)
+        }
+        link(
+          "Your music quality", symbol: "waveform", tint: PigBrand.accent(scheme), value: quality
+        ) {
+          QualityView(model: model) { quality = $0 }
+        }
+      }
+      Section {
+        link("Password", symbol: "lock", tint: PigBrand.secondary(scheme)) {
+          PasswordView(model: model)
+        }
+        link(
+          "Devices and sessions", symbol: "laptopcomputer.and.iphone",
+          tint: PigBrand.secondary(scheme), value: devices.map { $0.formatted() }
+        ) {
+          SessionsView(model: model)
+        }
+      }
+      Section {
+        link(
+          "Changes not sent yet", symbol: "arrow.up.circle", tint: .gray,
+          badge: model.pendingEdits.count
+        ) {
           PendingEditsView(model: model)
         }
-        NavigationLink("Diagnostics") { DiagnosticsView(model: model) }
+        link("Diagnostics", symbol: "waveform.path.ecg", tint: .gray) {
+          DiagnosticsView(model: model)
+        }
       }
-      Section("Library") {
-        LabeledContent("Songs in your library", value: model.songCount.formatted())
+      Section {
         Button("Refresh library", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
           .disabled(model.syncing)
       }
       Section {
-        Toggle(
-          "Seamless playback",
-          isOn: Binding(
-            get: { model.player.seamlessEnabled }, set: { model.player.seamlessEnabled = $0 }))
-        if model.player.seamlessEnabled {
-          Toggle(
-            "Crossfade",
-            isOn: Binding(
-              get: { model.player.crossfadeEnabled }, set: { model.player.crossfadeEnabled = $0 }))
-        }
-      } header: {
-        Text("Playback")
-      } footer: {
-        Text(
-          "Seamless playback gives gapless albums and a three-second crossfade between unrelated songs. A song that is very large or slow to arrive plays as a normal stream automatically."
-        )
-      }
-      Section {
         // Asks first, as signing out another device does: it can't be undone (D-79, #183).
         Button("Sign out", role: .destructive) { signingOut = true }
+          .frame(maxWidth: .infinity)
           .disabled(model.busy || model.mutationActive)
           .confirmationDialog(
             "Sign out of this iPhone? It will need to sign in again.", isPresented: $signingOut,
@@ -495,7 +524,41 @@ struct AccountView: View {
           }
       }
       if let message = model.message { Section { StatusText(message) } }
-    }.navigationTitle("Account")
+    }
+    .navigationTitle("Account").navigationBarTitleDisplayMode(.inline)
+    .task {
+      // Only what the rows show; the rows open without them.
+      if let settings = try? await model.readCatalogue({ try await $0.quality() }) {
+        quality = QualityChoices(settings).summary
+      }
+      if let sessions = try? await model.readCatalogue({ try await $0.sessions() }) {
+        devices = sessions.count { $0.revokedAt == nil }
+      }
+    }
+  }
+  /// A link with its icon tile, and its value or a count badge on the right.
+  private func link<Destination: View>(
+    _ title: String, symbol: String, tint: Color, value: String? = nil, badge: Int = 0,
+    @ViewBuilder destination: @escaping () -> Destination
+  ) -> some View {
+    NavigationLink(destination: destination) {
+      HStack(spacing: 12) {
+        Image(systemName: symbol).font(.body.weight(.semibold)).foregroundStyle(.white)
+          .frame(width: 30, height: 30)
+          .background(tint, in: .rect(cornerRadius: 7))
+          .accessibilityHidden(true)
+        Text(title)
+        Spacer()
+        if let value { Text(value).foregroundStyle(.secondary).pigFigures() }
+        if badge > 0 {
+          Text(badge.formatted()).font(PigType.footnote.weight(.semibold)).pigFigures()
+            .foregroundStyle(PigBrand.onAccent(scheme))
+            .padding(.horizontal, 7).frame(minWidth: 22, minHeight: 22)
+            .background(PigBrand.accent(scheme), in: Capsule())
+            .accessibilityLabel("\(badge) change\(badge == 1 ? "" : "s")")
+        }
+      }
+    }
   }
 }
 

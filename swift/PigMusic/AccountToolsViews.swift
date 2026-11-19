@@ -4,6 +4,8 @@ import PigDomain
 import UIKit
 import SwiftUI
 
+/// Appearance as three small previews, then every playback switch in one
+/// place (D-120): Seamless playback and Crossfade moved here from Account.
 struct PreferencesView: View {
   let model: AppModel
   @State private var preferences = AccountPreferences()
@@ -13,13 +15,19 @@ struct PreferencesView: View {
     Form {
       // Applies at once and is kept on this phone; it syncs whenever it can,
       // so it works offline and during a sync.
-      Picker("Appearance", selection: $preferences.appearance) {
-        Text("System").tag("system")
-        Text("Light").tag("light")
-        Text("Dark").tag("dark")
+      Section("Appearance") {
+        HStack(spacing: 10) {
+          ForEach(AppearanceTile.Choice.allCases, id: \.self) { choice in
+            AppearanceTile(choice: choice, selected: preferences.appearance == choice.rawValue) {
+              preferences.appearance = choice.rawValue
+            }
+          }
+        }.padding(.vertical, 8)
       }
       Section("Playback") {
-        Toggle("Keep playing similar songs", isOn: $preferences.keepPlaying)
+        ForEach(PlaybackSwitch.shown(seamless: model.player.seamlessEnabled), id: \.self) { item in
+          Toggle(item.title, isOn: binding(item))
+        }
       }
       if let message { StatusText(message) }
     }.pigCanvas().navigationTitle("Preferences").navigationBarTitleDisplayMode(.inline).task {
@@ -31,10 +39,82 @@ struct PreferencesView: View {
       Task { await save(value) }
     }
   }
+  /// Keep playing is the account's and syncs; the other two belong to this
+  /// iPhone's player.
+  private func binding(_ item: PlaybackSwitch) -> Binding<Bool> {
+    switch item {
+    case .keepPlaying: $preferences.keepPlaying
+    case .seamless:
+      Binding(get: { model.player.seamlessEnabled }, set: { model.player.seamlessEnabled = $0 })
+    case .crossfade:
+      Binding(get: { model.player.crossfadeEnabled }, set: { model.player.crossfadeEnabled = $0 })
+    }
+  }
   private func save(_ value: AccountPreferences) async {
     // nil: a newer choice replaced this one, and its own save reports.
     guard let confirmed = await model.choosePreferences(value) else { return }
     message = .info(confirmed ? "Saved." : "Saved on this iPhone; it will be sent when you're online.")
+  }
+}
+
+/// One Appearance choice: a small picture of the app in that look, its name
+/// and a round mark when chosen.
+private struct AppearanceTile: View {
+  enum Choice: String, CaseIterable {
+    case system, light, dark
+    var title: String { rawValue.capitalized }
+  }
+  let choice: Choice
+  let selected: Bool
+  let action: () -> Void
+  @Environment(\.colorScheme) private var scheme
+  @ScaledMetric(relativeTo: .body) private var width: CGFloat = 64
+  var body: some View {
+    Button(action: action) {
+      VStack(spacing: 8) {
+        preview
+          .frame(width: width, height: width * 1.55)
+          .clipShape(.rect(cornerRadius: 12, style: .continuous))
+          .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+              .strokeBorder(
+                selected ? PigBrand.accent(scheme) : PigBrand.border(scheme),
+                lineWidth: selected ? 3 : 1)
+          }
+        Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+          .foregroundStyle(selected ? PigBrand.accent(scheme) : .secondary)
+        Text(choice.title).font(PigType.subhead)
+      }
+      .frame(maxWidth: .infinity)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(choice.title)
+    .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+  }
+  @ViewBuilder private var preview: some View {
+    switch choice {
+    case .system:
+      HStack(spacing: 0) {
+        page(.light)
+        page(.dark)
+      }
+    case .light: page(.light)
+    case .dark: page(.dark)
+    }
+  }
+  private func page(_ look: ColorScheme) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      RoundedRectangle(cornerRadius: 4).fill(PigBrand.accent(look).opacity(0.6))
+        .frame(width: 18, height: 18)
+      Capsule().fill(PigBrand.border(look)).frame(height: 5)
+      Capsule().fill(PigBrand.border(look)).frame(width: 30, height: 5)
+      Spacer(minLength: 0)
+    }
+    .padding(8)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .background(PigBrand.canvas(look))
   }
 }
 struct PasswordView: View {
@@ -310,6 +390,10 @@ struct DiagnosticsView: View {
         }
       }
       Section("Server") {
+        // Moved here from Account's header (D-120).
+        LabeledContent("Address") {
+          Text(model.server).textSelection(.enabled)
+        }
         if let server {
           LabeledContent("Version", value: server.version)
           LabeledContent("Build", value: server.revision)
