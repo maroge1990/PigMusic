@@ -1,3 +1,33 @@
+/* A list's sort: the arrows, the word and the choices (D-120). */
+.sort-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  color: var(--secondary);
+  font-size: var(--type-subhead);
+}
+.sort-control select {
+  min-height: 2.75rem;
+  background: var(--raised);
+  color: var(--text);
+  border: 1px solid var(--control-border);
+  padding: 0 var(--space-8);
+  border-radius: var(--radius-compact);
+  max-width: 100%;
+}
+/* The Songs tab: Play and Shuffle, then the count. */
+.songs-tab-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-12);
+  margin-bottom: var(--space-16);
+}
+.songs-tab-header p {
+  flex: 1;
+  margin: 0;
+  color: var(--secondary);
+}
 .library-controls {
   display: flex;
   align-items: center;
@@ -115,13 +145,6 @@
   border: 0;
   background: color-mix(in srgb, var(--surface) 82%, transparent);
   color: var(--text);
-}
-.playlist-card > .collection-more {
-  top: 50%;
-  transform: translateY(-50%);
-}
-.playlist-card > a {
-  padding-right: var(--space-48);
 }
 .album-card {
   padding: 0;

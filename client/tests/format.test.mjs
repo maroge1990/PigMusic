@@ -18,7 +18,20 @@ const {
   formatRelative,
   formatDateTime,
   formatDuration,
+  formatLength,
+  formatListSize,
 } = await import("../src/format.ts");
+
+test("a list's length reads in hours and minutes", () => {
+  assert.equal(formatLength(5520), "1 hr 32 min");
+  assert.equal(formatLength(14 * 60), "14 min");
+  assert.equal(formatLength(6 * 3600), "6 hr");
+  assert.equal(formatLength(20), "1 min");
+  assert.equal(formatLength(0), "");
+  assert.equal(formatLength(undefined, "-"), "-");
+  assert.equal(formatListSize(24, 5520), "24 songs · 1 hr 32 min");
+  assert.equal(formatListSize(1), "1 song");
+});
 
 test("MusicBrainz partial dates keep only what they know", () => {
   assert.equal(formatDate("2010-07-03"), "3 Jul 2010");

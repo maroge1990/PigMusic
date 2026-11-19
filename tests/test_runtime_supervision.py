@@ -5,6 +5,7 @@ import json
 import socket
 from pathlib import Path
 import threading
+import time
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -46,7 +47,7 @@ def test_engine_crash_restarts_with_backoff_while_server_keeps_running(
     engines = []
     server = FakeProcess(lifetime=400)
 
-    def start_engine(root):
+    def start_engine(root, proceed=None):
         engines.append((clock[0], FakeProcess(lifetime=3)))
         return engines[-1][1], None
 
@@ -91,6 +92,448 @@ def test_the_engine_heap_has_room_for_a_burst_of_search_replies(tmp_path, monkey
     assert int(launched["DOTNET_GCHeapHardLimit"], 16) >= 512 * 1024 * 1024
 
 
+class HungEngine(FakeProcess):
+    """Never exits by itself; records when it was ended."""
+
+    def __init__(self, clock):
+        super().__init__(lifetime=None)
+        self.clock = clock
+        self.ended = None
+
+    def terminate(self):
+        if self.ended is None:
+            self.ended = self.clock[0]
+        super().terminate()
+
+
+def engine_supervised(
+    tmp_path, monkeypatch, ticks, answer, kind=HungEngine, server_probes=None
+):
+    """main() with a fake server living `ticks` seconds, hung engines and a
+    scripted engine probe: `answer(clock)` returns its state."""
+    clock = [0.0]
+    engines, probes = [], []
+
+    def server_probe():
+        if server_probes is not None:
+            server_probes.append(clock[0])
+        return "ok", []
+
+    def start_engine(root, proceed=None):
+        engines.append((clock[0], kind(clock)))
+        return engines[-1][1], None
+
+    def sleep(seconds):
+        clock[0] += 1
+
+    def engine_probe():
+        probes.append(clock[0])
+        return answer(clock[0]), []
+
+    monkeypatch.setenv("PIG_MUSIC_DATA", str(tmp_path))
+    monkeypatch.setenv("PIG_MUSIC_EMBEDDED_ENGINE", "true")
+    monkeypatch.setattr(runtime, "start_engine", start_engine)
+    monkeypatch.setattr(runtime, "proxy_trust", lambda: "127.0.0.1")
+    monkeypatch.setattr(
+        runtime.subprocess, "Popen", lambda *a, **k: FakeProcess(lifetime=ticks)
+    )
+    monkeypatch.setattr(runtime.time, "sleep", sleep)
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(runtime.signal, "signal", lambda *a: None)
+    monkeypatch.setattr(runtime, "probe", server_probe, raising=False)
+    monkeypatch.setattr(runtime, "engine_probe", engine_probe, raising=False)
+    assert runtime.main() == 1
+    return engines, probes
+
+
+def test_a_hung_engine_is_ended_and_started_again(tmp_path, monkeypatch, capsys):
+    """#256: an engine that stops answering without exiting was never
+    restarted; every call to it just timed out."""
+    engines, probes = engine_supervised(
+        tmp_path, monkeypatch, 600, lambda now: "silent"
+    )
+    # Ten silent probes, 30 s apart, after its 180 s grace.
+    assert probes[:10] == [180 + 30 * n for n in range(10)]
+    (first, hung), (again, _) = engines[:2]
+    assert hung.ended == 450
+    assert again == 450 + runtime.ENGINE_BACKOFF_START
+    err = capsys.readouterr().err
+    assert "Source engine has not answered for 300 s; restarting it in 5s" in err
+    # The server itself was never touched.
+    assert "Server has not answered" not in err
+
+
+class UnkillableEngine(HungEngine):
+    """Stuck in uninterruptible I/O: survives even a kill. A wait with a
+    limit lets the fake clock run out; one without would block for ever."""
+
+    def __init__(self, clock):
+        super().__init__(clock)
+        self.killed = None
+
+    def poll(self):
+        return None
+
+    def terminate(self):
+        if self.ended is None:
+            self.ended = self.clock[0]
+
+    def kill(self):
+        if self.killed is None:
+            self.killed = self.clock[0]
+
+    def wait(self, timeout=None):
+        if timeout is None:
+            raise AssertionError("waited for the engine without a limit")
+        self.clock[0] += timeout
+        raise runtime.subprocess.TimeoutExpired("slskd", timeout)
+
+
+def test_an_engine_that_outlives_a_kill_never_stalls_the_supervisor(
+    tmp_path, monkeypatch, capsys
+):
+    """Codex on 7866ac1: after the kill the supervisor waited for the engine
+    without a limit, so one stuck in kernel I/O stopped the server's
+    watchdog, every engine restart and the shutdown deadline."""
+    server_probes = []
+    engines, probes = engine_supervised(
+        tmp_path,
+        monkeypatch,
+        1500,
+        lambda now: "silent",
+        kind=UnkillableEngine,
+        server_probes=server_probes,
+    )
+    ((_, stuck),) = engines  # No second engine while the first is still there.
+    assert stuck.ended == 450 and stuck.killed == 460
+    # The server's watchdog kept probing every 30 s throughout.
+    after = [at for at in server_probes if at > 450]
+    assert after and all(b - a == 30 for a, b in zip(after, after[1:]))
+    assert after[-1] > 1400
+    err = capsys.readouterr().err
+    assert "did not stop within 10 s; killing it" in err
+    assert "Waiting for the old source engine to end" in err
+
+
+def test_starting_the_engine_on_a_hung_mount_never_stalls_the_supervisor(
+    tmp_path, monkeypatch, capsys
+):
+    """Codex on 438047f: the engine's start checks the library mount and
+    makes its folders on the NAS from the supervisor's own loop, so a hung
+    mount stopped the server's watchdog, restarts and shutdown."""
+    clock = [0.0]
+    release = threading.Event()
+    launches, server_probes, active = [], [], [0, 0]
+
+    def start_engine(root, proceed=None):
+        launches.append((clock[0], threading.current_thread().name))
+        if len(launches) == 1:
+            return HungEngine(clock), None
+        active[0] += 1
+        active[1] = max(active)
+        if threading.current_thread() is threading.main_thread():
+            raise AssertionError("the mount check would hang the supervisor")
+        release.wait(5)  # The mount check hangs.
+        active[0] -= 1
+        return None, None
+
+    def server_probe():
+        server_probes.append(clock[0])
+        if launches[1:] and clock[0] > launches[1][0] + 300:
+            release.set()  # The loop kept running while the start hung.
+        return "ok", []
+
+    def sleep(seconds):
+        clock[0] += 1
+
+    monkeypatch.setenv("PIG_MUSIC_DATA", str(tmp_path))
+    monkeypatch.setenv("PIG_MUSIC_EMBEDDED_ENGINE", "true")
+    monkeypatch.setattr(runtime, "start_engine", start_engine)
+    monkeypatch.setattr(runtime, "proxy_trust", lambda: "127.0.0.1")
+    monkeypatch.setattr(
+        runtime.subprocess, "Popen", lambda *a, **k: FakeProcess(lifetime=1200)
+    )
+    monkeypatch.setattr(runtime.time, "sleep", sleep)
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(runtime.signal, "signal", lambda *a: None)
+    monkeypatch.setattr(runtime, "probe", server_probe, raising=False)
+    monkeypatch.setattr(runtime, "engine_probe", lambda: ("silent", []))
+    try:
+        assert runtime.main() == 1
+    finally:
+        release.set()
+    assert release.is_set() and len(launches) >= 2
+    # The hung start ran off the loop, and only one start at a time.
+    assert all(name == "engine-launch" for _, name in launches)
+    assert active[1] == 1
+    after = [at for at in server_probes if at > launches[1][0]]
+    assert after and all(b - a == 30 for a, b in zip(after, after[1:]))
+    err = capsys.readouterr().err
+    assert "Starting the source engine is waiting on the library mount" in err
+
+
+@pytest.mark.parametrize("released", ["before_reap", "during_server_wait"])
+def test_an_engine_start_released_during_shutdown_leaves_no_engine_running(
+    tmp_path, monkeypatch, released
+):
+    """Codex on b71c163: a start held up on the mount and released while
+    the supervisor was stopping (reaping the web server) still spawned the
+    engine, which nobody then ended."""
+    clock = [0.0]
+    release = threading.Event()
+    handlers, engines = {}, []
+    pause = time.sleep  # Real time: the fake clock replaces time.sleep.
+
+    class Server(FakeProcess):
+        def wait(self, timeout=None):
+            if released == "during_server_wait":
+                release.set()
+                pause(0.3)  # The launcher spawns meanwhile.
+            return super().wait(timeout)
+
+    server = Server(lifetime=None)
+
+    def popen(command, **kwargs):
+        if "uvicorn" in command:
+            return server
+        engines.append(FakeProcess(lifetime=None))
+        return engines[-1]
+
+    def mount(*args, **kwargs):
+        release.wait(5)  # A hung NAS mount, until released.
+
+    def sleep(seconds):
+        clock[0] += 1
+        if clock[0] == 20:
+            handlers[runtime.signal.SIGTERM](runtime.signal.SIGTERM, None)
+            if released == "before_reap":
+                release.set()
+                pause(0.3)
+
+    monkeypatch.setenv("PIG_MUSIC_DATA", str(tmp_path / "data"))
+    monkeypatch.setenv("PIG_MUSIC_EMBEDDED_ENGINE", "true")
+    monkeypatch.setenv("PIG_MUSIC_DOWNLOAD_ROOT", str(tmp_path / "work"))
+    monkeypatch.setenv("PIG_MUSIC_LIBRARY", str(tmp_path / "nas"))
+    monkeypatch.setattr(runtime, "require_library_mount", mount)
+    monkeypatch.setattr(runtime, "proxy_trust", lambda: "127.0.0.1")
+    monkeypatch.setattr(runtime.subprocess, "Popen", popen)
+    monkeypatch.setattr(runtime.time, "sleep", sleep)
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(runtime.signal, "signal", handlers.__setitem__)
+    monkeypatch.setattr(runtime, "probe", lambda: ("ok", []), raising=False)
+    try:
+        assert runtime.main() == 0
+    finally:
+        release.set()
+    for thread in threading.enumerate():
+        if thread.name == "engine-launch":
+            thread.join(5)
+    assert all(engine.returncode is not None for engine in engines)
+
+
+def test_an_engine_mid_spawn_at_shutdown_is_ended_before_the_supervisor_exits(
+    tmp_path, monkeypatch
+):
+    """Codex on 4753842: with the child created but Popen not yet returned
+    when SIGTERM came, shutdown saw no engine and exited, leaving it alive."""
+    clock = [0.0]
+    release = threading.Event()
+    handlers, engines = {}, []
+    server = FakeProcess(lifetime=None)
+
+    def popen(command, **kwargs):
+        if "uvicorn" in command:
+            return server
+        engines.append(FakeProcess(lifetime=None))  # The child exists now.
+        release.wait(5)  # Popen has not returned it yet.
+        return engines[-1]
+
+    def sleep(seconds):
+        clock[0] += 1
+        if clock[0] == 20:
+            threading.Timer(0.2, release.set).start()
+            handlers[runtime.signal.SIGTERM](runtime.signal.SIGTERM, None)
+
+    monkeypatch.setenv("PIG_MUSIC_DATA", str(tmp_path / "data"))
+    monkeypatch.setenv("PIG_MUSIC_EMBEDDED_ENGINE", "true")
+    monkeypatch.delenv("PIG_MUSIC_DOWNLOAD_ROOT", raising=False)
+    monkeypatch.setattr(runtime, "proxy_trust", lambda: "127.0.0.1")
+    monkeypatch.setattr(runtime.subprocess, "Popen", popen)
+    monkeypatch.setattr(runtime.time, "sleep", sleep)
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(runtime.signal, "signal", handlers.__setitem__)
+    monkeypatch.setattr(runtime, "probe", lambda: ("ok", []), raising=False)
+    try:
+        assert runtime.main() == 0
+        # Ended before main returned, not by a thread left behind.
+        assert len(engines) == 1 and engines[0].returncode is not None
+    finally:
+        release.set()
+        for thread in threading.enumerate():
+            if thread.name == "engine-launch":
+                thread.join(5)
+
+
+class Uvicorn:
+    """A web server that needs `grace` seconds after SIGTERM to exit."""
+
+    def __init__(self, clock, grace):
+        self.clock, self.grace = clock, grace
+        self.terminated = None
+        self.killed = False
+        self.returncode = None
+
+    def poll(self):
+        if self.returncode is None and self.terminated is not None:
+            if self.clock() >= self.terminated + self.grace:
+                self.returncode = 0
+        return self.returncode
+
+    def terminate(self):
+        if self.terminated is None:
+            self.terminated = self.clock()
+
+    def kill(self):
+        self.killed = True
+        self.returncode = -9
+
+    def wait(self, timeout=None):
+        began = self.clock()
+        while self.poll() is None:
+            if timeout is not None and self.clock() - began >= timeout:
+                raise runtime.subprocess.TimeoutExpired("uvicorn", timeout)
+            threading.Event().wait(0.005)
+        return self.returncode
+
+
+def stopping_with_a_spawn_pending(tmp_path, monkeypatch, returns_after):
+    """main() stopped by its watchdog (the server never answers) while the
+    engine's start is inside Popen, returning `returns_after` seconds after
+    the watchdog gives up (None: only once main has returned). The clock
+    runs ten times faster than real time and a tick of sleep adds 1 s."""
+    real, base, ticks = time.monotonic, time.monotonic(), [0.0]
+
+    def clock():
+        return ticks[0] + (real() - base) * 10
+
+    release, gave_up = threading.Event(), []
+    server = Uvicorn(clock, grace=2)
+    engines = []
+
+    def popen(command, **kwargs):
+        if "uvicorn" in command:
+            return server
+        engines.append(FakeProcess(lifetime=None))  # The child exists now.
+        while not release.is_set():
+            if returns_after is not None and gave_up:
+                if clock() >= gave_up[0] + returns_after:
+                    break
+            release.wait(0.005)
+        return engines[-1]
+
+    def probe():
+        dog = runtime.WATCHDOG_SILENT_SECONDS // runtime.WATCHDOG_INTERVAL
+        probes.append(clock())
+        if len(probes) == dog:
+            gave_up.append(clock())
+        return "silent", []
+
+    probes = []
+
+    def sleep(seconds):
+        ticks[0] += 1
+
+    monkeypatch.setenv("PIG_MUSIC_DATA", str(tmp_path / "data"))
+    monkeypatch.setenv("PIG_MUSIC_EMBEDDED_ENGINE", "true")
+    monkeypatch.delenv("PIG_MUSIC_DOWNLOAD_ROOT", raising=False)
+    monkeypatch.setattr(runtime, "proxy_trust", lambda: "127.0.0.1")
+    monkeypatch.setattr(runtime.subprocess, "Popen", popen)
+    monkeypatch.setattr(runtime.time, "sleep", sleep)
+    monkeypatch.setattr(runtime.time, "monotonic", clock)
+    monkeypatch.setattr(runtime.time, "time", lambda: 1_000_000 + clock())
+    monkeypatch.setattr(runtime.signal, "signal", lambda *a: None)
+    monkeypatch.setattr(runtime, "probe", probe, raising=False)
+    try:
+        assert runtime.main() == 1
+        ended = clock()
+        alive_at_exit = [e for e in engines if e.returncode is None]
+    finally:
+        release.set()
+        for thread in threading.enumerate():
+            if thread.name == "engine-launch":
+                thread.join(5)
+    return server, engines, gave_up[0], ended, alive_at_exit
+
+
+def test_a_watchdog_restart_signals_the_server_before_waiting_on_a_spawn(
+    tmp_path, monkeypatch
+):
+    """Codex on a138b4a: stopped by the watchdog, the supervisor waited up
+    to 25 s for the engine's start before it signalled Uvicorn, which then
+    had no time left to exit and was killed."""
+    server, engines, gave_up, ended, alive = stopping_with_a_spawn_pending(
+        tmp_path, monkeypatch, returns_after=24
+    )
+    assert server.terminated is not None and server.terminated - gave_up < 5
+    assert not server.killed and server.returncode == 0
+    assert len(engines) == 1 and alive == []
+
+
+def test_a_spawn_still_pending_at_the_deadline_is_ended_by_its_launcher(
+    tmp_path, monkeypatch, capsys
+):
+    server, engines, gave_up, ended, alive = stopping_with_a_spawn_pending(
+        tmp_path, monkeypatch, returns_after=None
+    )
+    # The supervisor did not wait past its deadline for the start.
+    assert ended - gave_up < getattr(runtime, "STOP_SECONDS", 25) + 10
+    assert not server.killed
+    assert "still being started; it is ended as soon as its start returns" in (
+        capsys.readouterr().err
+    )
+    # Released after main returned: the launcher ends what it was handed.
+    (engine,) = engines
+    assert engine.returncode is not None
+
+
+def test_an_engine_that_answers_is_never_ended(tmp_path, monkeypatch):
+    # Nine silent probes, then any answer (even a refusal) starts the count again.
+    engines, probes = engine_supervised(
+        tmp_path,
+        monkeypatch,
+        1500,
+        # Every ninth probe answers.
+        lambda now: "degraded" if (now - 180) % 270 == 240 else "silent",
+    )
+    assert len(engines) == 1
+    assert engines[0][1].ended >= 1499  # Only when the server ended.
+    assert len(probes) > 40
+
+
+def test_a_hung_engine_is_restarted_three_times_an_hour_then_reported(
+    tmp_path, monkeypatch, capsys
+):
+    engines, probes = engine_supervised(
+        tmp_path, monkeypatch, 3000, lambda now: "silent"
+    )
+    assert len(engines) == 4
+    ended = [e.ended for _, e in engines]
+    # The fourth hang within the hour is left running until the server ends.
+    assert all(at < 2000 for at in ended[:3]) and ended[3] >= 2999
+    err = capsys.readouterr().err
+    assert err.count("restarting it in") == 3
+    assert (
+        "Source engine has not answered for 300 s; not restarting it again:"
+        " 3 restarts in the last hour"
+    ) in err
+    # Reminded every 10 minutes, not on every probe.
+    assert err.count("not restarting it again") <= 2
+
+
+def test_the_engine_probe_asks_its_local_port():
+    assert runtime.ENGINE_URL.startswith("http://127.0.0.1:5030/")
+
+
 class Supervised:
     """main() with a fake server child, a fake clock (one second a tick) and
     a scripted probe in place of the HTTP request."""
@@ -111,7 +554,9 @@ class Supervised:
 
         monkeypatch.setenv("PIG_MUSIC_DATA", str(tmp_path))
         monkeypatch.setenv("PIG_MUSIC_EMBEDDED_ENGINE", "false")
-        monkeypatch.setattr(runtime, "start_engine", lambda root: (None, None))
+        monkeypatch.setattr(
+            runtime, "start_engine", lambda root, proceed=None: (None, None)
+        )
         monkeypatch.setattr(runtime, "proxy_trust", lambda: "127.0.0.1")
         monkeypatch.setattr(runtime.subprocess, "Popen", lambda *a, **k: server)
         monkeypatch.setattr(runtime.time, "sleep", sleep)

@@ -4,6 +4,7 @@ This module never logs credentials. Public session IDs differ from stored token
 hashes. Call password work off the event loop using a bounded worker gate.
 """
 
+import datetime
 import hashlib
 import hmac
 import ipaddress
@@ -457,12 +458,24 @@ class Auth:
             )
 
     def people(self):
+        """Everyone, with the songs in their library and when any of their
+        sessions was last used (an ISO time, or None if never signed in)."""
         with self.store.connect() as conn:
-            return records(
+            people = records(
                 conn.execute(
-                    "SELECT id,username,display_name,role,disabled FROM users ORDER BY created_at"
+                    "SELECT u.id,u.username,u.display_name,u.role,u.disabled,"
+                    "(SELECT count(*) FROM library_members m WHERE m.user_id=u.id)"
+                    " AS song_count,"
+                    "(SELECT max(s.last_seen_at) FROM sessions s WHERE s.user_id=u.id)"
+                    " AS last_seen FROM users u ORDER BY u.created_at"
                 )
             )
+        for person in people:
+            if person["last_seen"] is not None:
+                person["last_seen"] = datetime.datetime.fromtimestamp(
+                    person["last_seen"], datetime.timezone.utc
+                ).isoformat()
+        return people
 
     def activity(self):
         with self.store.connect() as conn:

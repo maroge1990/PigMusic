@@ -13,13 +13,7 @@ import { PageHeader } from "./PageHeader";
 import { PersonalQuality } from "./PersonalQuality";
 import { SearchPage } from "./SearchPage";
 import { Cover } from "./Cover";
-import {
-  fromTrack,
-  PAUSED_NOTICE,
-  playlistSongs,
-  songBody,
-  type AddResult,
-} from "./songs";
+import { fromTrack, PAUSED_NOTICE, songBody, type AddResult } from "./songs";
 import { albumSummary, mergeAlbumTracks } from "./albumTracks";
 import { warmCovers, whenIdle } from "./prefetch";
 import { usePlayer } from "./Player";
@@ -37,6 +31,13 @@ import { PlaylistOptions } from "./PlaylistOptions";
 import { go, type Route } from "./routes";
 import { OwnerAlbumTools, OwnerArtistTools } from "./OwnerTools";
 import { InlineError, Loading } from "./EmptyState";
+import {
+  FavouritesCover,
+  PlaylistActions,
+  PlaylistCover,
+  playlistFacts,
+  playlistSize,
+} from "./PlaylistCards";
 
 function albumMeta(info: {
   artist?: string;
@@ -457,10 +458,7 @@ export function PersonalLibrary({
         </button>
       )}
       {searching ? (
-        <PageHeader
-          title="Search"
-          subtitle="Your library, the server and the wider catalogue."
-        />
+        <PageHeader title="Search" />
       ) : detail?.artist ? (
         <ArtistHero
           artist={detail.artist}
@@ -472,6 +470,22 @@ export function PersonalLibrary({
           eyebrow="IN YOUR LIBRARY"
           title={detail.title}
           subtitle={albumMeta(detail.albumInfo)}
+        />
+      ) : detail?.playlist ? (
+        <PageHeader
+          cover={
+            detail.playlist.favourites ? (
+              <FavouritesCover />
+            ) : (
+              <PlaylistCover
+                title={detail.title}
+                covers={playlistFacts(detail.playlist).covers}
+              />
+            )
+          }
+          eyebrow="PLAYLIST"
+          title={detail.title}
+          subtitle={playlistSize(detail.playlist)}
         />
       ) : detail ? (
         <PageHeader title={detail.title} />
@@ -486,18 +500,19 @@ export function PersonalLibrary({
         <SearchPage
           query={route.params.get("q") || ""}
           library={library}
-          songs={(tracks) => songs(tracks)}
+          person={user.id}
         />
       ) : detail ? (
         <>
-          {(detail.playlist || detail.quality) && (
+          {detail.playlist && (
+            <PlaylistActions key={detail.route} playlist={detail.playlist} />
+          )}
+          {detail.quality && (
             <div className="release-actions">
               {[false, true].map((shuffle) => {
-                const playable = detail.playlist
-                  ? playlistSongs(detail.playlist.entries, detail.cover)
-                  : (detail.tracks || [])
-                      .filter((t) => t.available !== false)
-                      .map((t) => fromTrack(t, detail.cover));
+                const playable = (detail.tracks || [])
+                  .filter((t) => t.available !== false)
+                  .map((t) => fromTrack(t, detail.cover));
                 return (
                   <button
                     key={String(shuffle)}
@@ -628,17 +643,17 @@ export function PersonalLibrary({
           playlists={playlists}
           favouriteList={favouriteList}
           songs={songs}
-          createPlaylist={(name) =>
-            action(
-              () =>
-                api("/v1/playlists", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ name }),
-                }),
-              "Playlist created",
-            )
-          }
+          // A refusal reaches the dialog, which keeps the name and says why
+          // (Codex round 2); only a created playlist closes it.
+          createPlaylist={async (name) => {
+            await api("/v1/playlists", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name }),
+            });
+            notify("Playlist created");
+            void refresh().catch((e) => setError(e.message));
+          }}
           refresh={refresh}
         />
       )}

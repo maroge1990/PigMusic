@@ -1,7 +1,7 @@
 /* Rewind (#203, #216): a dark figure card (the same in both appearances,
- * from the media roles), chips for one ranked list at a time, and the Home
- * card with this week's minutes and a bar per day. */
-.rewind-card,
+ * from the media roles) and chips for one ranked list at a time. The Home
+ * card takes the page's own look (D-120): this week's time, top artist and
+ * top song. */
 .rewind-hero {
   display: flex;
   color: var(--media-text);
@@ -11,35 +11,62 @@
   box-shadow: var(--elevation-card);
 }
 .rewind-card {
-  flex-direction: column;
-  gap: var(--space-16);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12) var(--space-16);
   margin: var(--space-16) 0 var(--space-8);
-  padding: var(--space-16);
+  padding: var(--space-12) var(--space-16);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
   text-decoration: none;
 }
 .rewind-card:focus-visible {
   outline: 3px solid var(--accent);
   outline-offset: 2px;
 }
-.rewind-card-top,
-.rewind-card-middle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-12);
+.rewind-card-icon {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex-shrink: 0;
+  border-radius: var(--radius-control);
+  background: var(--selected-fill);
+  color: var(--accent);
 }
 .rewind-card-title {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-8);
-  font-weight: 650;
+  display: grid;
+  min-width: 8rem;
 }
-.rewind-card-title svg {
-  color: var(--media-accent);
+.rewind-card-title strong {
+  font-size: var(--type-headline);
 }
-.rewind-card-period {
-  color: var(--media-secondary);
+.rewind-card-title span,
+.rewind-card-figures span span {
+  color: var(--secondary);
   font-size: var(--type-footnote);
+}
+.rewind-card-figures {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: var(--space-8) var(--space-32);
+  min-width: 0;
+}
+.rewind-card-figures > span {
+  display: grid;
+  min-width: 0;
+}
+.rewind-card-figures strong {
+  font-size: var(--type-headline);
+  overflow-wrap: anywhere;
+}
+.rewind-card-more {
+  color: var(--secondary);
+  flex-shrink: 0;
 }
 .rewind-figure {
   display: grid;
@@ -55,50 +82,6 @@
   color: var(--media-secondary);
   font-size: var(--type-footnote);
 }
-.rewind-card-covers {
-  display: flex;
-  flex-shrink: 0;
-}
-.rewind-card-covers .cover {
-  width: 3.5rem;
-  border: 2px solid var(--media-solid-panel);
-}
-.rewind-card-covers .cover + .cover {
-  margin-left: calc(-1 * var(--space-16));
-}
-.rewind-bars {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: var(--space-8);
-}
-.rewind-bar {
-  display: grid;
-  justify-items: center;
-  gap: var(--space-4);
-}
-.rewind-bar-track {
-  display: flex;
-  align-items: flex-end;
-  width: 100%;
-  max-width: 2rem;
-  height: 3rem;
-  border-radius: var(--radius-compact);
-  background: var(--media-raised);
-  overflow: hidden;
-}
-.rewind-bar.future .rewind-bar-track {
-  background: transparent;
-  border: 1px dashed var(--media-border);
-}
-.rewind-bar-fill {
-  width: 100%;
-  background: var(--media-accent);
-}
-.rewind-bar-day {
-  color: var(--media-secondary);
-  font-size: var(--type-caption);
-}
-
 /* The Rewind page. */
 .rewind-hero {
   align-items: center;
@@ -235,8 +218,21 @@ a.rewind-row {
   .rewind-figure strong {
     font-size: var(--type-title);
   }
-  .rewind-mixes li,
-  .rewind-card-covers .cover {
+  .rewind-mixes li {
     width: 2.75rem;
+  }
+}
+/* On a narrow screen the figures take their own line under the title. */
+@media (max-width: 600px) {
+  .rewind-card-title {
+    flex: 1;
+  }
+  .rewind-card-figures {
+    flex-basis: 100%;
+    order: 1;
+    gap: var(--space-8) var(--space-16);
+  }
+  .rewind-card-figures strong {
+    font-size: var(--type-body);
   }
 }

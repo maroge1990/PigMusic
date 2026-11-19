@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, SecretStr
 from ..auth import Auth, AuthError, COOKIE, DAY, browser_name
 from ..security import named_logout, session_thread
 from ..api_models import (
+    PeopleDTO,
     ActivationDTO,
     DeviceSessionDTO,
     InviteDTO,
@@ -280,7 +281,7 @@ def auth_router(auth: Auth, security=None, origin: str | None = None):
         )
         return {"changed": True}
 
-    @router.get("/people")
+    @router.get("/people", response_model=PeopleDTO)
     async def people(result=Depends(owner)):
         return {"people": await read(auth.people)}
 

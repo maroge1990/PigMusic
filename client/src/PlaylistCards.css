@@ -1,0 +1,62 @@
+/* Playlists as covers (D-120): four covers in a square, Favourites' star,
+ * and the dashed New playlist card. */
+.cover.playlist-mosaic {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+.playlist-mosaic .cover {
+  border-radius: 0;
+}
+.cover.favourites-cover {
+  color: var(--on-accent);
+  background: linear-gradient(
+    140deg,
+    color-mix(in srgb, var(--accent) 60%, var(--surface)),
+    var(--accent)
+  );
+}
+.favourites-cover svg {
+  width: 35%;
+  height: 35%;
+}
+.playlist-grid .new-playlist-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  /* The same box as the cards beside it, so the covers line up. */
+  padding: var(--space-8);
+  border-color: transparent;
+  background: none;
+  color: var(--text-accent);
+}
+.new-playlist-card .cover.new-playlist-cover {
+  width: 100%;
+  background: none;
+  border: 2px dashed var(--accent);
+}
+.new-playlist-card .cover svg {
+  width: 25%;
+  height: 25%;
+}
+/* A list's own header: the one section heading (#151) beside its cover. */
+.section-title.list-header {
+  justify-content: flex-start;
+  gap: var(--space-16) var(--space-24);
+  margin: 0 0 var(--space-16);
+}
+.list-header > .cover {
+  width: 7rem;
+  flex-shrink: 0;
+}
+.section-title > .list-header-text {
+  flex: 1;
+  min-width: 12rem;
+}
+.list-header-text p {
+  margin: var(--space-4) 0 0;
+  color: var(--secondary);
+}
+.list-header .release-actions {
+  margin: var(--space-12) 0 0;
+}

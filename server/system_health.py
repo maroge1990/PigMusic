@@ -143,7 +143,11 @@ def startup_lines():
                     "at": problem.get("at"),
                     "area": area,
                     "sentence": (
-                        f"Couldn't resume a saved {area} task," " so it was set aside."
+                        f"A saved {area} task could not be finished yet;"
+                        " it will be tried again at the next start."
+                        if problem.get("kind") == "unfinished"
+                        else f"Couldn't resume a saved {area} task,"
+                        " so it was set aside."
                     ),
                 }
             )

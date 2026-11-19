@@ -1,3 +1,4 @@
+import { Copy } from "lucide-react";
 import { apiFetch, isUnconfirmed, writeFailure } from "./api";
 import { restoreFromTrash } from "./trashUndo";
 import { notify, offerUndo } from "./notices";
@@ -77,12 +78,11 @@ export function DuplicateSongs() {
     albums.set(key, [...(albums.get(key) || []), item]);
   }
   return (
-    <section className="system-panel">
-      <h2>Duplicate songs</h2>
-      <p>
-        Downloaded songs the library already had on another album. Your own
-        files and editions chosen from Other versions are never listed.
-      </p>
+    <section className="system-panel library-tool">
+      <h2>
+        <Copy size={18} aria-hidden="true" />
+        Duplicate songs
+      </h2>
       <button
         className="secondary-button"
         disabled={busy}
