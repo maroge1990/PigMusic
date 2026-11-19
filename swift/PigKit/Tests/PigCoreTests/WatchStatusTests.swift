@@ -182,6 +182,33 @@ struct WatchStatusTests {
     #expect(WatchQueueRemoval.reconcile(queue, start: 0, removed: [])?.keep == [0, 1, 2, 3])
   }
 
+  /// Codex round 2: play([A, B]) collects A, A's removal is committed, and
+  /// a library listing only B arrives before the queue is published. The
+  /// mark for A must outlive that library until the queue is out.
+  @Test func removalMarksOutliveALibraryWhileAQueueIsBuilt() {
+    var marks = WatchRemovalMarks()
+    marks.beginBuilding()
+    marks.commit(["A"])
+    marks.libraryChanged(to: ["B"])
+    #expect(marks.removed == ["A"])
+    #expect(WatchQueueRemoval.reconcile(["A", "B"], start: 0, removed: marks.removed)?.keep == [1])
+    marks.endBuilding()
+    #expect(marks.removed.isEmpty)
+    // With no queue being built, a library prunes at once.
+    marks.commit(["C"])
+    marks.libraryChanged(to: ["B"])
+    #expect(marks.removed.isEmpty)
+    // Two queues: the mark stays until both are out.
+    marks.beginBuilding()
+    marks.beginBuilding()
+    marks.commit(["D"])
+    marks.libraryChanged(to: [])
+    marks.endBuilding()
+    #expect(marks.removed == ["D"])
+    marks.endBuilding()
+    #expect(marks.removed.isEmpty)
+  }
+
   /// A damaged saved library says so until the iPhone's copy arrives.
   @Test func aDamagedLibrarySaysItIsBeingFetchedAgain() {
     #expect(WatchRecovery(damagedFiles: []).text == nil)

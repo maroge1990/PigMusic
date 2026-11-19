@@ -51,6 +51,33 @@ public enum WatchQueueRemoval: Equatable, Sendable {
   }
 }
 
+/// Songs whose removal was committed, kept while any queue that may still
+/// hold them is being built (Codex round 2 on #252): a library that no
+/// longer lists a song lets its mark go only once no queue is being built,
+/// or a queue collected before the removal would keep the song.
+public struct WatchRemovalMarks: Equatable, Sendable {
+  public private(set) var removed: Set<String> = []
+  private var building = 0
+  private var library: Set<String>?
+  public init() {}
+  public mutating func commit(_ ids: some Sequence<String>) { removed.formUnion(ids) }
+  /// A queue starts collecting songs.
+  public mutating func beginBuilding() { building += 1 }
+  /// That queue was published, or given up.
+  public mutating func endBuilding() {
+    building = max(0, building - 1)
+    if building == 0, let library { prune(to: library) }
+  }
+  /// The library now lists these songs.
+  public mutating func libraryChanged(to ids: Set<String>) {
+    if building == 0 { prune(to: ids) } else { library = ids }
+  }
+  private mutating func prune(to ids: Set<String>) {
+    removed.formIntersection(ids)
+    library = nil
+  }
+}
+
 /// The Watch's lists in the order the iPhone files them (#252): A to Z
 /// ignoring case, accents and a leading "The", then by the second name.
 public enum WatchListOrder {

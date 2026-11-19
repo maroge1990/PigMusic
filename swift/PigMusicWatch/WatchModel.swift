@@ -28,7 +28,7 @@ import UIKit
   var problems: [String: WatchSaveProblem] = [:]
   /// Songs whose removal has been committed (the Undo ran out), noted at
   /// once so a queue still being built leaves them out.
-  @ObservationIgnored private var committedRemovals: Set<String> = []
+  @ObservationIgnored private var committedRemovals = WatchRemovalMarks()
   /// Removals waiting for their Undo (D-79, #183).
   let undo = UndoQueue()
   static func undoKey(_ id: String) -> String { "watch-song:" + id }
@@ -428,7 +428,7 @@ import UIKit
     manifest = await archive.snapshot()
     removing = Set(await archive.pendingRequests().filter { $0.value == "remove" }.keys)
     // Songs gone from the library need no reminder.
-    committedRemovals.formIntersection(Set(manifest.songs.map(\.id)))
+    committedRemovals.libraryChanged(to: Set(manifest.songs.map(\.id)))
     let next = await archive.receipt()
     // A song saved since it was turned away no longer counts against it.
     problems = problems.filter { id, _ in next.ready[id] == nil }
@@ -560,7 +560,7 @@ import UIKit
   }
   func send(_ action: String, songIds: [String] = []) async {
     // Noted before any await, so a queue being built leaves these out.
-    if action == "remove" { committedRemovals.formUnion(songIds) }
+    if action == "remove" { committedRemovals.commit(songIds) }
     if ["download", "remove"].contains(action), let archive {
       do { try await archive.request(action, ids: songIds) } catch {
         notices.post(error.localizedDescription)
@@ -662,6 +662,9 @@ import UIKit
   }
   func play(_ ids: [String], at index: Int = 0, seconds: Double = 0) async {
     guard let archive, let engine else { return }
+    // Removal marks stay while this queue is collected (Codex round 2).
+    committedRemovals.beginBuilding()
+    defer { committedRemovals.endBuilding() }
     await stop()
     let stamp = playbackGeneration
     var items: [PlaybackOccurrence] = []
@@ -687,7 +690,7 @@ import UIKit
       // await left before the queue is published (Codex round 1 on #252).
       guard
         let kept = WatchQueueRemoval.reconcile(
-          items.map(\.track.id), start: start, removed: committedRemovals)
+          items.map(\.track.id), start: start, removed: committedRemovals.removed)
       else { return }
       items = kept.keep.map { items[$0] }
       start = kept.start
