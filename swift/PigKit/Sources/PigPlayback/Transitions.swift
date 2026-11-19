@@ -117,7 +117,7 @@ public struct PlaybackQueue: Sendable, Codable {
   /// too. A failed read throws, so nothing in the queue changes; a song the
   /// read didn't return was removed.
   public static func freshCopies(
-    of changed: Set<String>, read: (Set<String>) async throws -> [Track]
+    of changed: Set<String>, read: @Sendable (Set<String>) async throws -> [Track]
   ) async throws -> [String: Track] {
     guard !changed.isEmpty else { return [:] }
     let found = try await read(changed).filter { changed.contains($0.id) }
