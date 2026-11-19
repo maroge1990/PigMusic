@@ -76,11 +76,15 @@ struct PasswordView: View {
     }.pigCanvas().navigationTitle("Password").navigationBarTitleDisplayMode(.inline)
   }
 }
+/// Every signed-in device with its icon, This device first and marked; a
+/// device's ⋯ signs it out, and one red Sign out other devices sits at the
+/// foot (D-120). Pull down to refresh.
 struct SessionsView: View {
   @Environment(\.colorScheme) private var scheme
   let model: AppModel
   @State private var sessions: [AccountSession] = []
   @State private var loading = false
+  @State private var loaded = false
   @State private var message: StatusMessage?
   @State private var revoking: AccountSession?
   @State private var signingOutOthers = false
@@ -92,40 +96,25 @@ struct SessionsView: View {
   }
   var body: some View {
     List {
-      ForEach(active) { session in
-        VStack(alignment: .leading, spacing: 2) {
-          HStack(spacing: 6) {
-            Text(session.deviceName.isEmpty ? session.kind : session.deviceName)
-            if session.current == true {
-              Text("This device").font(PigType.caption.weight(.semibold))
-                .foregroundStyle(PigBrand.success(scheme))
-            }
-          }
-          Text(
-            session.platformName + " · "
-              + (session.current == true
-                ? "In use now"
-                : "Last used "
-                  + Date(timeIntervalSince1970: session.lastSeenAt).formatted(
-                    .relative(presentation: .named)))
-          ).font(PigType.caption).foregroundStyle(.secondary)
-          if session.current != true {
-            Button("Sign out", role: .destructive) { revoking = session }.disabled(
-              loading || !model.canMutate)
-          }
+      if !loaded && message == nil {
+        PigLoading("Loading your devices")
+      }
+      if !active.isEmpty {
+        Section {
+          ForEach(active) { session in row(session) }
         }
       }
       if active.contains(where: { $0.current != true }) {
-        Button("Sign out other devices", role: .destructive) { signingOutOthers = true }
-          .disabled(loading || !model.canMutate)
+        Section {
+          Button("Sign out other devices", role: .destructive) { signingOutOthers = true }
+            .frame(maxWidth: .infinity)
+            .disabled(loading || !model.canMutate)
+        }
       }
       if let message { StatusText(message) }
-      if loading { ProgressView() }
-    }.pigCanvas().navigationTitle("Devices and sessions").navigationBarTitleDisplayMode(.inline).task { await load() }
-      .toolbar {
-        Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }.disabled(
-          loading)
-      }
+    }.pigCanvas().navigationTitle("Devices and sessions").navigationBarTitleDisplayMode(.inline)
+      .task { await load() }
+      .refreshable { await load() }
       .confirmationDialog(
         "Sign out every other browser and app? This device stays signed in.",
         isPresented: $signingOutOthers
@@ -161,56 +150,142 @@ struct SessionsView: View {
         }
       }
   }
+  private func row(_ session: AccountSession) -> some View {
+    let name = session.deviceName.isEmpty ? session.platformName : session.deviceName
+    return HStack(spacing: 12) {
+      Image(systemName: Self.symbol(session))
+        .font(.title3).foregroundStyle(PigBrand.secondary(scheme))
+        .frame(width: 40, height: 40)
+        .background(PigBrand.raised(scheme), in: .rect(cornerRadius: 10))
+        .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 3) {
+        HStack(spacing: 8) {
+          Text(name).font(.body.weight(.semibold)).lineLimit(1)
+          if session.current == true {
+            Text("This device").font(PigType.caption.weight(.semibold))
+              .foregroundStyle(PigBrand.success(scheme))
+              .padding(.horizontal, 8).padding(.vertical, 2)
+              .background(PigBrand.success(scheme).opacity(0.12), in: Capsule())
+          }
+        }
+        Text(
+          session.platformName + " · "
+            + (session.current == true
+              ? "In use now"
+              : "Last used "
+                + Date(timeIntervalSince1970: session.lastSeenAt).formatted(
+                  .relative(presentation: .named)))
+        ).font(PigType.footnote).foregroundStyle(.secondary)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .accessibilityElement(children: .combine)
+      if session.current != true {
+        Menu {
+          Button("Sign out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+            revoking = session
+          }.disabled(loading || !model.canMutate)
+        } label: {
+          Image(systemName: "ellipsis").frame(width: 44, height: 44).foregroundStyle(.secondary)
+        }
+        .buttonStyle(.borderless).accessibilityLabel("More actions for \(name)")
+      }
+    }
+  }
+  /// The device's kind as an icon: iPhone or iPad app, Apple Watch app or a
+  /// browser.
+  private static func symbol(_ session: AccountSession) -> String {
+    switch session.platform {
+    case "watchos": "applewatch"
+    case "web": "globe"
+    default: session.deviceName.lowercased().contains("ipad") ? "ipad" : "iphone"
+    }
+  }
   private func load() async {
     guard !loading else { return }
     loading = true
-    defer { loading = false }
-    do { sessions = try await model.readCatalogue { try await $0.sessions() } } catch {
-      message = .error(error.userMessage)
+    defer {
+      loading = false
+      loaded = true
     }
+    do {
+      sessions = try await model.readCatalogue { try await $0.sessions() }
+      message = nil
+    } catch { message = .error(error.userMessage) }
   }
 }
+/// Your music quality as a list with a tick (D-120): the household default
+/// first, saying its quality in words, then each quality. A tap saves it;
+/// there is no Save button.
 struct QualityView: View {
   let model: AppModel
   var scope = "system"
   var id = "*"
-  @State private var quality: QualitySettings?
-  @State private var selected = "inherit"
-  @State private var loading = false
+  /// Told the saved choice's words, so Account's row shows it at once.
+  var saved: (String?) -> Void = { _ in }
+  @State private var choices: QualityChoices?
+  /// The row ticked: the saved choice, or the one being saved.
+  @State private var selected: String?
+  @State private var saving = false
   @State private var message: StatusMessage?
+  @Environment(\.colorScheme) private var scheme
   var body: some View {
     Form {
-      if let quality {
-        Text("Household default: \(quality.householdDefault)").font(PigType.footnote)
-        Picker("My preference", selection: $selected) {
-          Text("Inherit default").tag("inherit")
-          ForEach(quality.options) { option in Text(option.label).tag(option.value) }
-        }
-        Button("Save preference") {
-          Task {
-            loading = true
-            defer { loading = false }
-            let value = selected == "inherit" ? nil : selected
-            do {
-              try await model.performPersonal {
-                try await $0.saveQuality(scope: scope, id: id, preferred: value)
-              }
-              message = .info("Preference saved.")
-            } catch { message = .error(error.userMessage) }
+      if let choices {
+        Section("Quality") {
+          ForEach(choices.rows) { row in
+            Button {
+              Task { await choose(row.value, in: choices) }
+            } label: {
+              HStack {
+                Text(row.title).foregroundStyle(PigBrand.text(scheme))
+                Spacer()
+                if let detail = row.detail {
+                  Text(detail).foregroundStyle(.secondary)
+                }
+                Image(systemName: "checkmark").foregroundStyle(PigBrand.accent(scheme))
+                  .opacity(selected == row.value ? 1 : 0)
+              }.contentShape(Rectangle())
+            }
+            .disabled(saving || !model.canMutate)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(row.detail.map { row.title + ", " + $0 } ?? row.title)
+            .accessibilityAddTraits(selected == row.value ? [.isButton, .isSelected] : .isButton)
           }
-        }.disabled(loading || !model.canMutate)
-      } else {
-        ProgressView()
+        }
+      } else if message == nil {
+        PigLoading("Loading your music quality")
       }
       if let message { StatusText(message) }
-    }.pigCanvas().navigationTitle("Your music quality").navigationBarTitleDisplayMode(.inline).task {
-      do {
-        let value = try await model.readCatalogue { try await $0.quality() }
-        quality = value
-        selected =
-          value.preferences.first(where: { $0.scope == scope && $0.itemId == id })?.preferred
-          ?? "inherit"
-      } catch { message = .error(error.userMessage) }
+    }.pigCanvas().navigationTitle("Your music quality").navigationBarTitleDisplayMode(.inline)
+      .task { await load() }
+      .refreshable { await load() }
+  }
+  private func load() async {
+    do {
+      let value = QualityChoices(
+        try await model.readCatalogue { try await $0.quality() }, scope: scope, id: id)
+      choices = value
+      selected = value.selected
+      message = nil
+    } catch { message = .error(error.userMessage) }
+  }
+  /// Saves at once; a choice the server refuses goes back to the last one.
+  private func choose(_ value: String?, in choices: QualityChoices) async {
+    guard value != selected, !saving else { return }
+    let previous = selected
+    selected = value
+    saving = true
+    defer { saving = false }
+    do {
+      try await model.performPersonal {
+        try await $0.saveQuality(scope: scope, id: id, preferred: value)
+      }
+      message = nil
+      let row = choices.rows.first { $0.value == value }
+      saved(value == nil ? row?.detail : row?.title)
+    } catch {
+      selected = previous
+      message = .error(error.userMessage)
     }
   }
 }
