@@ -62,67 +62,128 @@ struct SearchView: View {
   }
 }
 
-/// Before anything is typed: Shazam, then recent picks.
+/// Before anything is typed (D-120): What's playing?, recent searches you
+/// can clear, then shortcuts into your library with counts.
 private struct SearchStartView: View {
   let model: AppModel
+  @Environment(\.colorScheme) private var scheme
   var body: some View {
-    List {
-      ShazamSection(model: model)
-      if model.recentSearches.picks.isEmpty {
-        PigQuietState("Find music").listRowBackground(Color.clear)
-      } else {
-        recent
-      }
-    }
-  }
-  /// Picks opened or played from search, newest first; tapping one does the
-  /// same again (D-61).
-  private var recent: some View {
-    Section {
-      ForEach(model.recentSearches.picks) { pick in
-        switch pick {
-        case .song(let song) where model.undo.removing(song):
+    ScrollView {
+      VStack(alignment: .leading, spacing: 24) {
+        ShazamSection(model: model)
+        let picks = model.recentSearches.picks.filter { pick in
           // Removed from the library, waiting for its Undo (D-108).
-          EmptyView()
-        case .song(let song):
-          SongRow(model: model, track: song) {
-            // Played as the library holds it now, so a newer download is used.
-            Task { await model.replayRecent(pick) }
-          }
-        case .album(let album):
-          NavigationLink {
-            RecentAlbumView(model: model, album: album).onAppear { model.rememberSearch(pick) }
-          } label: {
-            CollectionRow(album.title, subtitle: "Album · " + album.artist) {
-              ArtworkThumb(model: model, source: album.artworkSource, title: album.title)
+          if case .song(let song) = pick { return !model.undo.removing(song) }
+          return true
+        }
+        if !picks.isEmpty {
+          VStack(alignment: .leading, spacing: 4) {
+            SectionHeading(title: "Recent") {
+              Button("Clear") { model.clearRecentSearches() }.font(PigType.subhead)
+            }
+            VStack(spacing: 0) {
+              ForEach(picks) { pick in
+                HStack(spacing: 4) {
+                  row(pick)
+                  Button {
+                    model.forgetSearch(pick)
+                  } label: {
+                    Image(systemName: "xmark").font(.footnote.weight(.semibold))
+                      .foregroundStyle(.secondary).frame(width: 36, height: 44)
+                  }
+                  .buttonStyle(.plain)
+                  .accessibilityLabel("Remove " + Self.name(pick))
+                }
+                RowSeparator()
+              }
             }
           }
-        case .artist(let artist):
-          NavigationLink {
-            SearchArtistView(model: model, artist: artist).onAppear { model.rememberSearch(pick) }
-          } label: {
-            CollectionRow(artist.name, subtitle: "Artist") {
-              SavedArtistThumb(model: model, artist: artist)
+        }
+        VStack(alignment: .leading, spacing: 10) {
+          SectionHeading("Your library")
+          LazyVGrid(
+            columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible())], spacing: 10
+          ) {
+            shortcut("Artists", "person", model.artistCount) { LibraryArtistsView(model: model) }
+            shortcut("Albums", "square.stack", model.albumCategoryCounts.values.reduce(0, +)) {
+              LibraryAlbumsView(model: model)
             }
-          }
-        case .catalogueArtist(let id, let name):
-          NavigationLink {
-            CatalogueArtistView(model: model, artistId: id, name: name)
-              .onAppear { model.rememberSearch(pick) }
-          } label: {
-            CollectionRow(name, subtitle: "Artist") {
-              ArtworkThumb(model: model, source: .artist(id), title: name, circle: true)
+            shortcut("Songs", "music.note", model.songCount) { LibrarySongsView(model: model) }
+            shortcut("Playlists", "music.note.list", model.playlists.count) {
+              PlaylistsView(model: model)
             }
           }
         }
       }
-    } header: {
-      HStack {
-        Text("Recently searched")
-        Spacer()
-        Button("Clear") { model.clearRecentSearches() }.textCase(nil)
-      }
+      .padding(.horizontal).padding(.vertical, 8)
     }
+    .scrollDismissesKeyboard(.immediately)
+  }
+  private static func name(_ pick: RecentPick) -> String {
+    switch pick {
+    case .song(let song): song.title
+    case .album(let album): album.title
+    case .artist(let artist): artist.name
+    case .catalogueArtist(_, let name): name
+    }
+  }
+  /// A pick opened or played from search; tapping it does the same again (D-61).
+  @ViewBuilder private func row(_ pick: RecentPick) -> some View {
+    switch pick {
+    case .song(let song):
+      SongRow(model: model, track: song) {
+        // Played as the library holds it now, so a newer download is used.
+        Task { await model.replayRecent(pick) }
+      }
+    case .album(let album):
+      NavigationLink {
+        RecentAlbumView(model: model, album: album).onAppear { model.rememberSearch(pick) }
+      } label: {
+        CollectionRow(album.title, subtitle: "Album · " + album.artist) {
+          ArtworkThumb(model: model, source: album.artworkSource, title: album.title)
+        }.frame(minHeight: 52)
+      }.buttonStyle(.plain)
+    case .artist(let artist):
+      NavigationLink {
+        SearchArtistView(model: model, artist: artist).onAppear { model.rememberSearch(pick) }
+      } label: {
+        CollectionRow(artist.name, subtitle: "Artist") {
+          SavedArtistThumb(model: model, artist: artist)
+        }.frame(minHeight: 52)
+      }.buttonStyle(.plain)
+    case .catalogueArtist(let id, let name):
+      NavigationLink {
+        CatalogueArtistView(model: model, artistId: id, name: name)
+          .onAppear { model.rememberSearch(pick) }
+      } label: {
+        CollectionRow(name, subtitle: "Artist") {
+          ArtworkThumb(model: model, source: .artist(id), title: name, circle: true)
+        }.frame(minHeight: 52)
+      }.buttonStyle(.plain)
+    }
+  }
+  private func shortcut<Destination: View>(
+    _ title: String, _ symbol: String, _ count: Int,
+    @ViewBuilder destination: @escaping () -> Destination
+  ) -> some View {
+    NavigationLink {
+      destination()
+    } label: {
+      VStack(alignment: .leading, spacing: 6) {
+        Image(systemName: symbol).font(.title3).foregroundStyle(PigBrand.accent(scheme))
+        Text(title).font(.body.weight(.semibold)).foregroundStyle(PigBrand.text(scheme))
+        Text(count.formatted()).font(PigType.footnote).pigFigures().foregroundStyle(.secondary)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(14)
+      .background(
+        PigBrand.surface(scheme), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+    .buttonStyle(.plain)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(title)
+    .accessibilityValue(count.formatted())
+    .accessibilityAddTraits(.isButton)
   }
 }
 
@@ -302,26 +363,43 @@ struct SearchArtistView: View {
   }
 }
 
-/// The ranked search (D-61): chips across the top, then one list. Top results
-/// mixes every kind; each row is marked by where its music is, never listed
-/// apart for it. Updates as the person types.
+/// The ranked search (D-61), grouped (D-120): one Top result, then Songs,
+/// Albums, Artists and Playlists, each item once with its one mark. The
+/// Apple Music question waits in a quiet row under the search box. Updates
+/// as the person types.
 private struct FoundResultsView: View {
   @ScaledMetric(relativeTo: .footnote) private var markSize: CGFloat = 13
   let model: AppModel
   @Bindable var search: FoundSearch
-  @State private var kind: FoundKind = .top
+  /// All the songs, not only the first few.
+  @State private var allSongs = false
   @Environment(\.colorScheme) private var scheme
   var body: some View {
-    let screen = search.screen
+    let groups = FoundGroups(search.screen)
     List {
-      Section {
-        // Less a song removed from the library, waiting for its Undo (D-108).
-        let items = screen[kind].filter { item in
-          guard case .song(let song) = item else { return true }
-          return !model.undo.removing(song)
+      AppleMusicRow {
+        await search.search(search.query, force: true)
+      }
+      if let top = groups.top, shows(top) {
+        Section { row(top) } header: { heading("Top result") }
+      }
+      let songs = groups.songs.filter(shows)
+      if !songs.isEmpty {
+        Section {
+          ForEach(allSongs ? songs : Array(songs.prefix(FoundGroups.songLimit))) { row($0) }
+          if !allSongs && songs.count > FoundGroups.songLimit {
+            Button("Show all \(songs.count) songs") { allSongs = true }
+              .foregroundStyle(PigBrand.textAccent(scheme))
+          }
+        } header: {
+          heading("Songs")
         }
-        ForEach(items) { item in row(item) }
-        if items.isEmpty {
+      }
+      group("Albums", groups.albums)
+      group("Artists", groups.artists)
+      group("Playlists", groups.playlists)
+      Section {
+        if groups.isEmpty {
           if search.loading {
             ProgressView("Searching…")
           } else if let error = search.error {
@@ -334,31 +412,29 @@ private struct FoundResultsView: View {
           Text("The server can't be reached, so this is music on this iPhone.")
             .font(PigType.footnote).foregroundStyle(.secondary)
         }
-        if kind == .top || kind == .songs || kind == .albums, let state = search.online?.state,
-          state != "ready"
-        {
+        if let state = search.online?.state, state != "ready" {
           Text(
             state == "busy"
               ? "Showing music on the server; more results in a moment."
               : "Music not on the server can't be searched right now."
           ).font(PigType.footnote).foregroundStyle(.secondary)
         }
-      } header: {
-        chips(screen.kinds).textCase(nil)
       }
     }
-    .onChange(of: search.query) { kind = .top }
+    .onChange(of: search.query) { allSongs = false }
   }
-  private func chips(_ kinds: [FoundKind]) -> some View {
-    ScrollView(.horizontal, showsIndicators: false) {
-      HStack(spacing: 8) {
-        ForEach(kinds, id: \.self) { option in
-          Button(option.rawValue) { kind = option }
-            .buttonStyle(ChipStyle(selected: option == kind))
-            .accessibilityAddTraits(option == kind ? .isSelected : [])
-        }
-      }.padding(.vertical, 4)
+  /// Less a song removed from the library, waiting for its Undo (D-108).
+  private func shows(_ item: FoundItem) -> Bool {
+    guard case .song(let song) = item else { return true }
+    return !model.undo.removing(song)
+  }
+  @ViewBuilder private func group(_ title: String, _ items: [FoundItem]) -> some View {
+    if !items.isEmpty {
+      Section { ForEach(items) { row($0) } } header: { heading(title) }
     }
+  }
+  private func heading(_ title: String) -> some View {
+    Text(title).font(PigType.sectionTitle).foregroundStyle(PigBrand.text(scheme)).textCase(nil)
   }
   @ViewBuilder private func row(_ item: FoundItem) -> some View {
     switch item {
@@ -383,7 +459,7 @@ private struct FoundResultsView: View {
       } label: {
         label(
           ArtworkThumb(model: model, source: album.artworkSource, title: album.title),
-          album.title, "Album · " + album.artist, mark: mine ? .library : .server)
+          album.title, "Album · " + album.artist, item: item)
       }
     case .artist(let artist, let mine):
       NavigationLink {
@@ -392,15 +468,18 @@ private struct FoundResultsView: View {
       } label: {
         label(
           SavedArtistThumb(model: model, artist: artist), artist.name, "Artist",
-          mark: mine ? .library : .server)
+          item: item)
       }
     case .playlist(let playlist):
       NavigationLink {
         PlaylistView(model: model, playlist: playlist)
       } label: {
         label(
-          SymbolThumb(systemImage: "music.note.list"), playlist.name,
-          "Playlist", mark: .library)
+          RowThumb {
+            CoverMosaicView(
+              model: model, tracks: playlist.songs, favourites: playlist.favourites == true,
+              width: 128)
+          }, playlist.name, playlist.facts, item: item)
       }
     case .mix(let mix):
       NavigationLink {
@@ -408,7 +487,7 @@ private struct FoundResultsView: View {
       } label: {
         label(
           RowThumb { MixArtwork(kind: mix.kind, title: mix.title) }, mix.title,
-          "Mix · " + mix.reason, mark: .library)
+          "Mix · " + mix.reason, item: item)
       }
     case .applePlaylist(let playlist):
       NavigationLink {
@@ -417,7 +496,7 @@ private struct FoundResultsView: View {
         label(
           RowThumb { AppleArtwork(url: playlist.artworkURL) }, playlist.name,
           ["Apple Music playlist", playlist.curator].compactMap { $0 }.joined(separator: " · "),
-          mark: .apple)
+          item: item)
       }
     case .appleSong(let song):
       NavigationLink {
@@ -426,7 +505,7 @@ private struct FoundResultsView: View {
         label(
           ArtworkThumb(
             model: model, source: song.albumAppleId.map { .appleAlbum($0) }, title: song.title),
-          song.title, "Song · " + song.artist, mark: .elsewhere)
+          song.title, "Song · " + song.artist, item: item)
       }
     case .appleAlbum(let album):
       NavigationLink {
@@ -434,7 +513,7 @@ private struct FoundResultsView: View {
       } label: {
         label(
           ArtworkThumb(model: model, source: .appleAlbum(album.appleId), title: album.title),
-          album.title, "Album · " + album.artist, mark: .elsewhere)
+          album.title, "Album · " + album.artist, item: item)
       }
     case .catalogueArtist(let artist):
       NavigationLink {
@@ -446,30 +525,71 @@ private struct FoundResultsView: View {
         label(
           ArtworkThumb(model: model, source: .artist(artist.id), title: artist.name, circle: true),
           artist.name, artist.description.isEmpty ? "Artist" : "Artist · " + artist.description,
-          mark: .elsewhere)
+          item: item)
       }
     }
   }
-  /// `apple`: an Apple Music playlist, whose songs are marked one by one.
-  private enum Mark { case library, server, elsewhere, apple }
-  private func label(_ thumb: some View, _ title: String, _ caption: String, mark: Mark)
+  /// The row's one mark (D-120): in your library, adding, paused, or not in
+  /// your library yet; nothing for music on the server that streams.
+  private func label(_ thumb: some View, _ title: String, _ caption: String, item: FoundItem)
     -> some View
   {
-    CollectionRow(
-      title, subtitle: mark == .elsewhere ? caption + " · Not on the server yet" : caption
-    ) {
+    CollectionRow(title, subtitle: caption) {
       thumb
     } trailing: {
-      // The same marks as songs (D-116): a tick for your library; nothing
-      // for music only on the server or not on it yet.
-      if mark == .library {
-        Image(systemName: "checkmark.circle.fill").font(.system(size: markSize, weight: .semibold))
-          .foregroundStyle(PigBrand.accent(scheme))
-          .accessibilityLabel("In your library")
+      if let symbol = Self.symbol(item.mark) {
+        Image(systemName: symbol).font(.system(size: markSize, weight: .semibold))
+          .foregroundStyle(
+            item.mark == .inLibrary ? PigBrand.accent(scheme) : PigBrand.secondary(scheme)
+          )
+          .accessibilityLabel(item.mark.label ?? "")
       }
     }
   }
+  static func symbol(_ mark: FoundMark) -> String? {
+    switch mark {
+    case .inLibrary: "checkmark.circle.fill"
+    case .adding: "clock"
+    case .paused: "pause.circle"
+    case .add: "plus"
+    case .none: nil
+    }
+  }
+}
 
+/// The Apple Music question (D-120): a quiet row under the search box, never
+/// a prompt mid-typing. Allow asks iOS once; Not now keeps it away.
+private struct AppleMusicRow: View {
+  let searchAgain: () async -> Void
+  @AppStorage("search.appleMusicNotNow") private var notNow = false
+  @State private var answered = false
+  @Environment(\.colorScheme) private var scheme
+  var body: some View {
+    if AppleMusicCatalogue.undetermined && !notNow && !answered {
+      HStack(spacing: 10) {
+        Image(systemName: "music.note").foregroundStyle(PigBrand.accent(scheme))
+          .accessibilityHidden(true)
+        Text("Include Apple Music results").font(PigType.subhead)
+        Spacer(minLength: 4)
+        Button("Allow") {
+          Task {
+            let allowed = await AppleMusicCatalogue.ask()
+            answered = true
+            if allowed { await searchAgain() }
+          }
+        }
+        .buttonStyle(.borderless).font(PigType.subhead.weight(.semibold))
+        .foregroundStyle(PigBrand.textAccent(scheme))
+        Button {
+          notNow = true
+        } label: {
+          Image(systemName: "xmark").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Not now")
+      }
+    }
+  }
 }
 
 /// An Apple result opens as the exact MusicBrainz version (#103): a song on
@@ -882,22 +1002,33 @@ private struct AppleImportSheet: View {
 private struct ShazamSection: View {
   let model: AppModel
   @State private var listening = false
+  @Environment(\.colorScheme) private var scheme
   var body: some View {
-    Section {
+    VStack(spacing: 4) {
       Button {
         listening = true
       } label: {
         Label("What's playing?", systemImage: "shazam.logo")
+          .font(.body.weight(.semibold))
+          .foregroundStyle(PigBrand.textAccent(scheme))
+          .frame(maxWidth: .infinity, minHeight: 48)
+          .background(
+            PigBrand.surface(scheme), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
       }
-      NavigationLink {
-        ShazamInboxView(model: model)
-      } label: {
-        LabeledContent {
-          let count = ShazamListener.shared.inbox.count
-          if count > 0 { Text("\(count)") }
+      .buttonStyle(.plain)
+      let count = ShazamListener.shared.inbox.count
+      if count > 0 {
+        NavigationLink {
+          ShazamInboxView(model: model)
         } label: {
-          Label("Shazamed", systemImage: "music.note.list")
+          LabeledContent {
+            Text("\(count)")
+          } label: {
+            Label("Shazamed", systemImage: "music.note.list")
+          }
+          .frame(minHeight: 44)
         }
+        .buttonStyle(.plain)
       }
     }
     .sheet(isPresented: $listening) { ShazamListenView(model: model) }

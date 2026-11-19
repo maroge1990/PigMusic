@@ -8,10 +8,15 @@
   /// allows Apple Music access once. Names are qualified: MusicKit's `Track`
   /// and `Playlist` are not PigMusic's.
   public enum AppleMusicCatalogue {
-    /// Search's Apple Music playlists, asking permission on the first search
-    /// that would show them.
+    /// Search's Apple Music playlists, once Apple Music is allowed. Typing
+    /// never asks (D-120): the "Include Apple Music results" row does.
     public static let playlistSearch = ApplePlaylistSearch(
-      authorize: { await authorized(asking: true) }, search: { try await playlists(query: $0) })
+      authorize: { await authorized(asking: false) }, search: { try await playlists(query: $0) })
+
+    /// Nobody has been asked about Apple Music yet.
+    public static var undetermined: Bool { MusicAuthorization.currentStatus == .notDetermined }
+    /// Asks for Apple Music, from the row under the search box (D-120).
+    public static func ask() async -> Bool { await MusicAuthorization.request() == .authorized }
 
     /// Whether MusicKit may be used; asks once when nobody has been asked.
     public static func authorized(asking: Bool) async -> Bool {
