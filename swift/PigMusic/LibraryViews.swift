@@ -785,21 +785,32 @@ struct NowPlayingView: View {
     }
   }
   private var upNext: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      HStack {
+    let layout = player.upNextLayout(model)
+    return VStack(alignment: .leading, spacing: 0) {
+      HStack(alignment: .firstTextBaseline) {
         Text("Up next").font(PigType.sectionTitle)
+        if !layout.nothingNext {
+          Text(SongSpan.summary(layout.chosen.map(\.track)))
+            .font(PigType.footnote).foregroundStyle(.secondary).pigFigures()
+        }
         Spacer()
         NavigationLink("Edit") { QueueEditorView(model: model) }
       }.padding(.bottom, 6)
-      let upcoming = Array(player.upcoming(hiding: model.undo).prefix(50))
-      // Where similar songs begin when the queue ran out (#202).
-      let similarStart = upcoming.firstIndex { model.similarIDs.contains($0.track.id) }
-      ForEach(Array(upcoming.enumerated()), id: \.element.id) { offset, item in
-        if offset == similarStart {
-          Text("Similar songs").font(PigType.caption.weight(.semibold))
-            .foregroundStyle(.secondary).padding(.top, 10).padding(.bottom, 4)
-            .accessibilityAddTraits(.isHeader)
-        }
+      if layout.nothingNext {
+        NothingNext(model: model, layout: layout).padding(.vertical, 8)
+      }
+      ForEach(layout.chosen.prefix(50)) { item in
+        UpNextRow(model: model, item: item)
+        RowSeparator()
+      }
+      if layout.showsSimilarHeading {
+        // Where similar songs begin when the queue ran out (#202, D-120).
+        Text(UpNextLayout<PlaybackOccurrence>.similarTitle).font(PigType.sectionTitle)
+          .padding(.top, 16).padding(.bottom, 6)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .accessibilityAddTraits(.isHeader)
+      }
+      ForEach(layout.similar.prefix(50)) { item in
         UpNextRow(model: model, item: item)
         RowSeparator()
       }
@@ -839,6 +850,34 @@ extension PlayerController {
       !undo.hides(AppModel.undoKey(upNext: $0.id))
     }
   }
+  /// Your songs, then similar songs (D-120).
+  @MainActor func upNextLayout(_ model: AppModel) -> UpNextLayout<PlaybackOccurrence> {
+    UpNextLayout(upcoming(hiding: model.undo), keepPlaying: model.preferences.keepPlaying) {
+      model.similarIDs.contains($0.track.id)
+    }
+  }
+}
+
+/// No song of yours follows (D-120): "Nothing next", with Shuffle your
+/// library when nothing at all waits. Where Keep playing is on, Then similar
+/// songs follows it.
+private struct NothingNext: View {
+  let model: AppModel
+  let layout: UpNextLayout<PlaybackOccurrence>
+  var body: some View {
+    VStack(spacing: 12) {
+      Text(UpNextLayout<PlaybackOccurrence>.nothingNextTitle)
+        .font(PigType.headline.weight(.semibold)).foregroundStyle(.secondary)
+      if layout.offersShuffle {
+        Button(UpNextLayout<PlaybackOccurrence>.shuffleTitle, systemImage: "shuffle") {
+          Task { await model.shuffleLibrary() }
+        }
+        .pigPrimaryAction()
+        .disabled(model.songCount == 0)
+      }
+    }
+    .frame(maxWidth: .infinity)
+  }
 }
 
 private struct AirPlayButton: UIViewRepresentable {
@@ -850,34 +889,74 @@ private struct AirPlayButton: UIViewRepresentable {
   func updateUIView(_ view: AVRoutePickerView, context: Context) {}
 }
 
-/// The queue: the playing song, then Up next, which drags to reorder and
-/// swipes to remove at once with Undo (D-118, D-79).
+/// The queue (D-120): the playing song with its cover, Up next with its
+/// count and time left, then similar songs as their own section. Songs drag
+/// to reorder and swipe to remove at once with Undo (D-118, D-79); an empty
+/// queue says Nothing next.
 struct QueueEditorView: View {
   let model: AppModel
+  @Environment(\.colorScheme) private var scheme
+  @ScaledMetric(relativeTo: .body) private var coverSize: CGFloat = 64
   private var player: PlayerController { model.player }
   var body: some View {
+    let layout = player.upNextLayout(model)
     List {
-      if let current = player.queue.current {
-        Section("Current song") {
-          SongRow(model: model, track: current.track, playing: true)
-        }
+      if let current = player.queue.current?.track {
+        Section { nowPlaying(current) }
       }
-      // The same row and menu as Up next under the player (#157).
-      Section("Up next") {
-        let shown = player.upcoming(hiding: model.undo)
-        ForEach(shown) { item in
-          UpNextRow(model: model, item: item)
-            .swipeActions {
-              Button("Remove", systemImage: "xmark", role: .destructive) {
-                model.removeFromUpNextLater(item)
-              }
-            }
+      Section {
+        if layout.nothingNext {
+          NothingNext(model: model, layout: layout).listRowBackground(Color.clear)
         }
-        .onMove { from, to in move(shown, from: from, to: to) }
+        rows(layout.chosen)
+      } header: {
+        HStack(alignment: .firstTextBaseline) {
+          Text("Up next").font(PigType.sectionTitle).foregroundStyle(PigBrand.text(scheme))
+          Spacer()
+          if !layout.nothingNext {
+            Text(SongSpan.summary(layout.chosen.map(\.track))).font(PigType.footnote).pigFigures()
+          }
+        }.textCase(nil)
+      }
+      if layout.showsSimilarHeading {
+        Section {
+          rows(layout.similar)
+        } header: {
+          Text(UpNextLayout<PlaybackOccurrence>.similarTitle).font(PigType.sectionTitle)
+            .foregroundStyle(PigBrand.text(scheme)).textCase(nil)
+        }
       }
     }
-    .pigCanvas().navigationTitle("Playback queue").navigationBarTitleDisplayMode(.inline)
+    .pigCanvas().navigationTitle("Queue").navigationBarTitleDisplayMode(.inline)
     .toolbar { EditButton() }
+  }
+  private func nowPlaying(_ track: Track) -> some View {
+    HStack(spacing: 14) {
+      Artwork(model: model, source: track.artworkSource, title: track.title, width: 256)
+        .frame(width: coverSize, height: coverSize)
+      VStack(alignment: .leading, spacing: 2) {
+        Text("NOW PLAYING").font(PigType.caption.weight(.semibold))
+          .foregroundStyle(PigBrand.textAccent(scheme))
+        Text(track.title).font(.headline).lineLimit(2)
+        Text([track.artist, track.album ?? ""].filter { !$0.isEmpty }.joined(separator: " · "))
+          .font(PigType.subhead).foregroundStyle(.secondary).lineLimit(1)
+      }
+      Spacer(minLength: 0)
+    }
+    .padding(.vertical, 4)
+    .accessibilityElement(children: .combine)
+  }
+  /// The same row and menu as Up next under the player (#157).
+  private func rows(_ shown: [PlaybackOccurrence]) -> some View {
+    ForEach(shown) { item in
+      UpNextRow(model: model, item: item)
+        .swipeActions {
+          Button("Remove", systemImage: "xmark", role: .destructive) {
+            model.removeFromUpNextLater(item)
+          }
+        }
+    }
+    .onMove { from, to in move(shown, from: from, to: to) }
   }
   /// Moves one song of those shown to `to`, by its place among the whole queue.
   private func move(_ shown: [PlaybackOccurrence], from: IndexSet, to: Int) {
