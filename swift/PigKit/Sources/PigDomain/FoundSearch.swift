@@ -157,16 +157,12 @@ public struct FoundScreen: Sendable {
     let named = Set(server.artists.map { SearchText.key($0.item.name) })
     let others = catalogue.filter { !named.contains(SearchText.key($0.name)) }
       .map { FoundItem.catalogueArtist($0) }
-    // Each song and album once (D-120): Apple's copy of one the server
-    // already lists (in the library, adding or on the server) is left out.
-    let serverSongs = Set(server.songs.map { Self.key($0.title, $0.artist) })
-    let serverAlbums = Set(server.albums.map { Self.key($0.item.title, $0.item.artist) })
-    let appleSongs = (online?.songs ?? []).filter {
-      !serverSongs.contains(Self.key($0.title, $0.artist))
-    }.map { FoundItem.appleSong($0) }
-    let appleAlbums = (online?.albums ?? []).filter {
-      !serverAlbums.contains(Self.key($0.title, $0.artist))
-    }.map { FoundItem.appleAlbum($0) }
+    // Apple's results stay beside the server's even when the names match: a
+    // name doesn't prove the same recording or edition (a live take, a
+    // remaster), and the server's rows carry no Apple identity to prove it
+    // (Codex round 1 on batch E). The server leaves out what it holds.
+    let appleSongs = (online?.songs ?? []).map { FoundItem.appleSong($0) }
+    let appleAlbums = (online?.albums ?? []).map { FoundItem.appleAlbum($0) }
     // Apple Music's playlists come from the phone (D-66), after the server's own.
     let applePlaylists = applePlaylists.map { FoundItem.applePlaylist($0) }
     // Apple's best songs and album fill Top results after the server's own,
@@ -181,10 +177,6 @@ public struct FoundScreen: Sendable {
     self.albums = albums + appleAlbums
     self.songs = songs + appleSongs
     self.playlists = playlists + mixes + applePlaylists
-  }
-  /// The same music by name, ignoring case, accents and punctuation.
-  static func key(_ title: String, _ artist: String) -> String {
-    SearchText.key(title) + "\u{1}" + SearchText.key(artist)
   }
   public subscript(kind: FoundKind) -> [FoundItem] {
     switch kind {

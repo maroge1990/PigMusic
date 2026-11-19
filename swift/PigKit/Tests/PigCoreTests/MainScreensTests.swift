@@ -114,26 +114,27 @@ private let onlineJSON = #"""
    "state":"ready"}
   """#
 
-/// D-120 (#255): an album the server lists (adding, say) isn't shown again
-/// as Apple's "not on the server" copy, nor a song.
-@Test func searchShowsAnAlbumOnce() {
+/// Codex round 1 on batch E: an Apple song or album named like a server one
+/// may be another recording or edition; nothing proves it the same, so both
+/// stay.
+@Test func searchKeepsADistinctRecordingWithTheSameName() {
   let screen = FoundScreen(decode(serverJSON), online: decode(onlineJSON))
-  #expect(screen.albums.map(\.id) == ["album:night", "album:exchange", "apple-album:22"])
-  #expect(screen.songs.map(\.id) == ["song:glass", "song:live"])
-  #expect(!screen.top.contains { $0.id == "apple-album:21" || $0.id == "apple-song:11" })
+  #expect(
+    screen.albums.map(\.id) == ["album:night", "album:exchange", "apple-album:21", "apple-album:22"])
+  #expect(screen.songs.map(\.id) == ["song:glass", "song:live", "apple-song:11"])
 }
 
 /// D-120: one Top result, then the groups, the top result not repeated.
 @Test func searchResultsAreGroupedWithOneTopResult() {
   let groups = FoundGroups(FoundScreen(decode(serverJSON), online: decode(onlineJSON)))
   #expect(groups.top?.id == "album:night")
-  #expect(groups.albums.map(\.id) == ["album:exchange", "apple-album:22"])
-  #expect(groups.songs.map(\.id) == ["song:glass", "song:live"])
+  #expect(groups.albums.map(\.id) == ["album:exchange", "apple-album:21", "apple-album:22"])
+  #expect(groups.songs.map(\.id) == ["song:glass", "song:live", "apple-song:11"])
   #expect(groups.artists.map(\.id) == ["artist:mara"])
   // One mark each.
   #expect(groups.top?.mark == .inLibrary)
-  #expect(groups.songs.map(\.mark) == [.inLibrary, .add])
-  #expect(groups.albums.map(\.mark) == [.inLibrary, .add])
+  #expect(groups.songs.map(\.mark) == [.inLibrary, .add, .add])
+  #expect(groups.albums.map(\.mark) == [.inLibrary, .add, .add])
   #expect(FoundGroups(FoundScreen(nil)).isEmpty)
 }
 
