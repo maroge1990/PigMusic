@@ -86,7 +86,9 @@ enum PlayOrigin: Hashable {
   /// Music requests the server is still getting, from the requests page summary.
   var serverActiveRequests = 0
   var pendingEdits: [PendingMutation] = []
-  @ObservationIgnored private var flushingEdits = false
+  /// Sending the outbox, Discard and Try again take turns (Codex round 1 on
+  /// batch E): a Discard never races an edit on its way.
+  @ObservationIgnored private let editTurns = TurnGate()
   var mutationActive = false
   var canMutate: Bool { service != nil && !busy && !syncing && !mutationActive }
   /// Requests wait in their own outbox, so a sync or another change in
@@ -1117,10 +1119,9 @@ enum PlayOrigin: Hashable {
   /// Edits the server's receipts confirmed, until saveEdit reads them.
   @ObservationIgnored private var appliedEdits: Set<String> = []
   @discardableResult func flushEdits() async -> Bool {
-    guard !flushingEdits, let store, let service, person != nil else { return false }
-    flushingEdits = true
+    guard let store, let service, person != nil, editTurns.tryEnter() else { return false }
     let stamp = account.generation
-    defer { flushingEdits = false }
+    defer { editTurns.leave() }
     var applied = false
     do {
       // Edits to one thing stay in order; a network failure stops all.
@@ -1290,32 +1291,49 @@ enum PlayOrigin: Hashable {
       }
     }
   }
-  func discardEdit(_ id: String) async {
-    guard !flushingEdits, let store else { return }
-    try? await store.acknowledgeMutation(id)
-    pendingEdits = (try? await store.pendingMutations()) ?? []
+  /// Discard waits for any send under way, then says what happened: an
+  /// edit already sent can't be discarded (Codex round 1 on batch E).
+  func discardEdit(_ id: String) async -> String? {
+    guard let store else { return nil }
+    let stamp = account.generation
+    await editTurns.enter()
+    let result = await EditOutbox.discard(
+      id, store: store, isCurrent: { [account] in account.isCurrent(stamp) })
+    editTurns.leave()
+    guard let result, account.isCurrent(stamp) else { return nil }
+    let (outcome, pending) = result
+    pendingEdits = pending
     _ = await flushEdits()
+    guard account.isCurrent(stamp) else { return nil }
     await refresh()
+    return PendingChangeWords.discarded(outcome)
   }
   /// Couldn't send. Try again. (D-120): the refused change waits once more
-  /// and is sent at once.
+  /// and is sent at once. Only for the account that asked: each await is
+  /// checked before anything is shown or sent (Codex round 1 on batch E).
   func retryEdit(_ id: String) async {
-    guard !flushingEdits, let store,
-      let pending = pendingEdits.first(where: { $0.id == id })
-    else { return }
-    try? await store.updateMutation(pending.retried())
-    pendingEdits = (try? await store.pendingMutations()) ?? []
+    guard let store else { return }
+    let stamp = account.generation
+    await editTurns.enter()
+    let pending = try? await EditOutbox.retry(
+      id, store: store, isCurrent: { [account] in account.isCurrent(stamp) })
+    editTurns.leave()
+    guard let pending, account.isCurrent(stamp) else { return }
+    pendingEdits = pending
     _ = await flushEdits()
+    guard account.isCurrent(stamp) else { return }
     await refresh()
   }
-  /// Shuffle your library (D-120): songs from the whole library, not only
-  /// the first page by title.
+  /// Shuffle your library (D-120): songs from the whole library, less those
+  /// whose removal waits for its Undo, checked again just before playing.
   func shuffleLibrary() async {
     guard let store else { return }
     let stamp = account.generation
-    guard let tracks = try? await store.shuffledTracks(limit: 200), account.isCurrent(stamp)
-    else { return }
-    play(tracks)
+    let songs = try? await LibraryShuffle.songs(
+      store: store, isCurrent: { [account] in account.isCurrent(stamp) },
+      removing: { [undo] in undo.removing($0) })
+    guard let songs, account.isCurrent(stamp) else { return }
+    play(undo.withoutRemoved(songs))
   }
   func cachedCatalogue<T: Codable & Sendable>(
     key: String, load: @Sendable (NativeService) async throws -> T

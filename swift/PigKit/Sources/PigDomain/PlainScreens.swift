@@ -10,10 +10,10 @@ public struct PendingChangeWords: Sendable, Equatable {
   public let title: String
   /// "Song · Artist", or the playlist's name.
   public let detail: String?
-  /// "Waiting to send" or "Couldn't send. Try again."
+  /// "Waiting to send", "Couldn't send. Try again." or "Couldn't send: the
+  /// playlist changed."
   public let status: String
-  /// The server refused it or it clashed with a newer version: Try again
-  /// sends it once more.
+  /// The server refused it or it clashed with a newer version.
   public let failed: Bool
   /// The SF Symbol drawn beside it.
   public let symbol: String
@@ -58,16 +58,71 @@ public struct PendingChangeWords: Sendable, Equatable {
       symbol = "arrow.up.circle"
     }
     failed = pending.state != "queued"
-    status = failed ? Self.couldNotSend : Self.waiting
+    retryable = pending.retryable
+    status =
+      !failed ? Self.waiting : retryable ? Self.couldNotSend : Self.playlistChanged
   }
+  /// Try again can send it: refused, but not because the playlist changed
+  /// (Codex round 1 on batch E). A conflicted edit offers Go to playlist and
+  /// Discard instead.
+  public let retryable: Bool
+  public static let playlistChanged = "Couldn't send: the playlist changed."
 
   /// The page's one button: "Send 3 changes now".
   public static func sendLabel(count: Int) -> String {
     count == 1 ? "Send 1 change now" : "Send \(count.formatted()) changes now"
   }
+
+  /// What Discard did, in words: it can find the change already sent.
+  public static func discarded(_ result: DiscardResult) -> String {
+    switch result {
+    case .discarded: "Discarded"
+    case .alreadyGone: "Already sent"
+    case .failed: "Couldn't discard. Try again."
+    }
+  }
+}
+
+/// What became of a Discard, which waits for any send in progress
+/// (Codex round 1 on batch E).
+public enum DiscardResult: Sendable, Equatable {
+  /// Taken out of the outbox: it won't be sent.
+  case discarded
+  /// No longer waiting: sent (or settled) before the Discard.
+  case alreadyGone
+  /// The outbox couldn't be changed.
+  case failed
+}
+
+/// One at a time, in order: sending the outbox, Discard and Try again never
+/// overlap, so a Discard can't race an edit already on its way.
+@MainActor public final class TurnGate {
+  public private(set) var busy = false
+  private var waiting: [CheckedContinuation<Void, Never>] = []
+  public init() {}
+  /// Takes the turn only when it is free (a send already running is enough).
+  public func tryEnter() -> Bool {
+    guard !busy else { return false }
+    busy = true
+    return true
+  }
+  /// Waits for the turn.
+  public func enter() async {
+    guard busy else {
+      busy = true
+      return
+    }
+    await withCheckedContinuation { waiting.append($0) }
+  }
+  /// Hands the turn to the next waiting, or frees it.
+  public func leave() {
+    if waiting.isEmpty { busy = false } else { waiting.removeFirst().resume() }
+  }
 }
 
 extension PendingMutation {
+  /// A refused edit Try again can send: not a playlist that changed since.
+  public var retryable: Bool { state != "queued" && state != "conflict" }
   /// Sent again on the next try: waiting once more, its old refusal gone.
   public func retried() -> PendingMutation {
     var copy = self

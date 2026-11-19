@@ -82,6 +82,44 @@ import PigStore
     }
   }
 
+  /// Try again (D-120): a refused edit that can be sent again waits once
+  /// more. The outbox as it now stands, or nil when the account ended
+  /// meanwhile: nothing read here may be shown for another account (Codex
+  /// round 1 on batch E). A conflicted edit is never retried.
+  public static func retry(_ id: String, store: LibraryStore, isCurrent: () -> Bool)
+    async throws -> [PendingMutation]?
+  {
+    guard isCurrent() else { return nil }
+    let pending = try await store.pendingMutations()
+    guard isCurrent() else { return nil }
+    guard let item = pending.first(where: { $0.id == id }), item.retryable else { return pending }
+    try await store.updateMutation(item.retried())
+    guard isCurrent() else { return nil }
+    let after = try await store.pendingMutations()
+    return isCurrent() ? after : nil
+  }
+
+  /// Discard: takes the edit out of the outbox if it is still there. Run it
+  /// in the outbox's turn (`TurnGate`), so no send is under way. nil when
+  /// the account ended meanwhile.
+  public static func discard(_ id: String, store: LibraryStore, isCurrent: () -> Bool)
+    async -> (DiscardResult, [PendingMutation])?
+  {
+    guard isCurrent() else { return nil }
+    do {
+      let pending = try await store.pendingMutations()
+      guard isCurrent() else { return nil }
+      guard pending.contains(where: { $0.id == id }) else { return (.alreadyGone, pending) }
+      try await store.acknowledgeMutation(id)
+      guard isCurrent() else { return nil }
+      let after = try await store.pendingMutations()
+      return isCurrent() ? (.discarded, after) : nil
+    } catch {
+      let pending = (try? await store.pendingMutations()) ?? []
+      return isCurrent() ? (.failed, pending) : nil
+    }
+  }
+
   /// What an edit changes, for keeping dependent edits in order.
   public nonisolated static func scope(_ mutation: OfflineMutation) -> String {
     if let playlist = mutation.playlistId { return "playlist:" + playlist }

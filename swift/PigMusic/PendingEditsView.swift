@@ -12,8 +12,14 @@ struct PendingEditsView: View {
   @State private var discarding: String?
   /// The playlist a change's Go to playlist opens.
   @State private var reviewing: Playlist?
+  /// What the last Discard did: "Discarded", "Already sent" or "Couldn't
+  /// discard. Try again."
+  @State private var result: String?
   var body: some View {
     List {
+      if let result {
+        StatusText(result, kind: result == PendingChangeWords.discarded(.failed) ? .error : .info)
+      }
       if model.pendingEdits.isEmpty {
         PigQuietState("All changes sent").listRowBackground(Color.clear)
       } else {
@@ -46,13 +52,13 @@ struct PendingEditsView: View {
         await model.refresh()
       }
       .confirmationDialog(
-        "Discard this change? It won't be sent.",
+        "Discard this change?",
         isPresented: Binding(get: { discarding != nil }, set: { if !$0 { discarding = nil } }),
         titleVisibility: .visible
       ) {
         if let id = discarding {
           Button("Discard this change", role: .destructive) {
-            Task { await model.discardEdit(id) }
+            Task { result = await model.discardEdit(id) }
             discarding = nil
           }
         }
@@ -88,7 +94,7 @@ private struct PendingChangeRow: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .accessibilityElement(children: .combine)
-      if words.failed {
+      if words.retryable {
         Button(action: retry) {
           Image(systemName: "arrow.clockwise").frame(width: 44, height: 44)
         }
