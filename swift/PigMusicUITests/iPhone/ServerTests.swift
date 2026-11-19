@@ -82,6 +82,42 @@ final class ServerTests: XCTestCase {
     expect(app.buttons["Download"])
   }
 
+  /// D-120 (#251): Your music quality saves on a tap, with no Save button,
+  /// and the household default says its quality in words.
+  func testYourMusicQualitySavesOnATap() throws {
+    try signIn()
+    tap(app.buttons["Account"].firstMatch)
+    let quality = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Your music quality'"))
+      .firstMatch
+    tap(quality)
+    let aac = app.buttons["AAC 256 kbps"]
+    expect(aac, timeout: 30)
+    XCTAssertFalse(app.buttons["Save preference"].exists)
+    let household = app.buttons.matching(
+      NSPredicate(format: "label BEGINSWITH 'Household default, '")
+    ).firstMatch
+    expect(household)
+    XCTAssertFalse(household.label.contains("_"), household.label)
+    // The library may still be loading: a choice waits until it can be saved.
+    let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: aac)
+    wait(for: [enabled], timeout: 60)
+    tap(aac)
+    let chosen = expectation(for: NSPredicate(format: "isSelected == true"), evaluatedWith: aac)
+    wait(for: [chosen], timeout: 10)
+    // Saved on the server: it is still ticked when the page opens again.
+    tap(app.navigationBars["Your music quality"].buttons.firstMatch)
+    expect(app.buttons.matching(NSPredicate(format: "label CONTAINS 'AAC 256 kbps'")).firstMatch)
+    tap(quality)
+    let reopened = app.buttons["AAC 256 kbps"]
+    expect(reopened, timeout: 30)
+    XCTAssertTrue(reopened.isSelected, app.debugDescription)
+    // Back to the default, for the other tests.
+    tap(household)
+    let restored = expectation(
+      for: NSPredicate(format: "isSelected == true"), evaluatedWith: household)
+    wait(for: [restored], timeout: 10)
+  }
+
   /// D-109: the iPhone page lists its transfers by album, as the Server page
   /// does; the album row opens to its songs (#228).
   func testThePhonesTransfersAreGroupedByAlbum() throws {
