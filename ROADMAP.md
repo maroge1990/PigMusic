@@ -5,25 +5,23 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 19 Nov 2026 (Melbourne).*
+*Overwritten at the end of every session. 20 Nov 2026 (Melbourne).*
 
-- **Live:** release `screens-20261119-v1`, server `91bc97d` (healthy at release). Earlier today: `oneofeach-20261119-v1`
-  (batch D web half) and `steady-20261119-v1` (requests and robustness). **TestFlight:** 0.2.0 (1135) and Xcode Cloud
-  build 2001 (480600a); the iPhone half of batch D is not on TestFlight yet.
-- **#265 done on our side (D-119):** TestFlight builds come from Xcode Cloud when a `testflight-…` branch is pushed (build
-  2001 reached TestFlight); tap-through tests run in CI; docs updated. Open until Mark installs a 2000+ build.
-- **Batch D, one of each (D-118):** web half live (one song row, one menu, collection menus, mixes as pages, one notice
-  area, one in-app confirm dialog; the server refuses a web write started under another sign-in, `X-Pig-Expected-Session`).
-  iPhone half on `feature/batch-d-ios`, waiting for a green tap-through run, then two Codex rounds, then TestFlight.
-- **Requests (#264, #262, #263) and robustness (#256, #257, #258):** live. An ordinary Add never resumes a song the
-  asker paused (the Add answer has `paused`; the iPhone's "Paused. Resume it in Downloads." is in batch D's iPhone half).
-- **Batch E, the plain and main screens (D-120, canvas "PigMusic plain screens", 35 screens):** web half live (16–23,
-  33–35). iPhone (1–15, 27–32) and Watch (24–26, #252) start after batch D's iPhone half lands.
-- **Findings filed today:** #266 to #275 (Codex mediums after last rounds). #242 (queue limits) left for later.
-- **Waiting on Mark's device check:** build 1094/1135 items (#168, #245, #239, #246), #229, #219, #232 to #235.
-- **Decisions:** D-120 today. Next: D-121.
-- **Mac:** reachable as `ssh mac` (its address changes; match the host key); debugging only now. PigMusic's build files
-  were cleared off it on 19 Nov.
+- **Live:** release `screens-20261119-v1` (server `91bc97d`): batch D web half, requests (#262–#264), robustness
+  (#256–#258) and every web screen of D-120. main has changed only native code and tests since.
+- **main `12d27d2`:** batch D iPhone half (#248, #249, #183), batch E iPhone (D-120 screens 1–15, 27–32) and Apple Watch
+  (24–26, #252). Each passed two Codex rounds and confirmations. **TestFlight:** Xcode Cloud build from branch
+  `testflight-20261120-b1` started 20 Nov; delete the branch once the build is on TestFlight. Not checked on a device.
+- **#265:** done on our side; open until Mark installs a 2000+ build.
+- **Known limits filed:** #279 (the shared playback engine restarts the current song at the same point when an upcoming
+  song changes or is removed, iPhone and Watch), #278 (no covers on the Watch), #281 (iPhone Albums has no Recently added
+  order), findings #266–#277 and #280.
+- **Tap-through tests** on GitHub are timing-sensitive (slow runners, 45-minute job limit); a failure with an empty iPhone
+  log is a runner problem: rerun. `ServerTests.testSendAnAlbumToTheWatch` now prints the text it found if it fails.
+- **Waiting on Mark's device check:** the new TestFlight build (batch D and E on iPhone and Watch), then the older items
+  (#168, #245, #239, #246, #229, #219, #232 to #235).
+- **Decisions:** D-120 (19 Nov). Next: D-121.
+- **Mac:** reachable as `ssh mac` (its address changes; match the host key); debugging only, about 14 GB free on 19 Nov.
 
 ## Now
 
@@ -35,8 +33,8 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Next
 
-**Finish D** (iPhone half: #248, #249, #183) and **E** (iPhone and Watch screens: #251, #252, #255; #209). Smaller: #253,
-#259 to #261, #242, findings #266 to #275.
+Mark's device round on the D/E TestFlight build. Smaller: #253, #259 to #261, #242, findings #266 to #281, #279 (gapless
+queue edits in the shared engine).
 
 Then: #226 (an unreadable download list or a source change must not empty the Watch), #230 and #231 (findings), #225
 (test workers' memory growth).
