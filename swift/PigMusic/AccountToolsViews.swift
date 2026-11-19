@@ -89,7 +89,6 @@ private struct AppearanceTile: View {
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .accessibilityElement(children: .ignore)
     .accessibilityLabel(choice.title)
     .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
   }
@@ -327,7 +326,6 @@ struct QualityView: View {
               }.contentShape(Rectangle())
             }
             .disabled(saving || !model.canMutate)
-            .accessibilityElement(children: .ignore)
             .accessibilityLabel(row.detail.map { row.title + ", " + $0 } ?? row.title)
             .accessibilityAddTraits(selected == row.value ? [.isButton, .isSelected] : .isButton)
           }

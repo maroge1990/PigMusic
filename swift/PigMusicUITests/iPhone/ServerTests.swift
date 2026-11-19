@@ -88,7 +88,7 @@ final class ServerTests: XCTestCase {
     try signIn()
     let quality = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Your music quality'"))
       .firstMatch
-    let aac = app.buttons["AAC 256 kbps"]
+    let aac = app.buttons["AAC 256 kbps"].firstMatch
     // Just after sign-in the Account sheet can be sent away (iOS's password
     // prompt): open it again until the page shows.
     for _ in 0..<4 where !aac.exists {
@@ -107,7 +107,7 @@ final class ServerTests: XCTestCase {
     // saved yet: tap until it is ticked.
     let deadline = Date.now.addingTimeInterval(120)
     while !aac.isSelected, Date.now < deadline {
-      if app.buttons["Not Now"].exists { app.buttons["Not Now"].tap() }
+      if app.buttons["Not Now"].firstMatch.exists { app.buttons["Not Now"].firstMatch.tap() }
       aac.tap()
       _ = aac.wait(for: \.isSelected, toEqual: true, timeout: 5)
     }
@@ -116,7 +116,7 @@ final class ServerTests: XCTestCase {
     tap(app.navigationBars["Your music quality"].buttons.firstMatch)
     expect(app.buttons.matching(NSPredicate(format: "label CONTAINS 'AAC 256 kbps'")).firstMatch)
     tap(quality)
-    let reopened = app.buttons["AAC 256 kbps"]
+    let reopened = app.buttons["AAC 256 kbps"].firstMatch
     expect(reopened, timeout: 30)
     XCTAssertTrue(reopened.isSelected, app.debugDescription)
     // Back to the default, for the other tests.
