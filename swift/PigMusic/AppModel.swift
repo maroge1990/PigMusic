@@ -666,25 +666,26 @@ enum PlayOrigin: Hashable {
         try await store?.sourceRevisions(ids: Set(revisions.keys).union(records.map(\.id))) ?? [:]
       guard account.isCurrent(stamp) else { return }
       // Songs the server changed or removed since their audio was cached.
-      var changed = Set(
-        revisions.filter { id, revision in known[id].map { $0 != revision } ?? true }.keys)
+      let held = records.map {
+        SourceRefresh.Download(
+          id: $0.id, ready: $0.state == "ready", revision: $0.track.sourceRevision)
+      }
+      let plan = SourceRefresh.plan(cached: revisions, downloads: held, known: known)
+      let changed = plan.changed
       var invalid = false
       if let downloads {
-        var allowed: [String: String?] = [:]
-        for record in records {
-          if let current = known[record.id] {
-            allowed.updateValue(current, forKey: record.id)
-            if record.state == "ready" && record.track.sourceRevision != current {
-              changed.insert(record.id)
-            }
-          } else if record.state == "ready" {
-            changed.insert(record.id)
+        var allowed = plan.allowed
+        if !changed.isEmpty {
+          if let fresh = await freshCopies(changed) {
+            guard account.isCurrent(stamp) else { return }
+            invalid = await player.invalidateSources(changed: changed, fresh: fresh)
+          } else {
+            // The player wasn't told: their downloads stay until a later
+            // refresh tells it (Codex confirmation on batch E).
+            allowed = SourceRefresh.deferring(plan, downloads: held)
           }
         }
-        if !changed.isEmpty, let fresh = await freshCopies(changed) {
-          guard account.isCurrent(stamp) else { return }
-          invalid = await player.invalidateSources(changed: changed, fresh: fresh)
-        }
+        guard account.isCurrent(stamp) else { return }
         await downloads.reconcile(allowed)
         guard account.isCurrent(stamp) else { return }
         downloads.resume(automatic: true)
