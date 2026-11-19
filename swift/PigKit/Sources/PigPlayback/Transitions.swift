@@ -105,6 +105,11 @@ public struct PlaybackQueue: Sendable, Codable {
     public var others = false
     /// Occurrences before the current one left, so its place moved.
     public var shifted = false
+    public init(current: Current = .same, others: Bool = false, shifted: Bool = false) {
+      self.current = current
+      self.others = others
+      self.shifted = shifted
+    }
   }
   /// The server changed or removed these songs (#76; Codex round 2 on batch
   /// E): every other occurrence takes its fresh copy (a new revision, so
