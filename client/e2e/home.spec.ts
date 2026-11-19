@@ -61,8 +61,8 @@ test("Home order, with no song recommendations", async ({ page }) => {
   const sections = page.locator(
     ".home-page > .home-section > .section-title h2",
   );
+  // D-120: no mixes yet, so no Mixes heading.
   await expect(sections).toHaveText([
-    "Your mixes",
     "Recently added",
     "Recommended for you",
     "Popular in Australia",
@@ -516,9 +516,11 @@ test("a chart that takes over two minutes still appears on an open Home", async 
     },
   });
   await page.goto("/#/home");
+  // D-120: a quiet placeholder row, never "Finding what's popular…".
   await expect(
-    page.getByText("Finding what\u2019s popular\u2026"),
+    page.getByRole("region", { name: "Popular in Australia, loading" }),
   ).toBeVisible();
+  await expect(page.locator(".home-page")).not.toContainText("Finding");
   // Each check waits for its answer before the next is timed, so the clock
   // moves a minute at a time until the ninth check has been made.
   await expect
@@ -534,4 +536,57 @@ test("a chart that takes over two minutes still appears on an open Home", async 
     .locator(".home-section")
     .filter({ hasText: "Popular in Australia" });
   await expect(popular.getByText("Song one")).toBeVisible();
+});
+
+// D-120 (#251): mixes and Recently added are covers with Play.
+test("mix and Recently added covers each have Play", async ({ page }) => {
+  const played: string[] = [];
+  await mockApi(page, {
+    answers: {
+      "/v1/home/mixes": (route) =>
+        route.fulfill({
+          json: {
+            mixes: [
+              {
+                id: "edition-0",
+                kind: "daily",
+                title: "Daily blend",
+                day: "Tuesday",
+                tracks: [
+                  {
+                    ...album.tracks[0],
+                    id: "mix:edition-0:0",
+                    server_state: "not_in_library",
+                  },
+                ],
+              },
+            ],
+            preparing: false,
+          },
+        }),
+      "/v1/home/recent": (route) =>
+        route.fulfill({
+          json: {
+            albums: [
+              { id: album.id, title: album.title, artist: album.artist },
+            ],
+          },
+        }),
+    },
+  });
+  await page.route("**/api/v1/playback/*/url", (route) => {
+    played.push(decodeURIComponent(route.request().url()));
+    return route.fulfill({
+      json: { url: "/api/v1/playback/files/prepared", expires_in: 21600 },
+    });
+  });
+  await page.goto("/#/home");
+  await expect(
+    page.locator(".home-page > .home-section > .section-title h2"),
+  ).toHaveText(["Mixes", "Recently added"]);
+  await page.getByRole("button", { name: "Play Daily blend" }).click();
+  await expect.poll(() => played.at(-1)).toContain("mix:edition-0:0/url");
+  await expect(page).toHaveURL(/#\/home$/);
+  await page.getByRole("button", { name: "Play Brat" }).click();
+  await expect.poll(() => played.at(-1)).toContain("t1/url");
 });

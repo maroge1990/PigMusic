@@ -42,6 +42,8 @@ export type Album = {
   cover_url?: string | null;
   saved_count?: number;
   selected_count?: number;
+  /** When its newest song joined your library (ISO), if known. */
+  added_at?: string | null;
 };
 export type Artist = {
   id: string;
@@ -64,6 +66,8 @@ export type Library = {
   artists: Artist[];
   albums: Album[];
   playlist_count?: number;
+  /** Changes whenever this person's library does. */
+  revision?: string;
   stats: {
     tracks: number;
     artists: number;

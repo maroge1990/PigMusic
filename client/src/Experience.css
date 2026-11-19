@@ -517,15 +517,23 @@
 .library-toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-12);
   margin-bottom: var(--space-16);
 }
 .library-toolbar .personal-tabs {
-  flex: 1;
+  flex: 1 1 20rem;
   min-width: 0;
   padding-bottom: 0;
 }
-.shuffle-library {
+/* Play, Shuffle and Sort for the whole library, beside the tabs. */
+.library-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+.library-play {
   flex: none;
 }
 .personal-grid > a,
@@ -685,14 +693,14 @@
   .personal-header .app-nav a.nav-account {
     display: none;
   }
-  .shuffle-library {
+  .library-play {
     width: 2.75rem;
     height: 2.75rem;
     padding: 0;
     justify-content: center;
     border-radius: 50%;
   }
-  .shuffle-library span {
+  .library-play span {
     position: absolute;
     width: 1px;
     height: 1px;

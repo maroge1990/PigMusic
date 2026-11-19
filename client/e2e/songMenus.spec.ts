@@ -132,9 +132,15 @@ test("a song tapped in search plays alone; on an album it plays on", async ({
 }) => {
   await mockApi(page, {
     answers: {
-      "/v1/search": (route) =>
+      "/v1/search/results": (route) =>
         route.fulfill({
-          json: { tracks: album.tracks, household_tracks: [] },
+          json: {
+            top: [],
+            songs: album.tracks,
+            albums: [],
+            artists: [],
+            playlists: [],
+          },
         }),
       "/v1/catalogue/artists": (route) =>
         route.fulfill({

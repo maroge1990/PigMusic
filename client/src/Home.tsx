@@ -8,7 +8,12 @@ import { withLibrary, type Song } from "./songs";
 import { warmArtist, whenIdle } from "./prefetch";
 import { MixPage, Mixes } from "./Mixes";
 import { CollectionCard, albumSongs } from "./CollectionMenu";
-import { InlineError, Loading } from "./EmptyState";
+import {
+  CoverPlay,
+  ShelfLoading,
+  ShelfPlaceholder,
+  usePlaceholder,
+} from "./HomeShelf";
 import { Rewind, RewindCard, rewindPeriod } from "./Rewind";
 import type { Route } from "./routes";
 
@@ -42,13 +47,6 @@ type Feed = {
   title?: string;
   state?: "ready" | "no_seeds" | "unavailable" | "preparing";
   unavailable: boolean;
-};
-const emptyMessages: Record<string, string> = {
-  "recommended:no_seeds":
-    "Recommendations appear once PigMusic has matched artists in your library.",
-  "recommended:unavailable": "Recommendations are temporarily unavailable.",
-  "popular:preparing": "Finding what\u2019s popular\u2026",
-  "popular:unavailable": "Charts are temporarily unavailable.",
 };
 function HomeSection({ kind }: { kind: "popular" | "recommended" }) {
   const [feed, setFeed] = useState<Feed | null>(null);
@@ -114,25 +112,17 @@ function HomeSection({ kind }: { kind: "popular" | "recommended" }) {
   // Only the chart names its source; recommendations need no caption (D-101).
   const caption =
     kind === "popular" ? feed?.source || "Apple Music · Australia" : undefined;
-  const empty = feed
-    ? emptyMessages[kind + ":" + (feed.state || "")] ||
-      (feed.unavailable || kind === "recommended"
-        ? emptyMessages[kind + ":unavailable"]
-        : "")
-    : "";
+  // Shown only with something in it; while the first answer or the chart's
+  // first build is on its way, at most a quiet placeholder row (D-120).
+  const placeholder = usePlaceholder(
+    kind,
+    !collections.length && !error && (!feed || feed.state === "preparing"),
+  );
+  if (!collections.length)
+    return placeholder ? <ShelfPlaceholder label={heading} /> : null;
   return (
     <section className="home-section">
-      <SectionHeader
-        title={heading}
-        subtitle={!feed || collections.length > 0 ? caption : undefined}
-      />
-      {!feed &&
-        (error ? (
-          <InlineError>{error}</InlineError>
-        ) : (
-          <Loading>Finding music…</Loading>
-        ))}
-      {feed && !collections.length && empty && <p role="status">{empty}</p>}
+      <SectionHeader title={heading} subtitle={caption} />
       {collections.map((collection) => (
         <section key={collection}>
           <h3>{collection[0].toUpperCase() + collection.slice(1)}</h3>
@@ -230,6 +220,7 @@ function RecentlyAdded() {
               <strong>{album.title}</strong>
               <p>{album.artist}</p>
             </a>
+            <CoverPlay title={album.title} songs={() => albumSongs(album.id)} />
           </CollectionCard>
         ))}
       </div>
@@ -246,10 +237,12 @@ export function Home({ route }: { route: Route }) {
     <main className="personal-main home-page">
       <PageHeader title="Home" />
       <RewindCard />
-      <Mixes />
-      <RecentlyAdded />
-      <HomeSection kind="recommended" />
-      <HomeSection kind="popular" />
+      <ShelfLoading>
+        <Mixes />
+        <RecentlyAdded />
+        <HomeSection kind="recommended" />
+        <HomeSection kind="popular" />
+      </ShelfLoading>
     </main>
   );
 }

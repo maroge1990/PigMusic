@@ -16,6 +16,8 @@ const SIMILAR_SEEDS = 10;
 const SIMILAR_EXCLUDE = 500;
 /** At most this many songs are saved for the next visit. */
 const SAVED_SONGS = 500;
+/** Of those, at most this many come before the song playing. */
+const SAVED_BEFORE = 50;
 /** Radio asks for more once this few songs are left after the current one. */
 const RADIO_LOW_WATER = 5;
 /** How many upcoming streamed songs the server prepares ahead. */
@@ -47,9 +49,16 @@ export function serializeQueue(
   position: number,
 ): string | null {
   if (!songs.length || cursor < 0) return null;
+  // A window of the queue around the song playing: a few heard before it,
+  // the rest still to come, the cursor counted from the window's start
+  // (Codex: a song past the 500th resumed as another).
+  const start = Math.max(
+    0,
+    Math.min(cursor - SAVED_BEFORE, songs.length - SAVED_SONGS),
+  );
   return JSON.stringify({
-    songs: songs.slice(0, SAVED_SONGS),
-    cursor: Math.min(cursor, SAVED_SONGS - 1),
+    songs: songs.slice(start, start + SAVED_SONGS),
+    cursor: cursor - start,
     position,
   });
 }

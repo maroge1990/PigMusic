@@ -4,8 +4,10 @@ else."""
 
 import asyncio
 import logging
+import os
 import threading
 import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -283,7 +285,6 @@ def test_the_server_stops_while_a_readiness_check_is_still_hung(tmp_path, monkey
             began = time.monotonic()
         assert time.monotonic() - began < 2
         assert calls and checks.outstanding() == ["storage"]
-        assert checks.executor is None
     finally:
         release.set()
     # The same app started again has working checks.
@@ -324,3 +325,114 @@ def test_a_readiness_check_that_raises_or_hangs_fails_and_runs_once_at_a_time():
         checks.close()
 
     asyncio.run(scenario())
+
+
+def test_overlapping_callers_share_one_check_and_its_answer():
+    """Codex on 7866ac1: a caller arriving while a healthy mount test was
+    still running was told at once the mount was unavailable."""
+    from server.readiness import ReadinessChecks
+
+    threads = []
+
+    def slow():
+        threads.append(threading.current_thread().name)
+        time.sleep(0.3)
+
+    async def scenario():
+        checks = ReadinessChecks()
+        return await asyncio.gather(
+            checks.passes("storage", slow, timeout=2),
+            checks.passes("storage", slow, timeout=2),
+        )
+
+    assert asyncio.run(scenario()) == [True, True]
+    assert len(threads) == 1
+
+
+def test_overlapping_callers_of_a_stalled_check_use_one_thread_and_fail():
+    from server.readiness import ReadinessChecks
+
+    release, threads = threading.Event(), []
+
+    def stalled():
+        threads.append(threading.current_thread().name)
+        release.wait(30)
+
+    async def scenario():
+        checks = ReadinessChecks()
+        began = time.monotonic()
+        answers = await asyncio.gather(
+            checks.passes("storage", stalled, timeout=0.3),
+            checks.passes("storage", stalled, timeout=0.3),
+        )
+        return answers, time.monotonic() - began
+
+    try:
+        answers, took = asyncio.run(scenario())
+    finally:
+        release.set()
+    assert answers == [False, False] and took < 2
+    assert len(threads) == 1
+
+
+def test_health_never_waits_on_a_hung_mount_on_a_request_thread(tmp_path, monkeypatch):
+    """#256: /api/health tested the mount on each caller's own pool thread,
+    so every app checking reachability held one more on a hung mount."""
+    monkeypatch.setattr(server_app, "HEALTH_STORAGE_TIMEOUT", 0.3, raising=False)
+    app = create_app(tmp_path)
+    release, calls = threading.Event(), []
+    with TestClient(app, client=LOCAL) as client:
+        try:
+            monkeypatch.setattr(
+                server_app,
+                "download_root",
+                blocking(server_app.download_root, release, calls),
+            )
+            began = time.monotonic()
+            for _ in range(20):
+                response = client.get("/api/health")
+                assert response.status_code == 200
+                assert response.json()["storage_available"] is False
+            # Waited for once, not once per caller.
+            assert time.monotonic() - began < 3
+            assert len(calls) == 1 and calls[0].startswith("ready")
+            assert free_thread_soon(client)
+            # Readiness shares the one outstanding mount test.
+            assert client.get(READY).json()["checks"]["storage"] is False
+            assert len(calls) == 1
+        finally:
+            release.set()
+        deadline = time.monotonic() + 5
+        while not client.get("/api/health").json()["storage_available"]:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+
+
+def test_a_hung_check_never_holds_up_the_process_exit(tmp_path):
+    """#256: a check still blocked on a dead mount kept the server's process
+    from exiting until the supervisor killed it 25 s later."""
+    import subprocess
+    import sys
+
+    script = (
+        "import asyncio, time\n"
+        "from server.readiness import ReadinessChecks\n"
+        "checks = ReadinessChecks()\n"
+        "async def main():\n"
+        "    assert not await checks.passes('storage', time.sleep, 30, timeout=0.1)\n"
+        "    checks.close()\n"
+        "asyncio.run(main())\n"
+    )
+    # The image runs the tests from outside the source tree, so find the
+    # server package the suite itself imported.
+    source = str(Path(server_app.__file__).resolve().parents[1])
+    env = {**os.environ, "PYTHONPATH": source}
+    began = time.monotonic()
+    subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=source,
+        env=env,
+        check=True,
+        timeout=20,
+    )
+    assert time.monotonic() - began < 10

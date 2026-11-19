@@ -75,9 +75,11 @@ final class ServerTests: XCTestCase {
     tap(app.buttons["Send to Apple Watch"])
     // D-103: sending shows no pop-up and no text, only a brief checkmark.
     XCTAssertFalse(app.alerts["Apple Watch"].waitForExistence(timeout: 5), app.debugDescription)
-    XCTAssertFalse(
-      app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Apple Watch'")).firstMatch
-        .exists, app.debugDescription)
+    let words = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Apple Watch'"))
+      .firstMatch
+    // The log keeps what was printed, not an assertion's message: name the text.
+    if words.exists { print("Shown after sending: \(words.label)\n\(app.debugDescription)") }
+    XCTAssertFalse(words.exists, "Shown after sending: \(words.label)")
     XCTAssertFalse(app.staticTexts["Connect and refresh your library on iPhone first."].exists)
     expect(app.buttons["Download"])
   }

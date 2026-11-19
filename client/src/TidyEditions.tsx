@@ -1,3 +1,4 @@
+import { Layers } from "lucide-react";
 import { apiFetch, detailOr, writeFailure } from "./api";
 import { notify, offerUndo } from "./notices";
 import { useState } from "react";
@@ -143,13 +144,11 @@ export function TidyEditions() {
     await review(failure);
   }
   return (
-    <section className="system-panel">
-      <h2>Album editions</h2>
-      <p>
-        Albums you have on more than one edition, such as an album and its
-        deluxe edition. The fullest edition is kept, with the best copy of each
-        song. Singles, EPs, live albums and greatest hits stay separate.
-      </p>
+    <section className="system-panel library-tool">
+      <h2>
+        <Layers size={18} aria-hidden="true" />
+        Album editions
+      </h2>
       <button
         className="secondary-button"
         disabled={busy}

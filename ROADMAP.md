@@ -5,28 +5,25 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 18 Nov 2026 (Melbourne), evening.*
+*Overwritten at the end of every session. 19 Nov 2026 (Melbourne).*
 
-- **Live:** release `words-20261118-v4`, server `3a51459` (batch C, released 12:50; healthy, readiness ok, no warnings).
-  **TestFlight:** 0.2.0 (1135) from `ad7e50d`, with batch C's iPhone and Watch half.
-- **Batch C, one word and one icon (#246, live, on TestFlight):** "Add to library" for asking the server for music (D-115),
-  one icon per meaning (D-116) and one word per thing (D-117) on web, iPhone and Watch; table in docs/DESIGN.md, guarded
-  by `tests/test_vocabulary.py`. Song rows and albums now report what the server did (Adding, Skipped). Reviews: Codex
-  round per half, confirmations and a final round; its high (album Add resent paused songs) fixed and confirmed by an Opus
-  stand-in review. Findings filed: #259 to #264.
-- **#265 in progress (D-119, the Mac stops being the build machine):** the simulator tap-through tests run in CI
-  (`native.yml` job `tap-through`, iPhone 17 + Apple Watch Series 11 on GitHub's iOS/watchOS 26.5; three mini-player
-  tests skip below iOS 27). Xcode Cloud workflow "TestFlight" (Mark set it up 18 Nov) archives scheme PigMusic for
-  internal TestFlight when a branch starting `testflight-` is pushed; build numbers start at 2000. Build 2000 failed on
-  the OpenAPI plugin trust; `swift/ci_scripts/ci_post_clone.sh` fixes that and build 2001 was running at handover.
-- **Codex:** usage ran out on 18 Nov and came back the same afternoon; an Opus stand-in review covered the gap.
-- **Release check:** the Unraid verify's test suite now gets 2 GB (its tmpfs counts; both the 17 and 18 Nov suites peak
-  at about 1.4 GB, #225).
-- **Waiting on Mark's device check:** build 1094's artwork and notices (#168, #245, #239), then build 1135's words and
-  icons (#246); #229 song menu, #219 Watch background delivery, #232 to #235.
-- **Decisions:** D-115 to D-119 today. Next: D-120.
-- **Mac:** reachable as `ssh mac` (its address changes; match the host key). PigMusic's build files are cleaned off after each use
-  (D-119); about 25 GB free. Mark's PigTV project shares the simulators.
+- **Live:** release `screens-20261119-v1`, server `91bc97d` (healthy at release). Earlier today: `oneofeach-20261119-v1`
+  (batch D web half) and `steady-20261119-v1` (requests and robustness). **TestFlight:** 0.2.0 (1135) and Xcode Cloud
+  build 2001 (480600a); the iPhone half of batch D is not on TestFlight yet.
+- **#265 done on our side (D-119):** TestFlight builds come from Xcode Cloud when a `testflight-…` branch is pushed (build
+  2001 reached TestFlight); tap-through tests run in CI; docs updated. Open until Mark installs a 2000+ build.
+- **Batch D, one of each (D-118):** web half live (one song row, one menu, collection menus, mixes as pages, one notice
+  area, one in-app confirm dialog; the server refuses a web write started under another sign-in, `X-Pig-Expected-Session`).
+  iPhone half on `feature/batch-d-ios`, waiting for a green tap-through run, then two Codex rounds, then TestFlight.
+- **Requests (#264, #262, #263) and robustness (#256, #257, #258):** live. An ordinary Add never resumes a song the
+  asker paused (the Add answer has `paused`; the iPhone's "Paused. Resume it in Downloads." is in batch D's iPhone half).
+- **Batch E, the plain and main screens (D-120, canvas "PigMusic plain screens", 35 screens):** web half live (16–23,
+  33–35). iPhone (1–15, 27–32) and Watch (24–26, #252) start after batch D's iPhone half lands.
+- **Findings filed today:** #266 to #275 (Codex mediums after last rounds). #242 (queue limits) left for later.
+- **Waiting on Mark's device check:** build 1094/1135 items (#168, #245, #239, #246), #229, #219, #232 to #235.
+- **Decisions:** D-120 today. Next: D-121.
+- **Mac:** reachable as `ssh mac` (its address changes; match the host key); debugging only now. PigMusic's build files
+  were cleared off it on 19 Nov.
 
 ## Now
 
@@ -38,8 +35,8 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Next
 
-**First: #265** (tap-through tests on GitHub Actions, TestFlight on Xcode Cloud; D-119). Then, from the 17 Nov review:
-**D, one of each** (designed, D-118): #248, #249, #183, #250 (#247 parked by Mark, 18 Nov). **E, the plain screens:** #251, #252, #209, #255. Smaller: #242, #253, #256, #257, #258, #259 to #264.
+**Finish D** (iPhone half: #248, #249, #183) and **E** (iPhone and Watch screens: #251, #252, #255; #209). Smaller: #253,
+#259 to #261, #242, findings #266 to #275.
 
 Then: #226 (an unreadable download list or a source change must not empty the Watch), #230 and #231 (findings), #225
 (test workers' memory growth).

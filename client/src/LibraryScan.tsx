@@ -1,3 +1,4 @@
+import { ScanSearch } from "lucide-react";
 import { apiFetch, detailOr, isUnconfirmed, writeFailure } from "./api";
 import { useEffect, useState } from "react";
 import { formatCount, formatDateTime } from "./format";
@@ -59,12 +60,11 @@ export function LibraryScan({ refresh }: { refresh: () => void }) {
     }
   }
   return (
-    <section className="system-panel">
-      <h2>Library scan</h2>
-      <p>
-        Read tags and artwork from your configured music folder. Existing files
-        are left unchanged.
-      </p>
+    <section className="system-panel library-tool">
+      <h2>
+        <ScanSearch size={18} aria-hidden="true" />
+        Library scan
+      </h2>
       <button
         className="secondary-button"
         disabled={scan.status === "scanning"}

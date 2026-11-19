@@ -145,6 +145,56 @@ struct CompanionArchiveTests {
     #expect(await archive.localFile(id: a.id) != nil)
     #expect(await archive.receipt().ready.keys.sorted() == [a.id])
   }
+  /// Codex round 1 on #252: a damaged saved library started empty with no
+  /// word why, so the Watch said "No music". It still starts empty (the
+  /// iPhone's next copy can be taken), and says which files were damaged.
+  @Test func damagedSavedLibraryIsNoted() async throws {
+    let root = try folder()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let music = root.appendingPathComponent("Music")
+    // A fresh install opens empty, with nothing damaged.
+    let fresh = try CompanionArchive(directory: music)
+    #expect(fresh.damagedFiles.isEmpty)
+    for name in ["context.json", "manifest.json"] {
+      let file = music.appendingPathComponent(name)
+      try Data("not json".utf8).write(to: file)
+      let opened = try CompanionArchive(directory: music)
+      #expect(opened.damagedFiles == [name])
+      #expect(await opened.snapshot().songs.isEmpty)
+      try FileManager.default.removeItem(at: file)
+    }
+  }
+  /// Codex round 2 on #252: with only manifest.json damaged, the reopened
+  /// archive kept its applied marker, so its receipt said the (now empty)
+  /// library was applied, the iPhone never sent it again, and its audio was
+  /// turned away as stale.
+  @Test func aDamagedManifestAsksForItsReplacement() async throws {
+    let root = try folder()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let music = root.appendingPathComponent("Music")
+    let archive = try CompanionArchive(directory: music)
+    let context = CompanionContext(revision: 3, account: "one")
+    let bytes = Data("song a".utf8)
+    let item = song("a", bytes: bytes)
+    let library = CompanionManifest(context: context, songs: [item])
+    try await archive.apply(context)
+    try await archive.apply(library)
+    let file = root.appendingPathComponent("incoming")
+    try bytes.write(to: file)
+    let ticket = CompanionFile(context: context, songId: item.id, checksum: item.checksum)
+    try await archive.accept(file, ticket: ticket)
+    #expect(await archive.receipt().manifestApplied)
+    // Only the manifest is damaged; context.json and applied.json are intact.
+    try Data("{\"songs\": [".utf8).write(to: music.appendingPathComponent("manifest.json"))
+    let reopened = try CompanionArchive(directory: music)
+    #expect(await reopened.receipt().manifestApplied == false)
+    #expect(await reopened.arrival(of: ticket) == .wait)
+    // The iPhone sends the same revision's library again: it is taken.
+    try await reopened.apply(library)
+    #expect(await reopened.snapshot().songs.map(\.id) == [item.id])
+    #expect(await reopened.receipt().manifestApplied)
+    #expect(await reopened.receipt().ready[item.id] == item.checksum)
+  }
   @Test func interruptedSaveLeavesNoPartialFiles() async throws {
     let root = try folder()
     defer { try? FileManager.default.removeItem(at: root) }
