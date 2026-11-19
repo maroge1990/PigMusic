@@ -51,31 +51,36 @@ public enum WatchQueueRemoval: Equatable, Sendable {
   }
 }
 
-/// Songs whose removal was committed, kept while any queue that may still
-/// hold them is being built (Codex round 2 on #252): a library that no
-/// longer lists a song lets its mark go only once no queue is being built,
-/// or a queue collected before the removal would keep the song.
+/// Songs whose removal was committed (Codex rounds 2 and 3 on #252). Each
+/// queue being built carries its own marks: those live when it began and
+/// those committed while it is collecting, kept even if a library drops
+/// the song meanwhile, so a queue collected before a removal never keeps
+/// it. A library that no longer lists a song clears its live mark, so a
+/// song sent again later plays in any queue begun after that.
 public struct WatchRemovalMarks: Equatable, Sendable {
-  public private(set) var removed: Set<String> = []
-  private var building = 0
-  private var library: Set<String>?
+  /// Marks a queue begun now starts with.
+  public private(set) var live: Set<String> = []
+  private var builds: [Int: Set<String>] = [:]
+  private var serial = 0
   public init() {}
-  public mutating func commit(_ ids: some Sequence<String>) { removed.formUnion(ids) }
-  /// A queue starts collecting songs.
-  public mutating func beginBuilding() { building += 1 }
-  /// That queue was published, or given up.
-  public mutating func endBuilding() {
-    building = max(0, building - 1)
-    if building == 0, let library { prune(to: library) }
+  public mutating func commit(_ ids: some Sequence<String>) {
+    let ids = Set(ids)
+    live.formUnion(ids)
+    for key in builds.keys { builds[key]?.formUnion(ids) }
   }
+  /// A queue starts collecting songs; pass the token to `removed(for:)`
+  /// and `endBuilding(_:)`.
+  public mutating func beginBuilding() -> Int {
+    serial += 1
+    builds[serial] = live
+    return serial
+  }
+  /// The songs that queue must leave out.
+  public func removed(for build: Int) -> Set<String> { builds[build] ?? live }
+  /// That queue was published, or given up: only its own marks go.
+  public mutating func endBuilding(_ build: Int) { builds[build] = nil }
   /// The library now lists these songs.
-  public mutating func libraryChanged(to ids: Set<String>) {
-    if building == 0 { prune(to: ids) } else { library = ids }
-  }
-  private mutating func prune(to ids: Set<String>) {
-    removed.formIntersection(ids)
-    library = nil
-  }
+  public mutating func libraryChanged(to ids: Set<String>) { live.formIntersection(ids) }
 }
 
 /// The Watch's lists in the order the iPhone files them (#252): A to Z

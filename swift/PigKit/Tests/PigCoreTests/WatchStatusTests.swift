@@ -187,26 +187,42 @@ struct WatchStatusTests {
   /// mark for A must outlive that library until the queue is out.
   @Test func removalMarksOutliveALibraryWhileAQueueIsBuilt() {
     var marks = WatchRemovalMarks()
-    marks.beginBuilding()
+    let build = marks.beginBuilding()
     marks.commit(["A"])
     marks.libraryChanged(to: ["B"])
-    #expect(marks.removed == ["A"])
-    #expect(WatchQueueRemoval.reconcile(["A", "B"], start: 0, removed: marks.removed)?.keep == [1])
-    marks.endBuilding()
-    #expect(marks.removed.isEmpty)
-    // With no queue being built, a library prunes at once.
+    #expect(marks.removed(for: build) == ["A"])
+    #expect(
+      WatchQueueRemoval.reconcile(["A", "B"], start: 0, removed: marks.removed(for: build))?.keep
+        == [1])
+    marks.endBuilding(build)
+    #expect(marks.live.isEmpty)
+    // A mark committed before a queue begins goes with it.
     marks.commit(["C"])
+    let later = marks.beginBuilding()
+    #expect(marks.removed(for: later) == ["C"])
+    marks.endBuilding(later)
+  }
+
+  /// Codex round 3: A removed and sent again while an older queue was still
+  /// collecting. The older queue leaves A out; a queue begun after A came
+  /// back plays it (the shared marks kept A's old mark, and that play
+  /// silently didn't start).
+  @Test func aSongSentAgainPlaysInAQueueBegunAfter() {
+    var marks = WatchRemovalMarks()
+    let old = marks.beginBuilding()
+    marks.commit(["A"])
     marks.libraryChanged(to: ["B"])
-    #expect(marks.removed.isEmpty)
-    // Two queues: the mark stays until both are out.
-    marks.beginBuilding()
-    marks.beginBuilding()
-    marks.commit(["D"])
-    marks.libraryChanged(to: [])
-    marks.endBuilding()
-    #expect(marks.removed == ["D"])
-    marks.endBuilding()
-    #expect(marks.removed.isEmpty)
+    marks.libraryChanged(to: ["A", "B"])
+    let fresh = marks.beginBuilding()
+    #expect(marks.removed(for: old) == ["A"])
+    #expect(marks.removed(for: fresh).isEmpty)
+    marks.endBuilding(old)
+    #expect(WatchQueueRemoval.reconcile(["A"], start: 0, removed: marks.removed(for: fresh)) != nil)
+    // A removal committed while both collect reaches both.
+    let other = marks.beginBuilding()
+    marks.commit(["B"])
+    #expect(marks.removed(for: fresh) == ["B"])
+    #expect(marks.removed(for: other) == ["B"])
   }
 
   /// A damaged saved library says so until the iPhone's copy arrives.

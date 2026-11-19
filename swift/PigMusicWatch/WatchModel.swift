@@ -663,8 +663,8 @@ import UIKit
   func play(_ ids: [String], at index: Int = 0, seconds: Double = 0) async {
     guard let archive, let engine else { return }
     // Removal marks stay while this queue is collected (Codex round 2).
-    committedRemovals.beginBuilding()
-    defer { committedRemovals.endBuilding() }
+    let build = committedRemovals.beginBuilding()
+    defer { committedRemovals.endBuilding(build) }
     await stop()
     let stamp = playbackGeneration
     var items: [PlaybackOccurrence] = []
@@ -690,7 +690,7 @@ import UIKit
       // await left before the queue is published (Codex round 1 on #252).
       guard
         let kept = WatchQueueRemoval.reconcile(
-          items.map(\.track.id), start: start, removed: committedRemovals.removed)
+          items.map(\.track.id), start: start, removed: committedRemovals.removed(for: build))
       else { return }
       items = kept.keep.map { items[$0] }
       start = kept.start
