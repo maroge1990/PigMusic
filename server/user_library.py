@@ -5,6 +5,7 @@ references and small per-user lists. User data never changes household identity.
 """
 
 from collections import OrderedDict, defaultdict
+from datetime import datetime, timezone
 import hashlib
 import json
 import re
@@ -1117,10 +1118,33 @@ class UserLibrary:
         projection = self.projection(user_id)
         from .playlists import Playlists
 
+        # When each song joined this person's library: an album's added_at is
+        # its newest song's, for the web's "Recently added" sort (D-120).
+        with self.store.connect() as conn:
+            added = dict(
+                conn.execute(
+                    "SELECT track_id, added_at FROM library_members WHERE user_id=?",
+                    (user_id,),
+                ).fetchall()
+            )
+
+        def added_at(album):
+            times = [added[t["id"]] for t in album["tracks"] if t["id"] in added]
+            if not times:
+                return None
+            return (
+                datetime.fromtimestamp(max(times), timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
+
         return {
             **{key: value for key, value in projection.items() if key != "tracks"},
             "albums": [
-                {k: v for k, v in a.items() if k not in {"tracks", "cover_key"}}
+                {
+                    **{k: v for k, v in a.items() if k not in {"tracks", "cover_key"}},
+                    "added_at": added_at(a),
+                }
                 for a in projection["albums"]
             ],
             "playlist_count": len(Playlists(self.store, user_id).list()),

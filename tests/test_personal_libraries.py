@@ -837,3 +837,41 @@ def test_apple_music_playlist_long_name_keeps_the_usual_limit(tmp_path, monkeypa
 
     names = [p["name"] for p in Playlists(app.state.store, owner).list()]
     assert "x" * 100 in names and "x" * 150 not in names
+
+
+def test_library_albums_say_when_their_newest_song_was_added(tmp_path, monkeypatch):
+    """D-120: the web sorts albums by Recently added from added_at."""
+    app, owner, member, token, track = household(tmp_path, monkeypatch)
+    store = app.state.store
+    song = store.library["albums"][0]["tracks"][0]["id"]
+    monkeypatch.setattr(time, "time", lambda: 1_790_000_000)
+    store.user_libraries.add(member, [song])
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token},
+    ) as client:
+        albums = client.get("/api/v1/library").json()["albums"]
+    assert [a["added_at"] for a in albums] == ["2026-09-21T14:13:20Z"]
+
+
+def test_a_validator_from_before_added_at_reads_the_library_again(
+    tmp_path, monkeypatch
+):
+    """Codex round 1, finding 4: a client holding the old summary's ETag
+    (the bare revision) gets the new shape, not a 304."""
+    app, owner, member, token, track = household(tmp_path, monkeypatch)
+    store = app.state.store
+    store.user_libraries.add(member, [store.library["albums"][0]["tracks"][0]["id"]])
+    old = '"' + store.user_libraries.summary(member)["revision"] + '"'
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token},
+    ) as client:
+        response = client.get("/api/v1/library", headers={"If-None-Match": old})
+        assert response.status_code == 200
+        assert "added_at" in response.json()["albums"][0]
+        current = response.headers["ETag"]
+        again = client.get("/api/v1/library", headers={"If-None-Match": current})
+        assert again.status_code == 304

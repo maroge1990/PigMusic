@@ -583,3 +583,27 @@ def test_devices_are_named_marked_current_and_others_can_be_signed_out(fixture):
             # A bearer token is checked before the cookie.
             assert denied.status_code == 401
         assert client.delete("/api/v1/me/sessions").json() == {"revoked": 0}
+
+
+def test_people_list_song_counts_and_when_each_was_last_seen(fixture):
+    """D-120: Admin › People shows each person's songs and last use."""
+    auth, owner, clock = fixture
+    bearer = {"Authorization": "Bearer " + token(auth)}
+    added = auth.setup_code(owner, "sam", "Sam")
+    with auth.store.connect() as conn:
+        conn.executemany(
+            "INSERT INTO library_members VALUES (?,?,?,'request')",
+            [(owner, "t1", 1), (owner, "t2", 1), (added["user_id"], "t3", 1)],
+        )
+        conn.execute(
+            "UPDATE sessions SET last_seen_at=? WHERE user_id=?",
+            (1700003600, owner),
+        )
+    with TestClient(app_for(auth), base_url="https://private.ts.net") as client:
+        people = client.get("/api/v1/people", headers=bearer).json()["people"]
+    by_name = {p["display_name"]: p for p in people}
+    assert by_name["Mark"]["song_count"] == 2
+    assert by_name["Mark"]["last_seen"] == "2023-11-14T23:13:20+00:00"
+    assert by_name["Sam"]["song_count"] == 1
+    # Never signed in: no time rather than a made-up one.
+    assert by_name["Sam"]["last_seen"] is None

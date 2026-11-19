@@ -31,19 +31,39 @@ public struct PlaybackQueue: Sendable, Codable {
   public var current: PlaybackOccurrence? { items.indices.contains(index) ? items[index] : nil }
   private enum CodingKeys: String, CodingKey { case items, index }
   public init() {}
+  /// The songs the queue added itself when it ran out (similar songs,
+  /// #202), by occurrence: one you add later is never taken for them, even
+  /// the same song (Codex round 1 on batch E). Not kept in a checkpoint.
+  public private(set) var recommended: Set<UUID> = []
+  public func isRecommended(_ id: UUID) -> Bool { recommended.contains(id) }
   public mutating func replace(_ tracks: [Track], startingAt: Int = 0) {
     identity = UUID()
+    recommended = []
     items = tracks.map { PlaybackOccurrence(track: $0) }
     index = min(max(0, startingAt), max(0, items.count - 1))
+  }
+  /// Marks every song now in the queue as added by the queue itself: similar
+  /// songs played as a fresh queue.
+  public mutating func markAllRecommended() {
+    recommended = Set(items.map(\.id))
   }
   public mutating func select(index: Int) {
     guard items.indices.contains(index) else { return }
     self.index = index
   }
-  public mutating func append(_ tracks: [Track], next: Bool = false) {
+  /// `recommended`: the queue adds these itself, at the very end. A song you
+  /// add (Add to queue) goes before them, at the end of your own songs.
+  public mutating func append(_ tracks: [Track], next: Bool = false, recommended: Bool = false) {
     let additions = tracks.map { PlaybackOccurrence(track: $0) }
-    if next && current != nil {
+    if recommended {
+      items.append(contentsOf: additions)
+      self.recommended.formUnion(additions.map(\.id))
+    } else if next && current != nil {
       items.insert(contentsOf: additions, at: index + 1)
+    } else if let first = items.indices.first(where: {
+      $0 > index && self.recommended.contains(items[$0].id)
+    }) {
+      items.insert(contentsOf: additions, at: first)
     } else {
       items.append(contentsOf: additions)
     }

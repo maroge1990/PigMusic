@@ -2960,6 +2960,22 @@
         "title": "PausedDTO",
         "type": "object"
       },
+      "PeopleDTO": {
+        "properties": {
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/PersonDTO"
+            },
+            "title": "People",
+            "type": "array"
+          }
+        },
+        "required": [
+          "people"
+        ],
+        "title": "PeopleDTO",
+        "type": "object"
+      },
       "Person": {
         "properties": {
           "display_name": {
@@ -2980,6 +2996,49 @@
           "display_name"
         ],
         "title": "Person",
+        "type": "object"
+      },
+      "PersonDTO": {
+        "properties": {
+          "disabled": {
+            "default": 0,
+            "title": "Disabled",
+            "type": "integer"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_seen": {
+            "nullable": true,
+            "title": "Last Seen",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "song_count": {
+            "default": 0,
+            "title": "Song Count",
+            "type": "integer"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "display_name",
+          "role"
+        ],
+        "title": "PersonDTO",
         "type": "object"
       },
       "PlayEvent": {
@@ -20241,7 +20300,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PeopleDTO"
+                }
               }
             },
             "description": "Successful Response"

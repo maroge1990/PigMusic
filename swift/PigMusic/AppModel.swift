@@ -86,7 +86,9 @@ enum PlayOrigin: Hashable {
   /// Music requests the server is still getting, from the requests page summary.
   var serverActiveRequests = 0
   var pendingEdits: [PendingMutation] = []
-  @ObservationIgnored private var flushingEdits = false
+  /// Sending the outbox, Discard and Try again take turns (Codex round 1 on
+  /// batch E): a Discard never races an edit on its way.
+  @ObservationIgnored private let editTurns = TurnGate()
   var mutationActive = false
   var canMutate: Bool { service != nil && !busy && !syncing && !mutationActive }
   /// Requests wait in their own outbox, so a sync or another change in
@@ -611,7 +613,11 @@ enum PlayOrigin: Hashable {
         "home:" + section.rawValue, as: HomeContent.self)
     }
     try await loadCache(artworkChanged: true)
-    pendingEdits = (try? await database.pendingMutations()) ?? []
+    // Read first, then checked: never shown for another account (Codex
+    // round 2 on batch E).
+    let pending = (try? await database.pendingMutations()) ?? []
+    try account.check(stamp)
+    pendingEdits = pending
   }
   /// A refresh asked for while one runs (a live revision event during a
   /// pull-to-refresh, say) is not dropped: the running one goes round again,
@@ -1138,8 +1144,14 @@ enum PlayOrigin: Hashable {
     guard let store, person != nil else { throw NativeFailure.authentication }
     let stamp = account.generation
     try await store.enqueueMutation(mutation)
-    try account.check(stamp)
-    pendingEdits = try await store.pendingMutations()
+    guard let pending = try await EditOutbox.pending(
+      store: store, isCurrent: { [account] in account.isCurrent(stamp) })
+    else {
+      // The account ended: the same error as every other stale step.
+      try account.check(stamp)
+      throw CancellationError()
+    }
+    pendingEdits = pending
     let applied = await flushEdits()
     try account.check(stamp)
     if applied { await refresh() }
@@ -1154,10 +1166,9 @@ enum PlayOrigin: Hashable {
   /// Edits the server's receipts confirmed, until saveEdit reads them.
   @ObservationIgnored private var appliedEdits: Set<String> = []
   @discardableResult func flushEdits() async -> Bool {
-    guard !flushingEdits, let store, let service, person != nil else { return false }
-    flushingEdits = true
+    guard let store, let service, person != nil, editTurns.tryEnter() else { return false }
     let stamp = account.generation
-    defer { flushingEdits = false }
+    defer { editTurns.leave() }
     var applied = false
     do {
       // Edits to one thing stay in order; a network failure stops all.
@@ -1180,7 +1191,11 @@ enum PlayOrigin: Hashable {
       // Any favourite the server refused, tapped now or long ago, goes back.
       let refused = try await EditOutbox.settleRefusedFavourites(store: store)
       if account.isCurrent(stamp), !refused.isEmpty { favouritesRefused(refused) }
-      if account.isCurrent(stamp) { pendingEdits = try await store.pendingMutations() }
+      if let pending = try await EditOutbox.pending(
+        store: store, isCurrent: { [account] in account.isCurrent(stamp) })
+      {
+        pendingEdits = pending
+      }
     } catch { if account.isCurrent(stamp) { message = error.userMessage } }
     return applied
   }
@@ -1327,12 +1342,59 @@ enum PlayOrigin: Hashable {
       }
     }
   }
-  func discardEdit(_ id: String) async {
-    guard !flushingEdits, let store else { return }
-    try? await store.acknowledgeMutation(id)
-    pendingEdits = (try? await store.pendingMutations()) ?? []
+  /// Discard waits for any send under way, then says what happened: an
+  /// edit already sent can't be discarded (Codex round 1 on batch E).
+  func discardEdit(_ id: String) async -> String? {
+    guard let store else { return nil }
+    let stamp = account.generation
+    await editTurns.enter()
+    let result = await EditOutbox.discard(
+      id, store: store, isCurrent: { [account] in account.isCurrent(stamp) })
+    editTurns.leave()
+    guard let result, account.isCurrent(stamp) else { return nil }
+    let (outcome, pending) = result
+    pendingEdits = pending
+    // Never a send or a refresh: Discard must not deliver what it cancels
+    // (Codex confirmation on batch E).
+    return PendingChangeWords.discarded(outcome)
+  }
+  /// Remove from this list: forgets a withdrawn change on this iPhone only.
+  func forgetEdit(_ id: String) async {
+    guard let store else { return }
+    let stamp = account.generation
+    await editTurns.enter()
+    let pending = try? await EditOutbox.forget(
+      id, store: store, isCurrent: { [account] in account.isCurrent(stamp) })
+    editTurns.leave()
+    guard let pending, account.isCurrent(stamp) else { return }
+    pendingEdits = pending
+  }
+  /// Couldn't send. Try again. (D-120): the refused change waits once more
+  /// and is sent at once. Only for the account that asked: each await is
+  /// checked before anything is shown or sent (Codex round 1 on batch E).
+  func retryEdit(_ id: String) async {
+    guard let store else { return }
+    let stamp = account.generation
+    await editTurns.enter()
+    let pending = try? await EditOutbox.retry(
+      id, store: store, isCurrent: { [account] in account.isCurrent(stamp) })
+    editTurns.leave()
+    guard let pending, account.isCurrent(stamp) else { return }
+    pendingEdits = pending
     _ = await flushEdits()
+    guard account.isCurrent(stamp) else { return }
     await refresh()
+  }
+  /// Shuffle your library (D-120): songs from the whole library, less those
+  /// whose removal waits for its Undo, checked again just before playing.
+  func shuffleLibrary() async {
+    guard let store else { return }
+    let stamp = account.generation
+    let songs = try? await LibraryShuffle.songs(
+      store: store, isCurrent: { [account] in account.isCurrent(stamp) },
+      removing: { [undo] in undo.removing($0) })
+    guard let songs, account.isCurrent(stamp) else { return }
+    play(undo.withoutRemoved(songs))
   }
   func cachedCatalogue<T: Codable & Sendable>(
     key: String, load: @Sendable (NativeService) async throws -> T
@@ -1792,8 +1854,9 @@ enum PlayOrigin: Hashable {
         playing: player.playing)
       {
         play(added)
+        player.markAllRecommended()
       } else {
-        player.enqueue(added)
+        player.enqueue(added, recommended: true)
       }
     }
   }

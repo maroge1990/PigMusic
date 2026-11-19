@@ -18,6 +18,8 @@ export type Playlist = {
 export type PlaylistSummary = {
   id: string;
   name: string;
+  /** Moves with every edit to the playlist. */
+  revision?: number;
   track_count?: number;
   available_count?: number;
 };

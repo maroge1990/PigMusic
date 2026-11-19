@@ -1,15 +1,29 @@
 import { expect, test, type Route } from "@playwright/test";
-import { artist, mockApi } from "./mock";
+import { album, artist, mockApi } from "./mock";
+
+const nothing = { top: [], songs: [], albums: [], artists: [], playlists: [] };
 
 test("search types ahead without a request per keystroke", async ({ page }) => {
   const asked: string[] = [];
   await mockApi(page, {
     answers: {
-      "/v1/search": (route) => {
+      "/v1/search/results": (route) => {
         asked.push(
           "library:" + new URL(route.request().url()).searchParams.get("q"),
         );
-        return route.fulfill({ json: { tracks: [], household_tracks: [] } });
+        return route.fulfill({
+          json: {
+            ...nothing,
+            top: [{ kind: "artist", id: artist.id }],
+            artists: [
+              {
+                ...artist,
+                in_library: true,
+                musicbrainz_artist_id: "mb-charli",
+              },
+            ],
+          },
+        });
       },
       "/v1/catalogue/artists": (route) => {
         const q = new URL(route.request().url()).searchParams.get("q") || "";
@@ -42,14 +56,13 @@ test("search types ahead without a request per keystroke", async ({ page }) => {
   // One pause, one search: nothing was sent for "C", "Ch", "Cha" …
   expect(asked).toEqual(["library:Charli", "catalogue:Charli"]);
   await expect(page).toHaveURL(/#\/search\?q=Charli$/);
-  // Discover rows show artwork, type and what you already have.
-  const charli = discover.getByRole("link", { name: /English singer/ });
-  await expect(charli).toContainText("Artist · English singer");
-  await expect(charli).toContainText("In your library");
-  await expect(charli.locator(".cover")).toHaveCount(1);
-  await expect(
-    discover.getByRole("link", { name: /Charli Band/ }),
-  ).not.toContainText("In your library");
+  // Catalogue rows show artwork and type; an artist the server already has
+  // is shown once, as the top result, never again from the catalogue.
+  const band = discover.getByRole("link", { name: /Charli Band/ });
+  await expect(band).toContainText("Artist");
+  await expect(band.locator(".cover")).toHaveCount(1);
+  await expect(page.locator(".search-top-card")).toContainText(artist.name);
+  await expect(page.getByText("English singer")).toHaveCount(0);
   // Changing and going back reuses the earlier answers.
   await box.press("Backspace");
   await expect(discover).toContainText("Charl Band");
@@ -108,11 +121,12 @@ test("signing in as someone else never shows the previous person's search", asyn
         route.fulfill({
           json: { preferences: [], options: [], household_default: "" },
         }),
-      "/v1/search": (route) => {
+      "/v1/search/results": (route) => {
         asked.push(person || "nobody");
         return route.fulfill({
           json: {
-            tracks: [
+            ...nothing,
+            songs: [
               {
                 id: `${person}-song`,
                 title: `${person}'s saved song`,
@@ -123,7 +137,6 @@ test("signing in as someone else never shows the previous person's search", asyn
                 server_state: "in_library",
               },
             ],
-            household_tracks: [],
           },
         });
       },
@@ -158,13 +171,13 @@ test("#182: the library answers 150 ms after typing; the catalogue waits for a l
     return route.fulfill({
       json:
         kind === "library"
-          ? { tracks: [], household_tracks: [] }
+          ? nothing
           : { artists: [], offset: 0, total: 0, next_offset: null },
     });
   };
   await mockApi(page, {
     answers: {
-      "/v1/search": record("library"),
+      "/v1/search/results": record("library"),
       "/v1/catalogue/artists": record("catalogue"),
     },
   });
@@ -187,4 +200,144 @@ test("#182: the library answers 150 ms after typing; the catalogue waits for a l
   await expect
     .poll(() => asked)
     .toEqual(["library:Cha", "library:Char", "catalogue:Char"]);
+});
+
+test("D-120: results are grouped and each item shows once with one mark", async ({
+  page,
+}) => {
+  const server = (id: string, title: string, state: string, mine: boolean) => ({
+    ...album,
+    id,
+    title,
+    tracks: undefined,
+    server_state: state,
+    in_library: mine,
+  });
+  await mockApi(page, {
+    answers: {
+      "/v1/search/results": (route) =>
+        route.fulfill({
+          json: {
+            ...nothing,
+            top: [
+              { kind: "album", id: album.id },
+              { kind: "song", id: "t1" },
+            ],
+            songs: album.tracks,
+            // The album is both in the library and the top result.
+            albums: [
+              server(album.id, "Brat", "in_library", true),
+              server("album-2", "Brat remixed", "requested", true),
+              server("album-3", "Sucker", "household_available", false),
+            ],
+            artists: [
+              {
+                ...artist,
+                in_library: true,
+                musicbrainz_artist_id: "mb-charli",
+              },
+            ],
+          },
+        }),
+      "/v1/catalogue/artists": (route) =>
+        route.fulfill({
+          json: {
+            artists: [{ id: "mb-charli", name: artist.name }],
+            offset: 0,
+            total: 1,
+            next_offset: null,
+          },
+        }),
+    },
+  });
+  await page.goto("/#/search?q=Brat");
+  const results = page.locator(".search-results");
+  await expect(results.locator("h2")).toHaveText([
+    "Top result",
+    "Songs",
+    "Albums",
+    "Artists",
+  ]);
+  // Brat is the top result and nowhere else.
+  await expect(page.locator(".search-top-card")).toContainText("Brat");
+  await expect(
+    results.locator("a.album-card", { hasText: /^Brat$/ }),
+  ).toHaveCount(0);
+  const albums = page.getByRole("region", { name: "Albums" });
+  await expect(albums.locator("a.album-card")).toHaveCount(2);
+  await expect(
+    albums
+      .locator("a.album-card", { hasText: "Brat remixed" })
+      .getByRole("img", {
+        name: "Adding",
+      }),
+  ).toHaveCount(1);
+  await expect(
+    albums.locator("a.album-card", { hasText: "Sucker" }).getByRole("img", {
+      name: "Not in your library",
+    }),
+  ).toHaveCount(1);
+  // One mark per item, and the artist once though the catalogue has it too.
+  for (const card of await albums.locator("a.album-card").all())
+    await expect(card.locator(".state-badge")).toHaveCount(1);
+  const artists = page.getByRole("region", { name: "Artists" });
+  await expect(artists.getByRole("link")).toHaveCount(1);
+  await expect(artists).toContainText("1 album in your library");
+  await expect(
+    page.getByRole("region", { name: "Songs" }).locator(".song-row"),
+  ).toHaveCount(2);
+});
+
+test("D-120: before typing, recent searches, your library and Recently added", async ({
+  page,
+}) => {
+  await mockApi(page, {
+    answers: {
+      "/v1/search/results": (route) => route.fulfill({ json: nothing }),
+      "/v1/catalogue/artists": (route) =>
+        route.fulfill({
+          json: { artists: [], offset: 0, total: 0, next_offset: null },
+        }),
+      "/v1/home/recent": (route) =>
+        route.fulfill({
+          json: {
+            albums: [
+              {
+                id: album.id,
+                title: "Brat",
+                artist: artist.name,
+                cover_url: album.cover_url,
+              },
+            ],
+          },
+        }),
+    },
+  });
+  await page.goto("/#/search");
+  const shortcuts = page.getByRole("region", { name: "Your library" });
+  await expect(shortcuts.getByRole("link")).toHaveText([
+    /Artists\s*1/,
+    /Albums\s*1/,
+    /Songs\s*2/,
+    /Playlists\s*0/,
+  ]);
+  await expect(shortcuts.getByRole("link", { name: /Albums/ })).toHaveAttribute(
+    "href",
+    "#/library/albums",
+  );
+  const added = page.getByRole("region", { name: "Recently added" });
+  await expect(added.locator(".album-card img")).toHaveCount(1);
+  await expect(page.getByRole("group", { name: "Recent" })).toHaveCount(0);
+  // A search kept with Enter comes back under Recent.
+  const box = page.getByRole("searchbox", {
+    name: "Search artists, albums or songs",
+  });
+  await box.fill("charli");
+  await box.press("Enter");
+  await expect(page.getByText(/Nothing matches/)).toBeVisible();
+  await page.goto("/#/search");
+  const recent = page.getByRole("group", { name: "Recent" });
+  await expect(recent.getByRole("link", { name: "charli" })).toBeVisible();
+  await recent.getByRole("button", { name: "Clear" }).click();
+  await expect(recent).toHaveCount(0);
 });

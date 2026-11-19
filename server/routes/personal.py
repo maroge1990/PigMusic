@@ -46,6 +46,8 @@ from ..conditional import CONDITIONAL_RESPONSES, conditional_json
 from ..playlists import Playlists, PlaylistConflict, PlaylistFull
 
 # Apps compare these to explain which features need a server update.
+#: /library's validator suffix; bump it whenever the summary's shape grows.
+SUMMARY_SHAPE = "-s2"
 SERVER_API_LEVEL = 2
 SERVER_CAPABILITIES = [
     "household_playlist_tracks",
@@ -279,7 +281,10 @@ def personal_router(store, artist_jobs, recovery, mixes=None):
     @router.get("/library")
     async def library(request: Request):
         data = await run(users.summary, identity(request))
-        etag = '"' + data["revision"] + '"'
+        # The suffix names the summary's shape: a validator from before
+        # albums carried added_at (#251) no longer matches, so those
+        # clients read the new shape once.
+        etag = '"' + data["revision"] + SUMMARY_SHAPE + '"'
         headers = {
             "ETag": etag,
             "Cache-Control": "private, no-cache",

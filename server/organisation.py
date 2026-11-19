@@ -499,32 +499,31 @@ class Organisation:
 
     @coordinated
     def recover(self):
-        # One record that cannot be settled is left as it is (#240).
+        # One record that cannot be read or settled is left as it is (#240);
+        # one whose file step fails again is listed as unfinished (#258).
         for name, record in document_records.rows(self.store, "organisation"):
             try:
                 self.recover_one(record)
+            except document_records.RETRYABLE as error:
+                document_records.unfinished("organisation", name, error)
             except Exception as error:
                 document_records.report("organisation", name, error)
         self.store.refresh_library()
 
     def recover_one(self, record):
+        """Settle a move or Undo a restart interrupted; raises when it can't
+        be finished now (the record stays for the next start)."""
         if record["status"] == "undoing":
-            try:
-                self.undo(record["id"])
-            except (OSError, ValueError):
-                pass
+            self.undo(record["id"])
             return
         if record["status"] not in {"preparing", "publishing"}:
             return
-        try:
-            _, root = saved_track(self.store, record["track_id"])
-            self.recovery.check_mount(root)
-            if str(root.resolve()) != record["root"]:
-                return
-            with self.recovery.lock:
-                self.finish(record, root)
-        except (OSError, ValueError):
-            pass
+        _, root = saved_track(self.store, record["track_id"])
+        self.recovery.check_mount(root)
+        if str(root.resolve()) != record["root"]:
+            raise ValueError("Library mount changed.")
+        with self.recovery.lock:
+            self.finish(record, root)
 
     def undoable(self, limit=None, offset=0):
         """Operations that can be undone, newest first."""

@@ -44,6 +44,49 @@ final class WatchDemoTests: XCTestCase {
     app.buttons["Pause"].tap()
     expect(app.buttons["Play"])
     XCTAssertTrue(app.staticTexts["PigMusic"].exists, "The player opened instead")
+    // #255: the row said "Now playing" while paused.
+    expect(app.staticTexts["Paused"])
+    XCTAssertFalse(app.staticTexts["Now playing"].exists, app.debugDescription)
+  }
+
+  /// #252: the home names its state; every demo song is on the Watch.
+  func testTheHomeSaysTheWatchIsReady() {
+    launchPlaying()
+    let ready = app.descendants(matching: .any)
+      .matching(NSPredicate(format: "label BEGINSWITH %@", "Ready for your run")).firstMatch
+    for _ in 0..<5 where !ready.exists { app.swipeUp() }
+    expect(ready)
+  }
+
+  /// #252: removing a song that isn't playing leaves playback and the queue
+  /// alone; every removal used to stop playback and clear the queue.
+  func testRemovingAnotherSongKeepsPlaying() {
+    launchPlaying()
+    let songs = app.descendants(matching: .any)
+      .matching(NSPredicate(format: "label BEGINSWITH %@", "Songs")).firstMatch
+    for _ in 0..<10 where !(songs.exists && songs.isHittable) { app.swipeUp() }
+    expect(songs)
+    songs.tap()
+    let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "After the Rain"))
+      .firstMatch
+    for _ in 0..<5 where !(row.exists && row.isHittable) { app.swipeUp() }
+    expect(row)
+    row.swipeLeft()
+    let remove = app.buttons["Remove"]
+    expect(remove)
+    remove.tap()
+    // The removal is sent when its Undo runs out (about 10 s).
+    let undo = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Undo")).firstMatch
+    expect(undo)
+    let sent = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: undo)
+    XCTAssertEqual(XCTWaiter().wait(for: [sent], timeout: 30), .completed, app.debugDescription)
+    let back = app.buttons["BackButton"]
+    if back.exists { back.tap() } else { app.swipeRight() }
+    let pause = app.buttons["Pause"]
+    for _ in 0..<10 where !pause.exists { app.swipeDown() }
+    // Still playing (the demo songs last 30 s, so not necessarily the first).
+    expect(pause)
+    XCTAssertTrue(app.staticTexts["Now playing"].exists, app.debugDescription)
   }
 
   /// D-117 (#246): the storage page names Apple Watch and iPhone in full,
@@ -55,9 +98,10 @@ final class WatchDemoTests: XCTestCase {
     for _ in 0..<10 where !(storage.exists && storage.isHittable) { app.swipeUp() }
     expect(storage)
     storage.tap()
+    // D-120: "… of 1 GB used" beside a gauge, with the song count.
     expect(
-      app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "songs on Apple Watch"))
-        .firstMatch)
+      app.descendants(matching: .any)
+        .matching(NSPredicate(format: "label CONTAINS %@", "of 1 GB used")).firstMatch)
     let limit = app.descendants(matching: .any)
       .matching(NSPredicate(format: "label BEGINSWITH %@", "Storage limit")).firstMatch
     expect(limit)

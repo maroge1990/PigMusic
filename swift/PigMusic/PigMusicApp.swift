@@ -266,7 +266,7 @@ struct LibraryShell: View {
         .undoBarSheet(model)
       }
       #if DEBUG
-        // Headless UI review: --tab=<name>, --demo-play and --show-player.
+        // Headless UI review: --tab=<name>, --demo-play (--demo-play-one) and --show-player.
         .task {
           let arguments = ProcessInfo.processInfo.arguments
           if let tab = arguments.first(where: { $0.hasPrefix("--tab=") })?.dropFirst(6),
@@ -276,7 +276,9 @@ struct LibraryShell: View {
           }
           if arguments.contains("--demo-play") {
             while model.songs.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
-            model.play(model.songs)
+            // --demo-play-one: one song, so Up next is empty (D-120).
+            model.play(
+              arguments.contains("--demo-play-one") ? Array(model.songs.prefix(1)) : model.songs)
             if !arguments.contains("--demo-autoplay") { model.player.pause() }
             // The full player opens only from a MiniPlayer tap; screenshots need it.
             if arguments.contains("--show-player") { showPlayer = true }

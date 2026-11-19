@@ -58,7 +58,7 @@ import PigStore
     -> [RefusedFavourite]
   {
     let refused = try await store.pendingMutations().filter {
-      $0.mutation.action == "favourite" && $0.state != "queued"
+      $0.mutation.action == "favourite" && $0.state != "queued" && !$0.withdrawn
     }
     guard !refused.isEmpty else { return [] }
     for item in refused { try await store.acknowledgeMutation(item.id) }
@@ -80,6 +80,86 @@ import PigStore
         trackId: id, value: favourite(id, in: remaining),
         track: refused.last { $0.mutation.track?.id == id }?.mutation.track)
     }
+  }
+
+  /// Try again (D-120): a refused edit that can be sent again waits once
+  /// more. The outbox as it now stands, or nil when the account ended
+  /// meanwhile: nothing read here may be shown for another account (Codex
+  /// round 1 on batch E). A conflicted edit is never retried.
+  public static func retry(_ id: String, store: LibraryStore, isCurrent: () -> Bool)
+    async throws -> [PendingMutation]?
+  {
+    guard isCurrent() else { return nil }
+    let pending = try await store.pendingMutations()
+    guard isCurrent() else { return nil }
+    guard let item = pending.first(where: { $0.id == id }), item.retryable else { return pending }
+    try await store.updateMutation(item.retried())
+    guard isCurrent() else { return nil }
+    let after = try await store.pendingMutations()
+    return isCurrent() ? after : nil
+  }
+
+  /// Discard never causes a send (Codex confirmation on batch E). An edit
+  /// never sent is taken out of the outbox ("Discarded"); one whose send may
+  /// have reached the server (or an older build's, with no marker) is
+  /// withdrawn: never sent again, kept to say so. Run it in the outbox's
+  /// turn (`TurnGate`), so no send is under way. nil when the account ended
+  /// meanwhile.
+  public static func discard(_ id: String, store: LibraryStore, isCurrent: () -> Bool)
+    async -> (DiscardResult, [PendingMutation])?
+  {
+    guard isCurrent() else { return nil }
+    do {
+      let pending = try await store.pendingMutations()
+      guard isCurrent() else { return nil }
+      guard let item = pending.first(where: { $0.id == id }) else {
+        return (.alreadyGone, pending)
+      }
+      if item.withdrawn { return (.unknown, pending) }
+      let result: DiscardResult
+      if item.maybeSent {
+        var withdrawn = item
+        withdrawn.state = "withdrawn"
+        withdrawn.message = nil
+        try await store.updateMutation(withdrawn)
+        result = .unknown
+      } else {
+        try await store.acknowledgeMutation(id)
+        result = .discarded
+      }
+      guard isCurrent() else { return nil }
+      let after = try await store.pendingMutations()
+      return isCurrent() ? (result, after) : nil
+    } catch {
+      let pending = (try? await store.pendingMutations()) ?? []
+      return isCurrent() ? (.failed, pending) : nil
+    }
+  }
+
+  /// Remove from this list: forgets a withdrawn edit on this iPhone only;
+  /// nothing is sent. nil when the account ended meanwhile.
+  public static func forget(_ id: String, store: LibraryStore, isCurrent: () -> Bool)
+    async throws -> [PendingMutation]?
+  {
+    guard isCurrent() else { return nil }
+    let pending = try await store.pendingMutations()
+    guard isCurrent() else { return nil }
+    guard pending.first(where: { $0.id == id })?.withdrawn == true else { return pending }
+    try await store.acknowledgeMutation(id)
+    guard isCurrent() else { return nil }
+    let after = try await store.pendingMutations()
+    return isCurrent() ? after : nil
+  }
+
+  /// The outbox as this account's page may show it: read first, then
+  /// checked, so a read that outlives its account is never shown for the
+  /// next one (Codex round 2 on batch E). nil when the account ended.
+  public static func pending(store: LibraryStore, isCurrent: () -> Bool) async throws
+    -> [PendingMutation]?
+  {
+    guard isCurrent() else { return nil }
+    let pending = try await store.pendingMutations()
+    return isCurrent() ? pending : nil
   }
 
   /// What an edit changes, for keeping dependent edits in order.
@@ -104,9 +184,18 @@ import PigStore
     sending: for item in try await store.pendingMutations() {
       guard isCurrent() else { return .stale }
       let scope = Self.scope(item.mutation)
+      if item.withdrawn { continue }
       guard item.state == "queued", !blocked.contains(scope) else {
         blocked.insert(scope)
         continue
+      }
+      // Recorded before it leaves: a reply lost on the way leaves an edit
+      // the server may have applied (Codex round 2 on batch E).
+      if item.attempted != true {
+        var marked = item
+        marked.attempted = true
+        try await store.updateMutation(marked)
+        guard isCurrent() else { return .stale }
       }
       do {
         let receipt = try await apply(item.mutation)
@@ -119,6 +208,7 @@ import PigStore
       } catch NativeFailure.changed {
         var changed = item
         changed.state = "conflict"
+        changed.attempted = false
         changed.message =
           "This playlist changed on the server. Discard this edit or review the current playlist before reapplying it."
         try await store.updateMutation(changed)
@@ -126,6 +216,7 @@ import PigStore
       } catch is MutationRejection {
         var rejected = item
         rejected.state = "rejected"
+        rejected.attempted = false
         rejected.message = "The server couldn't apply this edit. Review its song or playlist."
         try await store.updateMutation(rejected)
         blocked.insert(scope)

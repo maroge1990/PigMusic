@@ -677,52 +677,86 @@ struct DownloadMenu: View {
 }
 
 
+/// Account (D-120): your initials, name and song count, then the links in
+/// groups with an icon each, Refresh library, and Sign out last. Seamless
+/// playback and Crossfade live in Preferences; nothing explains itself in a
+/// paragraph (D-101).
 struct AccountView: View {
   @Bindable var model: AppModel
   @State private var signingOut = false
+  /// Your music quality in words, once the server says.
+  @State private var quality: String?
+  /// Counts answers from Your music quality, so an older read is dropped.
+  @State private var qualitySaves = 0
+  /// How many devices are signed in, once the server says.
+  @State private var devices: Int?
+  @Environment(\.colorScheme) private var scheme
+  @ScaledMetric(relativeTo: .title) private var avatarSize: CGFloat = 64
+  private var name: String { model.person?.displayName ?? model.person?.username ?? "" }
   var body: some View {
     Form {
       Section {
-        VStack(alignment: .leading, spacing: 2) {
-          Text(model.person?.displayName ?? "").font(.headline)
-          Text(model.server).font(PigType.footnote).foregroundStyle(.secondary)
-            .textSelection(.enabled)
+        HStack(spacing: 14) {
+          Text(
+            name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined()
+              .uppercased()
+          )
+          .font(.title2.weight(.bold)).foregroundStyle(PigBrand.textAccent(scheme))
+          .frame(width: avatarSize, height: avatarSize)
+          .background(PigBrand.accent(scheme).opacity(0.16), in: Circle())
+          .accessibilityHidden(true)
+          VStack(alignment: .leading, spacing: 2) {
+            Text(name).font(.title2.weight(.bold))
+            Text("\(model.songCount.formatted()) song\(model.songCount == 1 ? "" : "s") in your library")
+              .font(PigType.subhead).foregroundStyle(.secondary).pigFigures()
+          }
         }
-        NavigationLink("Preferences") { PreferencesView(model: model) }
-        NavigationLink("Password") { PasswordView(model: model) }
-        NavigationLink("Devices and sessions") { SessionsView(model: model) }
-        NavigationLink("Your music quality") { QualityView(model: model) }
-        NavigationLink("Changes not sent yet (\(model.pendingEdits.count))") {
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+      }
+      Section {
+        link("Preferences", symbol: "slider.horizontal.3", tint: PigBrand.accent(scheme)) {
+          PreferencesView(model: model)
+        }
+        link(
+          "Your music quality", symbol: "waveform", tint: PigBrand.accent(scheme), value: quality
+        ) {
+          QualityView(model: model) {
+            quality = $0
+            qualitySaves += 1
+          }
+        }
+      }
+      Section {
+        link("Password", symbol: "lock", tint: PigBrand.secondary(scheme)) {
+          PasswordView(model: model)
+        }
+        link(
+          "Devices and sessions", symbol: "laptopcomputer.and.iphone",
+          tint: PigBrand.secondary(scheme), value: devices.map { $0.formatted() }
+        ) {
+          SessionsView(model: model)
+        }
+      }
+      Section {
+        link(
+          "Changes not sent yet", symbol: "arrow.up.circle", tint: .gray,
+          badge: model.pendingEdits.count
+        ) {
           PendingEditsView(model: model)
         }
-        NavigationLink("Diagnostics") { DiagnosticsView(model: model) }
+        link("Diagnostics", symbol: "waveform.path.ecg", tint: .gray) {
+          DiagnosticsView(model: model)
+        }
       }
-      Section("Library") {
-        LabeledContent("Songs in your library", value: model.songCount.formatted())
+      Section {
         Button("Refresh library", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
           .disabled(model.syncing)
       }
       Section {
-        Toggle(
-          "Seamless playback",
-          isOn: Binding(
-            get: { model.player.seamlessEnabled }, set: { model.player.seamlessEnabled = $0 }))
-        if model.player.seamlessEnabled {
-          Toggle(
-            "Crossfade",
-            isOn: Binding(
-              get: { model.player.crossfadeEnabled }, set: { model.player.crossfadeEnabled = $0 }))
-        }
-      } header: {
-        Text("Playback")
-      } footer: {
-        Text(
-          "Seamless playback gives gapless albums and a three-second crossfade between unrelated songs. A song that is very large or slow to arrive plays as a normal stream automatically."
-        )
-      }
-      Section {
         // Asks first, as signing out another device does: it can't be undone (D-79, #183).
         Button("Sign out", role: .destructive) { signingOut = true }
+          .frame(maxWidth: .infinity)
           .disabled(model.busy || model.mutationActive)
           .confirmationDialog(
             "Sign out of this iPhone? It will need to sign in again.", isPresented: $signingOut,
@@ -732,7 +766,45 @@ struct AccountView: View {
           }
       }
       if let message = model.message { Section { StatusText(message) } }
-    }.navigationTitle("Account")
+    }
+    .navigationTitle("Account").navigationBarTitleDisplayMode(.inline)
+    .task {
+      // Only what the rows show; the rows open without them.
+      // A choice saved meanwhile on Your music quality wins over this read.
+      let before = qualitySaves
+      if let settings = try? await model.readCatalogue({ try await $0.quality() }),
+        qualitySaves == before
+      {
+        quality = QualityChoices(settings).summary
+      }
+      if let sessions = try? await model.readCatalogue({ try await $0.sessions() }) {
+        devices = sessions.count { $0.revokedAt == nil }
+      }
+    }
+  }
+  /// A link with its icon tile, and its value or a count badge on the right.
+  private func link<Destination: View>(
+    _ title: String, symbol: String, tint: Color, value: String? = nil, badge: Int = 0,
+    @ViewBuilder destination: @escaping () -> Destination
+  ) -> some View {
+    NavigationLink(destination: destination) {
+      HStack(spacing: 12) {
+        Image(systemName: symbol).font(.body.weight(.semibold)).foregroundStyle(.white)
+          .frame(width: 30, height: 30)
+          .background(tint, in: .rect(cornerRadius: 7))
+          .accessibilityHidden(true)
+        Text(title)
+        Spacer()
+        if let value { Text(value).foregroundStyle(.secondary).pigFigures() }
+        if badge > 0 {
+          Text(badge.formatted()).font(PigType.footnote.weight(.semibold)).pigFigures()
+            .foregroundStyle(PigBrand.onAccent(scheme))
+            .padding(.horizontal, 7).frame(minWidth: 22, minHeight: 22)
+            .background(PigBrand.accent(scheme), in: Capsule())
+            .accessibilityLabel("\(badge) change\(badge == 1 ? "" : "s")")
+        }
+      }
+    }
   }
 }
 
@@ -959,21 +1031,32 @@ struct NowPlayingView: View {
     }
   }
   private var upNext: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      HStack {
+    let layout = player.upNextLayout(model)
+    return VStack(alignment: .leading, spacing: 0) {
+      HStack(alignment: .firstTextBaseline) {
         Text("Up next").font(PigType.sectionTitle)
+        if !layout.nothingNext {
+          Text(SongSpan.summary(layout.chosen.map(\.track)))
+            .font(PigType.footnote).foregroundStyle(.secondary).pigFigures()
+        }
         Spacer()
         NavigationLink("Edit") { QueueEditorView(model: model) }
       }.padding(.bottom, 6)
-      let upcoming = Array(player.upcoming(hiding: model.undo).prefix(50))
-      // Where similar songs begin when the queue ran out (#202).
-      let similarStart = upcoming.firstIndex { model.similarIDs.contains($0.track.id) }
-      ForEach(Array(upcoming.enumerated()), id: \.element.id) { offset, item in
-        if offset == similarStart {
-          Text("Similar songs").font(PigType.caption.weight(.semibold))
-            .foregroundStyle(.secondary).padding(.top, 10).padding(.bottom, 4)
-            .accessibilityAddTraits(.isHeader)
-        }
+      if layout.nothingNext {
+        NothingNext(model: model, layout: layout).padding(.vertical, 8)
+      }
+      ForEach(layout.chosen.prefix(50)) { item in
+        UpNextRow(model: model, item: item)
+        RowSeparator()
+      }
+      if layout.showsSimilarHeading {
+        // Where similar songs begin when the queue ran out (#202, D-120).
+        Text(UpNextLayout<PlaybackOccurrence>.similarTitle).font(PigType.sectionTitle)
+          .padding(.top, 16).padding(.bottom, 6)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .accessibilityAddTraits(.isHeader)
+      }
+      ForEach(layout.similar.prefix(50)) { item in
         UpNextRow(model: model, item: item)
         RowSeparator()
       }
@@ -1013,6 +1096,34 @@ extension PlayerController {
       !undo.hides(AppModel.undoKey(upNext: $0.id))
     }
   }
+  /// Your songs, then similar songs (D-120).
+  @MainActor func upNextLayout(_ model: AppModel) -> UpNextLayout<PlaybackOccurrence> {
+    UpNextLayout(upcoming(hiding: model.undo), keepPlaying: model.preferences.keepPlaying) {
+      queue.isRecommended($0.id)
+    }
+  }
+}
+
+/// No song of yours follows (D-120): "Nothing next", with Shuffle your
+/// library when nothing at all waits. Where Keep playing is on, Then similar
+/// songs follows it.
+private struct NothingNext: View {
+  let model: AppModel
+  let layout: UpNextLayout<PlaybackOccurrence>
+  var body: some View {
+    VStack(spacing: 12) {
+      Text(UpNextLayout<PlaybackOccurrence>.nothingNextTitle)
+        .font(PigType.headline.weight(.semibold)).foregroundStyle(.secondary)
+      if layout.offersShuffle {
+        Button(UpNextLayout<PlaybackOccurrence>.shuffleTitle, systemImage: "shuffle") {
+          Task { await model.shuffleLibrary() }
+        }
+        .pigPrimaryAction()
+        .disabled(model.songCount == 0)
+      }
+    }
+    .frame(maxWidth: .infinity)
+  }
 }
 
 private struct AirPlayButton: UIViewRepresentable {
@@ -1024,34 +1135,74 @@ private struct AirPlayButton: UIViewRepresentable {
   func updateUIView(_ view: AVRoutePickerView, context: Context) {}
 }
 
-/// The queue: the playing song, then Up next, which drags to reorder and
-/// swipes to remove at once with Undo (D-118, D-79).
+/// The queue (D-120): the playing song with its cover, Up next with its
+/// count and time left, then similar songs as their own section. Songs drag
+/// to reorder and swipe to remove at once with Undo (D-118, D-79); an empty
+/// queue says Nothing next.
 struct QueueEditorView: View {
   let model: AppModel
+  @Environment(\.colorScheme) private var scheme
+  @ScaledMetric(relativeTo: .body) private var coverSize: CGFloat = 64
   private var player: PlayerController { model.player }
   var body: some View {
+    let layout = player.upNextLayout(model)
     List {
-      if let current = player.queue.current {
-        Section("Current song") {
-          SongRow(model: model, track: current.track, playing: true)
-        }
+      if let current = player.queue.current?.track {
+        Section { nowPlaying(current) }
       }
-      // The same row and menu as Up next under the player (#157).
-      Section("Up next") {
-        let shown = player.upcoming(hiding: model.undo)
-        ForEach(shown) { item in
-          UpNextRow(model: model, item: item)
-            .swipeActions {
-              Button("Remove", systemImage: "xmark", role: .destructive) {
-                model.removeFromUpNextLater(item)
-              }
-            }
+      Section {
+        if layout.nothingNext {
+          NothingNext(model: model, layout: layout).listRowBackground(Color.clear)
         }
-        .onMove { from, to in move(shown, from: from, to: to) }
+        rows(layout.chosen)
+      } header: {
+        HStack(alignment: .firstTextBaseline) {
+          Text("Up next").font(PigType.sectionTitle).foregroundStyle(PigBrand.text(scheme))
+          Spacer()
+          if !layout.nothingNext {
+            Text(SongSpan.summary(layout.chosen.map(\.track))).font(PigType.footnote).pigFigures()
+          }
+        }.textCase(nil)
+      }
+      if layout.showsSimilarHeading {
+        Section {
+          rows(layout.similar)
+        } header: {
+          Text(UpNextLayout<PlaybackOccurrence>.similarTitle).font(PigType.sectionTitle)
+            .foregroundStyle(PigBrand.text(scheme)).textCase(nil)
+        }
       }
     }
-    .pigCanvas().navigationTitle("Playback queue").navigationBarTitleDisplayMode(.inline)
+    .pigCanvas().navigationTitle("Queue").navigationBarTitleDisplayMode(.inline)
     .toolbar { EditButton() }
+  }
+  private func nowPlaying(_ track: Track) -> some View {
+    HStack(spacing: 14) {
+      Artwork(model: model, source: track.artworkSource, title: track.title, width: 256)
+        .frame(width: coverSize, height: coverSize)
+      VStack(alignment: .leading, spacing: 2) {
+        Text("NOW PLAYING").font(PigType.caption.weight(.semibold))
+          .foregroundStyle(PigBrand.textAccent(scheme))
+        Text(track.title).font(.headline).lineLimit(2)
+        Text([track.artist, track.album ?? ""].filter { !$0.isEmpty }.joined(separator: " · "))
+          .font(PigType.subhead).foregroundStyle(.secondary).lineLimit(1)
+      }
+      Spacer(minLength: 0)
+    }
+    .padding(.vertical, 4)
+    .accessibilityElement(children: .combine)
+  }
+  /// The same row and menu as Up next under the player (#157).
+  private func rows(_ shown: [PlaybackOccurrence]) -> some View {
+    ForEach(shown) { item in
+      UpNextRow(model: model, item: item)
+        .swipeActions {
+          Button("Remove", systemImage: "xmark", role: .destructive) {
+            model.removeFromUpNextLater(item)
+          }
+        }
+    }
+    .onMove { from, to in move(shown, from: from, to: to) }
   }
   /// Moves one song of those shown to `to`, by its place among the whole queue.
   private func move(_ shown: [PlaybackOccurrence], from: IndexSet, to: Int) {

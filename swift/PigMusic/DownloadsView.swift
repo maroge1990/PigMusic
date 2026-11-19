@@ -409,23 +409,41 @@ struct TransferGroupLabel: View {
   }
 }
 
-/// The Downloads tab: what you asked the server, this iPhone and Apple Watch
-/// to download. Each row says how many songs it holds (#209) and its badge
-/// counts its queued and in-progress songs; the tab badge is their total.
+/// The Downloads tab (D-120): each place is a card that says how many songs
+/// it holds and what is moving now (#209), iPhone and Apple Watch with a
+/// storage gauge; the songs on their way to this iPhone or Apple Watch are
+/// listed below. Each page keeps Transfers, On your iPhone or Apple Watch,
+/// and Settings (#209).
 struct DownloadsHubView: View {
   let model: AppModel
   var body: some View {
-    List {
-      row("Server", detail: DownloadPlace.server.summary(songs: model.songCount),
-        symbol: "server.rack", active: model.serverActiveRequests) { RequestsView(model: model) }
-      row("iPhone", detail: DownloadPlace.phone.summary(songs: phoneSongs), symbol: "iphone",
-        active: model.phoneActiveDownloads) { DownloadsView(model: model) }
-      if model.watch?.supported == true {
-        row("Apple Watch", detail: DownloadPlace.watch.summary(songs: watchSongs),
-          symbol: "applewatch", active: model.watchActiveDownloads) { WatchDownloadsView(model: model) }
+    ScrollView {
+      VStack(alignment: .leading, spacing: 12) {
+        card(
+          "iPhone", symbol: "iphone",
+          summary: DownloadPlace.phone.hubSummary(songs: phoneSongs, active: model.phoneActiveDownloads),
+          gauge: phoneGauge
+        ) { DownloadsView(model: model) }
+        if model.watch?.supported == true {
+          card(
+            "Apple Watch", symbol: "applewatch",
+            summary: DownloadPlace.watch.hubSummary(
+              songs: watchSongs, active: model.watchActiveDownloads),
+            gauge: watchGauge
+          ) { WatchDownloadsView(model: model) }
+        }
+        card(
+          "Server", symbol: "server.rack",
+          summary: DownloadPlace.server.hubSummary(
+            songs: model.songCount, active: model.serverActiveRequests),
+          gauge: nil
+        ) { RequestsView(model: model) }
+        InProgressList(model: model)
       }
+      .padding(.horizontal, 16).padding(.bottom, 24)
     }
     .navigationTitle("Downloads")
+    .refreshable { await model.refreshServerRequests() }
     .task {
       // Server requests have no live progress feed; poll while any are active.
       await model.refreshServerRequests()
@@ -435,21 +453,132 @@ struct DownloadsHubView: View {
       }
     }
   }
-  private func row<Destination: View>(
-    _ title: String, detail: String, symbol: String, active: Int,
+  private func card<Destination: View>(
+    _ title: String, symbol: String, summary: String, gauge: StorageGauge?,
     @ViewBuilder destination: @escaping () -> Destination
   ) -> some View {
     NavigationLink(destination: destination) {
-      Label {
-        VStack(alignment: .leading) {
-          Text(title)
-          Text(detail).font(PigType.footnote).foregroundStyle(.secondary).pigFigures()
-        }
-      } icon: {
-        Image(systemName: symbol)
-      }
-    }.badge(active)
+      DownloadPlaceCard(title: title, symbol: symbol, summary: summary, gauge: gauge)
+    }
+    .buttonStyle(.plain)
   }
   private var phoneSongs: Int { model.downloads?.records.count { $0.state == "ready" } ?? 0 }
   private var watchSongs: Int { model.watch?.receipt?.ready.count ?? 0 }
+  private var phoneGauge: StorageGauge? {
+    guard let downloads = model.downloads else { return nil }
+    let used = downloads.records.filter { $0.state == "ready" }.reduce(Int64(0)) { $0 + $1.total }
+    return StorageGauge(used: used, limit: downloads.budgetBytes)
+  }
+  private var watchGauge: StorageGauge? {
+    guard let receipt = model.watch?.receipt else { return nil }
+    return StorageGauge(used: receipt.usedBytes, limit: receipt.budgetBytes)
+  }
+}
+
+/// One place on the Downloads tab: its icon, name and counts, and for a
+/// device how full its Storage limit is.
+private struct DownloadPlaceCard: View {
+  let title: String
+  let symbol: String
+  let summary: String
+  let gauge: StorageGauge?
+  @Environment(\.colorScheme) private var scheme
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(spacing: 12) {
+        Image(systemName: symbol).font(.title2).foregroundStyle(PigBrand.accent(scheme))
+          .frame(width: 32).accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(title).font(.headline).foregroundStyle(PigBrand.text(scheme))
+          Text(summary).font(PigType.footnote).foregroundStyle(.secondary).pigFigures()
+        }
+        Spacer(minLength: 0)
+        Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+          .foregroundStyle(.tertiary).accessibilityHidden(true)
+      }
+      if let gauge {
+        ProgressView(value: gauge.fraction).tint(PigBrand.accent(scheme))
+          .accessibilityHidden(true)
+        Text(gauge.text).font(PigType.footnote).foregroundStyle(.secondary).pigFigures()
+      }
+    }
+    .padding(.horizontal, 16).padding(.vertical, 14)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(PigBrand.surface(scheme), in: .rect(cornerRadius: 14, style: .continuous))
+    .contentShape(.rect(cornerRadius: 14))
+    .accessibilityElement(children: .combine)
+  }
+}
+
+/// The songs on their way to this iPhone and Apple Watch, each with its
+/// mark; the device's own page acts on them.
+private struct InProgressList: View {
+  let model: AppModel
+  @Environment(\.colorScheme) private var scheme
+  private struct Item: Identifiable {
+    let id: String
+    let record: DownloadRecord
+    let control: TransferControl
+    let place: DownloadPlace
+  }
+  private var items: [Item] {
+    var items: [Item] = []
+    if let downloads = model.downloads {
+      for record in downloads.records
+      where ["queued", "downloading"].contains(record.state)
+        && !model.undo.hides(AppModel.undoKey(download: record.id))
+      {
+        items.append(
+          Item(
+            id: "phone:" + record.id, record: record,
+            control: TransferControl.phone(record, progress: downloads.progress[record.id]),
+            place: .phone))
+      }
+    }
+    if let watch = model.watch, let downloads = watch.downloads {
+      let receipt = watch.receipt
+      for record in downloads.records
+      where record.state != "failed" && !record.delivered
+        && (record.checksum == nil || receipt?.ready[record.id] != record.checksum)
+        && !model.undo.hides(AppModel.undoKey(watchTransfer: record.id))
+      {
+        items.append(
+          Item(
+            id: "watch:" + record.id, record: record,
+            control: TransferControl.watch(
+              record, onWatch: false, progress: downloads.progress[record.id]),
+            place: .watch))
+      }
+    }
+    return Array(items.prefix(30))
+  }
+  var body: some View {
+    let items = items
+    if !items.isEmpty {
+      Text("In progress").font(PigType.sectionTitle).padding(.top, 12)
+        .accessibilityAddTraits(.isHeader)
+      VStack(spacing: 0) {
+        ForEach(items) { item in
+          HStack(spacing: 4) {
+            CollectionRow(
+              item.record.track.title,
+              subtitle: [item.record.track.artist, item.record.track.album ?? ""]
+                .filter { !$0.isEmpty }.joined(separator: " · "),
+              subtitleLines: 1
+            ) {
+              ArtworkThumb(
+                model: model, source: item.record.track.artworkSource,
+                title: item.record.track.title)
+            }
+            .accessibilityElement(children: .combine)
+            TransferMarkButton(mark: item.control.mark, place: item.place, tap: nil, label: nil) {}
+          }
+          .padding(.vertical, 8)
+          if item.id != items.last?.id { RowSeparator() }
+        }
+      }
+      .padding(.leading, 12).padding(.trailing, 4)
+      .background(PigBrand.surface(scheme), in: .rect(cornerRadius: 14, style: .continuous))
+    }
+  }
 }

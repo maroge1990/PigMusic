@@ -77,11 +77,57 @@ final class ServerTests: XCTestCase {
     tap(app.buttons["Send to Apple Watch"])
     // D-103: sending shows no pop-up and no text, only a brief checkmark.
     XCTAssertFalse(app.alerts["Apple Watch"].waitForExistence(timeout: 5), app.debugDescription)
-    XCTAssertFalse(
-      app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Apple Watch'")).firstMatch
-        .exists, app.debugDescription)
+    let words = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Apple Watch'"))
+      .firstMatch
+    // The log keeps what was printed, not an assertion's message: name the text.
+    if words.exists { print("Shown after sending: \(words.label)\n\(app.debugDescription)") }
+    XCTAssertFalse(words.exists, "Shown after sending: \(words.label)")
     XCTAssertFalse(app.staticTexts["Connect and refresh your library on iPhone first."].exists)
     expect(app.buttons["Download"])
+  }
+
+  /// D-120 (#251): Your music quality saves on a tap, with no Save button,
+  /// and the household default says its quality in words.
+  func testYourMusicQualitySavesOnATap() throws {
+    try signIn()
+    let quality = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Your music quality'"))
+      .firstMatch
+    let aac = app.buttons["AAC 256 kbps"].firstMatch
+    // Just after sign-in the Account sheet can be sent away (iOS's password
+    // prompt): open it again until the page shows.
+    for _ in 0..<4 where !aac.exists {
+      if !quality.exists { tap(app.buttons["Account"].firstMatch) }
+      tap(quality)
+      _ = aac.waitForExistence(timeout: 15)
+    }
+    expect(aac)
+    XCTAssertFalse(app.buttons["Save preference"].exists)
+    let household = app.buttons.matching(
+      NSPredicate(format: "label BEGINSWITH 'Household default, '")
+    ).firstMatch
+    expect(household)
+    XCTAssertFalse(household.label.contains("_"), household.label)
+    // The library may still be loading after sign-in, when a choice can't be
+    // saved yet: tap until it is ticked.
+    let deadline = Date.now.addingTimeInterval(120)
+    while !aac.isSelected, Date.now < deadline {
+      if app.buttons["Not Now"].firstMatch.exists { app.buttons["Not Now"].firstMatch.tap() }
+      aac.tap()
+      _ = aac.wait(for: \.isSelected, toEqual: true, timeout: 5)
+    }
+    XCTAssertTrue(aac.isSelected, app.debugDescription)
+    // Saved on the server: it is still ticked when the page opens again.
+    tap(app.navigationBars["Your music quality"].buttons.firstMatch)
+    expect(app.buttons.matching(NSPredicate(format: "label CONTAINS 'AAC 256 kbps'")).firstMatch)
+    tap(quality)
+    let reopened = app.buttons["AAC 256 kbps"].firstMatch
+    expect(reopened, timeout: 30)
+    XCTAssertTrue(reopened.isSelected, app.debugDescription)
+    // Back to the default, for the other tests.
+    tap(household)
+    let restored = expectation(
+      for: NSPredicate(format: "isSelected == true"), evaluatedWith: household)
+    wait(for: [restored], timeout: 10)
   }
 
   /// D-109: the iPhone page lists its transfers by album, as the Server page

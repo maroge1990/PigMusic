@@ -573,6 +573,22 @@ class SessionsDTO(BaseModel):
     sessions: list[SessionDTO]
 
 
+class PersonDTO(BaseModel):
+    id: str
+    username: str
+    display_name: str
+    role: str
+    disabled: int = 0
+    # Songs in this person's library.
+    song_count: int = 0
+    # The newest last use of any of their sessions (ISO 8601), if any.
+    last_seen: str | None = None
+
+
+class PeopleDTO(BaseModel):
+    people: list[PersonDTO]
+
+
 class RevokedDTO(BaseModel):
     revoked: bool
 

@@ -13,7 +13,22 @@ import UIKit
   var manifest = CompanionManifest(context: CompanionContext(revision: 0, account: nil), songs: [])
   var receipt: CompanionReceipt?
   var link: CompanionLink?
-  var message: String?
+  /// Neutral notices ("Sent to iPhone"), shown in grey and cleared after a
+  /// few seconds (#252). Playback errors are `playback.error`.
+  let notices = ActionNotices()
+  /// Why the Watch's music couldn't be opened; the home shows it in place
+  /// of an empty library (#252).
+  var loadError: String?
+  /// The saved library was damaged and started empty: a grey notice until
+  /// the iPhone's next copy arrives.
+  var recovery = WatchRecovery(damagedFiles: [])
+  /// Songs whose removal is on its way to the iPhone: left out of lists and counts.
+  var removing: Set<String> = []
+  /// Songs the Watch turned away this session, and why (#252).
+  var problems: [String: WatchSaveProblem] = [:]
+  /// Songs whose removal has been committed (the Undo ran out), noted at
+  /// once so a queue still being built leaves them out.
+  @ObservationIgnored private var committedRemovals = WatchRemovalMarks()
   /// Removals waiting for their Undo (D-79, #183).
   let undo = UndoQueue()
   static func undoKey(_ id: String) -> String { "watch-song:" + id }
@@ -28,10 +43,21 @@ import UIKit
   var lastSynced = UserDefaults.standard.object(forKey: "watch.synced") as? Date {
     didSet { UserDefaults.standard.set(lastSynced, forKey: "watch.synced") }
   }
-  /// Songs on the Watch and verified, which play with no phone or network.
-  var readySongs: [CompanionSong] {
-    manifest.songs.filter { receipt?.ready[$0.id] == $0.checksum }
+  /// The library's songs, without those being removed.
+  var songs: [CompanionSong] { manifest.songs.filter { !removing.contains($0.id) } }
+  /// Whether the iPhone is in reach; nil when the link can't tell (demo, not activated).
+  var iPhoneReachable: Bool? {
+    guard let link, link.activated else { return nil }
+    return link.reachable
   }
+  /// Every count and mark on the Watch reads this (#252).
+  var status: WatchLibraryStatus {
+    WatchLibraryStatus(
+      manifest: manifest, receipt: receipt, removing: removing, problems: problems,
+      iPhoneReachable: iPhoneReachable)
+  }
+  /// On the Watch and verified: plays with no iPhone or network.
+  func isReady(_ song: CompanionSong) -> Bool { song.isReady(in: receipt) }
   var playback = QueuePlaybackSnapshot()
   /// What the iPhone plays, for the home's iPhone row (D-104). Kept across
   /// launches: the phone sends it only when the song or play/pause changes.
@@ -56,56 +82,12 @@ import UIKit
       engine?.setRepeatMode(repeatMode)
     }
   }
-  struct AlbumGroup: Identifiable {
-    let id: String
-    let title: String
-    let artist: String
-    let ids: [String]
-  }
-  struct ArtistGroup: Identifiable {
-    let id: String
-    let name: String
-    let albums: [AlbumGroup]
-    var ids: [String] { albums.flatMap(\.ids) }
-  }
   /// Artists by album artist, each with their albums on the Watch.
-  var artists: [ArtistGroup] {
-    Dictionary(grouping: albums, by: \.artist).map { name, albums in
-      ArtistGroup(id: name, name: name, albums: albums)
-    }.sorted { $0.name.sortingCompare($1.name) == .orderedAscending }
-  }
-  var albums: [AlbumGroup] {
-    var grouped: [String: [CompanionSong]] = [:]
-    for song in manifest.songs {
-      let artist = song.track.albumArtist ?? song.track.artist
-      let title = song.track.album ?? "Singles"
-      let key = song.track.albumId ?? (artist + "\u{0}" + title)
-      grouped[key, default: []].append(song)
-    }
-    var result: [AlbumGroup] = []
-    for (key, songs) in grouped {
-      guard let first = songs.first else { continue }
-      let ordered: [CompanionSong] = songs.sorted { left, right in
-        let leftDisc = left.track.discNumber ?? 1
-        let rightDisc = right.track.discNumber ?? 1
-        if leftDisc != rightDisc { return leftDisc < rightDisc }
-        let leftTrack = left.track.trackNumber ?? 0
-        let rightTrack = right.track.trackNumber ?? 0
-        if leftTrack != rightTrack { return leftTrack < rightTrack }
-        return left.id < right.id
-      }
-      let ids: [String] = ordered.map { $0.id }
-      result.append(
-        AlbumGroup(
-          id: key, title: first.track.album ?? "Singles",
-          artist: first.track.albumArtist ?? first.track.artist, ids: ids))
-    }
-    return result.sorted { left, right in
-      if left.title != right.title { return left.title < right.title }
-      if left.artist != right.artist { return left.artist < right.artist }
-      return left.id < right.id
-    }
-  }
+  var artists: [WatchArtist] { WatchLibraryIndex.artists(albums) }
+  /// A to Z ignoring case and a leading "The", like artists (#252).
+  var albums: [WatchAlbum] { WatchLibraryIndex.albums(songs) }
+  /// Every song by title (#255: was arrival order).
+  var songIds: [String] { WatchLibraryIndex.songs(songs) }
   func finishBackgroundDelivery() async {
     await link?.finishBackgroundDelivery()
     await reload()
@@ -154,7 +136,7 @@ import UIKit
         do {
           try await archive.recordListen(event)
           await flushListens()
-        } catch { message = "Couldn't save listening history: " + error.localizedDescription }
+        } catch { notices.post("Couldn't save listening history: " + error.localizedDescription) }
       }
     }
   }
@@ -192,6 +174,47 @@ import UIKit
       endedUnexpectedly: DiagnosticsLog.shared.previousRunEndedUnexpectedly)
     if let data = try? JSONEncoder().encode(payload) { link?.message(data) }
   }
+  /// The diagnostics a person sent from Storage: says it went (#252).
+  func sendDiagnosticsFromStorage() {
+    sendDiagnostics()
+    notices.post(link?.reachable == true ? "Sent to iPhone" : "Waiting to send")
+  }
+  /// The Watch's own folder, kept out of backups.
+  private static func baseDirectory() throws -> URL {
+    let base = try FileManager.default.url(
+      for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
+    ).appendingPathComponent(Self.demo ? "PigMusicWatchDemo" : "PigMusicWatch")
+    var values = URLResourceValues()
+    values.isExcludedFromBackup = true
+    try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+    var excluded = base
+    try excluded.setResourceValues(values)
+    return base
+  }
+  /// Opens the music archive; a failure shows on the home as an error, not
+  /// as an empty library (#252).
+  private func openArchive() {
+    guard archive == nil else { return }
+    do {
+      let opened = try CompanionArchive(
+        directory: try Self.baseDirectory().appendingPathComponent("Music"))
+      archive = opened
+      loadError = nil
+      recovery = WatchRecovery(damagedFiles: opened.damagedFiles)
+      if !opened.damagedFiles.isEmpty {
+        DiagnosticsLog.shared.record(
+          "sync", "saved library damaged: \(opened.damagedFiles.joined(separator: ", "))")
+      }
+    } catch {
+      DiagnosticsLog.shared.record("sync", "archive didn't open: \(error.localizedDescription)")
+      loadError = error.localizedDescription
+    }
+  }
+  /// Try again after the music couldn't be opened.
+  func reopen() async {
+    openArchive()
+    await reload()
+  }
   @ObservationIgnored private var sentCrashNotice = false
   init() {
     phoneCover = phoneNowPlaying?.cover.flatMap(UIImage.init(data:))
@@ -201,18 +224,12 @@ import UIKit
       version:
         "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
     )
+    openArchive()
     do {
-      let base = try FileManager.default.url(
-        for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
-      ).appendingPathComponent(Self.demo ? "PigMusicWatchDemo" : "PigMusicWatch")
-      var values = URLResourceValues()
-      values.isExcludedFromBackup = true
-      try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-      var excluded = base
-      try excluded.setResourceValues(values)
-      archive = try CompanionArchive(directory: base.appendingPathComponent("Music"))
       // The demo library never talks to the phone, so a real one can't replace it.
-      if !Self.demo { link = try CompanionLink(inbox: base.appendingPathComponent("Inbox")) }
+      if !Self.demo {
+        link = try CompanionLink(inbox: try Self.baseDirectory().appendingPathComponent("Inbox"))
+      }
       link?.onContext = { [weak self] context in await self?.contextReceived(context) }
       link?.onFile = { [weak self] file, data in await self?.fileReceived(file, data: data) }
       link?.onActivated = { [weak self] in
@@ -241,7 +258,7 @@ import UIKit
             try? await archive.acknowledgeListen(id, account: reply.account)
             await self?.flushListens()
           }
-          if let message = reply.message { self?.message = message }
+          if let message = reply.message { self?.notices.post(message) }
         }
       }
       try makeEngine()
@@ -296,7 +313,7 @@ import UIKit
         Task { @MainActor in self?.previous() }
         return .success
       }
-    } catch { message = error.localizedDescription }
+    } catch { notices.post(error.localizedDescription) }
   }
   #if DEBUG
     /// Headless UI review (`--demo`): its own archive with three generated
@@ -377,7 +394,7 @@ import UIKit
           CompanionManifest(context: context, songs: songs, collections: collections))
         for (file, ticket) in files { try await archive.accept(file, ticket: ticket) }
       } catch {
-        message = "Demo library: \(error.localizedDescription)"
+        notices.post("Demo library: \(error.localizedDescription)")
       }
       await reload()
       if ProcessInfo.processInfo.arguments.contains("--demo-play") {
@@ -407,8 +424,14 @@ import UIKit
   #endif
   func reload() async {
     guard let archive else { return }
+    link?.refreshState()
     manifest = await archive.snapshot()
+    removing = Set(await archive.pendingRequests().filter { $0.value == "remove" }.keys)
+    // Songs gone from the library need no reminder.
+    committedRemovals.libraryChanged(to: Set(manifest.songs.map(\.id)))
     let next = await archive.receipt()
+    // A song saved since it was turned away no longer counts against it.
+    problems = problems.filter { id, _ in next.ready[id] == nil }
     if receipt?.context != next.context || receipt?.ready != next.ready
       || receipt?.manifestApplied != next.manifestApplied
     {
@@ -428,7 +451,7 @@ import UIKit
     do {
       try link?.publishReceipt(
         CompanionAcknowledgement(receipt: receipt, manifest: await archive.snapshot()))
-    } catch { message = error.localizedDescription }
+    } catch { notices.post(error.localizedDescription) }
   }
   private func contextReceived(_ context: CompanionContext) async {
     guard let archive else { return }
@@ -449,7 +472,7 @@ import UIKit
       try await archive.apply(context)
       await reload()
       await acknowledge()
-    } catch CompanionFailure.stale {} catch { message = error.localizedDescription }
+    } catch CompanionFailure.stale {} catch { notices.post(error.localizedDescription) }
   }
   private func fileReceived(_ file: URL, data: Data) async {
     // Already taken by an earlier delivery of the same transfer.
@@ -493,6 +516,7 @@ import UIKit
               + (unchanged ? "" : "; playback stopped for a changed song"))
         }
         lastSynced = Date()
+        recovery.libraryArrived()
       } else if envelope.kind == "audio", let ticket = envelope.file {
         // Audio can be delivered before its manifest, and songs from an earlier
         // revision after the next one is announced (#64): keep what can't be
@@ -513,7 +537,18 @@ import UIKit
     } catch CompanionFailure.stale { deleteInbox(file) } catch {
       DiagnosticsLog.shared.record(
         "sync", "\(envelope.kind) rejected: \(error.localizedDescription)")
-      message = error.localizedDescription
+      if envelope.kind == "audio", let ticket = envelope.file {
+        // Shown with the song and in Storage's status, not as a passing notice.
+        if (error as? CompanionFailure) == .quota {
+          problems[ticket.songId] = .overLimit
+        } else if (error as? CompanionArchiveFailure) == .deviceFull {
+          problems[ticket.songId] = .deviceFull
+        } else {
+          problems[ticket.songId] = .unreadable
+        }
+      } else {
+        notices.post(error.localizedDescription)
+      }
       deleteInbox(file)
       await acknowledge()
     }
@@ -524,9 +559,11 @@ import UIKit
       at: file.deletingPathExtension().appendingPathExtension("json"))
   }
   func send(_ action: String, songIds: [String] = []) async {
+    // Noted before any await, so a queue being built leaves these out.
+    if action == "remove" { committedRemovals.commit(songIds) }
     if ["download", "remove"].contains(action), let archive {
       do { try await archive.request(action, ids: songIds) } catch {
-        message = error.localizedDescription
+        notices.post(error.localizedDescription)
         return
       }
     }
@@ -537,7 +574,9 @@ import UIKit
     let command = CompanionCommand(action, account: manifest.context.account, songIds: songIds)
     guard let data = try? JSONEncoder().encode(command) else { return }
     if action == "remove", let archive {
-      await stop()
+      // Only what plays the removed songs changes (#252): every removal
+      // used to stop playback and clear the queue.
+      await dropFromQueue(Set(songIds))
       for id in songIds { try? await archive.removeLocal(id: id) }
       await reload()
       await acknowledge()
@@ -547,20 +586,69 @@ import UIKit
         if let reply = try await link?.request(data),
           let value = try? JSONDecoder().decode(CompanionReply.self, from: reply)
         {
-          message = value.message
+          // The iPhone's own words when it has any; otherwise that it went.
+          notices.post(value.message ?? "Sent to iPhone")
         }
-      } catch { message = error.localizedDescription }
+      } catch { notices.post(error.localizedDescription) }
     } else {
       link?.message(data)
-      message = "Queued for iPhone."
+      notices.post("Waiting to send")
     }
+  }
+  /// Takes removed songs out of what plays (#252). A song that isn't playing
+  /// leaves playback alone; the playing one moves on to the next song.
+  private func dropFromQueue(_ ids: Set<String>) async {
+    let staged = pendingRestore
+    let current = staged?.index ?? latest.index
+    let queued = staged?.ids ?? queue.map(\.track.id)
+    var keep: [Int] = []
+    var index = current
+    var fromStart = false
+    var inPlace = false
+    switch WatchQueueRemoval.plan(
+      queue: queued, current: current, removing: ids, repeatAll: repeatMode == .all)
+    {
+    case .untouched: return
+    case .stop:
+      await stop()
+      return
+    case .upcoming(let kept):
+      keep = kept
+      inPlace = true
+    case .moved(let kept, let at):
+      keep = kept
+      index = at
+    case .advance(let kept, let at):
+      keep = kept
+      index = at
+      fromStart = true
+    }
+    let remaining = keep.map { queued[$0] }
+    let elapsed = fromStart ? 0 : (staged?.elapsed ?? latest.elapsed)
+    // The playing song keeps its place: the engine plays on with the new queue.
+    if staged == nil, inPlace {
+      let items = keep.map { queue[$0] }
+      queue = items
+      engine?.updateUpcoming(items)
+      updateNowPlaying()
+      return
+    }
+    if staged == nil, intent.wantsPlayback {
+      await play(remaining, at: index, seconds: elapsed)
+      return
+    }
+    // Paused, or a saved queue not prepared yet: it stays paused at its place.
+    guard let account = manifest.context.account else { return await stop() }
+    await stop()
+    stage(Checkpoint(account: account, ids: remaining, index: index, elapsed: elapsed))
+    checkpoint(playback)
   }
   func setBudget(_ gigabytes: Int) async {
     do {
       try await archive?.setBudget(Int64(gigabytes) * 1024 * 1024 * 1024)
       await reload()
       await acknowledge()
-    } catch { message = error.localizedDescription }
+    } catch { notices.post(error.localizedDescription) }
   }
   func stop() async {
     playbackGeneration += 1
@@ -574,6 +662,9 @@ import UIKit
   }
   func play(_ ids: [String], at index: Int = 0, seconds: Double = 0) async {
     guard let archive, let engine else { return }
+    // Removal marks stay while this queue is collected (Codex round 2).
+    let build = committedRemovals.beginBuilding()
+    defer { committedRemovals.endBuilding(build) }
     await stop()
     let stamp = playbackGeneration
     var items: [PlaybackOccurrence] = []
@@ -594,6 +685,16 @@ import UIKit
     do {
       try await activateAudio()
       guard playbackGeneration == stamp else { return }
+      // A removal committed while this queue was built (each await above)
+      // found nothing to take out of it: drop those songs now, with no
+      // await left before the queue is published (Codex round 1 on #252).
+      guard
+        let kept = WatchQueueRemoval.reconcile(
+          items.map(\.track.id), start: start, removed: committedRemovals.removed(for: build))
+      else { return }
+      items = kept.keep.map { items[$0] }
+      start = kept.start
+      if !kept.startKept { startSeconds = 0 }
       queue = items
       intent.play()
       engine.replace(
@@ -605,7 +706,7 @@ import UIKit
           else { throw CompanionFailure.stale }
           return PreparedAudioSource(file: file, byteCount: size)
         }, release: { _ in })
-    } catch { message = error.localizedDescription }
+    } catch { notices.post(error.localizedDescription) }
   }
   private func activateAudio() async throws {
     let session = AVAudioSession.sharedInstance()
@@ -639,7 +740,7 @@ import UIKit
         // Rebuilding a running engine is an audible skip; only recover a stopped one.
         if output?.requiresRecovery == true { engine?.recoverOutput() }
         engine?.resume()
-      } catch { message = error.localizedDescription }
+      } catch { notices.post(error.localizedDescription) }
     }
   }
   func pause() {
@@ -699,7 +800,7 @@ import UIKit
       do {
         if intent.canPlay { try await activateAudio() }
         engine?.recoverOutput()
-      } catch { message = error.localizedDescription }
+      } catch { notices.post(error.localizedDescription) }
     }
   }
   /// After a media-services reset the old engine objects are invalid: build new
@@ -714,11 +815,11 @@ import UIKit
     engine = nil
     output = nil
     do { try makeEngine() } catch {
-      message = error.localizedDescription
+      notices.post(error.localizedDescription)
       return
     }
     if let saved { stage(saved) }
-    message = "Audio restarted. Tap Play to resume."
+    notices.post("Audio restarted. Tap Play to resume.")
   }
 
   // MARK: Queue checkpoint
@@ -811,12 +912,27 @@ import UIKit
       return
     }
     let track = queue[playback.index].track
-    MPNowPlayingInfoCenter.default().nowPlayingInfo = [
+    var info: [String: Any] = [
       MPMediaItemPropertyTitle: track.title, MPMediaItemPropertyArtist: track.artist,
       MPMediaItemPropertyAlbumTitle: track.album ?? "",
       MPMediaItemPropertyPlaybackDuration: playback.duration,
       MPNowPlayingInfoPropertyElapsedPlaybackTime: playback.elapsed,
       MPNowPlayingInfoPropertyPlaybackRate: playback.state == .playing ? 1.0 : 0.0,
     ]
+    if let artwork = playerArtwork() { info[MPMediaItemPropertyArtwork] = artwork }
+    MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+  }
+  /// Songs reach the Watch without their covers, so the player shows the
+  /// PigMusic cover where the system drew a generic speaker tile (#255).
+  @ObservationIgnored private var standInArtwork: MPMediaItemArtwork?
+  private func playerArtwork() -> MPMediaItemArtwork? {
+    if let standInArtwork { return standInArtwork }
+    guard let size = UIImage(named: "PigLaunch")?.size else { return nil }
+    // Loaded where the system asks, so nothing main-actor is captured.
+    let artwork = MPMediaItemArtwork(boundsSize: size) { @Sendable _ in
+      UIImage(named: "PigLaunch") ?? UIImage()
+    }
+    standInArtwork = artwork
+    return artwork
   }
 }

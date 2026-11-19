@@ -14,12 +14,17 @@ export function DownloadLog({
   path,
   title,
   version,
+  startOpen = false,
+  onOpenChange,
 }: {
   path: string;
   title: string;
   version?: string;
+  /** Open from the start: a row that moved to another group stays open. */
+  startOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(startOpen);
   const [log, setLog] = useState<Log | null>(null);
   const [failed, setFailed] = useState(false);
   const serial = useRef(0);
@@ -41,7 +46,12 @@ export function DownloadLog({
   return (
     <details
       className="download-log"
-      onToggle={(event) => setOpen(event.currentTarget.open)}
+      open={open}
+      onToggle={(event) => {
+        const now = event.currentTarget.open;
+        setOpen(now);
+        onOpenChange?.(now);
+      }}
     >
       <summary aria-label={`Details of the download of ${title}`}>
         Details

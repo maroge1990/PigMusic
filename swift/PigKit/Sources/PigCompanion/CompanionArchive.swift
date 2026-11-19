@@ -13,6 +13,15 @@ public enum CompanionArrival: Equatable, Sendable {
   case stale
 }
 
+/// The Watch archive's own failures.
+public enum CompanionArchiveFailure: Error, LocalizedError, Equatable {
+  /// Apple Watch has no room left for the song.
+  case deviceFull
+  public var errorDescription: String? {
+    "Apple Watch has no space left. Remove songs or free up space on Apple Watch."
+  }
+}
+
 /// A bounded, credential-free Watch archive. Removal is driven by a confirmed phone context.
 ///
 /// The last applied manifest is the committed, playable library. A new revision for
@@ -30,6 +39,9 @@ public actor CompanionArchive {
   /// times (#219).
   private var arrivals: [String: Date]
   public private(set) var budgetBytes: Int64
+  /// Saved library files that were there but couldn't be read at opening
+  /// (context.json, manifest.json); the library started empty instead.
+  public nonisolated let damagedFiles: [String]
   public init(
     directory: URL, budgetBytes: Int64 = 1024 * 1024 * 1024,
     now: @escaping @Sendable () -> Date = { Date() }
@@ -54,23 +66,43 @@ public actor CompanionArchive {
       (try? decoder.decode(
         Int64.self, from: Data(contentsOf: directory.appendingPathComponent("budget.json"))))
       ?? budgetBytes
+    // Absent on a fresh install, or there but unreadable: an empty library,
+    // so the iPhone's next copy can be taken. A damaged one is noted, so the
+    // Watch can say why its music went (Codex round 1 on #252).
+    var damaged: [String] = []
+    func saved<Value: Decodable>(_ type: Value.Type, _ name: String) -> Value? {
+      let file = directory.appendingPathComponent(name)
+      guard FileManager.default.fileExists(atPath: file.path) else { return nil }
+      do { return try decoder.decode(type, from: Data(contentsOf: file)) } catch {
+        damaged.append(name)
+        return nil
+      }
+    }
     let loadedContext =
-      (try? decoder.decode(
-        CompanionContext.self,
-        from: Data(contentsOf: directory.appendingPathComponent("context.json"))))
-      ?? CompanionContext(revision: 0, account: nil)
+      saved(CompanionContext.self, "context.json") ?? CompanionContext(revision: 0, account: nil)
     context = loadedContext
     let loadedManifest =
-      (try? decoder.decode(
-        CompanionManifest.self,
-        from: Data(contentsOf: directory.appendingPathComponent("manifest.json"))))
+      saved(CompanionManifest.self, "manifest.json")
       ?? CompanionManifest(context: loadedContext, songs: [])
+    damagedFiles = damaged
     // A committed library from the same account stays playable while a newer
     // revision is on its way; anything else is revoked.
     let sameAccount =
       loadedContext.account != nil && loadedManifest.context.account == loadedContext.account
       && loadedManifest.context.revision <= loadedContext.revision
     manifest = sameAccount ? loadedManifest : CompanionManifest(context: loadedContext, songs: [])
+    // The applied marker belongs to the manifest it was written for: without
+    // that manifest the receipt must not claim it, or the iPhone takes the
+    // empty library as applied and never sends it again, and its audio is
+    // turned away as stale (Codex round 2 on #252). Audio then waits, as on
+    // a fresh install, and the same revision's manifest is taken when resent.
+    if appliedRevision != nil, appliedRevision != manifest.context.revision
+      || damaged.contains("manifest.json")
+      || !FileManager.default.fileExists(
+        atPath: directory.appendingPathComponent("manifest.json").path)
+    {
+      appliedRevision = nil
+    }
     for file in try FileManager.default.contentsOfDirectory(
       at: directory, includingPropertiesForKeys: nil) where file.pathExtension == "partial"
     {
@@ -290,8 +322,10 @@ public actor CompanionArchive {
     let exists = FileManager.default.fileExists(atPath: url(ticket.checksum).path)
     guard exists || used + song.bytes <= budgetBytes else { throw CompanionFailure.quota }
     let capacity = try VolumeSpace.available(at: directory)
+    // Apple Watch itself is full, not the Storage limit: told apart so the
+    // Watch doesn't point to a limit that wouldn't help.
     guard exists || capacity == nil || capacity! > song.bytes + 32 * 1024 * 1024 else {
-      throw CompanionFailure.quota
+      throw CompanionArchiveFailure.deviceFull
     }
     let handle = try FileHandle(forReadingFrom: file)
     defer { try? handle.close() }

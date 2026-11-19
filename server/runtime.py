@@ -6,6 +6,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 from pathlib import Path
@@ -35,6 +36,22 @@ WATCHDOG_RESTART_LIMIT = 3
 WATCHDOG_RESTART_WINDOW = 3600
 WATCHDOG_REMINDER_SECONDS = 600
 RESTART_HISTORY_ENTRIES = 50
+# A source engine that hangs without exiting (#256): asked over its local
+# HTTP port every 30 s once it has had 3 minutes to start, ten probes in a
+# row without any answer (300 s) end it and it is started again with the
+# crash back-off above; at most 3 such restarts an hour, then a reminder
+# every 10 minutes. Any HTTP answer, even a refusal, counts as an answer.
+ENGINE_URL = "http://127.0.0.1:5030/health"
+ENGINE_HANG_LIMIT = 3
+ENGINE_HANG_WINDOW = 3600
+ENGINE_STOP_SECONDS = 10
+# Starting the engine checks the library mount and prepares its folders on
+# the NAS first, which can hang: it runs on a thread of its own, one at a
+# time, and the supervisor waits for it at most half a second each time.
+ENGINE_LAUNCH_WAIT = 0.5
+# How long stopping waits for the server and the engine before killing them.
+STOP_SECONDS = 25
+ENGINE_LAUNCH_SLOW = 30
 # The history also says how each run of the server ended (#241): "start"
 # when it is started, then "stop" (asked to stop: a release or a container
 # stop), "exit" (it ended by itself), "watchdog" (ended for not answering),
@@ -253,11 +270,192 @@ class Watchdog:
         return "restart"
 
 
+def engine_probe():
+    return probe(ENGINE_URL, WATCHDOG_PROBE_TIMEOUT)
+
+
+class EngineWatch:
+    """Decides when a running source engine has hung (#256), as Watchdog
+    does for the server: `due` says when to probe it, `observe` takes the
+    probe's state and returns "restart" when it should be ended."""
+
+    def __init__(self, started, say=say):
+        self.say = say
+        self.restarts = []  # Monotonic times of this process's hang restarts.
+        self.started(started)
+
+    def started(self, now):
+        """A new engine process: its grace begins and the count starts again."""
+        self.next_probe = now + WATCHDOG_GRACE
+        self.silent = 0
+        self.reminded = None
+
+    def due(self, now):
+        if now < self.next_probe:
+            return False
+        self.next_probe = now + WATCHDOG_INTERVAL
+        return True
+
+    def observe(self, now, state):
+        if state != "silent":
+            self.silent = 0
+            self.reminded = None
+            return None
+        self.silent += 1
+        if self.silent * WATCHDOG_INTERVAL < WATCHDOG_SILENT_SECONDS:
+            return None
+        unanswered = f"Source engine has not answered for {WATCHDOG_SILENT_SECONDS} s"
+        self.restarts = [
+            at for at in self.restarts if 0 <= now - at < ENGINE_HANG_WINDOW
+        ]
+        if len(self.restarts) >= ENGINE_HANG_LIMIT:
+            if (
+                self.reminded is None
+                or now - self.reminded >= WATCHDOG_REMINDER_SECONDS
+            ):
+                self.reminded = now
+                self.say(
+                    f"{unanswered}; not restarting it again:"
+                    f" {ENGINE_HANG_LIMIT} restarts in the last hour"
+                )
+            return None
+        self.restarts.append(now)
+        return "restart"
+
+
+class Ending:
+    """A hung engine being ended, followed from the supervisor's loop and
+    never waited for: asked to stop, killed after 10 s, and kept until it
+    is reaped, since a process stuck in uninterruptible I/O can outlive
+    even a kill. No other engine starts while it is still there."""
+
+    def __init__(self, process, now, say=say):
+        self.process = process
+        self.say = say
+        self.kill_at = now + ENGINE_STOP_SECONDS
+        self.killed = False
+        self.reminded = None
+        process.terminate()
+
+    def gone(self, now):
+        if self.process.poll() is not None:
+            return True
+        if not self.killed and now >= self.kill_at:
+            self.killed = True
+            self.say(
+                f"Source engine did not stop within {ENGINE_STOP_SECONDS} s; killing it"
+            )
+            self.process.kill()
+        return False
+
+    def waiting(self, now):
+        """Said when another engine is due but this one is still there."""
+        if self.reminded is None or now - self.reminded >= WATCHDOG_REMINDER_SECONDS:
+            self.reminded = now
+            self.say("Waiting for the old source engine to end before starting another")
+
+
+class Launch:
+    """One start of the source engine on its own thread (#256), so a hung
+    library mount never stalls the supervisor's loop. `start_engine` still
+    checks the mount before it prepares any folder."""
+
+    def __init__(self, root, now):
+        self.result = (None, None)
+        self.began = now
+        self.said = False
+        # Set when the supervisor starts stopping: the start then spawns
+        # nothing, and an engine it spawned meanwhile is either handed over
+        # (`cancel`) or ended by the launcher itself, never left running.
+        self.cancelled = False
+        # Between the last check and the child being handed back: inside
+        # Popen, where the child may exist before the launcher has it.
+        self.spawning = False
+        self.lock = threading.Lock()
+        self.thread = threading.Thread(
+            target=self.run, args=(root,), name="engine-launch", daemon=True
+        )
+        self.thread.start()
+        self.thread.join(ENGINE_LAUNCH_WAIT)
+
+    def run(self, root):
+        try:
+            result = start_engine(root, self.proceed)
+        except Exception:
+            result = (None, None)
+        with self.lock:
+            self.spawning = False
+            if not self.cancelled:
+                self.result = result
+                return
+        process, log = result
+        if process is not None:
+            process.terminate()
+            try:
+                process.wait(timeout=ENGINE_STOP_SECONDS)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+        if log:
+            log.close()
+
+    def proceed(self):
+        """The last check before spawning: no once stopping has begun."""
+        with self.lock:
+            if self.cancelled:
+                return False
+            self.spawning = True
+            return True
+
+    def cancel(self):
+        """Stop this start: (the engine it already handed over, if any, for
+        the supervisor to end with the rest; whether a spawn is in flight,
+        whose child the launcher ends itself once Popen returns)."""
+        with self.lock:
+            self.cancelled = True
+            taken, self.result = self.result, (None, None)
+            return taken, self.spawning
+
+    def done(self):
+        return not self.thread.is_alive()
+
+    def slow(self, now):
+        """Said once when the start has waited on the mount for 30 s."""
+        if not self.said and now - self.began >= ENGINE_LAUNCH_SLOW:
+            self.said = True
+            say(
+                "Starting the source engine is waiting on the library mount;"
+                " the server carries on meanwhile"
+            )
+
+
+def reap(children, deadline, say=say):
+    """End each child by `deadline` (monotonic): wait, then kill and wait at
+    most 5 s more. One that outlives a kill is left, so stopping never
+    hangs on it."""
+    for child in children:
+        if not child:
+            continue
+        try:
+            child.wait(timeout=max(0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            child.kill()
+            try:
+                child.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                say("A child process did not end after being killed; leaving it")
+
+
 class _Stopping(BaseException):
     """Raised by the stop signal to leave a probe that is still waiting."""
 
 
-def start_engine(root):
+def start_engine(root, proceed=None):
+    """Start the engine; `proceed()` is asked once its folders are ready and
+    just before it is spawned, and nothing is spawned when it says no."""
     log = None
     try:
         engine = root / "engine"
@@ -335,6 +533,10 @@ def start_engine(root):
                 logfile.replace(engine / "runtime.previous.log")
             log = logfile.open("ab")
             os.chmod(logfile, 0o600)
+            # Nothing but the spawn itself after this last check.
+            if proceed is not None and not proceed():
+                log.close()
+                return None, None
             return (
                 subprocess.Popen(
                     command,
@@ -354,6 +556,8 @@ def start_engine(root):
 def main():
     server = None
     engine = None
+    ending = None  # A hung engine still being ended.
+    launch = None  # A start of the engine still running.
     stopping = False
     stop_signal = None
     probing = False
@@ -364,7 +568,9 @@ def main():
         stopping = True
         if first and signum is not None:
             stop_signal = signum
-        for child in (engine, server):
+        if launch:
+            launch.cancelled = True  # Set without the lock: a signal handler.
+        for child in (engine, ending and ending.process, server):
             if child and child.poll() is None:
                 child.terminate()
         # A probe can wait 10 s for a server that is not answering: the
@@ -378,7 +584,7 @@ def main():
     try:
         root = Path(os.environ.get("PIG_MUSIC_DATA", "/data"))
         history = root / "logs" / "restarts.json"
-        engine, log = start_engine(root)
+        launch = Launch(root, time.monotonic())
         record_start(history, time.time())
         server = subprocess.Popen(
             [
@@ -414,7 +620,10 @@ def main():
             history,
         )
         unanswered = False
+        engine_watch = EngineWatch(started)
         while not stopping and server.poll() is None:
+            if ending and ending.gone(time.monotonic()):
+                ending = None
             if engine and engine.poll() is not None:
                 if time.monotonic() - started >= ENGINE_HEALTHY_SECONDS:
                     backoff = ENGINE_BACKOFF_START
@@ -426,18 +635,58 @@ def main():
                 engine = None
                 next_engine_check = time.monotonic() + backoff
                 backoff = min(backoff * 2, ENGINE_BACKOFF_LIMIT)
+            elif engine and engine_watch.due(time.monotonic()):
+                # Like the server's probe: at most 10 s, once every 30 s.
+                try:
+                    try:
+                        probing = True
+                        state, _ = engine_probe()
+                    finally:
+                        probing = False
+                except _Stopping:
+                    continue
+                if (
+                    not stopping
+                    and engine_watch.observe(time.monotonic(), state) == "restart"
+                ):
+                    if time.monotonic() - started >= ENGINE_HEALTHY_SECONDS:
+                        backoff = ENGINE_BACKOFF_START
+                    say(
+                        f"Source engine has not answered for {WATCHDOG_SILENT_SECONDS} s;"
+                        f" restarting it in {backoff}s"
+                    )
+                    ending = Ending(engine, time.monotonic())
+                    engine = None
+                    next_engine_check = time.monotonic() + backoff
+                    backoff = min(backoff * 2, ENGINE_BACKOFF_LIMIT)
             if (
                 engine is None
+                and os.environ.get("PIG_MUSIC_EMBEDDED_ENGINE", "true").lower()
+                == "true"
+                and time.monotonic() >= next_engine_check
+                and ending
+            ):
+                ending.waiting(time.monotonic())
+            elif (
+                engine is None
+                and launch is None
                 and os.environ.get("PIG_MUSIC_EMBEDDED_ENGINE", "true").lower()
                 == "true"
                 and time.monotonic() >= next_engine_check
             ):
                 if log:
                     log.close()
-                engine, log = start_engine(root)
+                    log = None
+                launch = Launch(root, time.monotonic())
+            if launch and launch.done():
+                engine, log = launch.result
+                launch = None
                 started = time.monotonic()
+                engine_watch.started(started)
                 if not engine:
                     next_engine_check = time.monotonic() + 5
+            elif launch:
+                launch.slow(time.monotonic())
             if watchdog.due(time.monotonic()):
                 # Done here rather than on a thread: one probe holds the loop
                 # for at most its 10 s timeout, once every 30 s.
@@ -464,22 +713,35 @@ def main():
             record_restart(history, time.time(), "exit", reason)
         elif not failed:
             record_restart(history, time.time(), "stop", stop_reason(stop_signal))
+        deadline = time.monotonic() + STOP_SECONDS
+        spawning = False
+        if launch:
+            # An engine its start already handed over is ended with the
+            # rest; one being spawned is ended by the launcher itself once
+            # Popen hands it back.
+            taken, spawning = launch.cancel()
+            if taken[0] is not None and engine is None:
+                engine, log = taken
+        # Every known child is asked to stop first, on every path (a signal
+        # or the watchdog), so none waits on the engine's start.
         stop(None, None)
-        deadline = time.monotonic() + 25
-        for child in (engine, server):
-            if not child:
-                continue
-            try:
-                child.wait(timeout=max(0, deadline - time.monotonic()))
-            except subprocess.TimeoutExpired:
-                child.kill()
-                child.wait()
+        while spawning and launch.thread.is_alive() and time.monotonic() < deadline:
+            launch.thread.join(0.05)
+        if spawning and launch.thread.is_alive():
+            say(
+                "The source engine was still being started; it is ended as"
+                " soon as its start returns"
+            )
+        reap((engine, ending and ending.process, server), deadline)
         return 1 if failed else 0
     finally:
-        for child in (engine, server):
+        for child in (engine, ending and ending.process, server):
             if child and child.poll() is None:
                 child.kill()
-                child.wait()
+                try:
+                    child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
         if log:
             log.close()
 

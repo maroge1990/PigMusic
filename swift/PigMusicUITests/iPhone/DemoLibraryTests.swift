@@ -424,6 +424,50 @@ final class DemoLibraryTests: XCTestCase {
     expect(app.staticTexts["Demo listener"])
   }
 
+  /// Opens Account from Home's avatar.
+  private func openAccount() {
+    let account = app.navigationBars["Account"]
+    for _ in 0..<3 where !account.exists {
+      app.buttons["Account"].firstMatch.tap()
+      _ = account.waitForExistence(timeout: 5)
+    }
+    expect(account)
+  }
+
+  /// D-120 (#251): Seamless playback and Crossfade sit in Preferences with
+  /// Keep playing similar songs, no longer on Account.
+  func testPreferencesHoldEveryPlaybackSwitch() {
+    launch()
+    openAccount()
+    let preferences = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Preferences'"))
+      .firstMatch
+    expect(preferences)
+    XCTAssertFalse(app.switches["Crossfade"].exists)
+    XCTAssertFalse(app.switches["Seamless playback"].exists)
+    preferences.tap()
+    expect(app.switches["Keep playing similar songs"])
+    expect(app.switches["Seamless playback"])
+    expect(app.switches["Crossfade"])
+    expect(app.buttons["Dark"])
+  }
+
+  /// D-120 (#251): with nothing after the playing song, the queue says
+  /// Nothing next and offers Shuffle your library.
+  func testAnEmptyQueueSaysNothingNext() {
+    continueAfterFailure = false
+    app.launchArguments = ["--demo", "--demo-play", "--demo-play-one", "--show-player"]
+    app.launch()
+    expect(app.staticTexts["Now playing"], timeout: 30)
+    expect(app.staticTexts["Nothing next"])
+    expect(app.buttons["Shuffle your library"])
+    let edit = app.buttons["Edit"]
+    for _ in 0..<4 where !(edit.exists && edit.isHittable) { app.swipeUp() }
+    edit.tap()
+    expect(app.navigationBars["Queue"])
+    expect(app.staticTexts["Nothing next"])
+    expect(app.buttons["Shuffle your library"])
+  }
+
   func testSearchFindsALibrarySong() {
     launch()
     app.tabBars.buttons["Search"].tap()
