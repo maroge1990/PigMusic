@@ -87,7 +87,7 @@ struct PlainScreensTests {
   /// their own section; an empty queue says Nothing next.
   @Test func upNextSplitsYourSongsFromSimilarOnes() {
     let upcoming = [song("a"), song("b"), song("s1"), song("s2")]
-    let layout = UpNextLayout(upcoming, keepPlaying: true, similarIDs: ["s1", "s2"])
+    let layout = UpNextLayout(upcoming, keepPlaying: true) { ["s1", "s2"].contains($0.id) }
     #expect(layout.chosen.map(\.id) == ["a", "b"])
     #expect(layout.similar.map(\.id) == ["s1", "s2"])
     #expect(!layout.nothingNext)
@@ -95,20 +95,25 @@ struct PlainScreensTests {
     #expect(!layout.offersShuffle)
     #expect(SongSpan.summary(layout.chosen) == "2 songs · 8 min")
 
-    let empty = UpNextLayout([Track](), keepPlaying: false, similarIDs: [])
+    let empty = UpNextLayout([Track](), keepPlaying: false) { _ in false }
     #expect(empty.nothingNext)
     #expect(!empty.showsSimilarHeading)
     #expect(empty.offersShuffle)
     // Keep playing on: similar songs follow once the queue ends.
-    let keep = UpNextLayout([Track](), keepPlaying: true, similarIDs: [])
+    let keep = UpNextLayout([Track](), keepPlaying: true) { _ in false }
     #expect(keep.nothingNext)
     #expect(keep.showsSimilarHeading)
-    let onlySimilar = UpNextLayout([song("s1")], keepPlaying: true, similarIDs: ["s1"])
+    let onlySimilar = UpNextLayout([song("s1")], keepPlaying: true) { $0.id == "s1" }
     #expect(onlySimilar.nothingNext)
     #expect(!onlySimilar.offersShuffle)
     #expect(UpNextLayout<Track>.nothingNextTitle == "Nothing next")
     #expect(UpNextLayout<Track>.similarTitle == "Then similar songs")
   }
+
+
+
+
+
 
   /// Seamless playback and Crossfade sit with Keep playing similar songs.
   @Test func preferencesHoldEveryPlaybackSwitch() {

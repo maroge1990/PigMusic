@@ -123,25 +123,20 @@ public struct UpNextLayout<Item: Sendable>: Sendable {
   /// No song waits at all: offer Shuffle your library.
   public var offersShuffle: Bool { chosen.isEmpty && similar.isEmpty }
 
+  /// `isSimilar` says which songs the queue added itself; each song is
+  /// judged on its own, so one you added after them stays yours (Codex
+  /// round 1 on batch E).
   public init(
     _ upcoming: [Item], keepPlaying: Bool, isSimilar: (Item) -> Bool
   ) {
-    // Similar songs start where the queue ran out (#202).
-    let start = upcoming.firstIndex(where: isSimilar) ?? upcoming.endIndex
-    chosen = Array(upcoming[..<start])
-    similar = Array(upcoming[start...])
+    chosen = upcoming.filter { !isSimilar($0) }
+    similar = upcoming.filter(isSimilar)
     self.keepPlaying = keepPlaying
   }
 
   public static var nothingNextTitle: String { "Nothing next" }
   public static var similarTitle: String { "Then similar songs" }
   public static var shuffleTitle: String { "Shuffle your library" }
-}
-
-extension UpNextLayout where Item == Track {
-  public init(_ upcoming: [Track], keepPlaying: Bool, similarIDs: Set<String>) {
-    self.init(upcoming, keepPlaying: keepPlaying) { similarIDs.contains($0.id) }
-  }
 }
 
 /// "4 songs · 16 min": a count and the time the songs take.

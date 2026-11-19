@@ -853,7 +853,7 @@ extension PlayerController {
   /// Your songs, then similar songs (D-120).
   @MainActor func upNextLayout(_ model: AppModel) -> UpNextLayout<PlaybackOccurrence> {
     UpNextLayout(upcoming(hiding: model.undo), keepPlaying: model.preferences.keepPlaying) {
-      model.similarIDs.contains($0.track.id)
+      queue.isRecommended($0.id)
     }
   }
 }

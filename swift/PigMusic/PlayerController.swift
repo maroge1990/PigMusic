@@ -70,11 +70,15 @@ import PigSync
     let pending = queueStart.seconds(for: queue.current)
     onCheckpoint?(PlaybackCheckpoint(queue: queue, elapsed: pending > 0 ? pending : elapsed))
   }
-  func enqueue(_ tracks: [Track], next: Bool = false) {
+  /// `recommended`: similar songs the queue adds itself, after everything;
+  /// a song you add goes before them (Codex round 1 on batch E).
+  func enqueue(_ tracks: [Track], next: Bool = false, recommended: Bool = false) {
     guard queue.current != nil else { return }
-    queue.append(tracks, next: next)
+    queue.append(tracks, next: next, recommended: recommended)
     engineQueueChanged()
   }
+  /// The queue just played is all similar songs (#202).
+  func markAllRecommended() { queue.markAllRecommended() }
   func removeUpcoming(_ id: UUID) {
     queue.removeUpcoming(id)
     engineQueueChanged()

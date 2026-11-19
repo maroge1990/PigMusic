@@ -1775,8 +1775,9 @@ enum PlayOrigin: Hashable {
         playing: player.playing)
       {
         play(added)
+        player.markAllRecommended()
       } else {
-        player.enqueue(added)
+        player.enqueue(added, recommended: true)
       }
     }
   }
