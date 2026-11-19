@@ -241,6 +241,9 @@ struct LibraryShell: View {
   @State private var showAccount = false
   /// Counts choices of the Search tab, so its box takes the cursor each time.
   @State private var searchFocus = 0
+  /// Bumped by an Add songs or Find music elsewhere: Search starts again at
+  /// its root, even when it is the tab already showing (Codex round 1).
+  @State private var searchRoot = 0
   private var playing: Bool { model.player.queue.current != nil }
   var body: some View {
     tabs
@@ -300,7 +303,11 @@ struct LibraryShell: View {
     .onChange(of: selection) { _, chosen in
       if chosen == .search { searchFocus += 1 }
     }
-    .onChange(of: model.searchRequests) { selection = .search }
+    .onChange(of: model.searchRequests) {
+      selection = .search
+      searchRoot += 1
+      searchFocus += 1
+    }
     if #available(iOS 26.1, *) {
       view.tabBarMinimizeBehavior(.onScrollDown)
         .tabViewBottomAccessory(isEnabled: playing) {
@@ -340,6 +347,7 @@ struct LibraryShell: View {
         }
       }
     }
+    .id(destination == .search ? searchRoot : 0)
     // The one Undo bar rests above the mini player on every tab (#210).
     .undoBarResting(model, active: destination == selection)
     // Older systems: the player docks directly above the tab bar inside each

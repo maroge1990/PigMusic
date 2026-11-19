@@ -472,6 +472,28 @@ final class DemoLibraryTests: XCTestCase {
     expect(app.searchFields["Songs, albums and artists"])
   }
 
+  /// Codex round 1 on batch E: Add songs on an empty playlist opened from
+  /// Search goes back to Search's first page, not nowhere.
+  func testAddSongsFromSearchReturnsToSearch() {
+    launch()
+    app.tabBars.buttons["Search"].tap()
+    let playlists = app.buttons["Playlists"]
+    expect(playlists)
+    // The keyboard may cover the shortcuts.
+    if !playlists.isHittable { app.swipeUp() }
+    playlists.tap()
+    let empty = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Empty Days'"))
+      .firstMatch
+    expect(empty)
+    empty.tap()
+    let add = app.buttons["Add songs"]
+    expect(add)
+    add.tap()
+    XCTAssertTrue(app.staticTexts["No songs yet"].waitForNonExistence(timeout: 5), app.debugDescription)
+    expect(app.staticTexts["Your library"])
+    expect(app.searchFields["Songs, albums and artists"])
+  }
+
   /// D-120: Home leaves out a section with nothing in it (the demo has no
   /// recommendations): no heading and no loading words.
   func testHomeHidesAnEmptySection() {
