@@ -18,7 +18,10 @@ struct PendingEditsView: View {
   var body: some View {
     List {
       if let result {
-        StatusText(result, kind: result == PendingChangeWords.discarded(.failed) ? .error : .info)
+        StatusText(
+          result,
+          kind: [.failed, .unknown].map(PendingChangeWords.discarded).contains(result)
+            ? .error : .info)
       }
       if model.pendingEdits.isEmpty {
         PigQuietState("All changes sent").listRowBackground(Color.clear)

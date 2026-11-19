@@ -611,7 +611,11 @@ enum PlayOrigin: Hashable {
         "home:" + section.rawValue, as: HomeContent.self)
     }
     try await loadCache(artworkChanged: true)
-    pendingEdits = (try? await database.pendingMutations()) ?? []
+    // Read first, then checked: never shown for another account (Codex
+    // round 2 on batch E).
+    let pending = (try? await database.pendingMutations()) ?? []
+    try account.check(stamp)
+    pendingEdits = pending
   }
   /// A refresh asked for while one runs (a live revision event during a
   /// pull-to-refresh, say) is not dropped: the running one goes round again,
@@ -1103,8 +1107,14 @@ enum PlayOrigin: Hashable {
     guard let store, person != nil else { throw NativeFailure.authentication }
     let stamp = account.generation
     try await store.enqueueMutation(mutation)
-    try account.check(stamp)
-    pendingEdits = try await store.pendingMutations()
+    guard let pending = try await EditOutbox.pending(
+      store: store, isCurrent: { [account] in account.isCurrent(stamp) })
+    else {
+      // The account ended: the same error as every other stale step.
+      try account.check(stamp)
+      throw CancellationError()
+    }
+    pendingEdits = pending
     let applied = await flushEdits()
     try account.check(stamp)
     if applied { await refresh() }
@@ -1144,7 +1154,11 @@ enum PlayOrigin: Hashable {
       // Any favourite the server refused, tapped now or long ago, goes back.
       let refused = try await EditOutbox.settleRefusedFavourites(store: store)
       if account.isCurrent(stamp), !refused.isEmpty { favouritesRefused(refused) }
-      if account.isCurrent(stamp) { pendingEdits = try await store.pendingMutations() }
+      if let pending = try await EditOutbox.pending(
+        store: store, isCurrent: { [account] in account.isCurrent(stamp) })
+      {
+        pendingEdits = pending
+      }
     } catch { if account.isCurrent(stamp) { message = error.userMessage } }
     return applied
   }

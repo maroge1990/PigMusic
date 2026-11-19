@@ -109,7 +109,13 @@ import PigStore
     do {
       let pending = try await store.pendingMutations()
       guard isCurrent() else { return nil }
-      guard pending.contains(where: { $0.id == id }) else { return (.alreadyGone, pending) }
+      guard let item = pending.first(where: { $0.id == id }) else {
+        return (.alreadyGone, pending)
+      }
+      // Sent without an answer: it may be on the server, so it stays and is
+      // never reported discarded (Codex round 2 on batch E). The next send
+      // settles it: the server answers a repeated edit from its receipt.
+      guard !item.unknown else { return (.unknown, pending) }
       try await store.acknowledgeMutation(id)
       guard isCurrent() else { return nil }
       let after = try await store.pendingMutations()
@@ -118,6 +124,17 @@ import PigStore
       let pending = (try? await store.pendingMutations()) ?? []
       return isCurrent() ? (.failed, pending) : nil
     }
+  }
+
+  /// The outbox as this account's page may show it: read first, then
+  /// checked, so a read that outlives its account is never shown for the
+  /// next one (Codex round 2 on batch E). nil when the account ended.
+  public static func pending(store: LibraryStore, isCurrent: () -> Bool) async throws
+    -> [PendingMutation]?
+  {
+    guard isCurrent() else { return nil }
+    let pending = try await store.pendingMutations()
+    return isCurrent() ? pending : nil
   }
 
   /// What an edit changes, for keeping dependent edits in order.
@@ -146,6 +163,14 @@ import PigStore
         blocked.insert(scope)
         continue
       }
+      // Recorded before it leaves: a reply lost on the way leaves an edit
+      // the server may have applied (Codex round 2 on batch E).
+      if item.attempted != true {
+        var marked = item
+        marked.attempted = true
+        try await store.updateMutation(marked)
+        guard isCurrent() else { return .stale }
+      }
       do {
         let receipt = try await apply(item.mutation)
         guard receipt.applied, receipt.operationId == item.id, isCurrent() else { return .stale }
@@ -157,6 +182,7 @@ import PigStore
       } catch NativeFailure.changed {
         var changed = item
         changed.state = "conflict"
+        changed.attempted = false
         changed.message =
           "This playlist changed on the server. Discard this edit or review the current playlist before reapplying it."
         try await store.updateMutation(changed)
@@ -164,6 +190,7 @@ import PigStore
       } catch is MutationRejection {
         var rejected = item
         rejected.state = "rejected"
+        rejected.attempted = false
         rejected.message = "The server couldn't apply this edit. Review its song or playlist."
         try await store.updateMutation(rejected)
         blocked.insert(scope)

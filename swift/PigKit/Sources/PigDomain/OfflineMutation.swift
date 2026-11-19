@@ -33,6 +33,12 @@ public struct PendingMutation: Codable, Sendable, Identifiable {
   public var mutation: OfflineMutation
   public var state: String
   public var message: String?
+  /// Sent at least once without an answer that settled it (a lost reply):
+  /// the server may already have applied it (Codex round 2 on batch E).
+  public var attempted: Bool?
+  /// Waiting, but a send may have reached the server: Discard can't promise
+  /// it stays unsent.
+  public var unknown: Bool { state == "queued" && attempted == true }
   public var id: String { mutation.id }
   public init(mutation: OfflineMutation) {
     self.mutation = mutation

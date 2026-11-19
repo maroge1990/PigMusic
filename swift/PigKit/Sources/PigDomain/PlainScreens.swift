@@ -79,6 +79,7 @@ public struct PendingChangeWords: Sendable, Equatable {
     case .discarded: "Discarded"
     case .alreadyGone: "Already sent"
     case .failed: "Couldn't discard. Try again."
+    case .unknown: "Couldn't tell whether this change was sent. Check the playlist."
     }
   }
 }
@@ -92,6 +93,9 @@ public enum DiscardResult: Sendable, Equatable {
   case alreadyGone
   /// The outbox couldn't be changed.
   case failed
+  /// Sent once without an answer: it may be on the server, so it was kept
+  /// (Codex round 2 on batch E).
+  case unknown
 }
 
 /// One at a time, in order: sending the outbox, Discard and Try again never

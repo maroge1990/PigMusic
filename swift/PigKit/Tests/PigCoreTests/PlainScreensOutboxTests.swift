@@ -59,4 +59,53 @@ import Testing
     #expect(again?.0 == .alreadyGone)
     #expect(await EditOutbox.discard(edit.id, store: store) { false } == nil)
   }
+
+  private struct LostReply: Error {}
+
+  /// Codex round 2 on batch E: a send whose reply is lost may have reached
+  /// the server; Discard keeps it and says it couldn't tell, never
+  /// "Discarded". The next send settles it.
+  @Test func discardNeverClaimsAnEditWithALostReply() async throws {
+    let (store, root) = try makeStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let edit = OfflineMutation(action: "delete", playlistId: "p", revision: 3)
+    try await store.enqueueMutation(edit)
+    var applied = false
+    _ = try await EditOutbox.send(store: store, isCurrent: { true }, applied: &applied) { _ in
+      throw LostReply()
+    }
+    let waiting = try await store.pendingMutations()
+    #expect(waiting.first?.unknown == true)
+    let discard = await EditOutbox.discard(edit.id, store: store) { true }
+    #expect(discard?.0 == .unknown)
+    #expect(try await store.pendingMutations().count == 1)
+    #expect(
+      PendingChangeWords.discarded(.unknown)
+        == "Couldn't tell whether this change was sent. Check the playlist.")
+    // The server answers the repeated edit from its receipt: settled.
+    _ = try await EditOutbox.send(store: store, isCurrent: { true }, applied: &applied) {
+      OfflineMutationReceipt(operationId: $0.id, applied: true)
+    }
+    #expect(try await store.pendingMutations().isEmpty)
+    // An edit never sent is still discarded at once.
+    let fresh = OfflineMutation(action: "create", name: "Run")
+    try await store.enqueueMutation(fresh)
+    #expect(await EditOutbox.discard(fresh.id, store: store) { true }?.0 == .discarded)
+  }
+
+  /// Codex round 2 on batch E: the outbox read at the end of a send is shown
+  /// only if its account is still the current one when the read returns.
+  @Test func anOutboxReadOutlivingItsAccountIsNotShown() async throws {
+    let (store, root) = try makeStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try await store.enqueueMutation(OfflineMutation(action: "create", name: "Run"))
+    var checks = 0
+    // Current when the read starts, switched by the time it returns.
+    let read = try await EditOutbox.pending(store: store) {
+      checks += 1
+      return checks < 2
+    }
+    #expect(read == nil)
+    #expect(try await EditOutbox.pending(store: store) { true }?.count == 1)
+  }
 }
