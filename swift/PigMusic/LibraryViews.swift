@@ -449,6 +449,8 @@ struct AccountView: View {
   @State private var signingOut = false
   /// Your music quality in words, once the server says.
   @State private var quality: String?
+  /// Counts answers from Your music quality, so an older read is dropped.
+  @State private var qualitySaves = 0
   /// How many devices are signed in, once the server says.
   @State private var devices: Int?
   @Environment(\.colorScheme) private var scheme
@@ -482,7 +484,10 @@ struct AccountView: View {
         link(
           "Your music quality", symbol: "waveform", tint: PigBrand.accent(scheme), value: quality
         ) {
-          QualityView(model: model) { quality = $0 }
+          QualityView(model: model) {
+            quality = $0
+            qualitySaves += 1
+          }
         }
       }
       Section {
@@ -528,7 +533,11 @@ struct AccountView: View {
     .navigationTitle("Account").navigationBarTitleDisplayMode(.inline)
     .task {
       // Only what the rows show; the rows open without them.
-      if let settings = try? await model.readCatalogue({ try await $0.quality() }) {
+      // A choice saved meanwhile on Your music quality wins over this read.
+      let before = qualitySaves
+      if let settings = try? await model.readCatalogue({ try await $0.quality() }),
+        qualitySaves == before
+      {
         quality = QualityChoices(settings).summary
       }
       if let sessions = try? await model.readCatalogue({ try await $0.sessions() }) {

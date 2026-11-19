@@ -104,9 +104,52 @@ public struct QualityChoices: Sendable, Equatable {
   }
 
   /// What the Account row shows: the chosen quality, or the default's.
-  public var summary: String? {
-    rows.first { $0.value == selected }.flatMap { $0.value == nil ? $0.detail : $0.title }
+  public var summary: String? { summary(of: selected) }
+  /// The words for `value`: its quality, or the default's.
+  public func summary(of value: String?) -> String? {
+    rows.first { $0.value == value }.flatMap { $0.value == nil ? $0.detail : $0.title }
   }
+}
+
+/// Your music quality's state while it reads and saves (Codex round 1 on
+/// batch E): a read that started before a save never overwrites the saved
+/// choice, and the tick and Account's row show the same confirmed value.
+public struct QualityPick: Sendable, Equatable {
+  public private(set) var choices: QualityChoices?
+  /// The row ticked: the confirmed choice, or the one being saved.
+  public private(set) var selected: String?
+  /// The confirmed choice, for Account's row.
+  public private(set) var confirmed: String?
+  public private(set) var saving = false
+  private var version = 0
+  public init() {}
+  /// Starting a read: pass the token to `read(_:token:)`.
+  public func readToken() -> Int { version }
+  /// A read's answer; dropped when a save started since, or one is running.
+  public mutating func read(_ value: QualityChoices, token: Int) {
+    guard token == version, !saving else { return }
+    choices = value
+    selected = value.selected
+    confirmed = value.selected
+  }
+  /// Ticks `value` while it saves; false when nothing is to be saved.
+  public mutating func startSave(_ value: String?) -> Bool {
+    guard choices != nil, !saving, value != selected else { return false }
+    saving = true
+    version += 1
+    selected = value
+    return true
+  }
+  /// The save's answer: kept when the server took it, else back to the last
+  /// confirmed choice.
+  public mutating func finishSave(succeeded: Bool) {
+    guard saving else { return }
+    saving = false
+    version += 1
+    if succeeded { confirmed = selected } else { selected = confirmed }
+  }
+  /// Account's row: the confirmed choice in words.
+  public var summary: String? { choices?.summary(of: confirmed) }
 }
 
 /// The queue under the playing song (D-120): the songs you chose, with their

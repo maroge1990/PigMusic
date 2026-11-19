@@ -299,21 +299,21 @@ struct QualityView: View {
   let model: AppModel
   var scope = "system"
   var id = "*"
-  /// Told the saved choice's words, so Account's row shows it at once.
+  /// Told the confirmed choice's words, so Account's row shows what the
+  /// tick shows.
   var saved: (String?) -> Void = { _ in }
-  @State private var choices: QualityChoices?
-  /// The row ticked: the saved choice, or the one being saved.
-  @State private var selected: String?
-  @State private var saving = false
+  /// The choices, the tick and the confirmed choice; a read that started
+  /// before a save is dropped (Codex round 1 on batch E).
+  @State private var pick = QualityPick()
   @State private var message: StatusMessage?
   @Environment(\.colorScheme) private var scheme
   var body: some View {
     Form {
-      if let choices {
+      if let choices = pick.choices {
         Section("Quality") {
           ForEach(choices.rows) { row in
             Button {
-              Task { await choose(row.value, in: choices) }
+              Task { await choose(row.value) }
             } label: {
               HStack {
                 Text(row.title).foregroundStyle(PigBrand.text(scheme))
@@ -322,12 +322,13 @@ struct QualityView: View {
                   Text(detail).foregroundStyle(.secondary)
                 }
                 Image(systemName: "checkmark").foregroundStyle(PigBrand.accent(scheme))
-                  .opacity(selected == row.value ? 1 : 0)
+                  .opacity(pick.selected == row.value ? 1 : 0)
               }.contentShape(Rectangle())
             }
-            .disabled(saving || !model.canMutate)
+            .disabled(pick.saving || !model.canMutate)
             .accessibilityLabel(row.detail.map { row.title + ", " + $0 } ?? row.title)
-            .accessibilityAddTraits(selected == row.value ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAddTraits(
+              pick.selected == row.value ? [.isButton, .isSelected] : .isButton)
           }
         }
       } else if message == nil {
@@ -339,32 +340,28 @@ struct QualityView: View {
       .refreshable { await load() }
   }
   private func load() async {
+    let token = pick.readToken()
     do {
       let value = QualityChoices(
         try await model.readCatalogue { try await $0.quality() }, scope: scope, id: id)
-      choices = value
-      selected = value.selected
+      pick.read(value, token: token)
       message = nil
     } catch { message = .error(error.userMessage) }
   }
   /// Saves at once; a choice the server refuses goes back to the last one.
-  private func choose(_ value: String?, in choices: QualityChoices) async {
-    guard value != selected, !saving else { return }
-    let previous = selected
-    selected = value
-    saving = true
-    defer { saving = false }
+  private func choose(_ value: String?) async {
+    guard pick.startSave(value) else { return }
     do {
       try await model.performPersonal {
         try await $0.saveQuality(scope: scope, id: id, preferred: value)
       }
+      pick.finishSave(succeeded: true)
       message = nil
-      let row = choices.rows.first { $0.value == value }
-      saved(value == nil ? row?.detail : row?.title)
     } catch {
-      selected = previous
+      pick.finishSave(succeeded: false)
       message = .error(error.userMessage)
     }
+    saved(pick.summary)
   }
 }
 
