@@ -92,9 +92,14 @@ extension AcquisitionResult {
   /// downloads are off, or where to resume paused songs (alone or beside
   /// added ones).
   public var menuNotice: String? {
-    if !downloadsEnabled { return Self.downloadsOffNotice }
-    guard paused > 0 else { return nil }
-    return created + existing > 0 ? sentence : Self.pausedNotice
+    let waiting = created + existing > 0
+    guard paused > 0 else { return downloadsEnabled ? nil : Self.downloadsOffNotice }
+    // Where to resume is always said; downloads being off too when other
+    // songs wait (Codex confirmation on batch D).
+    if !downloadsEnabled {
+      return waiting ? Self.downloadsOffNotice + " " + Self.pausedNotice : Self.pausedNotice
+    }
+    return waiting ? sentence : Self.pausedNotice
   }
 }
 

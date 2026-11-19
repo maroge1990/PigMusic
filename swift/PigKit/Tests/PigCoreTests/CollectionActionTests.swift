@@ -25,6 +25,15 @@ struct CollectionActionTests {
 
   /// A mix's Add: a plain success is a haptic; paused songs say where to
   /// resume them, alone or beside added ones.
+  /// Codex confirmation on batch D: downloads being off never hides where
+  /// to resume a paused song; it is said too when other songs wait.
+  @Test func downloadsOffKeepsTheResumeSentence() {
+    #expect(result(0, paused: 1, enabled: false).menuNotice == "Paused. Resume it in Downloads.")
+    #expect(
+      result(1, paused: 1, enabled: false).menuNotice
+        == "Adding. Downloads are off on the server, so it will wait. Paused. Resume it in Downloads.")
+  }
+
   @Test func aMenusAddSaysWhereToResumePausedSongs() {
     #expect(result(1).menuNotice == nil)
     #expect(result(0, paused: 1).menuNotice == "Paused. Resume it in Downloads.")
