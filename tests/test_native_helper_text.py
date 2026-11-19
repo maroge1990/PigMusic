@@ -64,9 +64,10 @@ KEPT = {
         'Text("This can add many albums at once.")'
     ],
     "PigMusic/PendingEditsView.swift": ['"Discard this change?"'],
-    "PigMusic/SearchViews.swift": ['PigQuietState("Find music")', "Listening…"],
-    "PigMusic/LibraryViews.swift": [
-        'PigQuietState("Your library is empty", line: nil)'
+    "PigMusic/SearchViews.swift": ["Listening…"],
+    "PigKit/Sources/PigDomain/MainScreens.swift": [
+        'case .library: "Your library is empty"',
+        'case .library: "Find music"',
     ],
     "PigMusicShare/ShareViewController.swift": ["Added to PigMusic's Shazamed list"],
 }
