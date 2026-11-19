@@ -26,25 +26,29 @@ struct PendingEditsView: View {
       if model.pendingEdits.isEmpty {
         PigQuietState("All changes sent").listRowBackground(Color.clear)
       } else {
-        Section {
-          Button(
-            PendingChangeWords.sendLabel(count: model.pendingEdits.count),
-            systemImage: "arrow.up.circle"
-          ) {
-            Task {
-              loading = true
-              _ = await model.flushEdits()
-              await model.refresh()
-              loading = false
-            }
-          }.disabled(loading)
+        // Withdrawn changes are never sent again: not counted.
+        let sendable = model.pendingEdits.count { !$0.withdrawn }
+        if sendable > 0 {
+          Section {
+            Button(
+              PendingChangeWords.sendLabel(count: sendable), systemImage: "arrow.up.circle"
+            ) {
+              Task {
+                loading = true
+                _ = await model.flushEdits()
+                await model.refresh()
+                loading = false
+              }
+            }.disabled(loading)
+          }
         }
         Section {
           ForEach(model.pendingEdits) { pending in
             PendingChangeRow(
               model: model, pending: pending, busy: loading,
               retry: { Task { await model.retryEdit(pending.id) } },
-              discard: { discarding = pending.id }, open: { reviewing = $0 })
+              discard: { discarding = pending.id }, open: { reviewing = $0 },
+              forget: { Task { await model.forgetEdit(pending.id) } })
           }
         }
       }
@@ -78,6 +82,8 @@ private struct PendingChangeRow: View {
   let retry: () -> Void
   let discard: () -> Void
   let open: (Playlist) -> Void
+  /// Remove from this list: a withdrawn change, forgotten on this iPhone.
+  let forget: () -> Void
   @Environment(\.colorScheme) private var scheme
   private var playlist: Playlist? {
     pending.mutation.playlistId.flatMap { id in model.playlists.first { $0.id == id } }
@@ -107,9 +113,14 @@ private struct PendingChangeRow: View {
         if let playlist {
           Button("Go to playlist", systemImage: "music.note.list") { open(playlist) }
         }
-        // Asks first: a discarded change can't be brought back (D-79, #183).
-        Button("Discard this change", systemImage: "xmark", role: .destructive, action: discard)
-          .disabled(busy)
+        if words.withdrawn {
+          // Never sent again; this only forgets it here.
+          Button("Remove from this list", systemImage: "xmark", action: forget).disabled(busy)
+        } else {
+          // Asks first: a discarded change can't be brought back (D-79, #183).
+          Button("Discard this change", systemImage: "xmark", role: .destructive, action: discard)
+            .disabled(busy)
+        }
       } label: {
         Image(systemName: "ellipsis").frame(width: 32, height: 44).foregroundStyle(.secondary)
       }

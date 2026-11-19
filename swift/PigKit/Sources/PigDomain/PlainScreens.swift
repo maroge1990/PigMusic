@@ -59,13 +59,19 @@ public struct PendingChangeWords: Sendable, Equatable {
     }
     failed = pending.state != "queued"
     retryable = pending.retryable
+    withdrawn = pending.withdrawn
     status =
-      !failed ? Self.waiting : retryable ? Self.couldNotSend : Self.playlistChanged
+      withdrawn
+      ? Self.discarded(.unknown)
+      : !failed ? Self.waiting : retryable ? Self.couldNotSend : Self.playlistChanged
   }
   /// Try again can send it: refused, but not because the playlist changed
   /// (Codex round 1 on batch E). A conflicted edit offers Go to playlist and
   /// Discard instead.
   public let retryable: Bool
+  /// Discarded after a send that may have reached the server: it offers Go
+  /// to playlist and Remove from this list, and is never sent again.
+  public let withdrawn: Bool
   public static let playlistChanged = "Couldn't send: the playlist changed."
 
   /// The page's one button: "Send 3 changes now".
@@ -93,8 +99,8 @@ public enum DiscardResult: Sendable, Equatable {
   case alreadyGone
   /// The outbox couldn't be changed.
   case failed
-  /// Sent once without an answer: it may be on the server, so it was kept
-  /// (Codex round 2 on batch E).
+  /// A send may have reached the server: withdrawn, never sent again, and
+  /// kept to say so (Codex confirmation on batch E).
   case unknown
 }
 
@@ -126,7 +132,7 @@ public enum DiscardResult: Sendable, Equatable {
 
 extension PendingMutation {
   /// A refused edit Try again can send: not a playlist that changed since.
-  public var retryable: Bool { state != "queued" && state != "conflict" }
+  public var retryable: Bool { state != "queued" && state != "conflict" && state != "withdrawn" }
   /// Sent again on the next try: waiting once more, its old refusal gone.
   public func retried() -> PendingMutation {
     var copy = self

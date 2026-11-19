@@ -58,7 +58,7 @@ import PigStore
     -> [RefusedFavourite]
   {
     let refused = try await store.pendingMutations().filter {
-      $0.mutation.action == "favourite" && $0.state != "queued"
+      $0.mutation.action == "favourite" && $0.state != "queued" && !$0.withdrawn
     }
     guard !refused.isEmpty else { return [] }
     for item in refused { try await store.acknowledgeMutation(item.id) }
@@ -99,9 +99,12 @@ import PigStore
     return isCurrent() ? after : nil
   }
 
-  /// Discard: takes the edit out of the outbox if it is still there. Run it
-  /// in the outbox's turn (`TurnGate`), so no send is under way. nil when
-  /// the account ended meanwhile.
+  /// Discard never causes a send (Codex confirmation on batch E). An edit
+  /// never sent is taken out of the outbox ("Discarded"); one whose send may
+  /// have reached the server (or an older build's, with no marker) is
+  /// withdrawn: never sent again, kept to say so. Run it in the outbox's
+  /// turn (`TurnGate`), so no send is under way. nil when the account ended
+  /// meanwhile.
   public static func discard(_ id: String, store: LibraryStore, isCurrent: () -> Bool)
     async -> (DiscardResult, [PendingMutation])?
   {
@@ -112,18 +115,40 @@ import PigStore
       guard let item = pending.first(where: { $0.id == id }) else {
         return (.alreadyGone, pending)
       }
-      // Sent without an answer: it may be on the server, so it stays and is
-      // never reported discarded (Codex round 2 on batch E). The next send
-      // settles it: the server answers a repeated edit from its receipt.
-      guard !item.unknown else { return (.unknown, pending) }
-      try await store.acknowledgeMutation(id)
+      if item.withdrawn { return (.unknown, pending) }
+      let result: DiscardResult
+      if item.maybeSent {
+        var withdrawn = item
+        withdrawn.state = "withdrawn"
+        withdrawn.message = nil
+        try await store.updateMutation(withdrawn)
+        result = .unknown
+      } else {
+        try await store.acknowledgeMutation(id)
+        result = .discarded
+      }
       guard isCurrent() else { return nil }
       let after = try await store.pendingMutations()
-      return isCurrent() ? (.discarded, after) : nil
+      return isCurrent() ? (result, after) : nil
     } catch {
       let pending = (try? await store.pendingMutations()) ?? []
       return isCurrent() ? (.failed, pending) : nil
     }
+  }
+
+  /// Remove from this list: forgets a withdrawn edit on this iPhone only;
+  /// nothing is sent. nil when the account ended meanwhile.
+  public static func forget(_ id: String, store: LibraryStore, isCurrent: () -> Bool)
+    async throws -> [PendingMutation]?
+  {
+    guard isCurrent() else { return nil }
+    let pending = try await store.pendingMutations()
+    guard isCurrent() else { return nil }
+    guard pending.first(where: { $0.id == id })?.withdrawn == true else { return pending }
+    try await store.acknowledgeMutation(id)
+    guard isCurrent() else { return nil }
+    let after = try await store.pendingMutations()
+    return isCurrent() ? after : nil
   }
 
   /// The outbox as this account's page may show it: read first, then
@@ -159,6 +184,7 @@ import PigStore
     sending: for item in try await store.pendingMutations() {
       guard isCurrent() else { return .stale }
       let scope = Self.scope(item.mutation)
+      if item.withdrawn { continue }
       guard item.state == "queued", !blocked.contains(scope) else {
         blocked.insert(scope)
         continue

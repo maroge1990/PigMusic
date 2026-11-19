@@ -1317,10 +1317,20 @@ enum PlayOrigin: Hashable {
     guard let result, account.isCurrent(stamp) else { return nil }
     let (outcome, pending) = result
     pendingEdits = pending
-    _ = await flushEdits()
-    guard account.isCurrent(stamp) else { return nil }
-    await refresh()
+    // Never a send or a refresh: Discard must not deliver what it cancels
+    // (Codex confirmation on batch E).
     return PendingChangeWords.discarded(outcome)
+  }
+  /// Remove from this list: forgets a withdrawn change on this iPhone only.
+  func forgetEdit(_ id: String) async {
+    guard let store else { return }
+    let stamp = account.generation
+    await editTurns.enter()
+    let pending = try? await EditOutbox.forget(
+      id, store: store, isCurrent: { [account] in account.isCurrent(stamp) })
+    editTurns.leave()
+    guard let pending, account.isCurrent(stamp) else { return }
+    pendingEdits = pending
   }
   /// Couldn't send. Try again. (D-120): the refused change waits once more
   /// and is sent at once. Only for the account that asked: each await is

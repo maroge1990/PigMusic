@@ -33,16 +33,21 @@ public struct PendingMutation: Codable, Sendable, Identifiable {
   public var mutation: OfflineMutation
   public var state: String
   public var message: String?
-  /// Sent at least once without an answer that settled it (a lost reply):
-  /// the server may already have applied it (Codex round 2 on batch E).
+  /// Whether a send of it may have reached the server: false only for an
+  /// edit never sent, or one the server answered without applying. An edit
+  /// saved by an older build has no marker and may have been sent (Codex
+  /// confirmation on batch E).
   public var attempted: Bool?
-  /// Waiting, but a send may have reached the server: Discard can't promise
-  /// it stays unsent.
-  public var unknown: Bool { state == "queued" && attempted == true }
+  /// A send may have reached the server.
+  public var maybeSent: Bool { attempted != false }
+  /// Discarded after a send that may have reached the server: never sent
+  /// again, kept to say so until the person removes it from the list.
+  public var withdrawn: Bool { state == "withdrawn" }
   public var id: String { mutation.id }
   public init(mutation: OfflineMutation) {
     self.mutation = mutation
     state = "queued"
+    attempted = false
   }
 }
 public struct OfflineMutationReceipt: Codable, Sendable {

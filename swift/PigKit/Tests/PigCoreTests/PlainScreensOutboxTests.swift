@@ -62,35 +62,76 @@ import Testing
 
   private struct LostReply: Error {}
 
-  /// Codex round 2 on batch E: a send whose reply is lost may have reached
-  /// the server; Discard keeps it and says it couldn't tell, never
-  /// "Discarded". The next send settles it.
-  @Test func discardNeverClaimsAnEditWithALostReply() async throws {
+  /// Sends the outbox, recording what reached the API.
+  private func send(
+    _ store: LibraryStore, seen: inout [String], failing: Bool = false
+  ) async throws {
+    var applied = false
+    var reached: [String] = []
+    _ = try await EditOutbox.send(store: store, isCurrent: { true }, applied: &applied) {
+      reached.append($0.id)
+      if failing { throw LostReply() }
+      return OfflineMutationReceipt(operationId: $0.id, applied: true)
+    }
+    seen += reached
+  }
+
+  /// Codex confirmation on batch E: a playlist deleted offline, whose send
+  /// was tried and lost on reconnecting, is Discarded: nothing more reaches
+  /// the API; it says it couldn't tell, and Remove from this list forgets it.
+  @Test func discardAfterALostSendNeverSendsIt() async throws {
     let (store, root) = try makeStore()
     defer { try? FileManager.default.removeItem(at: root) }
-    let edit = OfflineMutation(action: "delete", playlistId: "p", revision: 3)
-    try await store.enqueueMutation(edit)
-    var applied = false
-    _ = try await EditOutbox.send(store: store, isCurrent: { true }, applied: &applied) { _ in
-      throw LostReply()
-    }
-    let waiting = try await store.pendingMutations()
-    #expect(waiting.first?.unknown == true)
-    let discard = await EditOutbox.discard(edit.id, store: store) { true }
+    let delete = OfflineMutation(action: "delete", playlistId: "p", revision: 3)
+    try await store.enqueueMutation(delete)
+    var seen: [String] = []
+    try await send(store, seen: &seen, failing: true)
+    #expect(seen == [delete.id])
+    let discard = await EditOutbox.discard(delete.id, store: store) { true }
     #expect(discard?.0 == .unknown)
-    #expect(try await store.pendingMutations().count == 1)
-    #expect(
-      PendingChangeWords.discarded(.unknown)
-        == "Couldn't tell whether this change was sent. Check the playlist.")
-    // The server answers the repeated edit from its receipt: settled.
-    _ = try await EditOutbox.send(store: store, isCurrent: { true }, applied: &applied) {
-      OfflineMutationReceipt(operationId: $0.id, applied: true)
-    }
+    #expect(discard?.1.first?.withdrawn == true)
+    seen = []
+    try await send(store, seen: &seen)
+    #expect(seen.isEmpty)
+    let row = try await store.pendingMutations()
+    #expect(PendingChangeWords(row[0]).status
+      == "Couldn't tell whether this change was sent. Check the playlist.")
+    #expect(!PendingChangeWords(row[0]).retryable)
+    #expect(try await EditOutbox.retry(delete.id, store: store) { true }?.first?.withdrawn == true)
+    #expect(try await EditOutbox.forget(delete.id, store: store) { true }?.isEmpty == true)
+    // A later edit to the same playlist isn't held back by it.
+    let later = OfflineMutation(action: "append", playlistId: "p")
+    try await store.enqueueMutation(later)
+    #expect(await EditOutbox.discard(later.id, store: store) { true }?.0 == .discarded)
+  }
+
+  /// An edit saved by an older build has no send marker: it may have been
+  /// sent, so Discard withdraws it and it is never sent.
+  @Test func discardWithdrawsALegacyEdit() async throws {
+    let (store, root) = try makeStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let delete = OfflineMutation(action: "delete", playlistId: "p", revision: 3)
+    try await store.enqueueMutation(delete)
+    var legacy = try await store.pendingMutations()[0]
+    legacy.attempted = nil
+    try await store.updateMutation(legacy)
+    #expect(await EditOutbox.discard(delete.id, store: store) { true }?.0 == .unknown)
+    var seen: [String] = []
+    try await send(store, seen: &seen)
+    #expect(seen.isEmpty)
+  }
+
+  /// An edit never sent is simply discarded, and never sent.
+  @Test func discardRemovesAnEditNeverSent() async throws {
+    let (store, root) = try makeStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let edit = OfflineMutation(action: "create", name: "Run")
+    try await store.enqueueMutation(edit)
+    #expect(await EditOutbox.discard(edit.id, store: store) { true }?.0 == .discarded)
+    var seen: [String] = []
+    try await send(store, seen: &seen)
+    #expect(seen.isEmpty)
     #expect(try await store.pendingMutations().isEmpty)
-    // An edit never sent is still discarded at once.
-    let fresh = OfflineMutation(action: "create", name: "Run")
-    try await store.enqueueMutation(fresh)
-    #expect(await EditOutbox.discard(fresh.id, store: store) { true }?.0 == .discarded)
   }
 
   /// Codex round 2 on batch E: the outbox read at the end of a send is shown
