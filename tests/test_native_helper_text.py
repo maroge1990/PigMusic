@@ -58,13 +58,12 @@ KEPT = {
     "PigMusic/AppModel.swift": ['notifyDone("Playlist saved")'],
     "PigMusic/AccountToolsViews.swift": [
         'static let serverUpdate = "Update the server to use everything"',
-        "Household default: ",
     ],
     "PigMusic/Components.swift": ['message = .info("Saved")'],
     "PigMusic/ArtistAcquisitionView.swift": [
         'Text("This can add many albums at once.")'
     ],
-    "PigMusic/PendingEditsView.swift": ["Discarding stops retries"],
+    "PigMusic/PendingEditsView.swift": ['"Discard this change?"'],
     "PigMusic/SearchViews.swift": ['PigQuietState("Find music")', "Listening…"],
     "PigMusic/LibraryViews.swift": [
         'PigQuietState("Your library is empty", line: nil)'
