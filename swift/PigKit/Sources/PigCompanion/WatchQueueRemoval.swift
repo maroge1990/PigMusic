@@ -35,6 +35,20 @@ public enum WatchQueueRemoval: Equatable, Sendable {
     if repeatAll, !keep.isEmpty { return .advance(keep: keep, index: 0) }
     return .stop
   }
+
+  /// A queue still being built when removals were committed (Codex round 1
+  /// on #252): the positions it keeps, where to start among them, and
+  /// whether that is the chosen song (else it starts from the beginning of
+  /// the next kept one, or the last kept before it). Nil when nothing is left.
+  public static func reconcile(
+    _ queue: [String], start: Int, removed: Set<String>
+  ) -> (keep: [Int], start: Int, startKept: Bool)? {
+    let keep = queue.indices.filter { !removed.contains(queue[$0]) }
+    guard !keep.isEmpty else { return nil }
+    if let index = keep.firstIndex(of: start) { return (keep, index, true) }
+    if let index = keep.firstIndex(where: { $0 > start }) { return (keep, index, false) }
+    return (keep, keep.count - 1, false)
+  }
 }
 
 /// The Watch's lists in the order the iPhone files them (#252): A to Z

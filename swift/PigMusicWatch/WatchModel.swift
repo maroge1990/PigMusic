@@ -23,6 +23,9 @@ import UIKit
   var removing: Set<String> = []
   /// Songs the Watch turned away this session, and why (#252).
   var problems: [String: WatchSaveProblem] = [:]
+  /// Songs whose removal has been committed (the Undo ran out), noted at
+  /// once so a queue still being built leaves them out.
+  @ObservationIgnored private var committedRemovals: Set<String> = []
   /// Removals waiting for their Undo (D-79, #183).
   let undo = UndoQueue()
   static func undoKey(_ id: String) -> String { "watch-song:" + id }
@@ -414,6 +417,8 @@ import UIKit
     link?.refreshState()
     manifest = await archive.snapshot()
     removing = Set(await archive.pendingRequests().filter { $0.value == "remove" }.keys)
+    // Songs gone from the library need no reminder.
+    committedRemovals.formIntersection(Set(manifest.songs.map(\.id)))
     let next = await archive.receipt()
     // A song saved since it was turned away no longer counts against it.
     problems = problems.filter { id, _ in next.ready[id] == nil }
@@ -543,6 +548,8 @@ import UIKit
       at: file.deletingPathExtension().appendingPathExtension("json"))
   }
   func send(_ action: String, songIds: [String] = []) async {
+    // Noted before any await, so a queue being built leaves these out.
+    if action == "remove" { committedRemovals.formUnion(songIds) }
     if ["download", "remove"].contains(action), let archive {
       do { try await archive.request(action, ids: songIds) } catch {
         notices.post(error.localizedDescription)
@@ -664,6 +671,16 @@ import UIKit
     do {
       try await activateAudio()
       guard playbackGeneration == stamp else { return }
+      // A removal committed while this queue was built (each await above)
+      // found nothing to take out of it: drop those songs now, with no
+      // await left before the queue is published (Codex round 1 on #252).
+      guard
+        let kept = WatchQueueRemoval.reconcile(
+          items.map(\.track.id), start: start, removed: committedRemovals)
+      else { return }
+      items = kept.keep.map { items[$0] }
+      start = kept.start
+      if !kept.startKept { startSeconds = 0 }
       queue = items
       intent.play()
       engine.replace(

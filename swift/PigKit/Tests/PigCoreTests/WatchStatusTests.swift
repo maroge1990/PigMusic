@@ -165,6 +165,23 @@ struct WatchStatusTests {
     #expect(WatchQueueRemoval.plan(queue: [], current: 0, removing: ["a"]) == .untouched)
   }
 
+  /// Codex round 1: a removal committed while play() was still building its
+  /// queue was missed, and the removed song was queued anyway.
+  @Test func aQueueBeingBuiltDropsCommittedRemovals() {
+    let queue = ["a", "b", "c", "d"]
+    let kept = WatchQueueRemoval.reconcile(queue, start: 2, removed: ["b"])
+    #expect(kept?.keep == [0, 2, 3])
+    #expect(kept?.start == 1)
+    #expect(kept?.startKept == true)
+    // The chosen song went: the next one, from its start.
+    let next = WatchQueueRemoval.reconcile(queue, start: 1, removed: ["b"])
+    #expect(next?.start == 1)
+    #expect(next?.startKept == false)
+    #expect(WatchQueueRemoval.reconcile(queue, start: 3, removed: ["d"])?.start == 2)
+    #expect(WatchQueueRemoval.reconcile(["a"], start: 0, removed: ["a"]) == nil)
+    #expect(WatchQueueRemoval.reconcile(queue, start: 0, removed: [])?.keep == [0, 1, 2, 3])
+  }
+
   /// Albums file like artists: "abbey road" before "Tusk", "The Wall" under W.
   @Test func listsIgnoreCaseAndALeadingThe() {
     let names = ["Tusk", "abbey road", "The Wall", "Blue", "the Bends"]
