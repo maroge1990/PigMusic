@@ -188,6 +188,16 @@ public actor LibraryStore {
       try String.fetchOne($0, sql: "SELECT value FROM metadata WHERE key='artwork'")
     }
   }
+  /// How long every song in the library plays, in seconds (D-120).
+  public func totalDuration() throws -> Double {
+    try database.read {
+      try Double.fetchOne(
+        $0,
+        sql:
+          "SELECT coalesce(sum(json_extract(CAST(payload AS TEXT),'$.duration')),0) FROM tracks")
+        ?? 0
+    }
+  }
   public func count(_ collection: LibraryCollection) throws -> Int {
     try database.read {
       try Int.fetchOne($0, sql: "SELECT count(*) FROM \(collection.rawValue)") ?? 0
@@ -448,6 +458,9 @@ public actor LibraryStore {
     case .titleDescending: "name COLLATE sortname DESC, id"
     case .artist:
       "json_extract(CAST(payload AS TEXT),'$.artist') COLLATE sortname, name COLLATE sortname, id"
+    // Newest first; music without a year after it.
+    case .year:
+      "json_extract(CAST(payload AS TEXT),'$.year') IS NULL, CAST(json_extract(CAST(payload AS TEXT),'$.year') AS TEXT) DESC, name COLLATE sortname, id"
     }
   }
 

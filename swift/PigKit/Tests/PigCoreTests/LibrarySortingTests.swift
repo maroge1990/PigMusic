@@ -197,4 +197,25 @@ struct LibraryReloadGateTests {
     let changed = gate.afterSync(libraryChanged: true)
     #expect(pending && !again && changed)
   }
+  /// D-120: Albums sort by year, newest first and undated last; Songs
+  /// say how long the whole library plays.
+  @Test func albumsSortByYearAndTheLibraryKnowsItsLength() async throws {
+    let store = try LibraryStore(path: ":memory:")
+    let albums: [Album] = try LibraryCodec.decoder().decode(
+      [Album].self,
+      from: Data(
+        (#"[{"id":"old","title":"A","artist":"X","year":1971},{"id":"none","title":"B","artist":"X"},"#
+          + #"{"id":"new","title":"C","artist":"X","year":"2024"},{"id":"mid","title":"D","artist":"X","year":1999}]"#)
+          .utf8))
+    try await store.replace(
+      LibrarySnapshot(
+        revision: "one",
+        tracks: [
+          Track(id: "1", title: "One", artist: "X", duration: 100),
+          Track(id: "2", title: "Two", artist: "X", duration: 50.5),
+          Track(id: "3", title: "Three", artist: "X"),
+        ], albums: albums))
+    #expect(try await store.albums(sort: .year).map(\.id) == ["new", "mid", "old", "none"])
+    #expect(try await store.totalDuration() == 150.5)
+  }
 }

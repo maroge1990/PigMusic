@@ -360,6 +360,8 @@ extension PlaylistEntry {
 
 public enum LibrarySort: String, Codable, Sendable, CaseIterable {
   case title, artist, titleDescending
+  /// Newest first; albums only (D-120).
+  case year
 }
 
 extension String {
