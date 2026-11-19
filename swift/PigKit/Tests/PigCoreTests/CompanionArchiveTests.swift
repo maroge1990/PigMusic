@@ -145,23 +145,22 @@ struct CompanionArchiveTests {
     #expect(await archive.localFile(id: a.id) != nil)
     #expect(await archive.receipt().ready.keys.sorted() == [a.id])
   }
-  /// Codex round 1 on #252: an unreadable saved library opened as an empty
-  /// one, so the Watch said "No music" instead of its error with Try again.
-  @Test func unreadableSavedLibraryIsAnErrorAndStays() async throws {
+  /// Codex round 1 on #252: a damaged saved library started empty with no
+  /// word why, so the Watch said "No music". It still starts empty (the
+  /// iPhone's next copy can be taken), and says which files were damaged.
+  @Test func damagedSavedLibraryIsNoted() async throws {
     let root = try folder()
     defer { try? FileManager.default.removeItem(at: root) }
     let music = root.appendingPathComponent("Music")
-    // A fresh install opens empty.
+    // A fresh install opens empty, with nothing damaged.
     let fresh = try CompanionArchive(directory: music)
-    #expect(await fresh.snapshot().songs.isEmpty)
+    #expect(fresh.damagedFiles.isEmpty)
     for name in ["context.json", "manifest.json"] {
       let file = music.appendingPathComponent(name)
       try Data("not json".utf8).write(to: file)
-      #expect(throws: CompanionArchiveFailure.unreadable(name)) {
-        _ = try CompanionArchive(directory: music)
-      }
-      // Left in place for the next try.
-      #expect(try Data(contentsOf: file) == Data("not json".utf8))
+      let opened = try CompanionArchive(directory: music)
+      #expect(opened.damagedFiles == [name])
+      #expect(await opened.snapshot().songs.isEmpty)
       try FileManager.default.removeItem(at: file)
     }
   }

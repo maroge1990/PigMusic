@@ -182,6 +182,15 @@ struct WatchStatusTests {
     #expect(WatchQueueRemoval.reconcile(queue, start: 0, removed: [])?.keep == [0, 1, 2, 3])
   }
 
+  /// A damaged saved library says so until the iPhone's copy arrives.
+  @Test func aDamagedLibrarySaysItIsBeingFetchedAgain() {
+    #expect(WatchRecovery(damagedFiles: []).text == nil)
+    var recovery = WatchRecovery(damagedFiles: ["manifest.json"])
+    #expect(recovery.text == "Couldn't read your saved music. Getting it again from iPhone.")
+    recovery.libraryArrived()
+    #expect(recovery.text == nil)
+  }
+
   /// Albums file like artists: "abbey road" before "Tusk", "The Wall" under W.
   @Test func listsIgnoreCaseAndALeadingThe() {
     let names = ["Tusk", "abbey road", "The Wall", "Blue", "the Bends"]

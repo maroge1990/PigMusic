@@ -153,6 +153,17 @@ public struct WatchLibraryStatus: Equatable, Sendable {
   }
 }
 
+/// After the saved library was found damaged and started empty: a grey
+/// notice until the iPhone's next copy arrives (Codex round 1 on #252).
+public struct WatchRecovery: Equatable, Sendable {
+  public static let notice = "Couldn't read your saved music. Getting it again from iPhone."
+  public private(set) var waiting: Bool
+  public init(damagedFiles: [String]) { waiting = !damagedFiles.isEmpty }
+  /// A library from the iPhone was applied.
+  public mutating func libraryArrived() { waiting = false }
+  public var text: String? { waiting ? Self.notice : nil }
+}
+
 /// The figures on Storage & sync: "1.2 GB" "of 2 GB", the gauge, and the
 /// Storage limit in whole gigabytes, all counted in 1,024s so the limit
 /// reads as the picker sets it.

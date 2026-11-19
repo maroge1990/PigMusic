@@ -17,14 +17,8 @@ public enum CompanionArrival: Equatable, Sendable {
 public enum CompanionArchiveFailure: Error, LocalizedError, Equatable {
   /// Apple Watch has no room left for the song.
   case deviceFull
-  /// The saved library (context or manifest) is there but can't be read;
-  /// it is left in place.
-  case unreadable(String)
   public var errorDescription: String? {
-    switch self {
-    case .deviceFull: "Apple Watch has no space left. Remove songs or free up space on Apple Watch."
-    case .unreadable: "Couldn't read the music saved on this Apple Watch. Try again."
-    }
+    "Apple Watch has no space left. Remove songs or free up space on Apple Watch."
   }
 }
 
@@ -45,6 +39,9 @@ public actor CompanionArchive {
   /// times (#219).
   private var arrivals: [String: Date]
   public private(set) var budgetBytes: Int64
+  /// Saved library files that were there but couldn't be read at opening
+  /// (context.json, manifest.json); the library started empty instead.
+  public nonisolated let damagedFiles: [String]
   public init(
     directory: URL, budgetBytes: Int64 = 1024 * 1024 * 1024,
     now: @escaping @Sendable () -> Date = { Date() }
@@ -69,23 +66,25 @@ public actor CompanionArchive {
       (try? decoder.decode(
         Int64.self, from: Data(contentsOf: directory.appendingPathComponent("budget.json"))))
       ?? budgetBytes
-    // Absent on a fresh install: an empty library. There but unreadable: an
-    // error the Watch shows with Try again, never an empty library, and the
-    // files stay as they are (Codex round 1 on #252).
-    func saved<Value: Decodable>(_ type: Value.Type, _ name: String) throws -> Value? {
+    // Absent on a fresh install, or there but unreadable: an empty library,
+    // so the iPhone's next copy can be taken. A damaged one is noted, so the
+    // Watch can say why its music went (Codex round 1 on #252).
+    var damaged: [String] = []
+    func saved<Value: Decodable>(_ type: Value.Type, _ name: String) -> Value? {
       let file = directory.appendingPathComponent(name)
       guard FileManager.default.fileExists(atPath: file.path) else { return nil }
       do { return try decoder.decode(type, from: Data(contentsOf: file)) } catch {
-        throw CompanionArchiveFailure.unreadable(name)
+        damaged.append(name)
+        return nil
       }
     }
     let loadedContext =
-      try saved(CompanionContext.self, "context.json")
-      ?? CompanionContext(revision: 0, account: nil)
+      saved(CompanionContext.self, "context.json") ?? CompanionContext(revision: 0, account: nil)
     context = loadedContext
     let loadedManifest =
-      try saved(CompanionManifest.self, "manifest.json")
+      saved(CompanionManifest.self, "manifest.json")
       ?? CompanionManifest(context: loadedContext, songs: [])
+    damagedFiles = damaged
     // A committed library from the same account stays playable while a newer
     // revision is on its way; anything else is revoked.
     let sameAccount =

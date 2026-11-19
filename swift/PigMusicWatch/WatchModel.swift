@@ -19,6 +19,9 @@ import UIKit
   /// Why the Watch's music couldn't be opened; the home shows it in place
   /// of an empty library (#252).
   var loadError: String?
+  /// The saved library was damaged and started empty: a grey notice until
+  /// the iPhone's next copy arrives.
+  var recovery = WatchRecovery(damagedFiles: [])
   /// Songs whose removal is on its way to the iPhone: left out of lists and counts.
   var removing: Set<String> = []
   /// Songs the Watch turned away this session, and why (#252).
@@ -193,8 +196,15 @@ import UIKit
   private func openArchive() {
     guard archive == nil else { return }
     do {
-      archive = try CompanionArchive(directory: try Self.baseDirectory().appendingPathComponent("Music"))
+      let opened = try CompanionArchive(
+        directory: try Self.baseDirectory().appendingPathComponent("Music"))
+      archive = opened
       loadError = nil
+      recovery = WatchRecovery(damagedFiles: opened.damagedFiles)
+      if !opened.damagedFiles.isEmpty {
+        DiagnosticsLog.shared.record(
+          "sync", "saved library damaged: \(opened.damagedFiles.joined(separator: ", "))")
+      }
     } catch {
       DiagnosticsLog.shared.record("sync", "archive didn't open: \(error.localizedDescription)")
       loadError = error.localizedDescription
@@ -506,6 +516,7 @@ import UIKit
               + (unchanged ? "" : "; playback stopped for a changed song"))
         }
         lastSynced = Date()
+        recovery.libraryArrived()
       } else if envelope.kind == "audio", let ticket = envelope.file {
         // Audio can be delivered before its manifest, and songs from an earlier
         // revision after the next one is announced (#64): keep what can't be

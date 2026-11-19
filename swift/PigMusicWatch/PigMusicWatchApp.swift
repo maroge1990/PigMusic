@@ -124,6 +124,11 @@ private struct WatchLibraryView: View {
           } actions: {
             Button("Try again", systemImage: "arrow.clockwise") { Task { await model.reopen() } }
           }.listRowBackground(Color.clear)
+        } else if model.songs.isEmpty, let notice = model.recovery.text {
+          // The saved library was damaged: it comes again from the iPhone.
+          Text(notice).font(PigType.footnote).foregroundStyle(.secondary)
+            .multilineTextAlignment(.center).frame(maxWidth: .infinity)
+            .listRowBackground(Color.clear)
         } else if model.songs.isEmpty {
           ContentUnavailableView {
             Label {
