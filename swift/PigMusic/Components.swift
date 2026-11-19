@@ -1161,3 +1161,144 @@ struct ClearFinishedButton: View {
     .disabled(!enabled)
   }
 }
+
+/// A playlist's cover (D-120): Favourites' star, four album covers as a
+/// mosaic, the one cover it has, or a music symbol.
+struct CoverMosaicView: View {
+  let model: AppModel
+  let tracks: [Track]
+  var favourites = false
+  var width = 256
+  @Environment(\.colorScheme) private var scheme
+  var body: some View {
+    let covers = CoverMosaic.songs(tracks)
+    Color.clear.aspectRatio(1, contentMode: .fit)
+      .overlay {
+        if favourites {
+          LinearGradient(
+            colors: [PigBrand.accent(scheme).opacity(0.6), PigBrand.accent(scheme)],
+            startPoint: .topLeading, endPoint: .bottomTrailing
+          )
+          .overlay {
+            GeometryReader { proxy in
+              Image(systemName: "star.fill").font(.system(size: proxy.size.width * 0.42))
+                .foregroundStyle(.white).frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+          }
+        } else if covers.count == 4 {
+          Grid(horizontalSpacing: 0, verticalSpacing: 0) {
+            ForEach(0..<2, id: \.self) { row in
+              GridRow {
+                ForEach(0..<2, id: \.self) { column in
+                  let track = covers[row * 2 + column]
+                  Artwork(
+                    model: model, source: track.artworkSource, title: track.title, width: width / 2
+                  )
+                  .clipShape(Rectangle())
+                }
+              }
+            }
+          }
+        } else if let track = covers.first {
+          Artwork(model: model, source: track.artworkSource, title: track.title, width: width)
+        } else {
+          PigBrand.raised(scheme).overlay {
+            GeometryReader { proxy in
+              Image(systemName: "music.note").font(.system(size: proxy.size.width * 0.32))
+                .foregroundStyle(PigBrand.secondary(scheme))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+          }
+        }
+      }
+      .clipShape(RoundedRectangle(cornerRadius: PigRadius.artwork, style: .continuous))
+      .accessibilityHidden(true)
+  }
+}
+
+/// Play and Shuffle at the top of a list of music (D-120), side by side.
+struct PlayShuffleRow: View {
+  let play: () -> Void
+  let shuffle: () -> Void
+  @Environment(\.colorScheme) private var scheme
+  var body: some View {
+    HStack(spacing: 12) {
+      Button(action: play) {
+        Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity, minHeight: 36)
+      }
+      .pigPrimaryAction()
+      Button(action: shuffle) {
+        Label("Shuffle", systemImage: "shuffle").frame(maxWidth: .infinity, minHeight: 36)
+      }
+      .buttonStyle(.bordered).tint(PigBrand.accent(scheme))
+    }
+    .font(.body.weight(.semibold))
+    .controlSize(.large)
+  }
+}
+
+/// An empty page (D-120): an icon, one short line and one action; no
+/// explanation (D-101).
+struct EmptyPageView: View {
+  let page: EmptyPage
+  let systemImage: String
+  let action: () -> Void
+  @Environment(\.colorScheme) private var scheme
+  @ScaledMetric(relativeTo: .title) private var icon: CGFloat = 40
+  var body: some View {
+    VStack(spacing: 16) {
+      Image(systemName: systemImage).font(.system(size: icon))
+        .foregroundStyle(PigBrand.secondary(scheme)).accessibilityHidden(true)
+      Text(page.line).font(.headline).foregroundStyle(PigBrand.secondary(scheme))
+      Button(action: action) {
+        Text(page.action).font(.body.weight(.semibold)).padding(.horizontal, 12)
+      }
+      .pigPrimaryAction().controlSize(.large)
+    }
+    .multilineTextAlignment(.center)
+    .frame(maxWidth: .infinity)
+    .padding(.vertical, 32).padding(.horizontal)
+  }
+}
+
+/// A shelf's one quiet placeholder row while it first loads (D-120): its
+/// heading over faint tiles, no words.
+struct ShelfPlaceholder: View {
+  let title: String
+  var size: CGFloat = 150
+  @Environment(\.colorScheme) private var scheme
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text(title).font(PigType.sectionTitle).padding(.horizontal)
+      HStack(spacing: 14) {
+        ForEach(0..<3, id: \.self) { _ in
+          RoundedRectangle(cornerRadius: PigRadius.artwork, style: .continuous)
+            .fill(PigBrand.raised(scheme)).frame(width: size, height: size)
+        }
+      }
+      .padding(.horizontal)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .clipped()
+      .accessibilityHidden(true)
+    }
+  }
+}
+
+/// A section's heading with an optional link on the right ("See all").
+struct SectionHeading<Trailing: View>: View {
+  let title: String
+  @ViewBuilder var trailing: Trailing
+  var body: some View {
+    HStack(alignment: .firstTextBaseline) {
+      Text(title).font(PigType.sectionTitle).accessibilityAddTraits(.isHeader)
+      Spacer()
+      trailing
+    }
+  }
+}
+
+extension SectionHeading where Trailing == EmptyView {
+  init(_ title: String) {
+    self.init(title: title) { EmptyView() }
+  }
+}

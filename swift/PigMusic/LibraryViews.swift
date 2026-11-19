@@ -5,32 +5,20 @@ import PigDomain
 import PigPlayback
 import SwiftUI
 
-private enum LibraryTab: String, CaseIterable, Identifiable {
-  case artists = "Artists"
-  case albums = "Albums"
-  case musicals = "Musicals"
-  case soundtracks = "Soundtracks"
-  case compilations = "Compilations"
-  case songs = "Songs"
-  case playlists = "Playlists"
+/// The album categories of the Albums page; empty ones stay hidden, as on the web.
+private enum AlbumCategory: String, CaseIterable, Identifiable {
+  case album = "Albums"
+  case musical = "Musicals"
+  case soundtrack = "Soundtracks"
+  case compilation = "Compilations"
   var id: String { rawValue }
-  /// Album tabs show one category each, as on the web.
-  var albumCategory: String? {
-    switch self {
-    case .albums: "album"
-    case .musicals: "musical"
-    case .soundtracks: "soundtrack"
-    case .compilations: "compilation"
-    default: nil
-    }
-  }
+  var key: String { String(describing: self) }
 }
 
-/// "Your library": collection chips and a card grid, as in the web client.
+/// Library (D-120): four tiles with artwork and counts into Artists, Albums,
+/// Songs and Playlists, then Recently added.
 struct LibraryView: View {
   @Bindable var model: AppModel
-  @State private var tab: LibraryTab = .artists
-  @Environment(\.colorScheme) private var scheme
   /// An empty library is loading, unreachable or truly empty, and says which.
   @ViewBuilder private var emptyLibrary: some View {
     if model.syncing {
@@ -44,51 +32,55 @@ struct LibraryView: View {
           .pigPrimaryAction()
       }
     } else {
-      PigQuietState("Your library is empty", line: nil) {
-        Button("Find music") { model.openSearch() }.pigPrimaryAction()
-      }
+      EmptyPageView(page: .library, systemImage: "music.note.house") { model.openSearch() }
     }
   }
+  private var tiles: [GridItem] { [GridItem(.flexible(), spacing: 12), GridItem(.flexible())] }
   var body: some View {
     ScrollView {
-      LazyVStack(alignment: .leading, spacing: 16, pinnedViews: []) {
-        VStack(alignment: .leading, spacing: 2) {
-          Text(
-            [model.person?.displayName, "\(model.songCount.formatted()) songs"].compactMap { $0 }
-              .joined(separator: " · ")
-          ).font(PigType.subhead).foregroundStyle(.secondary)
-          if let message = model.message {
-            StatusText(message)
-          }
+      VStack(alignment: .leading, spacing: 24) {
+        if let message = model.message {
+          StatusText(message).padding(.horizontal)
         }
-        HStack(spacing: 8) {
-          ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-              // Empty category tabs stay hidden, as on the web.
-              ForEach(
-                LibraryTab.allCases.filter {
-                  $0 == .albums || $0.albumCategory.map { model.albumCategoryCounts[$0, default: 0] > 0 } ?? true
-                }
-              ) { item in
-                Button(item.rawValue) {
-                  tab = item
-                  if let category = item.albumCategory {
-                    Task { await model.showAlbums(category: category) }
-                  }
-                }
-                  .buttonStyle(ChipStyle(selected: tab == item))
-                  .accessibilityAddTraits(tab == item ? .isSelected : [])
-              }
+        if model.songCount == 0 {
+          emptyLibrary
+        } else {
+          LazyVGrid(columns: tiles, spacing: 12) {
+            tile("Artists", count: model.artistCount) {
+              LibraryArtistsView(model: model)
+            } art: {
+              ArtistTileArt(model: model, artists: Array(model.artists.prefix(3)))
+            }
+            tile("Albums", count: model.albumCategoryCounts.values.reduce(0, +)) {
+              LibraryAlbumsView(model: model)
+            } art: {
+              AlbumTileArt(model: model, albums: Array(model.albums.prefix(4)))
+            }
+            tile("Songs", count: model.songCount) {
+              LibrarySongsView(model: model)
+            } art: {
+              SongsTileArt()
+            }
+            tile("Playlists", count: model.playlists.count) {
+              PlaylistsView(model: model)
+            } art: {
+              PlaylistTileArt(model: model, playlists: PlaylistOrder.shown(model.playlists))
             }
           }
+          .padding(.horizontal)
         }
-        content
-        if model.songCount == 0 { emptyLibrary }
+        if let recent = model.homeContent[.recent]?.albums, !recent.isEmpty {
+          RecentlyAddedShelf(model: model, albums: recent)
+        }
       }
-      .padding(.horizontal).padding(.bottom, 24)
+      .padding(.vertical, 8).padding(.bottom, 16)
     }
-    .navigationTitle("Your library")
-    .refreshable { await model.refresh() }
+    .navigationTitle("Library")
+    .refreshable {
+      await model.refresh()
+      await model.refreshHome(force: true)
+    }
+    .task(id: model.artworkNamespace) { await model.refreshHome() }
     #if DEBUG
       // Headless UI review: --open-album shows the first album page and
       // --open-artist the first artist's.
@@ -110,96 +102,338 @@ struct LibraryView: View {
     @State private var debugAlbum: Album?
     @State private var debugArtist: Artist?
   #endif
-  /// Songs, less those removed from the library and waiting for their Undo (#214).
-  private var shownSongs: [Track] { model.undo.withoutRemoved(model.songs) }
-  @ViewBuilder private var content: some View {
-    switch tab {
-    case .artists:
-      sort(.artists, selected: model.artistSort, artistOption: false)
-      LazyVGrid(columns: cardColumns, spacing: 18) {
-        ForEach(model.artists) { artist in
-          NavigationLink {
-            SavedArtistView(model: model, artist: artist)
-          } label: {
-            SavedArtistCard(model: model, artist: artist)
-          }.buttonStyle(.plain)
-            // The artist's one menu, as on its page (D-118).
-            .contextMenu { ArtistActionsMenu(model: model, artist: artist) }
-        }
+  private func tile<Destination: View, Art: View>(
+    _ title: String, count: Int, @ViewBuilder destination: @escaping () -> Destination,
+    @ViewBuilder art: () -> Art
+  ) -> some View {
+    NavigationLink {
+      destination()
+    } label: {
+      LibraryTile(title: title, count: count) { art() }
+    }
+    .buttonStyle(.plain)
+    // Named by the collection alone, its count read after it.
+    .accessibilityLabel(title)
+    .accessibilityValue(count.formatted())
+  }
+}
+
+/// One Library tile: artwork above the collection's name and count.
+private struct LibraryTile<Art: View>: View {
+  let title: String
+  let count: Int
+  @ViewBuilder let art: Art
+  @Environment(\.colorScheme) private var scheme
+  @ScaledMetric(relativeTo: .body) private var artHeight: CGFloat = 96
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      art.frame(maxWidth: .infinity).frame(height: artHeight)
+      HStack(alignment: .firstTextBaseline) {
+        Text(title).font(.body.weight(.semibold)).foregroundStyle(PigBrand.text(scheme))
+        Spacer(minLength: 4)
+        Text(count.formatted()).font(PigType.subhead).pigFigures()
+          .foregroundStyle(PigBrand.secondary(scheme))
       }
-      more(.artists, shown: model.artists.count, total: model.artistCount)
-    case .albums, .musicals, .soundtracks, .compilations:
-      sort(.albums, selected: model.albumSort)
-      LazyVGrid(columns: cardColumns, spacing: 18) {
-        ForEach(model.albums) { album in
-          NavigationLink {
-            AlbumView(model: model, album: album)
-          } label: {
-            CollectionCard(
-              model: model, source: album.artworkSource, title: album.title, caption: album.artist)
-          }.buttonStyle(.plain)
-            // The album's one menu, as on its page (D-118).
-            .contextMenu { AlbumActionsMenu(model: model, album: album) }
-        }
+    }
+    .padding(12)
+    .background(PigBrand.surface(scheme), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+  }
+}
+
+/// Three artist portraits overlapping.
+private struct ArtistTileArt: View {
+  let model: AppModel
+  let artists: [Artist]
+  @Environment(\.colorScheme) private var scheme
+  var body: some View {
+    HStack(spacing: -22) {
+      ForEach(Array(artists.enumerated()), id: \.element.id) { index, artist in
+        ArtistCircle(model: model, artist: artist)
+          .frame(width: 64, height: 64)
+          .overlay(Circle().strokeBorder(PigBrand.surface(scheme), lineWidth: 3))
+          .zIndex(Double(3 - index))
       }
-      more(.albums, shown: model.albums.count, total: model.albumCount)
-    case .songs:
-      sort(.tracks, selected: model.songSort)
-      LazyVStack(spacing: 0) {
-        let songs = shownSongs
-        ForEach(Array(songs.enumerated()), id: \.element.id) { index, track in
-          SongRow(model: model, track: track) { model.play(songs, at: index) }
-          RowSeparator()
-        }
-      }
-      more(.tracks, shown: model.songs.count, total: model.songCount)
-    case .playlists:
-      NavigationLink {
-        PlaylistToolsView(model: model)
-      } label: {
-        Label("New or imported playlist", systemImage: "plus")
-      }.padding(.vertical, 4)
-      LazyVStack(spacing: 0) {
-        ForEach(model.playlists) { playlist in
-          NavigationLink {
-            PlaylistView(model: model, playlist: playlist)
-          } label: {
-            CollectionRow(
-              playlist.name,
-              subtitle: (playlist.trackCount ?? playlist.entries?.count).map {
-                "\($0) song\($0 == 1 ? "" : "s")"
-              }
-            ) {
-              SymbolThumb(
-                systemImage: playlist.favourites == true ? "star.fill" : "music.note.list")
-            } trailing: {
-              Image(systemName: "chevron.right").foregroundStyle(.tertiary)
-            }.padding(.vertical, 4)
-          }.buttonStyle(.plain)
-            // The playlist's one menu, as on its page (D-118).
-            .contextMenu { PlaylistActionsMenu(model: model, playlist: playlist) }
-          RowSeparator()
+    }
+    .accessibilityHidden(true)
+  }
+}
+
+/// An artist's portrait, from their own album covers.
+private struct ArtistCircle: View {
+  let model: AppModel
+  let artist: Artist
+  @State private var sha: String?
+  var body: some View {
+    Artwork(
+      model: model, source: artist.artworkSource(cover: sha), title: artist.name, width: 128,
+      circle: true
+    )
+    .task(id: "\(artist.id)|\(model.artworkRefresh)") { sha = await model.artistCover(artist) }
+  }
+}
+
+/// Four album covers in a square grid.
+private struct AlbumTileArt: View {
+  let model: AppModel
+  let albums: [Album]
+  var body: some View {
+    Grid(horizontalSpacing: 4, verticalSpacing: 4) {
+      ForEach(0..<2, id: \.self) { row in
+        GridRow {
+          ForEach(0..<2, id: \.self) { column in
+            let index = row * 2 + column
+            if index < albums.count {
+              Artwork(
+                model: model, source: albums[index].artworkSource, title: albums[index].title,
+                width: 128)
+            } else {
+              Color.clear.aspectRatio(1, contentMode: .fit)
+            }
+          }
         }
       }
     }
+    .aspectRatio(1, contentMode: .fit)
+    .accessibilityHidden(true)
   }
-  private func sort(
-    _ collection: LibraryCollection, selected: LibrarySort, artistOption: Bool = true
-  )
-    -> some View
-  {
-    LibrarySortPicker(
-      model: model, collection: collection, selected: selected, artist: artistOption)
+}
+
+private struct SongsTileArt: View {
+  @Environment(\.colorScheme) private var scheme
+  var body: some View {
+    LinearGradient(
+      colors: [PigBrand.accent(scheme).opacity(0.55), PigBrand.accent(scheme)],
+      startPoint: .topLeading, endPoint: .bottomTrailing
+    )
+    .overlay {
+      Image(systemName: "music.note").font(.system(size: 34, weight: .semibold))
+        .foregroundStyle(.white)
+    }
+    .clipShape(RoundedRectangle(cornerRadius: PigRadius.artwork, style: .continuous))
+    .accessibilityHidden(true)
   }
-  @ViewBuilder private func more(_ collection: LibraryCollection, shown: Int, total: Int)
-    -> some View
-  {
+}
+
+/// Favourites' star beside the first other playlist's cover.
+private struct PlaylistTileArt: View {
+  let model: AppModel
+  let playlists: [Playlist]
+  var body: some View {
+    HStack(spacing: 4) {
+      if let favourites = playlists.first(where: { $0.favourites == true }) {
+        CoverMosaicView(model: model, tracks: [], favourites: true, width: 128)
+          .id(favourites.id)
+      }
+      if let other = playlists.first(where: { $0.favourites != true }) {
+        CoverMosaicView(model: model, tracks: other.songs, width: 128)
+      }
+    }
+    .frame(maxWidth: .infinity)
+    .accessibilityHidden(true)
+  }
+}
+
+/// Recently added albums as covers (Home and Library, D-120).
+struct RecentlyAddedShelf: View {
+  let model: AppModel
+  let albums: [Album]
+  var body: some View {
+    Shelf(title: "Recently added") {
+      ForEach(albums) { album in
+        NavigationLink {
+          AlbumView(model: model, album: album)
+        } label: {
+          CollectionCard(
+            model: model, source: album.artworkSource, title: album.title, caption: album.artist
+          ).frame(width: 120)
+        }.buttonStyle(.plain)
+          .contextMenu { AlbumActionsMenu(model: model, album: album) }
+      }
+    }
+  }
+}
+
+/// Library: Artists, as cards.
+struct LibraryArtistsView: View {
+  @Bindable var model: AppModel
+  var body: some View {
+    ScrollView {
+      LazyVStack(alignment: .leading, spacing: 16) {
+        LibrarySortPicker(model: model, collection: .artists, selected: model.artistSort)
+        LazyVGrid(columns: cardColumns, spacing: 18) {
+          ForEach(model.artists) { artist in
+            NavigationLink {
+              SavedArtistView(model: model, artist: artist)
+            } label: {
+              SavedArtistCard(model: model, artist: artist)
+            }.buttonStyle(.plain)
+              // The artist's one menu, as on its page (D-118).
+              .contextMenu { ArtistActionsMenu(model: model, artist: artist) }
+          }
+        }
+        LibraryMore(model: model, collection: .artists, shown: model.artists.count, total: model.artistCount)
+      }
+      .padding(.horizontal).padding(.bottom, 24)
+    }
+    .pigCanvas().navigationTitle("Artists")
+    .refreshable { await model.refresh() }
+  }
+}
+
+/// Library: Albums, by category, as cards.
+struct LibraryAlbumsView: View {
+  @Bindable var model: AppModel
+  var body: some View {
+    ScrollView {
+      LazyVStack(alignment: .leading, spacing: 16) {
+        let categories = AlbumCategory.allCases.filter {
+          $0 == .album || model.albumCategoryCounts[$0.key, default: 0] > 0
+        }
+        if categories.count > 1 {
+          ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+              ForEach(categories) { item in
+                let selected = model.albumCategory == item.key
+                Button(item.rawValue) { Task { await model.showAlbums(category: item.key) } }
+                  .buttonStyle(ChipStyle(selected: selected))
+                  .accessibilityAddTraits(selected ? .isSelected : [])
+              }
+            }
+          }
+        }
+        LibrarySortPicker(model: model, collection: .albums, selected: model.albumSort)
+        LazyVGrid(columns: cardColumns, spacing: 18) {
+          ForEach(model.albums) { album in
+            NavigationLink {
+              AlbumView(model: model, album: album)
+            } label: {
+              CollectionCard(
+                model: model, source: album.artworkSource, title: album.title, caption: album.artist)
+            }.buttonStyle(.plain)
+              // The album's one menu, as on its page (D-118).
+              .contextMenu { AlbumActionsMenu(model: model, album: album) }
+          }
+        }
+        LibraryMore(model: model, collection: .albums, shown: model.albums.count, total: model.albumCount)
+      }
+      .padding(.horizontal).padding(.bottom, 24)
+    }
+    .pigCanvas().navigationTitle("Albums")
+    .refreshable { await model.refresh() }
+  }
+}
+
+/// Library: Songs, with Play and Shuffle at the top (D-120).
+struct LibrarySongsView: View {
+  @Bindable var model: AppModel
+  /// Songs, less those removed from the library and waiting for their Undo (#214).
+  private var shownSongs: [Track] { model.undo.withoutRemoved(model.songs) }
+  var body: some View {
+    ScrollView {
+      LazyVStack(alignment: .leading, spacing: 12) {
+        LibrarySortPicker(model: model, collection: .tracks, selected: model.songSort)
+        Text(CollectionFacts.line(count: model.songCount, seconds: model.songSeconds))
+          .font(PigType.subhead).pigFigures().foregroundStyle(.secondary)
+        let songs = shownSongs
+        PlayShuffleRow {
+          model.play(songs)
+        } shuffle: {
+          model.play(songs.shuffled())
+        }
+        .disabled(songs.isEmpty)
+        LazyVStack(spacing: 0) {
+          ForEach(Array(songs.enumerated()), id: \.element.id) { index, track in
+            SongRow(model: model, track: track) { model.play(songs, at: index) }
+            RowSeparator()
+          }
+        }
+        LibraryMore(model: model, collection: .tracks, shown: model.songs.count, total: model.songCount)
+      }
+      .padding(.horizontal).padding(.bottom, 24)
+    }
+    .pigCanvas().navigationTitle("Songs")
+    .refreshable { await model.refresh() }
+  }
+}
+
+/// Library: Playlists (D-120): New playlist, then Favourites first, each with
+/// its cover mosaic, count and length.
+struct PlaylistsView: View {
+  @Bindable var model: AppModel
+  @State private var creating = false
+  @ScaledMetric(relativeTo: .body) private var cover: CGFloat = 64
+  @Environment(\.colorScheme) private var scheme
+  var body: some View {
+    let playlists = PlaylistOrder.shown(model.playlists)
+    let empty = EmptyPage.playlists(playlists)
+    ScrollView {
+      LazyVStack(alignment: .leading, spacing: 0) {
+        if empty == nil {
+          Button {
+            creating = true
+          } label: {
+            HStack(spacing: 14) {
+              RoundedRectangle(cornerRadius: PigRadius.artwork, style: .continuous)
+                .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                .overlay { Image(systemName: "plus").font(.title3.weight(.semibold)) }
+                .frame(width: cover, height: cover)
+              Text("New playlist").font(.body.weight(.semibold))
+              Spacer()
+            }
+            .foregroundStyle(PigBrand.accent(scheme))
+            .frame(minHeight: cover + 16).contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+        }
+        ForEach(playlists) { playlist in
+          NavigationLink {
+            PlaylistView(model: model, playlist: playlist)
+          } label: {
+            HStack(spacing: 14) {
+              CoverMosaicView(
+                model: model, tracks: playlist.songs, favourites: playlist.favourites == true,
+                width: 128
+              )
+              .frame(width: cover, height: cover)
+              VStack(alignment: .leading, spacing: 3) {
+                Text(playlist.name).font(.body.weight(.semibold))
+                  .foregroundStyle(PigBrand.text(scheme)).lineLimit(2)
+                Text(playlist.facts).font(PigType.subhead).pigFigures().foregroundStyle(.secondary)
+              }
+              Spacer(minLength: 0)
+            }
+            .frame(minHeight: cover + 16).contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          // The playlist's one menu, as on its page (D-118).
+          .contextMenu { PlaylistActionsMenu(model: model, playlist: playlist) }
+          RowSeparator()
+        }
+        if let empty {
+          EmptyPageView(page: empty, systemImage: "music.note.list") { creating = true }
+        }
+      }
+      .padding(.horizontal).padding(.bottom, 24)
+    }
+    .pigCanvas().navigationTitle("Playlists")
+    .refreshable { await model.refresh() }
+    .navigationDestination(isPresented: $creating) { PlaylistToolsView(model: model) }
+  }
+}
+
+/// "Show more" under a paged list, which also pages in as it scrolls into view.
+private struct LibraryMore: View {
+  let model: AppModel
+  let collection: LibraryCollection
+  let shown: Int
+  let total: Int
+  var body: some View {
     if shown < total {
       Button("Show more") { Task { await model.more(collection) } }
         .buttonStyle(.pigSecondary)
         .disabled(model.loadingMore || model.syncing)
         .frame(maxWidth: .infinity)
-        // Grids page in as they scroll into view.
         .onAppear { Task { await model.more(collection) } }
     }
   }
@@ -829,11 +1063,11 @@ struct QueueEditorView: View {
   }
 }
 
+/// The sort menu, its names fitting the tab (D-120).
 private struct LibrarySortPicker: View {
   let model: AppModel
   let collection: LibraryCollection
   let selected: LibrarySort
-  var artist = true
   var body: some View {
     Menu {
       Picker(
@@ -844,9 +1078,9 @@ private struct LibrarySortPicker: View {
             Task { await model.sortLibrary(collection, by: value) }
           })
       ) {
-        Text("Title A–Z").tag(LibrarySort.title)
-        Text("Title Z–A").tag(LibrarySort.titleDescending)
-        if artist { Text("Artist, then title").tag(LibrarySort.artist) }
+        ForEach(LibrarySortChoice.options(collection), id: \.self) { option in
+          Text(LibrarySortChoice.name(option, in: collection)).tag(option)
+        }
       }
     } label: {
       Label(label, systemImage: "arrow.up.arrow.down").font(PigType.footnote)
@@ -854,13 +1088,7 @@ private struct LibrarySortPicker: View {
     .disabled(model.loadingMore || model.syncing)
     .accessibilityLabel("Sort, \(label)")
   }
-  private var label: String {
-    switch selected {
-    case .title: "Title A–Z"
-    case .titleDescending: "Title Z–A"
-    case .artist: "Artist, then title"
-    }
-  }
+  private var label: String { LibrarySortChoice.name(selected, in: collection) }
 }
 
 /// The artist page the player's artist link opens.

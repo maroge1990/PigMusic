@@ -93,6 +93,8 @@ enum PlayOrigin: Hashable {
   /// progress doesn't stop one (#206); only a signed-in library is needed.
   var canRequest: Bool { store != nil && person != nil }
   var songCount = 0
+  /// How long the whole library plays, in seconds (Songs' header, D-120).
+  var songSeconds: Double = 0
   var albumCount = 0
   var artistCount = 0
   /// Album category shown in Library ("album", "musical", "soundtrack", "compilation").
@@ -745,6 +747,7 @@ enum PlayOrigin: Hashable {
     let artists = try await store.artists(sort: artistSort)
     let playlists = try await store.playlists()
     let count = try await store.count(.tracks)
+    let seconds = try await store.totalDuration()
     let categoryCounts = try await store.albumCategoryCounts()
     let artistCount = try await store.ownArtistCount()
     guard account.isCurrent(stamp) else { return }
@@ -753,6 +756,7 @@ enum PlayOrigin: Hashable {
     self.artists = artists
     self.playlists = playlists
     songCount = count
+    songSeconds = seconds
     albumCategoryCounts = categoryCounts
     albumCount = categoryCounts[albumCategory] ?? 0
     self.artistCount = artistCount
@@ -963,6 +967,10 @@ enum PlayOrigin: Hashable {
   }
   func clearRecentSearches() {
     recentSearches.clear()
+    saveRecentSearches()
+  }
+  func forgetSearch(_ pick: RecentPick) {
+    recentSearches.remove(pick)
     saveRecentSearches()
   }
   private func saveRecentSearches() {
@@ -2137,6 +2145,7 @@ enum PlayOrigin: Hashable {
     artists = []
     playlists = []
     songCount = 0
+    songSeconds = 0
     syncFailed = false
     albumCount = 0
     artistCount = 0
@@ -2156,8 +2165,10 @@ enum PlayOrigin: Hashable {
   #if DEBUG
     private func loadDemo() async {
       do {
+        // Three playlists (D-120): one with songs, an empty one and
+        // Favourites, which sorts last by name but shows first.
         let fixture =
-          #"{"revision":"demo","tracks":[{"id":"one","title":"First Light","artist":"The Orchard","album":"Sunrise","album_id":"sunrise","track_number":1,"duration":3},{"id":"two","title":"Open Road","artist":"The Orchard","album":"Sunrise","album_id":"sunrise","track_number":2,"duration":3},{"id":"three","title":"After the Rain","artist":"Riverlight","album":"Quiet Hours","album_id":"quiet","track_number":1,"duration":3}],"albums":[{"id":"sunrise","title":"Sunrise","artist":"The Orchard","track_count":2},{"id":"quiet","title":"Quiet Hours","artist":"Riverlight","track_count":1}],"artists":[{"id":"orchard","name":"The Orchard","track_count":2,"album_ids":["sunrise"]},{"id":"river","name":"Riverlight","track_count":1,"album_ids":["quiet"]}],"playlists":[]}"#
+          #"{"revision":"demo","tracks":[{"id":"one","title":"First Light","artist":"The Orchard","album":"Sunrise","album_id":"sunrise","track_number":1,"duration":3},{"id":"two","title":"Open Road","artist":"The Orchard","album":"Sunrise","album_id":"sunrise","track_number":2,"duration":3},{"id":"three","title":"After the Rain","artist":"Riverlight","album":"Quiet Hours","album_id":"quiet","track_number":1,"duration":3}],"albums":[{"id":"sunrise","title":"Sunrise","artist":"The Orchard","track_count":2},{"id":"quiet","title":"Quiet Hours","artist":"Riverlight","track_count":1}],"artists":[{"id":"orchard","name":"The Orchard","track_count":2,"album_ids":["sunrise"]},{"id":"river","name":"Riverlight","track_count":1,"album_ids":["quiet"]}],"playlists":[{"id":"afternoon","name":"Afternoon","revision":1,"track_count":2,"entries":[{"entry_id":"a1","title":"First Light","artist":"The Orchard","position":0,"duration":3,"server_state":"in_library","saved_track":{"id":"one","title":"First Light","artist":"The Orchard","album":"Sunrise","album_id":"sunrise","duration":3}},{"entry_id":"a2","title":"After the Rain","artist":"Riverlight","position":1,"duration":3,"server_state":"in_library","saved_track":{"id":"three","title":"After the Rain","artist":"Riverlight","album":"Quiet Hours","album_id":"quiet","duration":3}}]},{"id":"empty","name":"Empty Days","revision":1,"track_count":0,"entries":[]},{"id":"favourites","name":"Favourites","revision":1,"favourites":true,"track_count":1,"entries":[{"entry_id":"f1","title":"Open Road","artist":"The Orchard","position":0,"duration":3,"server_state":"in_library","saved_track":{"id":"two","title":"Open Road","artist":"The Orchard","album":"Sunrise","album_id":"sunrise","duration":3}}]}]}"#
         let database = try LibraryStore(path: ":memory:")
         var snapshot = try LibraryCodec.decoder().decode(
           LibrarySnapshot.self, from: Data(fixture.utf8))

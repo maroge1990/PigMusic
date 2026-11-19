@@ -147,29 +147,39 @@ struct PlaylistView: View {
     loading || !model.canMutate
       || model.pendingEdits.contains(where: { $0.mutation.playlistId == playlist.id })
   }
+  /// Read from the server or the library with its songs: an empty one
+  /// offers Add songs (D-120).
+  private var empty: EmptyPage? {
+    EmptyPage.playlist(songs: shown.count, loaded: playlist.entries != nil && !removing)
+  }
   var body: some View {
     List {
       Section {
-        DetailHeader(
-          model: model, source: songs.lazy.compactMap(\.artworkSource).first,
-          eyebrow: playlist.favourites == true ? "FAVOURITES" : "PLAYLIST", title: playlist.name,
-          subtitle: "\(songs.count) song\(songs.count == 1 ? "" : "s")"
-        ).preparesPlayback(songs, model: model)
-        HStack(spacing: 10) {
-          PlayCapsule { model.play(songs) }.disabled(songs.isEmpty)
-          RoundIcon(label: "Shuffle", systemImage: "shuffle") { model.play(songs.shuffled()) }
-            .disabled(songs.isEmpty)
-          DownloadMenu(
-            model: model, tracks: songs,
-            origin: DownloadOrigin(playlistId: playlist.id, playlistName: playlist.name),
-            missingCount: missing.count
-          ) { await addMissing() }
-          CollectionMenuButton(label: "More actions for \(playlist.name)") {
-            PlaylistActionsMenu(
-              model: model, playlist: playlist, missing: missing.count, addMissing: addMissing)
+        // The cover, name and figures, then Play and Shuffle (D-120).
+        VStack(spacing: 10) {
+          CoverMosaicView(
+            model: model, tracks: songs, favourites: playlist.favourites == true, width: 512
+          )
+          .frame(width: 200, height: 200)
+          .shadow(color: .black.opacity(0.15), radius: 12, y: 6)
+          Text(playlist.name).font(.title2.weight(.bold)).multilineTextAlignment(.center)
+            .accessibilityAddTraits(.isHeader)
+          if empty == nil {
+            Text(CollectionFacts.line(count: songs.count, seconds: entries.reduce(0) { $0 + ($1.duration ?? 0) }))
+              .font(PigType.subhead).pigFigures().foregroundStyle(.secondary)
+            PlayShuffleRow {
+              model.play(songs)
+            } shuffle: {
+              model.play(songs.shuffled())
+            }
+            .disabled(songs.isEmpty).padding(.top, 4)
           }
-          Spacer()
-        }.buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity)
+        .preparesPlayback(songs, model: model)
+        if let empty {
+          EmptyPageView(page: empty, systemImage: "music.note") { model.openSearch() }
+        }
         if let message { StatusText(message) }
         // Edits saved offline show here, and a rejected one says so where it was made.
         if let failed = model.pendingEdits.first(where: {
@@ -237,10 +247,15 @@ struct PlaylistView: View {
       }
     }.listStyle(.plain).pigCanvas().navigationTitle(playlist.name).navigationBarTitleDisplayMode(.inline)
       .toolbar {
-        if playlist.favourites != true { EditButton() }
-        Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }.disabled(
-          loading || removing)
+        if playlist.favourites != true && empty == nil { EditButton() }
+        // The playlist's one menu (D-118), with Download and Add N songs to library.
+        CollectionMenuButton(label: "More actions for \(playlist.name)") {
+          PlaylistActionsMenu(
+            model: model, playlist: playlist, missing: missing.count, addMissing: addMissing)
+        }
       }
+      // Pull down to refresh replaces the toolbar's Refresh (D-120).
+      .refreshable { if !removing { await load() } }
       .task { await load() }
       // A sync changed the library: show the playlist as the server now has it.
       .onChange(of: model.libraryRevision) { if !removing { Task { await load() } } }

@@ -30,4 +30,6 @@ public struct RecentSearches: Codable, Sendable, Hashable {
     if picks.count > Self.limit { picks.removeLast(picks.count - Self.limit) }
   }
   public mutating func clear() { picks = [] }
+  /// One pick taken off the list (D-120: its ×), the rest in their order.
+  public mutating func remove(_ pick: RecentPick) { picks.removeAll { $0.id == pick.id } }
 }

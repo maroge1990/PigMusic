@@ -24,6 +24,14 @@ private func song(_ id: String) -> Track {
   #expect(recent.picks.isEmpty)
 }
 
+/// D-120: one recent pick can be taken off the list by itself.
+@Test func oneRecentPickCanBeRemoved() {
+  var recent = RecentSearches()
+  for id in ["a", "b", "c"] { recent.add(.song(song(id))) }
+  recent.remove(.song(song("b")))
+  #expect(recent.picks.map(\.id) == ["song:c", "song:a"])
+}
+
 @Test func aRecentSongIsReplayedAsTheLibraryHoldsItNow() async throws {
   let store = try LibraryStore(path: ":memory:")
   var saved = Track(id: "song", title: "Song", artist: "Artist")
