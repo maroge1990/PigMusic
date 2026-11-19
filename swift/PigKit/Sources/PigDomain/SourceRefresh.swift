@@ -40,13 +40,10 @@ public enum SourceRefresh {
     }
     return Plan(changed: changed, allowed: allowed)
   }
-  /// The player wasn't told of `plan.changed`: their downloads keep their own
-  /// revision, so they stay until a later refresh tells it.
-  public static func deferring(_ plan: Plan, downloads: [Download]) -> [String: String?] {
-    var allowed = plan.allowed
-    for download in downloads where plan.changed.contains(download.id) {
-      allowed.updateValue(download.revision, forKey: download.id)
-    }
-    return allowed
+  /// The downloads a refresh leaves exactly as they are: the changed songs
+  /// when the player wasn't told of them. Never an older revision put in
+  /// their place: one downloaded again meanwhile is kept as it is.
+  public static func skipped(_ plan: Plan, playerTold: Bool) -> Set<String> {
+    playerTold ? [] : plan.changed
   }
 }

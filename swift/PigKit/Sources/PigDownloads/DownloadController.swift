@@ -399,13 +399,16 @@ import PigDomain
     try? await archive.interruptRunning()
     await reload()
   }
-  public func reconcile(_ allowed: [String: String?]) async {
+  /// Keeps the downloads `allowed` names at those revisions and removes the
+  /// rest, except `skipping`, which stay exactly as they are (the player
+  /// hasn't been told of their change yet: Codex confirmation on batch E).
+  public func reconcile(_ allowed: [String: String?], skipping: Set<String> = []) async {
     await stopWorker()
     #if os(iOS)
-      await background?.reconcile(Set(allowed.keys), revisions: allowed)
+      await background?.reconcile(Set(allowed.keys), revisions: allowed, skipping: skipping)
     #endif
     if !usesBackgroundTransfers { try? await archive.interruptRunning() }
-    try? await archive.reconcile(allowed)
+    try? await archive.reconcile(allowed, skipping: skipping)
     await reload()
   }
   public func clear() async {

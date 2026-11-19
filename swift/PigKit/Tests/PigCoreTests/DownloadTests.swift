@@ -436,6 +436,27 @@ private actor Flag {
     #expect(await reopened.snapshot().isEmpty)
     #expect(!FileManager.default.fileExists(atPath: file.path))
   }
+  /// Codex confirmation on batch E: a refresh's fresh-copy read is
+  /// suspended; meanwhile the person downloads the changed song again (now
+  /// v2); the read throws. The refresh's plan was made from the old v1
+  /// download, and the skipped song is left exactly as it is: the new
+  /// download survives. Not skipped, the stale plan would remove it.
+  @Test func aSkippedSongKeepsADownloadMadeWhileTheRefreshWaited() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let archive = try archive(root)
+    var song = try track()
+    song.sourceRevision = "v2"
+    try await archive.enqueue([song], quality: "original")
+    let stale = SourceRefresh.plan(
+      cached: [:], downloads: [.init(id: "song", ready: true, revision: "v1")],
+      known: ["song": "v3"])
+    try await archive.reconcile(
+      stale.allowed, skipping: SourceRefresh.skipped(stale, playerTold: false))
+    #expect(await archive.snapshot().first?.track.sourceRevision == "v2")
+    try await archive.reconcile(stale.allowed)
+    #expect(await archive.snapshot().isEmpty)
+  }
   @Test func songInAnAlbumAndAPlaylistStaysUntilBothAreRemoved() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }

@@ -4,29 +4,23 @@ import Testing
 
 /// Codex confirmation on batch E: song A plays from its download and the
 /// server removes it. The first refresh can't read the fresh copies, so the
-/// player isn't told: A's download stays. The next refresh finds A again,
-/// tells the player, and only then lets the download go.
-@Test func aFailedReadKeepsTheDownloadUntilThePlayerIsTold() {
-  var downloads = [
+/// player isn't told: A's download is left alone. The next refresh finds A
+/// again, tells the player, and only then lets the download go.
+@Test func aFailedReadLeavesTheDownloadUntilThePlayerIsTold() {
+  let downloads = [
     SourceRefresh.Download(id: "A", ready: true, revision: "1"),
     SourceRefresh.Download(id: "B", ready: true, revision: "1"),
   ]
   let known: [String: String?] = ["B": "1"]  // A was removed from the library.
-  // Refresh 1: the read fails.
+  // Refresh 1: the read fails; A is skipped, not given a revision.
   let first = SourceRefresh.plan(cached: [:], downloads: downloads, known: known)
   #expect(first.changed == ["A"])
-  let kept = SourceRefresh.deferring(first, downloads: downloads)
-  #expect(kept["A"] == .some("1"))
-  #expect(kept["B"] == .some("1"))
-  // What the archive keeps: a download whose revision is allowed.
-  downloads = downloads.filter { download in
-    kept[download.id].map { $0 == download.revision } ?? false
-  }
-  #expect(downloads.map(\.id) == ["A", "B"])
-  // Refresh 2: A is found again for the player; told, its download goes.
+  #expect(SourceRefresh.skipped(first, playerTold: false) == ["A"])
+  #expect(first.allowed["A"] == nil)
+  // Refresh 2: A is found again; told, nothing is skipped and it goes.
   let second = SourceRefresh.plan(cached: [:], downloads: downloads, known: known)
   #expect(second.changed == ["A"])
-  #expect(second.allowed["A"] == nil)
+  #expect(SourceRefresh.skipped(second, playerTold: true).isEmpty)
   #expect(second.allowed["B"] == .some("1"))
 }
 

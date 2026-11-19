@@ -271,8 +271,8 @@ public actor DownloadArchive {
     records.removeAll { $0.id == id }
     try persist()
   }
-  public func reconcile(_ allowed: [String: String?]) throws {
-    for record in records {
+  public func reconcile(_ allowed: [String: String?], skipping: Set<String> = []) throws {
+    for record in records where !skipping.contains(record.id) {
       guard let revision = allowed[record.id], revision == record.track.sourceRevision else {
         try remove(id: record.id)
         continue

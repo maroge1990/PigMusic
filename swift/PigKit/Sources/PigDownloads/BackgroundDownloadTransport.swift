@@ -221,11 +221,15 @@
       }
       suspending.subtract(active.keys)
     }
-    func reconcile(_ allowed: Set<String>, revisions: [String: String?]? = nil) async {
+    /// `skipping`: songs left exactly as they are, whatever their revision.
+    func reconcile(
+      _ allowed: Set<String>, revisions: [String: String?]? = nil, skipping: Set<String> = []
+    ) async {
       for job in Array(jobs.values)
-      where !allowed.contains(job.record.id)
-        || (revisions != nil
-          && (revisions?[job.record.id] ?? nil) != job.record.track.sourceRevision)
+      where !skipping.contains(job.record.id)
+        && (!allowed.contains(job.record.id)
+          || (revisions != nil
+            && (revisions?[job.record.id] ?? nil) != job.record.track.sourceRevision))
       {
         tasks[job.id]?.cancel()
         removeJob(job.id)

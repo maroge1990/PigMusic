@@ -674,19 +674,20 @@ enum PlayOrigin: Hashable {
       let changed = plan.changed
       var invalid = false
       if let downloads {
-        var allowed = plan.allowed
+        var told = true
         if !changed.isEmpty {
           if let fresh = await freshCopies(changed) {
             guard account.isCurrent(stamp) else { return }
             invalid = await player.invalidateSources(changed: changed, fresh: fresh)
           } else {
-            // The player wasn't told: their downloads stay until a later
-            // refresh tells it (Codex confirmation on batch E).
-            allowed = SourceRefresh.deferring(plan, downloads: held)
+            told = false
           }
         }
         guard account.isCurrent(stamp) else { return }
-        await downloads.reconcile(allowed)
+        // The player wasn't told: those downloads are left exactly as they
+        // are until a refresh tells it (Codex confirmation on batch E).
+        await downloads.reconcile(
+          plan.allowed, skipping: SourceRefresh.skipped(plan, playerTold: told))
         guard account.isCurrent(stamp) else { return }
         downloads.resume(automatic: true)
       } else if !changed.isEmpty, let fresh = await freshCopies(changed) {
