@@ -69,16 +69,22 @@ public actor CompanionArchive {
       (try? decoder.decode(
         Int64.self, from: Data(contentsOf: directory.appendingPathComponent("budget.json"))))
       ?? budgetBytes
+    // Absent on a fresh install: an empty library. There but unreadable: an
+    // error the Watch shows with Try again, never an empty library, and the
+    // files stay as they are (Codex round 1 on #252).
+    func saved<Value: Decodable>(_ type: Value.Type, _ name: String) throws -> Value? {
+      let file = directory.appendingPathComponent(name)
+      guard FileManager.default.fileExists(atPath: file.path) else { return nil }
+      do { return try decoder.decode(type, from: Data(contentsOf: file)) } catch {
+        throw CompanionArchiveFailure.unreadable(name)
+      }
+    }
     let loadedContext =
-      (try? decoder.decode(
-        CompanionContext.self,
-        from: Data(contentsOf: directory.appendingPathComponent("context.json"))))
+      try saved(CompanionContext.self, "context.json")
       ?? CompanionContext(revision: 0, account: nil)
     context = loadedContext
     let loadedManifest =
-      (try? decoder.decode(
-        CompanionManifest.self,
-        from: Data(contentsOf: directory.appendingPathComponent("manifest.json"))))
+      try saved(CompanionManifest.self, "manifest.json")
       ?? CompanionManifest(context: loadedContext, songs: [])
     // A committed library from the same account stays playable while a newer
     // revision is on its way; anything else is revoked.
