@@ -969,6 +969,20 @@ enum PlayOrigin: Hashable {
     recentSearches.clear()
     saveRecentSearches()
   }
+  /// Songs' Play, Shuffle and a row's tap (D-120): the whole library in the
+  /// chosen sort, read for the account that asked, less songs waiting for
+  /// their removal's Undo.
+  func playLibrarySongs(from track: Track? = nil, shuffled: Bool = false) async {
+    guard let store else { return }
+    let stamp = account.generation
+    let sort = songSort
+    guard let all = try? await store.allTracks(sort: sort), account.isCurrent(stamp) else {
+      return
+    }
+    let queue = LibraryQueue.make(
+      all, removing: { undo.removing($0) }, from: track?.id, shuffled: shuffled)
+    play(queue.songs, at: queue.index)
+  }
   func forgetSearch(_ pick: RecentPick) {
     recentSearches.remove(pick)
     saveRecentSearches()

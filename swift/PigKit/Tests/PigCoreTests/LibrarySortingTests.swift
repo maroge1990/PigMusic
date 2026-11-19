@@ -218,4 +218,21 @@ struct LibraryReloadGateTests {
     #expect(try await store.albums(sort: .year).map(\.id) == ["new", "mid", "old", "none"])
     #expect(try await store.totalDuration() == 150.5)
   }
+  /// Codex round 1 on batch E: Songs' Play plays the whole library, not the
+  /// first page; a row's tap starts at its song and plays on past the page.
+  @Test func songsPlayTheWholeLibraryInItsSort() async throws {
+    let store = try LibraryStore(path: ":memory:")
+    let tracks = (0..<250).map {
+      Track(id: String($0), title: String(format: "%03d", $0), artist: "A")
+    }
+    try await store.replace(LibrarySnapshot(revision: "one", tracks: tracks))
+    #expect(try await store.tracks(limit: 100, sort: .titleDescending).count == 100)
+    let all = try await store.allTracks(sort: .titleDescending)
+    #expect(all.map(\.id) == tracks.reversed().map(\.id))
+    let queue = LibraryQueue.make(all, removing: { $0.id == "5" }, from: "150")
+    #expect(queue.songs.count == 249)
+    #expect(queue.songs[queue.index].id == "150")
+    #expect(queue.songs.last?.id == "0")
+    #expect(LibraryQueue.make(all, removing: { _ in false }, shuffled: true).songs.count == 250)
+  }
 }

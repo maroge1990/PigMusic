@@ -336,15 +336,18 @@ struct LibrarySongsView: View {
         Text(CollectionFacts.line(count: model.songCount, seconds: model.songSeconds))
           .font(PigType.subhead).pigFigures().foregroundStyle(.secondary)
         let songs = shownSongs
+        // The whole library, not only the pages loaded (Codex round 1).
         PlayShuffleRow {
-          model.play(songs)
+          Task { await model.playLibrarySongs() }
         } shuffle: {
-          model.play(songs.shuffled())
+          Task { await model.playLibrarySongs(shuffled: true) }
         }
         .disabled(songs.isEmpty)
         LazyVStack(spacing: 0) {
-          ForEach(Array(songs.enumerated()), id: \.element.id) { index, track in
-            SongRow(model: model, track: track) { model.play(songs, at: index) }
+          ForEach(songs) { track in
+            SongRow(model: model, track: track) {
+              Task { await model.playLibrarySongs(from: track) }
+            }
             RowSeparator()
           }
         }

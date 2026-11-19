@@ -208,3 +208,18 @@ public struct FoundGroups: Sendable {
     top == nil && songs.isEmpty && albums.isEmpty && artists.isEmpty && playlists.isEmpty
   }
 }
+
+/// Songs' Play, Shuffle and a row's tap (D-120) play the whole library in
+/// the chosen sort, not only the pages loaded so far, less songs waiting
+/// for their removal's Undo.
+public enum LibraryQueue {
+  public static func make(
+    _ all: [Track], removing: (Track) -> Bool, from trackId: String? = nil,
+    shuffled: Bool = false
+  ) -> (songs: [Track], index: Int) {
+    let songs = all.filter { !removing($0) }
+    if shuffled { return (songs.shuffled(), 0) }
+    let index = trackId.flatMap { id in songs.firstIndex { $0.id == id } } ?? 0
+    return (songs, index)
+  }
+}

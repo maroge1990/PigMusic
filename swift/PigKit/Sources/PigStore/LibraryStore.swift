@@ -188,6 +188,15 @@ public actor LibraryStore {
       try String.fetchOne($0, sql: "SELECT value FROM metadata WHERE key='artwork'")
     }
   }
+  /// Every song in the library in `sort`'s order, for Songs' Play and
+  /// Shuffle (D-120): the whole collection, not one page.
+  public func allTracks(sort: LibrarySort = .title) throws -> [Track] {
+    try database.read { db in
+      try Row.fetchAll(db, sql: "SELECT payload FROM tracks ORDER BY \(Self.order(sort))").map {
+        try LibraryCodec.decoder().decode(Track.self, from: $0["payload"] as Data)
+      }
+    }
+  }
   /// How long every song in the library plays, in seconds (D-120).
   public func totalDuration() throws -> Double {
     try database.read {

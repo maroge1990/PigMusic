@@ -136,3 +136,13 @@ private let onlineJSON = #"""
   #expect(groups.albums.map(\.mark) == [.inLibrary, .add])
   #expect(FoundGroups(FoundScreen(nil)).isEmpty)
 }
+
+/// Codex round 1 on batch E: a row's tap starts at its song in the whole
+/// list, songs waiting for removal left out.
+@Test func theLibraryQueueStartsAtTheTappedSong() {
+  let all = (0..<150).map { Track(id: String($0), title: String($0), artist: "A") }
+  let queue = LibraryQueue.make(all, removing: { $0.id == "3" }, from: "120")
+  #expect(queue.songs.count == 149)
+  #expect(queue.songs[queue.index].id == "120")
+  #expect(LibraryQueue.make(all, removing: { _ in false }).index == 0)
+}
