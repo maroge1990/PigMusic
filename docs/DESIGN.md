@@ -27,6 +27,7 @@ One word and one icon for each thing on web, iPhone and Watch (D-115 to D-117); 
 | Ask the server for music | `plus` / `Plus` | Add to library; Add N songs to library |
 | Saving a copy to a device | `arrow.down.circle` / `CircleArrowDown` | Download; Couldn't download |
 | Send to Apple Watch | `applewatch` | Send to Apple Watch; On Apple Watch; Waiting for Apple Watch |
+| Apple Watch status (D-120) | `checkmark.circle.fill`, `clock`, `iphone.slash`, `exclamationmark.circle` | Ready for your run; Arriving from iPhone; Can't reach your iPhone; Storage full; Couldn't save N songs; Sent to iPhone; Waiting to send |
 | Favourite | `star` / `Star` | Favourite |
 | Remove from library, delete playlist | `trash` / `Trash2` | Remove from library (Undo) |
 | Remove a download from a device | `minus.circle` / `CircleMinus` | Remove download |
