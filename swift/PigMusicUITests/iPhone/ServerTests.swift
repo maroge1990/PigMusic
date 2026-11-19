@@ -98,12 +98,15 @@ final class ServerTests: XCTestCase {
     ).firstMatch
     expect(household)
     XCTAssertFalse(household.label.contains("_"), household.label)
-    // The library may still be loading: a choice waits until it can be saved.
-    let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: aac)
-    wait(for: [enabled], timeout: 60)
-    tap(aac)
-    let chosen = expectation(for: NSPredicate(format: "isSelected == true"), evaluatedWith: aac)
-    wait(for: [chosen], timeout: 10)
+    // The library may still be loading after sign-in, when a choice can't be
+    // saved yet: tap until it is ticked.
+    let deadline = Date.now.addingTimeInterval(120)
+    while !aac.isSelected, Date.now < deadline {
+      if app.buttons["Not Now"].exists { app.buttons["Not Now"].tap() }
+      aac.tap()
+      _ = aac.wait(for: \.isSelected, toEqual: true, timeout: 5)
+    }
+    XCTAssertTrue(aac.isSelected, app.debugDescription)
     // Saved on the server: it is still ticked when the page opens again.
     tap(app.navigationBars["Your music quality"].buttons.firstMatch)
     expect(app.buttons.matching(NSPredicate(format: "label CONTAINS 'AAC 256 kbps'")).firstMatch)
