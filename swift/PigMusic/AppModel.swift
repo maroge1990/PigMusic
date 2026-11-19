@@ -681,16 +681,14 @@ enum PlayOrigin: Hashable {
             changed.insert(record.id)
           }
         }
-        if !changed.isEmpty {
-          let fresh = await freshQueued(changed)
+        if !changed.isEmpty, let fresh = await freshCopies(changed) {
           guard account.isCurrent(stamp) else { return }
           invalid = await player.invalidateSources(changed: changed, fresh: fresh)
         }
         await downloads.reconcile(allowed)
         guard account.isCurrent(stamp) else { return }
         downloads.resume(automatic: true)
-      } else if !changed.isEmpty {
-        let fresh = await freshQueued(changed)
+      } else if !changed.isEmpty, let fresh = await freshCopies(changed) {
         guard account.isCurrent(stamp) else { return }
         invalid = await player.invalidateSources(changed: changed, fresh: fresh)
       }
@@ -975,15 +973,14 @@ enum PlayOrigin: Hashable {
     recentSearches.clear()
     saveRecentSearches()
   }
-  /// The library's copy of each changed song in the queue, absent when it
-  /// was removed: the queue swaps them in by occurrence (Codex round 2).
-  private func freshQueued(_ changed: Set<String>) async -> [String: Track] {
-    guard let store else { return [:] }
-    var fresh: [String: Track] = [:]
-    for id in Set(player.queue.items.map(\.track.id)).intersection(changed) {
-      if let track = try? await store.track(id: id) { fresh[id] = track }
+  /// The library's copy of every changed song, read at once (Codex
+  /// confirmation on batch E): absent when it was removed; nil when the
+  /// read failed, which changes nothing in the queue.
+  private func freshCopies(_ changed: Set<String>) async -> [String: Track]? {
+    guard let store else { return nil }
+    return try? await PlaybackQueue.freshCopies(of: changed) { ids in
+      try await store.tracks(ids: ids)
     }
-    return fresh
   }
   /// Songs' Play, Shuffle and a row's tap (D-120): the whole library in the
   /// chosen sort, read for the account that asked, less songs waiting for

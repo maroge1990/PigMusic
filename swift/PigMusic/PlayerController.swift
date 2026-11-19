@@ -308,6 +308,10 @@ import PigSync
         // The song's own audio, or its place, changed: start it again where it was.
         restartInCurrentMode()
       } else if refresh.others {
+        // The engine's stream holds its own copy of every occurrence and
+        // reads a song's source with it when it gets there, so it must be
+        // given the fresh copies; it takes them by starting the song playing
+        // again at the same point (#279 would let it swap them in place).
         engineQueueChanged()
       }
       await repository?.forget(ids: changed)

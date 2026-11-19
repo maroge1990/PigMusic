@@ -271,6 +271,20 @@ public actor LibraryStore {
   }
   /// Each known track's source revision (nil when it has none) in one query.
   /// Ids missing from the library are left out.
+  /// The library's copy of each of these songs, read at once; a song not in
+  /// the library is absent (Codex confirmation on batch E).
+  public func tracks(ids: some Collection<String>) throws -> [Track] {
+    guard !ids.isEmpty else { return [] }
+    let list = String(decoding: try JSONEncoder().encode(Array(ids)), as: UTF8.self)
+    return try database.read { db in
+      try Row.fetchAll(
+        db,
+        sql:
+          "SELECT tracks.payload FROM tracks JOIN json_each(?) ids ON tracks.id=ids.value",
+        arguments: [list]
+      ).map { try LibraryCodec.decoder().decode(Track.self, from: $0["payload"] as Data) }
+    }
+  }
   public func sourceRevisions(ids: some Collection<String>) throws -> [String: String?] {
     guard !ids.isEmpty else { return [:] }
     let list = String(decoding: try JSONEncoder().encode(Array(ids)), as: UTF8.self)

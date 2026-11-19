@@ -111,6 +111,18 @@ public struct PlaybackQueue: Sendable, Codable {
       self.shifted = shifted
     }
   }
+  /// Every changed song's fresh copy, read in one go for all of them, not
+  /// only those queued when it began (Codex confirmation on batch E): the
+  /// queue can be replaced while it reads, and its songs are then answered
+  /// too. A failed read throws, so nothing in the queue changes; a song the
+  /// read didn't return was removed.
+  public static func freshCopies(
+    of changed: Set<String>, read: (Set<String>) async throws -> [Track]
+  ) async throws -> [String: Track] {
+    guard !changed.isEmpty else { return [:] }
+    let found = try await read(changed).filter { changed.contains($0.id) }
+    return Dictionary(found.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+  }
   /// The server changed or removed these songs (#76; Codex round 2 on batch
   /// E): every other occurrence takes its fresh copy (a new revision, so
   /// neither its stale cached audio nor its stale download is used) or

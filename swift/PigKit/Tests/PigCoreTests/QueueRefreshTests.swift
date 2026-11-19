@@ -41,6 +41,60 @@ private func song(_ id: Int, revision: String = "a") -> Track {
   #expect(queue.refreshSongs(["99"], fresh: [:]) == .init())
 }
 
+/// Holds the lookup until the test lets it answer.
+private actor Gate {
+  private var waiting: CheckedContinuation<Void, Never>?
+  private var open = false
+  func wait() async {
+    if open { return }
+    await withCheckedContinuation { waiting = $0 }
+  }
+  func release() {
+    open = true
+    waiting?.resume()
+    waiting = nil
+  }
+}
+
+/// Codex confirmation on batch E: the queue is replaced while the fresh
+/// copies are read. The new queue's current song C changed too; it was
+/// looked up with the rest, so it takes its fresh copy instead of being
+/// taken for removed (which stopped playback).
+@Test func aQueueReplacedDuringTheLookupKeepsItsChangedCurrentSong() async throws {
+  let queue = QueueBox()
+  await queue.replace([song(1), song(2)])
+  let gate = Gate()
+  let library = [song(2, revision: "b"), song(3, revision: "b")]
+  async let lookup = PlaybackQueue.freshCopies(of: ["2", "3"]) { ids in
+    await gate.wait()
+    return library.filter { ids.contains($0.id) }
+  }
+  // Something else plays while the lookup waits: C (song 3) first.
+  await queue.replace([song(3), song(4)])
+  await gate.release()
+  let fresh = try await lookup
+  let result = await queue.refresh(["2", "3"], fresh: fresh)
+  #expect(result.current == .fresh)
+  #expect(await queue.revision == "b")
+}
+
+/// A failed lookup changes nothing: the error reaches the caller.
+@Test func aFailedLookupChangesNothing() async {
+  struct Unreadable: Error {}
+  await #expect(throws: Unreadable.self) {
+    _ = try await PlaybackQueue.freshCopies(of: ["1"]) { _ in throw Unreadable() }
+  }
+}
+
+@MainActor private final class QueueBox {
+  var queue = PlaybackQueue()
+  func replace(_ tracks: [Track]) { queue.replace(tracks) }
+  func refresh(_ changed: Set<String>, fresh: [String: Track]) -> PlaybackQueue.SongRefresh {
+    queue.refreshSongs(changed, fresh: fresh)
+  }
+  var revision: String? { queue.current?.track.sourceRevision }
+}
+
 /// Only the song playing changing itself is reported, for the player to
 /// restart it where it was.
 @Test func theCurrentSongChangingItselfIsReported() {
