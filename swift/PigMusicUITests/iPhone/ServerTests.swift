@@ -66,6 +66,8 @@ final class ServerTests: XCTestCase {
   func testSendAnAlbumToTheWatch() throws {
     try signIn()
     tap(app.tabBars.buttons["Library"])
+    // Library's tiles lead to the collections (D-120).
+    tap(app.buttons["Artists"])
     let artist = app.buttons["The Test Pilots, 1 album"]
     expect(artist, timeout: 30)
     tap(artist)
@@ -87,6 +89,8 @@ final class ServerTests: XCTestCase {
   func testThePhonesTransfersAreGroupedByAlbum() throws {
     try signIn()
     tap(app.tabBars.buttons["Library"])
+    // Library's tiles lead to the collections (D-120).
+    tap(app.buttons["Artists"])
     let artist = app.buttons["The Test Pilots, 1 album"]
     expect(artist, timeout: 30)
     tap(artist)

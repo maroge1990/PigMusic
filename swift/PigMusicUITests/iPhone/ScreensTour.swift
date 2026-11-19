@@ -212,18 +212,22 @@ final class ScreensTour: XCTestCase {
       back()
     }
 
-    // Library: each collection, the sort menu, an artist, an album, a playlist.
+    // Library (D-120): the tiles, each collection, the sort menu, an artist,
+    // an album, a playlist.
     tab("Library")
-    shoot("library-artists")
-    for chip in ["Albums", "Musicals", "Soundtracks", "Compilations", "Songs", "Playlists"] {
-      app.swipeDown()
-      if open(app.buttons[chip], "library-" + chip.lowercased()) && chip == "Albums" {
+    shoot("library")
+    for tile in ["Artists", "Albums", "Songs", "Playlists"] {
+      tab("Library")
+      guard open(app.buttons[tile], "library-" + tile.lowercased()) else { continue }
+      if tile == "Albums" {
         scrolled("library-albums", pages: 2)
-        tab("Library")
-        tap(app.buttons["Albums"], "albums-again")
+        for chip in ["Musicals", "Soundtracks", "Compilations"] {
+          app.swipeDown()
+          open(app.buttons[chip], "library-" + chip.lowercased())
+        }
+        if open(begins("Sort, "), "sort-menu") { closeMenu() }
       }
     }
-    if open(begins("Sort, "), "sort-menu") { closeMenu() }
     if open(begins(name("PLAYLIST", "Road trip")), "playlist") {
       scrolled("playlist", pages: 2)
       let row = begins("More actions for ")
@@ -234,15 +238,15 @@ final class ScreensTour: XCTestCase {
       }
       back()
     }
-    if open(begins("New or imported playlist"), "playlist-tools") { back() }
+    if open(app.buttons["New playlist"], "playlist-tools") { back() }
     tab("Library")
-    tap(app.buttons["Artists"], "artists-chip")
+    tap(app.buttons["Artists"], "artists-tile")
     if open(begins(name("ARTIST", "Fleetwood Mac")), "library-artist") {
       scrolled("library-artist", pages: 3)
       back()
     }
     tab("Library")
-    tap(app.buttons["Albums"], "albums-chip")
+    tap(app.buttons["Albums"], "albums-tile")
     if open(begins(name("ALBUM", "Rumours")), "library-album") {
       // The album's one menu (D-118), then a song's.
       let albumMenu = "More actions for " + name("ALBUM", "Rumours")
@@ -301,14 +305,7 @@ final class ScreensTour: XCTestCase {
       sleep(2)
       shoot("search-results")
       scrolled("search-results", pages: 3)
-      for chip in ["Artists", "Albums", "Songs"] where app.buttons[chip].exists {
-        app.swipeDown()
-        app.swipeDown()
-        app.swipeDown()
-        open(app.buttons[chip], "search-" + chip.lowercased())
-      }
       app.swipeDown()
-      tap(app.buttons["Artists"], "search-artists-again")
       let artist = element("label BEGINSWITH[c] %@", name("SEARCH", "radiohead"))
       if open(artist, "catalogue-artist") {
         sleep(6)

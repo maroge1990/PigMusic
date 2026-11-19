@@ -213,10 +213,18 @@ final class DemoLibraryTests: XCTestCase {
     XCTAssertFalse(app.buttons["Play next"].exists, file: file, line: line)
   }
 
+  /// D-120: Library opens on four tiles with counts; Artists leads to the
+  /// artist, and on to their album.
   func testLibraryLeadsFromAnArtistToTheirAlbum() {
     launch()
     app.tabBars.buttons["Library"].tap()
-    expect(app.staticTexts["Demo listener · 3 songs"])
+    let artists = app.buttons["Artists"]
+    expect(artists)
+    XCTAssertEqual(artists.value as? String, "2")
+    XCTAssertEqual(app.buttons["Songs"].value as? String, "3")
+    XCTAssertTrue(app.buttons["Playlists"].exists)
+    artists.tap()
+    expect(app.buttons["The Orchard"])
     app.buttons["The Orchard"].tap()
     expect(app.staticTexts["IN YOUR LIBRARY"])
     let album = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Sunrise'")).firstMatch
@@ -240,6 +248,9 @@ final class DemoLibraryTests: XCTestCase {
   func testTheArtistPageHasTheDownloadMenu() {
     launch()
     app.tabBars.buttons["Library"].tap()
+    expect(app.buttons["Artists"])
+    app.buttons["Artists"].tap()
+    expect(app.buttons["The Orchard"])
     app.buttons["The Orchard"].tap()
     expect(app.staticTexts["IN YOUR LIBRARY"])
     expect(app.buttons["Play"])
@@ -423,5 +434,68 @@ final class DemoLibraryTests: XCTestCase {
     if app.buttons["Continue"].waitForExistence(timeout: 2) { app.buttons["Continue"].tap() }
     field.typeText("Rain")
     expect(app.staticTexts["After the Rain"])
+  }
+
+  /// D-120: Favourites is always first among playlists, although "Afternoon"
+  /// comes before it by name; each says its count and length.
+  func testFavouritesIsTheFirstPlaylist() {
+    launch()
+    app.tabBars.buttons["Library"].tap()
+    expect(app.buttons["Playlists"])
+    app.buttons["Playlists"].tap()
+    let favourites = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Favourites'"))
+      .firstMatch
+    let afternoon = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Afternoon'"))
+      .firstMatch
+    expect(favourites)
+    expect(afternoon)
+    XCTAssertLessThan(favourites.frame.minY, afternoon.frame.minY, app.debugDescription)
+    XCTAssertTrue(afternoon.label.contains("2 songs · 1 min"), afternoon.label)
+  }
+
+  /// D-120: an empty playlist says so in one line and offers Add songs,
+  /// which opens Search; pull down to refresh replaces its Refresh button.
+  func testAnEmptyPlaylistOffersAddSongs() {
+    launch()
+    app.tabBars.buttons["Library"].tap()
+    expect(app.buttons["Playlists"])
+    app.buttons["Playlists"].tap()
+    let empty = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Empty Days'"))
+      .firstMatch
+    expect(empty)
+    empty.tap()
+    expect(app.staticTexts["No songs yet"])
+    let add = app.buttons["Add songs"]
+    expect(add)
+    XCTAssertFalse(app.buttons["Refresh"].exists)
+    add.tap()
+    expect(app.searchFields["Songs, albums and artists"])
+  }
+
+  /// D-120: Home leaves out a section with nothing in it (the demo has no
+  /// recommendations): no heading and no loading words.
+  func testHomeHidesAnEmptySection() {
+    launch()
+    expect(app.staticTexts["Mixes"])
+    XCTAssertFalse(app.staticTexts["Recommended for you"].exists, app.debugDescription)
+    XCTAssertFalse(
+      app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Finding'")).firstMatch
+        .exists)
+  }
+
+  /// D-120: search results are grouped under one Top result, and an album
+  /// shows once.
+  func testSearchShowsAnAlbumOnce() {
+    launch()
+    app.tabBars.buttons["Search"].tap()
+    let field = app.searchFields["Songs, albums and artists"]
+    expect(field)
+    field.tap()
+    if app.buttons["Continue"].waitForExistence(timeout: 2) { app.buttons["Continue"].tap() }
+    field.typeText("Sunrise")
+    expect(app.staticTexts["Top result"])
+    let album = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Sunrise'"))
+    expect(album.firstMatch)
+    XCTAssertEqual(album.count, 1, app.debugDescription)
   }
 }
