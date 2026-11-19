@@ -24,6 +24,8 @@ import PigStore
     public var requested: [String] = []
     /// Left out by the server (excluded from the household's downloads).
     public var skipped: [String] = []
+    /// Paused by the person before: Add left them paused (#264).
+    public var paused: [String] = []
     /// Refused, with the server's reason.
     public var refused: [String] = []
     public var reason: String?
@@ -35,6 +37,7 @@ import PigStore
     public mutating func absorb(_ later: Report) {
       requested += later.requested
       skipped += later.skipped
+      paused += later.paused
       refused += later.refused
       reason = later.reason ?? reason
       downloadsEnabled = downloadsEnabled && later.downloadsEnabled
@@ -44,12 +47,9 @@ import PigStore
     /// when several were refused (#245), or that a song was left out (Codex
     /// round 2: nothing may vanish without a word).
     public func notice(titles: [String: String]) -> String? {
-      if let reason {
-        return refused.count > 1 ? "Couldn't add \(refused.count) songs: \(reason)" : reason
-      }
-      guard let id = skipped.first else { return nil }
-      return
-        "Couldn't add \(titles[id] ?? "that song"): it's excluded from this server's downloads."
+      RequestNotice.text(
+        refused: refused.count, reason: reason,
+        excluded: skipped.first.map { titles[$0] ?? "that song" }, paused: !paused.isEmpty)
     }
   }
 
@@ -94,6 +94,9 @@ import PigStore
         report.downloadsEnabled = report.downloadsEnabled && result.downloadsEnabled
         if result.created + result.existing > 0 {
           report.requested.append(track.id)
+        } else if result.paused > 0 {
+          // The person paused it before: it stays paused (#264), not left out.
+          report.paused.append(track.id)
         } else {
           report.skipped.append(track.id)
         }

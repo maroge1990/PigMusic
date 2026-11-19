@@ -53,6 +53,21 @@ private struct Offline: Error {}
     #expect(await RequestOutbox.pending(store).isEmpty)
   }
 
+  /// #264: a song the person paused stays paused when added again; it is
+  /// reported paused, with where to resume it, never as excluded.
+  @Test func aSongPausedBeforeIsReportedPausedNotExcluded() async throws {
+    let (store, root) = try makeStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try await RequestOutbox.add(first, to: store)
+    let report = try await RequestOutbox.send(store: store, isCurrent: { true }) { _ in
+      AcquisitionResult(created: 0, existing: 0, skipped: 0, paused: 1, downloadsEnabled: true)
+    }
+    #expect(report.paused == ["first"])
+    #expect(report.skipped.isEmpty && report.requested.isEmpty)
+    #expect(report.notice(titles: ["first": "First"]) == "Paused. Resume it in Downloads.")
+    #expect(await RequestOutbox.pending(store).isEmpty)
+  }
+
   @Test func aLeftOutOrRefusedSongIsExplained() {
     var report = RequestOutbox.Report()
     #expect(report.notice(titles: [:]) == nil)
@@ -62,6 +77,23 @@ private struct Offline: Error {}
         == "Couldn't add First: it's excluded from this server's downloads.")
     report.reason = "No."
     #expect(report.notice(titles: ["first": "First"]) == "No.")
+  }
+
+  /// Codex round 1 on batch D: a paused song is still told beside a song
+  /// left out or refused.
+  @Test func aPausedSongIsToldBesideAnExclusionOrARefusal() {
+    var excluded = RequestOutbox.Report()
+    excluded.skipped = ["first"]
+    excluded.paused = ["second"]
+    #expect(
+      excluded.notice(titles: ["first": "First"])
+        == "Couldn't add First: it's excluded from this server's downloads. Paused. Resume it in Downloads."
+    )
+    var refused = RequestOutbox.Report()
+    refused.refused = ["first"]
+    refused.reason = "No."
+    refused.paused = ["second"]
+    #expect(refused.notice(titles: [:]) == "No. Paused. Resume it in Downloads.")
   }
 
   /// #245: one drain of the outbox says what was refused once, with how

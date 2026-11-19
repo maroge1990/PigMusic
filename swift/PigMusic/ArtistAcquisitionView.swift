@@ -25,7 +25,7 @@ struct ArtistAcquisitionView: View {
           "Monitoring starts with the current catalogue as a baseline. Use Add albums to library for the albums already out."
         ).font(PigType.footnote)
       }
-      if let state {
+      if let state, !cancelling {
         Section("Progress") {
           Text(RequestStatus.label(state.status))
           Text(
@@ -43,13 +43,15 @@ struct ArtistAcquisitionView: View {
             Text("This can add many albums at once.")
           }
         Button("Cancel adding and monitoring", systemImage: "xmark", role: .destructive) {
-          Task { await cancel() }
+          cancel()
         }
         Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }
-      }.disabled(loading || !model.canMutate || !(albums || singles || eps))
+      }.disabled(loading || cancelling || !model.canMutate || !(albums || singles || eps))
       if loading { ProgressView() }
       if let message { StatusText(message) }
     }.pigCanvas().navigationTitle("Artist monitoring").navigationBarTitleDisplayMode(.inline).task { await load() }
+      // Undone: the page shows the settings as the server still has them.
+      .onChange(of: cancelling) { _, now in if !now { Task { await load() } } }
   }
   private func apply(_ value: ArtistAcquisition) {
     state = value
@@ -81,13 +83,10 @@ struct ArtistAcquisitionView: View {
       apply(value)
     } catch { message = .error(error.userMessage) }
   }
-  private func cancel() async {
-    guard !loading else { return }
-    loading = true
-    defer { loading = false }
-    do {
-      let value = try await model.performPersonal({ try await $0.cancelArtist(id: artistId) })
-      apply(value)
-    } catch { message = .error(error.userMessage) }
+  /// At once, with Undo (D-79, #183): the page shows nothing being added or
+  /// monitored, and the server hears of it when the Undo runs out.
+  private func cancel() {
+    model.cancelArtistLater(id: artistId) { value in apply(value) }
   }
+  private var cancelling: Bool { model.undo.hides(AppModel.undoKey(artistAdding: artistId)) }
 }

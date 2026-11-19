@@ -123,6 +123,8 @@ struct LibraryView: View {
           } label: {
             SavedArtistCard(model: model, artist: artist)
           }.buttonStyle(.plain)
+            // The artist's one menu, as on its page (D-118).
+            .contextMenu { ArtistActionsMenu(model: model, artist: artist) }
         }
       }
       more(.artists, shown: model.artists.count, total: model.artistCount)
@@ -136,6 +138,8 @@ struct LibraryView: View {
             CollectionCard(
               model: model, source: album.artworkSource, title: album.title, caption: album.artist)
           }.buttonStyle(.plain)
+            // The album's one menu, as on its page (D-118).
+            .contextMenu { AlbumActionsMenu(model: model, album: album) }
         }
       }
       more(.albums, shown: model.albums.count, total: model.albumCount)
@@ -172,6 +176,8 @@ struct LibraryView: View {
               Image(systemName: "chevron.right").foregroundStyle(.tertiary)
             }.padding(.vertical, 4)
           }.buttonStyle(.plain)
+            // The playlist's one menu, as on its page (D-118).
+            .contextMenu { PlaylistActionsMenu(model: model, playlist: playlist) }
           RowSeparator()
         }
       }
@@ -284,6 +290,9 @@ struct AlbumView: View {
           RoundIcon(label: "Shuffle", systemImage: "shuffle") { model.play(tracks.shuffled()) }
             .disabled(tracks.isEmpty)
           DownloadMenu(model: model, tracks: tracks)
+          CollectionMenuButton(label: "More actions for \(album.title)") {
+            AlbumActionsMenu(model: model, album: album)
+          }
           Spacer()
         }
         let rows = rows
@@ -376,13 +385,15 @@ struct DownloadMenu: View {
   var body: some View {
     HStack(spacing: 10) {
       Menu {
-        Button("Download", systemImage: "arrow.down.circle") {
+        // Worded as a song's Download menu (D-106, D-118).
+        Button("Original", systemImage: "arrow.down.circle") {
           Task { await model.download(tracks, origin: origin) }
         }
-        Button("Download smaller copies", systemImage: "arrow.down.circle") {
+        Button("Smaller AAC copy", systemImage: "arrow.down.circle") {
           Task { await model.download(tracks, quality: "aac", origin: origin) }
         }
-        if model.watch?.supported == true {
+        // Only while an Apple Watch is paired, as in every menu (D-118).
+        if model.watchPaired {
           Button("Send to Apple Watch", systemImage: "applewatch") {
             Task { await sendToWatch() }
           }
@@ -431,6 +442,7 @@ struct DownloadMenu: View {
 
 struct AccountView: View {
   @Bindable var model: AppModel
+  @State private var signingOut = false
   var body: some View {
     Form {
       Section {
@@ -472,8 +484,15 @@ struct AccountView: View {
         )
       }
       Section {
-        Button("Sign out", role: .destructive) { Task { await model.signOut() } }.disabled(
-          model.busy || model.mutationActive)
+        // Asks first, as signing out another device does: it can't be undone (D-79, #183).
+        Button("Sign out", role: .destructive) { signingOut = true }
+          .disabled(model.busy || model.mutationActive)
+          .confirmationDialog(
+            "Sign out of this iPhone? It will need to sign in again.", isPresented: $signingOut,
+            titleVisibility: .visible
+          ) {
+            Button("Sign out", role: .destructive) { Task { await model.signOut() } }
+          }
       }
       if let message = model.message { Section { StatusText(message) } }
     }.navigationTitle("Account")
@@ -668,7 +687,7 @@ struct NowPlayingView: View {
           menu
         } label: {
           RoundIconLabel(systemImage: "ellipsis")
-        }.buttonStyle(.plain).accessibilityLabel("Song actions")
+        }.buttonStyle(.plain).menuOrder(.fixed).accessibilityLabel("Song actions")
       }
     }
   }
@@ -709,7 +728,7 @@ struct NowPlayingView: View {
         Spacer()
         NavigationLink("Edit") { QueueEditorView(model: model) }
       }.padding(.bottom, 6)
-      let upcoming = Array(player.queue.items.dropFirst(player.queue.index + 1).prefix(50))
+      let upcoming = Array(player.upcoming(hiding: model.undo).prefix(50))
       // Where similar songs begin when the queue ran out (#202).
       let similarStart = upcoming.firstIndex { model.similarIDs.contains($0.track.id) }
       ForEach(Array(upcoming.enumerated()), id: \.element.id) { offset, item in
@@ -730,29 +749,31 @@ struct NowPlayingView: View {
   }
 }
 
+/// A song in Up next: the one song row (D-118), whose tap plays from it (#99)
+/// and whose menu adds the queue's own edits.
 private struct UpNextRow: View {
-  @ScaledMetric(relativeTo: .body) private var moreWidth: CGFloat = 32
   let model: AppModel
   let item: PlaybackOccurrence
   var body: some View {
-    HStack(spacing: 12) {
-      // Tapping the song plays from it (#99); the menu edits the queue.
-      Button {
-        model.player.jump(to: item.id)
-      } label: {
-        CollectionRow(item.track.title, subtitle: item.track.artist) {
-          ArtworkThumb(model: model, source: item.track.artworkSource, title: item.track.title)
-        }
-      }.buttonStyle(.plain).accessibilityHint("Plays from this song")
-      Menu {
-        Button("Move earlier", systemImage: "arrow.up") { model.player.moveUpcoming(item.id, by: -1) }
-        Button("Move later", systemImage: "arrow.down") { model.player.moveUpcoming(item.id, by: 1) }
-        Button("Remove from queue", systemImage: "xmark", role: .destructive) {
-          model.player.removeUpcoming(item.id)
-        }
-      } label: {
-        Image(systemName: "ellipsis").frame(minWidth: moreWidth, minHeight: 44)
-      }.accessibilityLabel("Queue actions for \(item.track.title)")
+    SongRow(
+      model: model, track: item.track, playing: false,
+      page: [
+        SongPageAction(.moveEarlier) { model.player.moveUpcoming(item.id, by: -1) },
+        SongPageAction(.moveLater) { model.player.moveUpcoming(item.id, by: 1) },
+        SongPageAction(.removeFromUpNext) { model.removeFromUpNextLater(item) },
+      ]
+    ) {
+      model.player.jump(to: item.id)
+    }
+    .accessibilityHint("Plays from this song")
+  }
+}
+
+extension PlayerController {
+  /// Up next less the songs whose removal waits for its Undo (D-79).
+  func upcoming(hiding undo: UndoQueue) -> [PlaybackOccurrence] {
+    queue.items.dropFirst(queue.index + 1).filter {
+      !undo.hides(AppModel.undoKey(upNext: $0.id))
     }
   }
 }
@@ -766,6 +787,8 @@ private struct AirPlayButton: UIViewRepresentable {
   func updateUIView(_ view: AVRoutePickerView, context: Context) {}
 }
 
+/// The queue: the playing song, then Up next, which drags to reorder and
+/// swipes to remove at once with Undo (D-118, D-79).
 struct QueueEditorView: View {
   let model: AppModel
   private var player: PlayerController { model.player }
@@ -773,19 +796,36 @@ struct QueueEditorView: View {
     List {
       if let current = player.queue.current {
         Section("Current song") {
-          CollectionRow(current.track.title, subtitle: current.track.artist) {
-            ArtworkThumb(
-              model: model, source: current.track.artworkSource, title: current.track.title)
-          }
+          SongRow(model: model, track: current.track, playing: true)
         }
       }
-      // The same row, menu and wording as Up next under the player (#157).
+      // The same row and menu as Up next under the player (#157).
       Section("Up next") {
-        ForEach(player.queue.items.dropFirst(player.queue.index + 1)) { item in
+        let shown = player.upcoming(hiding: model.undo)
+        ForEach(shown) { item in
           UpNextRow(model: model, item: item)
+            .swipeActions {
+              Button("Remove", systemImage: "xmark", role: .destructive) {
+                model.removeFromUpNextLater(item)
+              }
+            }
         }
+        .onMove { from, to in move(shown, from: from, to: to) }
       }
-    }.pigCanvas().navigationTitle("Playback queue").navigationBarTitleDisplayMode(.inline)
+    }
+    .pigCanvas().navigationTitle("Playback queue").navigationBarTitleDisplayMode(.inline)
+    .toolbar { EditButton() }
+  }
+  /// Moves one song of those shown to `to`, by its place among the whole queue.
+  private func move(_ shown: [PlaybackOccurrence], from: IndexSet, to: Int) {
+    guard let index = from.first, shown.indices.contains(index) else { return }
+    let moved = shown[index].id
+    let items = player.queue.items
+    guard let position = items.firstIndex(where: { $0.id == moved }) else { return }
+    // Down: after the song it now follows; up: before the song it now precedes.
+    let anchor = to > index ? shown[to - 1] : (shown.indices.contains(to) ? shown[to] : nil)
+    guard let anchor, let target = items.firstIndex(where: { $0.id == anchor.id }) else { return }
+    player.moveUpcoming(moved, by: target - position)
   }
 }
 
@@ -836,6 +876,29 @@ struct ArtistRoute: Identifiable, Hashable {
     }
     self.names = names
     self.origin = origin
+  }
+}
+
+/// A page pushed onto the selected tab from anywhere (D-118): the player's
+/// artist link, or a song menu's Go to album or Go to artist.
+struct PageRoute: Identifiable, Hashable {
+  enum Place: Hashable {
+    case artist(ArtistRoute)
+    case album(RewindLink, title: String)
+  }
+  let id = UUID()
+  let place: Place
+  init(_ place: Place) { self.place = place }
+}
+
+struct PageRouteView: View {
+  let model: AppModel
+  let route: PageRoute
+  var body: some View {
+    switch route.place {
+    case .artist(let artist): ArtistRouteView(model: model, route: artist)
+    case .album(let link, let title): RewindLinkView(model: model, link: link, title: title)
+    }
   }
 }
 

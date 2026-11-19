@@ -14,12 +14,25 @@ public enum PlaybackRepeat: String, Codable, Sendable, CaseIterable {
   case off, all, one
 }
 
+/// A song taken out of Up next, with where it was and from which queue.
+public struct TakenOccurrence: Sendable, Equatable {
+  public let item: PlaybackOccurrence
+  public let position: Int
+  public let queue: UUID
+}
+
 public struct PlaybackQueue: Sendable, Codable {
   public private(set) var items: [PlaybackOccurrence] = []
   public private(set) var index: Int = 0
+  /// This queue's identity: new each time it is replaced (playing something
+  /// else, Stop) or read back from a checkpoint; kept while it advances or
+  /// is reordered. An Up next Undo acts only on the queue it came from.
+  public private(set) var identity = UUID()
   public var current: PlaybackOccurrence? { items.indices.contains(index) ? items[index] : nil }
+  private enum CodingKeys: String, CodingKey { case items, index }
   public init() {}
   public mutating func replace(_ tracks: [Track], startingAt: Int = 0) {
+    identity = UUID()
     items = tracks.map { PlaybackOccurrence(track: $0) }
     index = min(max(0, startingAt), max(0, items.count - 1))
   }
@@ -38,6 +51,26 @@ public struct PlaybackQueue: Sendable, Codable {
   public mutating func removeUpcoming(_ id: UUID) {
     guard let position = items.firstIndex(where: { $0.id == id }), position > index else { return }
     items.remove(at: position)
+  }
+  /// Takes a song out of Up next at once (D-79, D-118: it can never become
+  /// current while its Undo waits) and says where it was, for `putBack`.
+  public mutating func takeUpcoming(_ id: UUID) -> TakenOccurrence? {
+    guard let position = items.firstIndex(where: { $0.id == id }), position > index else {
+      return nil
+    }
+    return TakenOccurrence(item: items.remove(at: position), position: position, queue: identity)
+  }
+  /// Whether `taken` came from this queue, so its Undo can still put it back.
+  public func holds(_ taken: TakenOccurrence) -> Bool { taken.queue == identity }
+  /// Undo of `takeUpcoming`: the song returns to its old place while that is
+  /// still in Up next, else to the front of Up next. Never twice, and never
+  /// into another queue (Codex round 1 on batch D): false when it didn't.
+  @discardableResult public mutating func putBack(_ taken: TakenOccurrence) -> Bool {
+    guard holds(taken), !items.contains(where: { $0.id == taken.item.id }) else { return false }
+    let position = taken.position
+    let place = position > index && position <= items.count ? position : min(index + 1, items.count)
+    items.insert(taken.item, at: place)
+    return true
   }
   public mutating func moveUpcoming(_ id: UUID, by delta: Int) {
     guard let position = items.firstIndex(where: { $0.id == id }), position > index else { return }

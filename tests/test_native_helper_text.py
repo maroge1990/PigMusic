@@ -55,7 +55,7 @@ REMOVED = {
 
 KEPT = {
     "PigMusic/PigMusicApp.swift": ['Text("At least 12 characters")'],
-    "PigMusic/HomeView.swift": ['static let savedNotice = "Playlist saved"'],
+    "PigMusic/AppModel.swift": ['notifyDone("Playlist saved")'],
     "PigMusic/AccountToolsViews.swift": [
         'static let serverUpdate = "Update the server to use everything"',
         "Household default: ",

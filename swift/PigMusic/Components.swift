@@ -361,6 +361,27 @@ struct RoundIcon: View {
   }
 }
 
+/// The ⋯ in an album, artist or playlist page's action row: the same menu
+/// as a long press on its card or row (D-118).
+struct CollectionMenuButton<Content: View>: View {
+  let label: String
+  @ViewBuilder let content: Content
+  var body: some View {
+    Menu {
+      content
+    } label: {
+      RoundIconLabel(systemImage: "ellipsis")
+    }
+    .buttonStyle(.plain)
+    // The same order wherever it opens (D-118).
+    .menuOrder(.fixed)
+    // One VoiceOver stop with the name, as the Download menu (#97).
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(label)
+    .accessibilityAddTraits(.isButton)
+  }
+}
+
 struct RoundIconLabel: View {
   let systemImage: String
   // Grow with Dynamic Type (#162).
@@ -379,74 +400,155 @@ struct RoundIconLabel: View {
   }
 }
 
-/// Song row matching the web: number or artwork, title, caption, a state mark and
-/// a "more" button for song actions.
+/// The text and lead of the one song row (D-118, #248), in fixed slots: the
+/// lead (cover, or number), the title with a small star for a favourite,
+/// "Artist · Album", any note below, and the length on numbered rows. SongRow
+/// draws library songs with it; songs not on the server (Apple Music,
+/// Shazam) use it too, without the menu.
+struct SongRowLabel<Lead: View, Note: View>: View {
+  let title: String
+  var star = false
+  let caption: String
+  var length: String?
+  var current = false
+  @ViewBuilder let lead: Lead
+  @ViewBuilder let note: Note
+  @Environment(\.colorScheme) private var scheme
+  @ScaledMetric(relativeTo: .footnote) private var starSize: CGFloat = 10
+  var body: some View {
+    HStack(spacing: 12) {
+      lead
+      VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 4) {
+          Text(title).lineLimit(1)
+            .foregroundStyle(current ? PigBrand.textAccent(scheme) : PigBrand.text(scheme))
+          if star {
+            Image(systemName: "star.fill").font(.system(size: starSize, weight: .semibold))
+              .foregroundStyle(PigBrand.accent(scheme)).accessibilityHidden(true)
+          }
+        }
+        if !caption.isEmpty {
+          Text(caption).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
+        }
+        note
+      }
+      Spacer(minLength: 0)
+      if let length {
+        Text(length).font(PigType.footnote).pigFigures().foregroundStyle(.secondary)
+      }
+    }
+    .frame(minHeight: 48).contentShape(Rectangle())
+  }
+}
+
+/// The one song row (D-118, #248): SongRowLabel, then one state mark, then
+/// the ⋯ that opens the song's menu, as a long press does. A tap plays the
+/// song and continues through its list (search plays only that song). The
+/// queue, the iPhone's and Apple Watch's downloads and the album pages are
+/// options of it, not rows of their own.
 struct SongRow: View {
   let model: AppModel
   let track: Track
+  /// The track number on an album page or the place on a chart.
   var number: Int?
-  var showArtwork = true
-  let play: () -> Void
+  /// A numbered row on an album's own page shows the artist alone; a chart's
+  /// shows "Artist · Album".
+  var albumPage = true
+  /// Set by the queue, where the same song can be playing and next.
+  var playing: Bool?
+  /// What the page adds to the song's menu (D-118).
+  var page: [SongPageAction] = []
+  /// Nil where the song can't play here (Apple Watch's downloads).
+  var play: (() -> Void)?
   @Environment(\.colorScheme) private var scheme
   // Grow with Dynamic Type (#162).
   @ScaledMetric(relativeTo: .subheadline) private var numberWidth: CGFloat = 26
   @ScaledMetric(relativeTo: .body) private var moreWidth: CGFloat = 32
   @ScaledMetric(relativeTo: .footnote) private var markSize: CGFloat = 13
-  private var current: Bool { model.player.queue.current?.track.actionTrack.id == track.actionTrack.id }
-  private var caption: String {
-    if number != nil { return track.durationText ?? track.artist }
-    return [track.artist, track.album].compactMap { $0 }.filter { !$0.isEmpty }
-      .joined(separator: " · ")
+  private var current: Bool {
+    playing ?? (model.player.queue.current?.track.actionTrack.id == track.actionTrack.id)
+  }
+  private var facts: SongRowFacts {
+    let place: SongRowFacts.Place =
+      number.map { albumPage ? .album($0) : .chart($0) } ?? .list
+    return SongRowFacts(
+      track, place: place, favourite: model.favourites[track.actionTrack.id] == true)
   }
   var body: some View {
     // The ⋯ button and a long press open the same menu (D-112, #229).
-    SongActionsLookup(model: model, track: track.actionTrack) { menu in row(menu) }
+    SongActionsLookup(model: model, track: track.actionTrack, page: page) { menu in row(menu) }
   }
   private func row(_ menu: SongActionsMenu) -> some View {
-    HStack(spacing: 12) {
-      Button {
-        play()
-      } label: {
-        HStack(spacing: 12) {
-          if let number {
-            Group {
-              if current {
-                Image(systemName: "waveform").foregroundStyle(PigBrand.accent(scheme))
-              } else {
-                Text("\(number)").foregroundStyle(.secondary)
-              }
-            }.font(.subheadline.monospacedDigit()).frame(minWidth: numberWidth)
-          } else if showArtwork {
-            ArtworkThumb(model: model, source: track.artworkSource, title: track.title)
-          }
-          VStack(alignment: .leading, spacing: 2) {
-            Text(track.title).lineLimit(1)
-              .foregroundStyle(current ? PigBrand.textAccent(scheme) : PigBrand.text(scheme))
-            Text(caption).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
-          }
-          Spacer(minLength: 0)
-        }.contentShape(Rectangle())
+    let facts = facts
+    return HStack(spacing: 12) {
+      if let play {
+        Button(action: play) { label(facts) }
+          .buttonStyle(.plain)
+          .accessibilityLabel("Play \(track.title) by \(track.artist)")
+          .accessibilityValue(spoken(facts))
+      } else {
+        label(facts)
+          .accessibilityElement(children: .ignore)
+          .accessibilityLabel("\(track.title) by \(track.artist)")
+          .accessibilityValue(spoken(facts))
       }
-      .buttonStyle(.plain)
-      .accessibilityLabel(
-        "Play \(track.title) by \(track.artist)"
-      )
-      .accessibilityValue(current ? "Now playing" : ([stateLabel] + deviceLabels).joined(separator: ", "))
       indicator
       Menu {
         menu
       } label: {
         Image(systemName: "ellipsis").frame(minWidth: moreWidth, minHeight: 44).foregroundStyle(.secondary)
-      }.buttonStyle(.plain).accessibilityLabel("More actions for \(track.title)")
+      }.buttonStyle(.plain).menuOrder(.fixed).accessibilityLabel("More actions for \(track.title)")
     }
     .frame(minHeight: 48)
     .contextMenu { menu }
+  }
+  private func label(_ facts: SongRowFacts) -> some View {
+    SongRowLabel(
+      title: facts.title, star: facts.star, caption: facts.caption, length: facts.length,
+      current: current
+    ) {
+      lead(facts)
+    } note: {
+      EmptyView()
+    }
+  }
+  @ViewBuilder private func lead(_ facts: SongRowFacts) -> some View {
+    switch facts.lead {
+    case .number(let number):
+      Group {
+        if current {
+          Image(systemName: "waveform").foregroundStyle(PigBrand.accent(scheme))
+        } else {
+          Text("\(number)").foregroundStyle(.secondary)
+        }
+      }.font(.subheadline.monospacedDigit()).frame(minWidth: numberWidth)
+    case .cover:
+      // The playing mark sits on the cover (D-118: the queue's rows too).
+      ArtworkThumb(model: model, source: track.artworkSource, title: track.title)
+        .overlay {
+          if current {
+            Image(systemName: "waveform").font(.system(size: markSize, weight: .bold))
+              .foregroundStyle(PigBrand.onAccent(scheme)).padding(5)
+              .background(PigBrand.accent(scheme), in: Circle())
+          }
+        }
+    }
+  }
+  private func spoken(_ facts: SongRowFacts) -> String {
+    if current { return "Now playing" }
+    return ((facts.star ? ["Favourite"] : []) + [stateLabel] + deviceLabels)
+      .joined(separator: ", ")
   }
   private var copies: (phone: DeviceCopyMark?, watch: DeviceCopyMark?) {
     model.deviceCopies(track.id)
   }
   /// Requested as soon as it is asked for here, as in its sheet (#206).
-  private var state: String? { track.shownState(requested: model.isRequested(track.id)) }
+  private var state: String? {
+    if track.serverState != "in_library", model.requestedSongs.paused.contains(track.id) {
+      return "paused"
+    }
+    return track.shownState(requested: model.isRequested(track.id))
+  }
   private var deviceLabels: [String] {
     let copies = copies
     func label(_ mark: DeviceCopyMark?, _ device: String) -> String? {
@@ -501,6 +603,9 @@ struct SongRow: View {
         EmptyView()
       case "requested":
         Image(systemName: "clock").foregroundStyle(.secondary)
+      case "paused":
+        // Paused by you; Add leaves it so (#264). Resume it in Downloads.
+        Image(systemName: "pause.circle").foregroundStyle(.secondary)
       case "failed":
         Image(systemName: "exclamationmark.circle").foregroundStyle(PigBrand.danger(scheme))
       default:
@@ -513,6 +618,7 @@ struct SongRow: View {
     case "household_available": "On the server, not in your library"
     case "not_in_library": "Not on the server"
     case "requested": "Adding"
+    case "paused": "Paused"
     case "failed": "Couldn't add"
     default: "In your library"
     }
@@ -656,11 +762,15 @@ struct AlbumSongList: View {
   let model: AppModel
   let tracks: [Track]
   var number: (Int, Track) -> Int = { index, track in track.trackNumber ?? index + 1 }
+  /// False for a chart: its rows show "Artist · Album" (D-118).
+  var albumPage = true
   let play: (Int) -> Void
   var body: some View {
     LazyVStack(spacing: 0) {
       ForEach(Array(tracks.enumerated()), id: \.offset) { index, song in
-        SongRow(model: model, track: song, number: number(index, song)) { play(index) }
+        SongRow(model: model, track: song, number: number(index, song), albumPage: albumPage) {
+          play(index)
+        }
         RowSeparator(numbered: true)
       }
     }
@@ -814,7 +924,8 @@ struct UndoBar: View {
         model.notices.dismiss(notice.id)
       } label: {
         bar {
-          Image(systemName: "exclamationmark.circle").accessibilityHidden(true)
+          Image(systemName: notice.done ? "checkmark.circle" : "exclamationmark.circle")
+            .accessibilityHidden(true)
           Text(notice.text).font(PigType.footnote.weight(.medium)).lineLimit(3)
             .multilineTextAlignment(.leading)
           Spacer(minLength: 0)

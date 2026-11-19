@@ -18,6 +18,7 @@ import Observation
   /// Being sent, or sent a moment ago: still hidden while the screen reloads.
   public private(set) var sending: Set<String> = []
   @ObservationIgnored private var actions: [String: @MainActor () async -> Bool] = [:]
+  @ObservationIgnored private var undoes: [String: @MainActor () -> Void] = [:]
   @ObservationIgnored private var timers: [String: Task<Void, Never>] = [:]
   @ObservationIgnored private var chain: Task<Void, Never>?
   /// Rises when the account ends: actions queued before it are dropped.
@@ -63,12 +64,15 @@ import Observation
 
   /// Offers Undo for `label`, then runs `commit`, which says whether the
   /// change was made (a failure shows the thing again). A second action for
-  /// an id already waiting is ignored.
+  /// an id already waiting is ignored. `undone` runs if Undo is pressed: for
+  /// a change made at once that Undo puts back (Up next, D-118).
   public func schedule(
-    _ id: String, label: String, commit: @escaping @MainActor () async -> Bool
+    _ id: String, label: String, undone: (@MainActor () -> Void)? = nil,
+    commit: @escaping @MainActor () async -> Bool
   ) {
     guard actions[id] == nil, !sending.contains(id) else { return }
     actions[id] = commit
+    if let undone { undoes[id] = undone }
     items.append(Item(id: id, label: label))
     let wait = wait
     timers[id] = Task { [weak self] in
@@ -82,7 +86,12 @@ import Observation
     guard actions.removeValue(forKey: id) != nil else { return }
     timers.removeValue(forKey: id)?.cancel()
     items.removeAll { $0.id == id }
+    undoes.removeValue(forKey: id)?()
   }
+
+  /// Sends one waiting action now: its Undo leaves (an Up next removal whose
+  /// queue has ended can no longer be undone).
+  public func sendNow(_ id: String) { send(id) }
 
   /// Sends every waiting action now, in order.
   public func sendAll() {
@@ -96,6 +105,7 @@ import Observation
     for timer in timers.values { timer.cancel() }
     timers = [:]
     actions = [:]
+    undoes = [:]
     items = []
   }
 
@@ -107,6 +117,7 @@ import Observation
 
   private func send(_ id: String) {
     guard let action = actions.removeValue(forKey: id) else { return }
+    undoes.removeValue(forKey: id)
     timers.removeValue(forKey: id)?.cancel()
     items.removeAll { $0.id == id }
     sending.insert(id)

@@ -48,3 +48,24 @@ public struct PlaylistRemovalLedger: Sendable {
     self.applied[Self.key(playlist, revision), default: []].append(position)
   }
 }
+
+extension PlaylistRemoval {
+  /// The Undo id of removing the song at `position` from that version of a
+  /// playlist (entry IDs are positions).
+  public static func undoKey(playlist: String, revision: Int, position: Int) -> String {
+    "playlist-entry:\(playlist)@\(revision)#\(position)"
+  }
+
+  /// A playlist's songs as its page and both collection-menu entry points
+  /// use them (Codex round 1 on batch D): less those whose removal waits for
+  /// its Undo (`hides`) or that this iPhone already removed from that
+  /// version (`ledger`), with their positions. Undo brings a song back.
+  public static func shown(
+    _ playlist: Playlist, ledger: PlaylistRemovalLedger, hides: (String) -> Bool
+  ) -> [(position: Int, entry: PlaylistEntry)] {
+    (playlist.entries ?? []).enumerated().filter { position, _ in
+      !ledger.removed(playlist: playlist.id, position: position, revision: playlist.revision)
+        && !hides(undoKey(playlist: playlist.id, revision: playlist.revision, position: position))
+    }.map { (position: $0.offset, entry: $0.element) }
+  }
+}

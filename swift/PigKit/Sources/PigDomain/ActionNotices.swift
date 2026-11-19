@@ -8,6 +8,9 @@ public struct ActionNotice: Identifiable, Equatable, Sendable {
   public let text: String
   /// What the server's log knows the failure by, when it said.
   public let reference: String?
+  /// Says something was done (a mix saved, D-118), not that it failed: the
+  /// same bar, with a tick and no error haptic.
+  public var done = false
 }
 
 /// The app's one notice for a failed action (#245): a song menu's failure
@@ -30,9 +33,11 @@ public struct ActionNotice: Identifiable, Equatable, Sendable {
   public init(lifetime: Duration = .seconds(6)) { self.lifetime = lifetime }
 
   /// Shows `text` in place of any notice showing, for `lifetime`.
-  @discardableResult public func post(_ text: String, reference: String? = nil) -> ActionNotice {
+  @discardableResult public func post(
+    _ text: String, reference: String? = nil, done: Bool = false
+  ) -> ActionNotice {
     serial += 1
-    let notice = ActionNotice(id: serial, text: text, reference: reference)
+    let notice = ActionNotice(id: serial, text: text, reference: reference, done: done)
     current = notice
     timer?.cancel()
     let lifetime = lifetime

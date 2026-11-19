@@ -168,6 +168,9 @@ struct SavedArtistView: View {
             model.play(songs.shuffled())
           }.disabled(songs.isEmpty)
           DownloadMenu(model: model, tracks: songs)
+          CollectionMenuButton(label: "More actions for \(artist.name)") {
+            ArtistActionsMenu(model: model, artist: artist)
+          }
           Spacer()
         }
         LazyVGrid(columns: cardColumns, spacing: 18) {
@@ -179,6 +182,7 @@ struct SavedArtistView: View {
                 model: model, source: album.artworkSource, title: album.title,
                 caption: album.year?.text)
             }.buttonStyle(.plain)
+              .contextMenu { AlbumActionsMenu(model: model, album: album) }
           }
         }
         if loading { ProgressView().frame(maxWidth: .infinity) }
@@ -715,21 +719,16 @@ private struct ApplePlaylistView: View {
   /// A song not on the server: Apple's details, and the way to its catalogue
   /// page. Unmarked until the server has been asked.
   private func elsewhere(_ song: ApplePlaylistSong, checked: Bool) -> some View {
-    HStack(spacing: 12) {
-      AppleArtwork(url: song.artworkURL).frame(width: 44, height: 44)
-      VStack(alignment: .leading, spacing: 2) {
-        Text(song.title).lineLimit(1).foregroundStyle(PigBrand.text(scheme))
-        Text(
-          [song.artist, song.album ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
-        )
-        .font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
-        if checked {
-          Text("Not on the server yet").font(PigType.caption).foregroundStyle(.secondary)
-        }
+    // The one song row's slots, without the menu: nothing here to act on (D-118).
+    SongRowLabel(
+      title: song.title, caption: SongRowFacts.caption(artist: song.artist, album: song.album)
+    ) {
+      RowThumb { AppleArtwork(url: song.artworkURL) }
+    } note: {
+      if checked {
+        Text("Not on the server yet").font(PigType.caption).foregroundStyle(.secondary)
       }
-      Spacer(minLength: 0)
     }
-    .frame(minHeight: 48).contentShape(Rectangle())
   }
   private func load() async {
     if songs == nil {
@@ -1185,21 +1184,19 @@ private struct ShazamInboxView: View {
     .task(id: ApplePlaylistStates.fingerprint(asked)) { await load(asked) }
   }
   private func row(_ song: ShazamSong, state: ApplePlaylistSongState?) -> some View {
-    HStack(spacing: 12) {
-      AppleArtwork(url: song.artworkURL).frame(width: 44, height: 44)
-      VStack(alignment: .leading, spacing: 2) {
-        Text(song.title.isEmpty ? "Unknown song" : song.title).lineLimit(1)
-          .foregroundStyle(PigBrand.text(scheme))
-        Text(song.artist).font(PigType.footnote).foregroundStyle(.secondary).lineLimit(1)
-        if requested.contains(song.shazamId) {
-          Text("Adding").font(PigType.caption).foregroundStyle(.secondary)
-        } else if let caption = ShazamStatus.caption(state) {
-          Text(caption).font(PigType.caption).foregroundStyle(.secondary)
-        }
+    // The one song row's slots, without the menu (D-118).
+    SongRowLabel(
+      title: song.title.isEmpty ? "Unknown song" : song.title,
+      caption: SongRowFacts.caption(artist: song.artist, album: nil)
+    ) {
+      RowThumb { AppleArtwork(url: song.artworkURL) }
+    } note: {
+      if requested.contains(song.shazamId) {
+        Text("Adding").font(PigType.caption).foregroundStyle(.secondary)
+      } else if let caption = ShazamStatus.caption(state) {
+        Text(caption).font(PigType.caption).foregroundStyle(.secondary)
       }
-      Spacer(minLength: 0)
     }
-    .frame(minHeight: 48).contentShape(Rectangle())
   }
   private func load(_ songs: [ApplePlaylistSong]) async {
     guard !songs.isEmpty else { return }

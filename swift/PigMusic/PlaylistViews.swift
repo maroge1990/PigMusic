@@ -131,15 +131,9 @@ struct PlaylistView: View {
   }
   /// With each song's position in the playlist, without songs waiting for
   /// their removal's Undo (#183).
-  private var shown: [(position: Int, entry: PlaylistEntry)] {
-    (playlist.entries ?? []).enumerated().filter {
-      // A stale copy can still list a song this iPhone removed (Codex).
-      !model.removed(playlist, at: $0.offset)
-        && !model.undo.hides(
-        AppModel.undoKey(
-          playlist: playlist.id, revision: playlist.revision, position: $0.offset))
-    }.map { ($0.offset, $0.element) }
-  }
+  /// A stale copy can still list a song this iPhone removed (Codex); the
+  /// page's menu uses the same songs.
+  private var shown: [(position: Int, entry: PlaylistEntry)] { model.shownEntries(playlist) }
   private var entries: [PlaylistEntry] { shown.map(\.entry) }
   /// A removal from this playlist is waiting or being sent: the page keeps
   /// the version it was made on until all of them are sent, so a waiting row
@@ -170,6 +164,10 @@ struct PlaylistView: View {
             origin: DownloadOrigin(playlistId: playlist.id, playlistName: playlist.name),
             missingCount: missing.count
           ) { await addMissing() }
+          CollectionMenuButton(label: "More actions for \(playlist.name)") {
+            PlaylistActionsMenu(
+              model: model, playlist: playlist, missing: missing.count, addMissing: addMissing)
+          }
           Spacer()
         }.buttonStyle(.plain)
         if let message { StatusText(message) }
@@ -190,7 +188,16 @@ struct PlaylistView: View {
       }.listRowSeparator(.hidden).listRowBackground(Color.clear)
       Section {
         ForEach(Array(shown.enumerated()), id: \.element.entry.entryId) { index, row in
-          SongRow(model: model, track: row.entry.playbackTrack) { model.play(songs, at: index) }
+          SongRow(
+            model: model, track: row.entry.playbackTrack,
+            page: locked
+              ? []
+              : [
+                SongPageAction(.removeFromPlaylist) {
+                  model.removeLater(at: row.position, from: playlist)
+                }
+              ]
+          ) { model.play(songs, at: index) }
             .swipeActions {
               // At once, with Undo (D-79): sent when the Undo runs out.
               Button("Remove", systemImage: "xmark", role: .destructive) {
@@ -267,27 +274,16 @@ struct PlaylistView: View {
       if !household.isEmpty {
         added = try await model.performPersonal { try await $0.addMembership(trackIds: household) }
       }
-      var created = 0
-      var existing = 0
-      var skipped = 0
-      var downloadsEnabled = true
+      var batches: [AcquisitionResult] = []
       for batch in stride(from: 0, to: requested.count, by: 500) {
         let tracks = Array(requested[batch..<min(batch + 500, requested.count)])
-        let result = try await model.performPersonal { try await $0.requestMusic(tracks) }
-        created += result.created
-        existing += result.existing
-        skipped += result.skipped
-        downloadsEnabled = downloadsEnabled && result.downloadsEnabled
+        batches.append(try await model.performPersonal { try await $0.requestMusic(tracks) })
       }
-      let queued = AcquisitionResult(
-        created: created, existing: existing, skipped: skipped, downloadsEnabled: downloadsEnabled)
-      let done = [
-        added > 0 ? "Added \(added) song\(added == 1 ? "" : "s") to your library." : nil,
-        requested.isEmpty ? nil : queued.sentence,
-      ].compactMap { $0 }.joined(separator: " ")
-      message = .info(done.isEmpty ? "These songs are already being added." : done)
+      // Every batch's answer, paused songs included, in the notice bar: the
+      // page's own reload would clear its line (Codex confirmation, batch D).
+      model.notifyDone(AcquisitionResult.playlistNotice(added: added, requested: batches))
       reloadAfterEdit = true
-    } catch is CancellationError {} catch { message = .error(error.userMessage) }
+    } catch is CancellationError {} catch { model.notify(error) }
   }
   private func edit(name: String? = nil, order: [Int]? = nil) async {
     guard !loading else { return }
