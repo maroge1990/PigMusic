@@ -279,15 +279,11 @@ struct PlaylistView: View {
         let tracks = Array(requested[batch..<min(batch + 500, requested.count)])
         batches.append(try await model.performPersonal { try await $0.requestMusic(tracks) })
       }
-      // Every batch's answer, paused songs included (Codex round 2 on batch D).
-      let queued = AcquisitionResult.combined(batches)
-      let done = [
-        added > 0 ? "Added \(added) song\(added == 1 ? "" : "s") to your library." : nil,
-        requested.isEmpty ? nil : queued.sentence,
-      ].compactMap { $0 }.joined(separator: " ")
-      message = .info(done.isEmpty ? "These songs are already being added." : done)
+      // Every batch's answer, paused songs included, in the notice bar: the
+      // page's own reload would clear its line (Codex confirmation, batch D).
+      model.notifyDone(AcquisitionResult.playlistNotice(added: added, requested: batches))
       reloadAfterEdit = true
-    } catch is CancellationError {} catch { message = .error(error.userMessage) }
+    } catch is CancellationError {} catch { model.notify(error) }
   }
   private func edit(name: String? = nil, order: [Int]? = nil) async {
     guard !loading else { return }

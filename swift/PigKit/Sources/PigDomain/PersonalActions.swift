@@ -87,6 +87,15 @@ extension AcquisitionResult {
       paused: results.reduce(0) { $0 + $1.paused },
       downloadsEnabled: results.allSatisfy(\.downloadsEnabled))
   }
+  /// A playlist's Add of its missing songs in one line: household copies
+  /// added, then the server's answer for the rest (paused songs included).
+  public static func playlistNotice(added: Int, requested: [AcquisitionResult]) -> String {
+    let line = [
+      added > 0 ? "Added \(added) song\(added == 1 ? "" : "s") to your library." : nil,
+      requested.isEmpty ? nil : combined(requested).sentence,
+    ].compactMap { $0 }.joined(separator: " ")
+    return line.isEmpty ? "These songs are already being added." : line
+  }
   public static let downloadsOffNotice = "Adding. Downloads are off on the server, so it will wait."
   /// What a menu's Add says: nil when a success haptic is enough; else that
   /// downloads are off, or where to resume paused songs (alone or beside
