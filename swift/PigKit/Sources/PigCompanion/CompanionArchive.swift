@@ -91,6 +91,18 @@ public actor CompanionArchive {
       loadedContext.account != nil && loadedManifest.context.account == loadedContext.account
       && loadedManifest.context.revision <= loadedContext.revision
     manifest = sameAccount ? loadedManifest : CompanionManifest(context: loadedContext, songs: [])
+    // The applied marker belongs to the manifest it was written for: without
+    // that manifest the receipt must not claim it, or the iPhone takes the
+    // empty library as applied and never sends it again, and its audio is
+    // turned away as stale (Codex round 2 on #252). Audio then waits, as on
+    // a fresh install, and the same revision's manifest is taken when resent.
+    if appliedRevision != nil, appliedRevision != manifest.context.revision
+      || damaged.contains("manifest.json")
+      || !FileManager.default.fileExists(
+        atPath: directory.appendingPathComponent("manifest.json").path)
+    {
+      appliedRevision = nil
+    }
     for file in try FileManager.default.contentsOfDirectory(
       at: directory, includingPropertiesForKeys: nil) where file.pathExtension == "partial"
     {
