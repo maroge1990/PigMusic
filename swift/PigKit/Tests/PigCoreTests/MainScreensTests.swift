@@ -138,6 +138,23 @@ private let onlineJSON = #"""
   #expect(FoundGroups(FoundScreen(nil)).isEmpty)
 }
 
+/// Codex round 1 on batch E: Not now hides the Apple Music row for this
+/// account only, and for 30 days; the switch brings it back.
+@Test func notNowHidesTheAppleMusicRowForOneAccountFor30Days() {
+  let now = Date(timeIntervalSince1970: 1_000_000)
+  var ask = AppleMusicAsk()
+  #expect(ask.shows(account: "a", undetermined: true, now: now))
+  #expect(!ask.shows(account: "a", undetermined: false, now: now))
+  ask.dismiss(account: "a", now: now)
+  #expect(!ask.shows(account: "a", undetermined: true, now: now.addingTimeInterval(86_400)))
+  #expect(ask.shows(account: "b", undetermined: true, now: now))
+  #expect(ask.shows(account: "a", undetermined: true, now: now.addingTimeInterval(AppleMusicAsk.quiet)))
+  ask.reopen(account: "a")
+  #expect(ask.shows(account: "a", undetermined: true, now: now))
+  let kept = try! JSONDecoder().decode(AppleMusicAsk.self, from: JSONEncoder().encode(ask))
+  #expect(kept == ask)
+}
+
 /// Codex round 1 on batch E: a row's tap starts at its song in the whole
 /// list, songs waiting for removal left out.
 @Test func theLibraryQueueStartsAtTheTappedSong() {

@@ -15,6 +15,8 @@
 
     /// Nobody has been asked about Apple Music yet.
     public static var undetermined: Bool { MusicAuthorization.currentStatus == .notDetermined }
+    /// Apple Music may be used.
+    public static var allowed: Bool { MusicAuthorization.currentStatus == .authorized }
     /// Asks for Apple Music, from the row under the search box (D-120).
     public static func ask() async -> Bool { await MusicAuthorization.request() == .authorized }
 

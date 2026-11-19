@@ -209,6 +209,23 @@ public struct FoundGroups: Sendable {
   }
 }
 
+/// The "Include Apple Music results" row (D-120): shown while nobody has
+/// been asked, unless this PigMusic account said Not now in the last 30
+/// days. Another account on the iPhone still sees it.
+public struct AppleMusicAsk: Codable, Sendable, Equatable {
+  public static let quiet: TimeInterval = 30 * 24 * 60 * 60
+  public private(set) var notNow: [String: Date] = [:]
+  public init() {}
+  public mutating func dismiss(account: String, now: Date = Date()) { notNow[account] = now }
+  /// The Search menu's switch brings the row back.
+  public mutating func reopen(account: String) { notNow[account] = nil }
+  public func shows(account: String?, undetermined: Bool, now: Date = Date()) -> Bool {
+    guard undetermined, let account else { return false }
+    guard let dismissed = notNow[account] else { return true }
+    return now.timeIntervalSince(dismissed) >= Self.quiet
+  }
+}
+
 /// Songs' Play, Shuffle and a row's tap (D-120) play the whole library in
 /// the chosen sort, not only the pages loaded so far, less songs waiting
 /// for their removal's Undo.

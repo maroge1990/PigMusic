@@ -28,6 +28,7 @@ struct SearchView: View {
       }
     }
     .navigationTitle("Search")
+    .toolbar { ToolbarItem(placement: .topBarTrailing) { SearchMenu(model: model) } }
     // Always shown, never hidden until the page is pulled down.
     .searchable(
       text: $query, isPresented: $searching,
@@ -377,7 +378,7 @@ private struct FoundResultsView: View {
   var body: some View {
     let groups = FoundGroups(search.screen)
     List {
-      AppleMusicRow {
+      AppleMusicRow(account: model.person?.id) {
         await search.search(search.query, force: true)
       }
       if let top = groups.top, shows(top) {
@@ -558,37 +559,91 @@ private struct FoundResultsView: View {
 }
 
 /// The Apple Music question (D-120): a quiet row under the search box, never
-/// a prompt mid-typing. Allow asks iOS once; Not now keeps it away.
+/// a prompt mid-typing. Allow asks iOS once (and waits while iOS asks); Not
+/// now hides it for this account for 30 days, and the Search menu's switch
+/// brings it back (Codex round 1 on batch E).
 private struct AppleMusicRow: View {
+  let account: String?
   let searchAgain: () async -> Void
-  @AppStorage("search.appleMusicNotNow") private var notNow = false
+  @AppStorage(AppleMusicAsk.storageKey) private var stored = Data()
   @State private var answered = false
+  @State private var asking = false
   @Environment(\.colorScheme) private var scheme
   var body: some View {
-    if AppleMusicCatalogue.undetermined && !notNow && !answered {
+    let ask = AppleMusicAsk.read(stored)
+    if !answered, ask.shows(account: account, undetermined: AppleMusicCatalogue.undetermined) {
       HStack(spacing: 10) {
         Image(systemName: "music.note").foregroundStyle(PigBrand.accent(scheme))
           .accessibilityHidden(true)
         Text("Include Apple Music results").font(PigType.subhead)
         Spacer(minLength: 4)
         Button("Allow") {
+          asking = true
           Task {
             let allowed = await AppleMusicCatalogue.ask()
+            asking = false
             answered = true
             if allowed { await searchAgain() }
           }
         }
+        .disabled(asking)
         .buttonStyle(.borderless).font(PigType.subhead.weight(.semibold))
         .foregroundStyle(PigBrand.textAccent(scheme))
         Button {
-          notNow = true
+          guard let account else { return }
+          var changed = ask
+          changed.dismiss(account: account)
+          stored = changed.data
         } label: {
           Image(systemName: "xmark").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
         }
         .buttonStyle(.borderless)
         .accessibilityLabel("Not now")
+        .disabled(asking)
       }
     }
+  }
+}
+
+extension AppleMusicAsk {
+  static let storageKey = "search.appleMusicAsk"
+  static func read(_ data: Data) -> AppleMusicAsk {
+    (try? JSONDecoder().decode(AppleMusicAsk.self, from: data)) ?? AppleMusicAsk()
+  }
+  var data: Data { (try? JSONEncoder().encode(self)) ?? Data() }
+}
+
+/// The Search screen's ⋯ (Codex round 1 on batch E): the lasting switch for
+/// Apple Music results. On asks iOS when nobody has been asked and brings
+/// the row back; otherwise iOS's Settings decides, so it opens there.
+private struct SearchMenu: View {
+  let model: AppModel
+  @AppStorage(AppleMusicAsk.storageKey) private var stored = Data()
+  @State private var allowed = AppleMusicCatalogue.allowed
+  @Environment(\.openURL) private var openURL
+  var body: some View {
+    Menu {
+      Toggle(
+        "Include Apple Music results",
+        isOn: Binding(
+          get: { allowed },
+          set: { on in
+            if on, let account = model.person?.id {
+              var ask = AppleMusicAsk.read(stored)
+              ask.reopen(account: account)
+              stored = ask.data
+            }
+            if on && AppleMusicCatalogue.undetermined {
+              Task { allowed = await AppleMusicCatalogue.ask() }
+            } else if let settings = URL(string: UIApplication.openSettingsURLString) {
+              openURL(settings)
+            }
+          })
+      )
+    } label: {
+      Image(systemName: "ellipsis").accessibilityLabel("Search options")
+    }
+    .onAppear { allowed = AppleMusicCatalogue.allowed }
   }
 }
 
