@@ -625,11 +625,11 @@ struct RequestsView: View {
       next = page.nextOffset
       // Paused marks follow the server's list: a request resumed on another
       // device, or by a Resume whose answer was lost, isn't paused here
-      // (Codex round 1 on batch K). Complete only when this one page is all.
+      // (Codex round 1 on batch K). Only what this page reports counts: a
+      // request it leaves out keeps its mark (Codex round 2).
       model.requestedSongs.reconcile(
         statuses: Dictionary(
-          page.groups.flatMap(\.items).map { ($0.id, $0.status) }, uniquingKeysWith: { a, _ in a }),
-        complete: offset == 0 && page.nextOffset == nil)
+          page.groups.flatMap(\.items).map { ($0.id, $0.status) }, uniquingKeysWith: { a, _ in a }))
       enabled = page.downloadsEnabled
       model.serverActiveRequests = page.active
       loaded = true

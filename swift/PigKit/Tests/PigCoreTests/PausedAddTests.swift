@@ -137,13 +137,13 @@ struct PausedAddTests {
     let asked = marks.asking()
     marks.pausedOnServer(
       ["elsewhere": ["r1"], "still": ["r2"], "unlisted": ["r3"]], asked: asked)
-    // One page of a longer list: an unlisted request is not known.
-    marks.reconcile(statuses: ["r1": "waiting_for_sources", "r2": "paused"], complete: false)
+    // A request the list leaves out says nothing, even on a one-page list:
+    // the server folds a song's jobs into one entry (Codex round 2).
+    marks.reconcile(statuses: ["r1": "waiting_for_sources", "r2": "paused"])
     #expect(marks.paused == ["still", "unlisted"])
-    // The whole list: a request not on it is gone.
-    marks.reconcile(statuses: ["r2": "paused"], complete: true)
-    #expect(marks.paused == ["still"])
-    marks.reconcile(statuses: ["r2": "completed"], complete: true)
+    marks.reconcile(statuses: ["r2": "paused"])
+    #expect(marks.paused == ["still", "unlisted"])
+    marks.reconcile(statuses: ["r2": "completed", "r3": "waiting_for_sources"])
     #expect(marks.paused.isEmpty)
   }
 
@@ -153,7 +153,20 @@ struct PausedAddTests {
     marks.queued("old")
     let asked = marks.asking()
     marks.pausedOnServer(["old": []], asked: asked)
-    marks.reconcile(statuses: [:], complete: true)
+    marks.reconcile(statuses: [:])
     #expect(marks.paused == ["old"])
+  }
+
+  /// Codex round 2 on batch K: a song paused under two requests keeps its
+  /// mark while the list reports only one of them, not paused.
+  @Test func aMarkStaysWhileAnyOfItsRequestsIsUnreported() {
+    var marks = RequestMarks()
+    marks.queued("song")
+    let asked = marks.asking()
+    marks.pausedOnServer(["song": ["a", "b"]], asked: asked)
+    marks.reconcile(statuses: ["a": "waiting_for_sources"])
+    #expect(marks.paused == ["song"])
+    marks.reconcile(statuses: ["a": "waiting_for_sources", "b": "downloading"])
+    #expect(marks.paused.isEmpty)
   }
 }

@@ -67,19 +67,17 @@ public struct RequestMarks: Sendable, Equatable {
     }
   }
   /// The server's request list (Codex round 1 on batch K): `statuses` holds
-  /// the status of each request it lists, by request ID; `complete` says it
-  /// lists every one of this person's requests. A paused mark whose
-  /// requests are none of them paused there (resumed on another device, a
-  /// Resume whose answer was lost, finished, cancelled, or gone from a
-  /// complete list) is cleared. One whose request isn't on a partial list,
-  /// or an older server's mark with no request, is left as it is.
-  public mutating func reconcile(statuses: [String: String], complete: Bool) {
+  /// the status of each request it reports, by request ID. A paused mark is
+  /// cleared only when the list reports every one of its requests, none of
+  /// them paused (resumed on another device, a Resume whose answer was lost,
+  /// finished, cancelled). A request the list leaves out says nothing: the
+  /// server folds a song's jobs into one entry, so a paused job can be
+  /// missing from even a one-page list (Codex round 2): the mark stays. An
+  /// older server's mark with no request is left as it is.
+  public mutating func reconcile(statuses: [String: String]) {
     for (song, requestIds) in pausedSongs where !requestIds.isEmpty {
-      let stillPaused = requestIds.contains { request in
-        guard let status = statuses[request] else { return !complete }
-        return status == "paused"
-      }
-      if !stillPaused {
+      let reported = requestIds.compactMap { statuses[$0] }
+      if reported.count == requestIds.count, !reported.contains("paused") {
         paused.remove(song)
         pausedSongs[song] = nil
       }

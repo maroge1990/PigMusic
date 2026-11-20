@@ -274,4 +274,4 @@ def test_paused_marks_follow_resumes_and_the_request_list():
     load = views.split("private func load(reset: Bool) async {", 1)[1]
     load = load.split("\n  }\n", 1)[0]
     assert "model.requestedSongs.reconcile(" in load
-    assert "complete: offset == 0 && page.nextOffset == nil)" in load
+    assert "complete:" not in load
