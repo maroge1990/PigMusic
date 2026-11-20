@@ -153,14 +153,47 @@ public enum ShazamFailure: Error, Sendable, Hashable {
 /// no longer sees.
 public struct ShazamAttempts: Sendable {
   private var current = 0
+  /// The listening screen that started the running attempt, if any.
+  private var owner: UUID?
   public init() {}
-  /// Starts an attempt and returns its token.
-  public mutating func begin() -> Int {
+  /// Starts an attempt for `owner` (the listening screen) and returns its token.
+  public mutating func begin(owner: UUID? = nil) -> Int {
     current += 1
+    self.owner = owner
     return current
   }
   /// Ends whatever attempt is running.
-  public mutating func cancel() { current += 1 }
+  public mutating func cancel() {
+    current += 1
+    owner = nil
+  }
   /// Whether `token`'s attempt is still the one the person is waiting on.
   public func isCurrent(_ token: Int) -> Bool { token == current }
+  /// Whether the running attempt is `owner`'s: a screen that closes ends
+  /// only its own attempt, never one a newly opened screen started (#124:
+  /// Done then a quick reopen left the new screen on "Listening…").
+  public func belongs(to owner: UUID) -> Bool { self.owner == owner }
+}
+
+/// What the "What's playing?" screen shows once an attempt has ended.
+public enum ShazamScreen: Sendable, Hashable {
+  case found(ShazamSong)
+  /// "No song found" with the reason and Try again.
+  case failed(ShazamFailure)
+
+  /// The screen after an attempt (bounded by `ShazamListening.outerLimit`);
+  /// nil when the screen itself closed or started another attempt, which
+  /// then says nothing. An attempt cancelled any other way, or one that
+  /// never answered, still leaves "Listening…" for Try again (#124).
+  public static func after(
+    _ end: ShazamBounded<Result<ShazamSong, ShazamFailure>>, screenClosed: Bool
+  ) -> ShazamScreen? {
+    guard !screenClosed else { return nil }
+    switch end {
+    case .finished(.success(let song)): return .found(song)
+    case .finished(.failure(let reason)): return .failed(reason)
+    case .timedOut: return .failed(.timedOut)
+    case .cancelled: return .failed(.cancelled)
+    }
+  }
 }

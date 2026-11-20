@@ -306,7 +306,7 @@ final class DemoLibraryTests: XCTestCase {
     let favourite = app.buttons.matching(
       NSPredicate(
         format: "label IN %@",
-        ["Add to favourites", "Remove from favourites", "Load favourite status"])
+        ["Add to favourites", "Remove from favourites", "Favourite"])
     ).firstMatch
     XCTAssertTrue(favourite.exists, app.debugDescription)
     XCTAssertFalse(app.buttons["Play next"].exists)
@@ -451,8 +451,9 @@ final class DemoLibraryTests: XCTestCase {
     expect(app.buttons["Dark"])
   }
 
-  /// D-120 (#251): with nothing after the playing song, the queue says
-  /// Nothing next and offers Shuffle your library.
+  /// D-120 (#251): with nothing after the playing song, the player's Up
+  /// next says Nothing next and offers Shuffle your library. #287: Up next
+  /// has no Edit and no separate Queue page.
   func testAnEmptyQueueSaysNothingNext() {
     continueAfterFailure = false
     app.launchArguments = ["--demo", "--demo-play", "--demo-play-one", "--show-player"]
@@ -460,12 +461,43 @@ final class DemoLibraryTests: XCTestCase {
     expect(app.staticTexts["Now playing"], timeout: 30)
     expect(app.staticTexts["Nothing next"])
     expect(app.buttons["Shuffle your library"])
-    let edit = app.buttons["Edit"]
-    for _ in 0..<4 where !(edit.exists && edit.isHittable) { app.swipeUp() }
-    edit.tap()
-    expect(app.navigationBars["Queue"])
-    expect(app.staticTexts["Nothing next"])
-    expect(app.buttons["Shuffle your library"])
+    XCTAssertFalse(app.buttons["Edit"].exists, app.debugDescription)
+  }
+
+  /// #287: a song in the player's Up next swipes to Remove, at once, and
+  /// Undo puts it back.
+  func testASwipeRemovesASongFromUpNextWithUndo() {
+    continueAfterFailure = false
+    app.launchArguments = ["--demo", "--demo-play", "--show-player"]
+    app.launch()
+    expect(app.staticTexts["Now playing"], timeout: 30)
+    expect(app.staticTexts["Up next"])
+    XCTAssertFalse(app.buttons["Edit"].exists, app.debugDescription)
+    // A song row of Up next that is on screen ("Play <song> by <artist>"):
+    // the list holds the whole queue and draws its rows as they scroll in,
+    // so the last row may exist without being on screen.
+    let rows = app.buttons.matching(
+      NSPredicate(format: "label BEGINSWITH 'Play ' AND label CONTAINS ' by '"))
+    func onScreen() -> XCUIElement? {
+      (0..<min(rows.count, 12)).map { rows.element(boundBy: $0) }.first { $0.isHittable }
+    }
+    for _ in 0..<4 where onScreen() == nil {
+      app.swipeUp()
+    }
+    guard let found = onScreen() else {
+      return XCTFail("No Up next row on screen\n" + app.debugDescription)
+    }
+    let label = found.label
+    let row = app.buttons[label]
+    row.swipeLeft()
+    let remove = app.buttons["Remove"]
+    expect(remove)
+    remove.tap()
+    XCTAssertTrue(row.waitForNonExistence(timeout: 5), app.debugDescription)
+    let undo = app.buttons["Undo"]
+    expect(undo)
+    undo.tap()
+    expect(app.buttons[label])
   }
 
   func testSearchFindsALibrarySong() {

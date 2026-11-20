@@ -16,6 +16,33 @@ struct CompanionArchiveTests {
       checksum: SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined(),
       bytes: Int64(bytes.count))
   }
+  /// Codex round 2 on batch G: on a cold background launch the Watch's view
+  /// model had no receipt yet, so a duplicate copy looked new with nothing
+  /// waiting. The archive now says, from its own write, what changed.
+  @Test func acceptSaysWhetherTheCopyIsNewAndHowManyWaited() async throws {
+    let root = try folder()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let archive = try CompanionArchive(directory: root.appendingPathComponent("Music"))
+    let context = CompanionContext(revision: 1, account: "one")
+    let first = Data("first song".utf8)
+    let second = Data("second song".utf8)
+    let one = song("one", bytes: first)
+    let two = song("two", bytes: second)
+    try await archive.apply(context)
+    try await archive.apply(CompanionManifest(context: context, songs: [one, two]))
+    let file = root.appendingPathComponent("incoming")
+    try first.write(to: file)
+    let accepted = try await archive.accept(
+      file, ticket: CompanionFile(context: context, songId: one.id, checksum: one.checksum))
+    #expect(accepted == CompanionAcceptance(newlyReady: true, waitingBefore: 2))
+    // The same copy again, judged by a freshly opened archive (a cold launch).
+    let reopened = try CompanionArchive(directory: root.appendingPathComponent("Music"))
+    try first.write(to: file)
+    let repeated = try await reopened.accept(
+      file, ticket: CompanionFile(context: context, songId: one.id, checksum: one.checksum))
+    #expect(repeated == CompanionAcceptance(newlyReady: false, waitingBefore: 1))
+  }
+
   @Test func independentDownloadsSurviveRestartAndRejectCorruption() async throws {
     let root = try folder()
     defer { try? FileManager.default.removeItem(at: root) }

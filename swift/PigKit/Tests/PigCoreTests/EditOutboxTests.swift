@@ -239,6 +239,49 @@ private struct Offline: Error {}
     #expect(try await EditOutbox.settleRefusedFavourites(store: store).isEmpty)
   }
 
+  /// Codex round 2 on batch G (#285): a new playlist the server refuses
+  /// leaves the outbox with its songs, so nothing waits behind a playlist
+  /// that will never exist; an edit to another playlist queued in between
+  /// stays and is sent. A create that only failed to connect takes nothing.
+  @Test func aRefusedNewPlaylistLeavesWithItsSongs() async throws {
+    let (store, root) = try makeStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let group = NewPlaylistEdits.make(name: "Road trip", songs: [song, song])
+    let other = OfflineMutation(action: "rename", playlistId: "existing", name: "B", revision: 1)
+    try await store.enqueueMutations(group)
+    try await store.enqueueMutation(other)
+    let server = Server()
+    var applied = false
+    server.answers = [group[0].id: Offline()]
+    _ = try await EditOutbox.send(store: store, isCurrent: { true }, applied: &applied) {
+      try server.apply($0)
+    }
+    #expect(try await EditOutbox.settleRefusedCreates(store: store).isEmpty)
+    #expect(try await store.pendingMutations().count == 4)
+    server.answers = [group[0].id: MutationRejection.rejected]
+    server.seen = []
+    _ = try await EditOutbox.send(store: store, isCurrent: { true }, applied: &applied) {
+      try server.apply($0)
+    }
+    #expect(server.seen == [group[0].id, other.id])
+    #expect(try await EditOutbox.settleRefusedCreates(store: store) == ["Road trip"])
+    #expect(try await store.pendingMutations().isEmpty)
+  }
+
+  /// Codex round 2 on batch G: discarding a new playlist's create by hand
+  /// discards the songs waiting to be added to it, and nothing else.
+  @Test func discardingANewPlaylistDiscardsItsSongs() async throws {
+    let (store, root) = try makeStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let group = NewPlaylistEdits.make(name: "Road trip", songs: [song])
+    let favourite = OfflineMutation(action: "favourite", track: song, favourite: true)
+    try await store.enqueueMutations(group)
+    try await store.enqueueMutation(favourite)
+    let result = await EditOutbox.discard(group[0].id, store: store) { true }
+    #expect(result?.0 == .discarded)
+    #expect(result?.1.map(\.id) == [favourite.id])
+  }
+
   /// Codex confirmation on #212: refusals on successive sends must never
   /// show a value that neither the server nor a waiting tap holds. With no
   /// tap left, the song's state is unknown until the server is read again.
@@ -255,6 +298,8 @@ private struct Offline: Error {}
       let edit = OfflineMutation(action: "favourite", track: song, favourite: value)
       try await store.enqueueMutation(edit)
       edits.append(edit)
+      // Its save ends once it waits in the outbox, as in the app.
+      if let tap { states.settled(tap) }
       // The app caches each tap as the star shows it.
       try await store.cache(value, key: EditOutbox.favouriteCacheKey(song.id))
     }

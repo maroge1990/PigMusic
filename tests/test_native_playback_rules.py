@@ -115,3 +115,42 @@ def test_forgetting_changed_sources_removes_them_before_any_suspension():
     forget = body(repository, "public func forget(ids: Set<String>)")
     assert not re.search(r"for [^{]* in entries[^{]*\{[^}]*await", forget)
     assert "await preparer.release" in forget
+
+
+def test_whats_playing_never_stays_on_listening():
+    """#124, build 2002: "What's playing?" stayed on Listening… for ever. A
+    cancelled attempt on a still-shown screen left it there (`case
+    .failure(.cancelled): break`), the old screen's onDisappear ended a new
+    screen's attempt, and nothing bounded the whole call. Every step is now
+    logged, a screen ends only its own attempt, an outer deadline covers
+    identify, and every ending leaves Listening… (the mapping and the
+    deadline are PigDomain's, tested with swift test)."""
+    search = (APP / "SearchViews.swift").read_text()
+    view = search[search.index("private struct ShazamListenView") :]
+    view = view[: view.index("/// Where a Shazam song is")]
+    assert "case .failure(.cancelled): break" not in view
+    # Logged at the tap and as the task's first statement.
+    section = search[search.index("private struct ShazamSection") :]
+    tap = section[: section.index("listening = true")]
+    assert 'DiagnosticsLog.shared.record("shazam"' in tap
+    task = body(view, ".task(id: attempt)")
+    first = task.split("\n")[1].strip()
+    assert first.startswith('DiagnosticsLog.shared.record("shazam"')
+    # The whole identify call is bounded, and its end maps to a screen.
+    assert "ShazamListening.bounded(ShazamListening.outerLimit)" in task
+    assert "identify(owner: owner" in task
+    assert "ShazamScreen.after(end, screenClosed: Task.isCancelled || closing)" in task
+    # Closing ends only this screen's attempt.
+    assert "ShazamListener.shared.cancel()" not in view
+    assert ".onDisappear { ShazamListener.shared.cancel(owner: owner) }" in view
+    listener = (ROOT / "swift/PigKit/Sources/PigSync/ShazamListener.swift").read_text()
+    identify = listener[listener.index("public func identify(") :]
+    identify = body(identify, "-> Result<ShazamSong, ShazamFailure>")
+    assert identify.split("\n")[1].strip() == (
+        'DiagnosticsLog.shared.record("shazam", "identify started")'
+    )
+    # A match is shown first: the lookup is bounded, the save runs apart.
+    assert "ShazamListening.detailed(" in identify
+    assert "await Self.detailedSong(item" not in identify
+    save = identify[: identify.index("SHLibrary.default.addItems")]
+    assert "Task { @MainActor in" in save[save.rindex("if item.shazamID != nil") :]

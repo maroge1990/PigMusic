@@ -185,7 +185,7 @@ public protocol ListeningAudioSession: Sendable {
     // microphone, and ends it.
     let id = reservation ?? gate.reserve()
     defer { if reservation == nil { gate.end(id) } }
-    let race = ShazamRace<Session.Outcome>()
+    let race = ShazamRace<ShazamListenEnd<Session.Outcome>>()
     guard gate.startRecording(id, stop: { race.finish(.playbackStarted) }) else {
       log("playback started before listening: not recording")
       return .playbackStarted
@@ -251,6 +251,57 @@ public protocol ListeningAudioSession: Sendable {
     return end
   }
 
+  /// The most the whole of "What's playing?" may take, the microphone
+  /// question and setting up included: a step the listening limit doesn't
+  /// cover must not leave the screen on "Listening…" (#124).
+  public static let outerLimit: Duration = limit + .seconds(10)
+  /// The most the song's album and length may hold back a match (#124).
+  public static let lookupLimit: Duration = .seconds(3)
+
+  /// `operation`, or `.timedOut` once `limit` has passed, or `.cancelled`
+  /// when the caller is cancelled: whichever comes first. The operation is
+  /// cancelled when it lost and is never waited for, so one that never
+  /// returns can't hold the caller (#124).
+  public static func bounded<Value: Sendable>(
+    _ limit: Duration, _ operation: @escaping @MainActor @Sendable () async -> Value
+  ) async -> ShazamBounded<Value> {
+    if Task.isCancelled { return .cancelled }
+    let race = ShazamRace<ShazamBounded<Value>>()
+    let work = Task { @MainActor in
+      let value = await operation()
+      race.finish(.finished(value))
+    }
+    let deadline = Task { @MainActor in
+      do { try await Task.sleep(for: limit) } catch { return }
+      race.finish(.timedOut)
+    }
+    let end = await withTaskCancellationHandler {
+      await race.wait()
+    } onCancel: {
+      Task { @MainActor in race.finish(.cancelled) }
+    }
+    deadline.cancel()
+    work.cancel()
+    return end
+  }
+
+  /// A match's song with its album and length when `lookup` gives them
+  /// within `limit`; otherwise the plain song, so a lookup that never
+  /// returns never holds the match back (#124).
+  public static func detailed(
+    _ plain: ShazamSong, limit: Duration = lookupLimit,
+    log: @escaping @MainActor @Sendable (String) -> Void,
+    lookup: @escaping @MainActor @Sendable () async -> ShazamSong
+  ) async -> ShazamSong {
+    switch await bounded(limit, lookup) {
+    case .finished(let song): return song
+    case .timedOut:
+      log("song details took longer than \(limit): shown without them")
+      return plain
+    case .cancelled: return plain
+    }
+  }
+
   /// An error's domain and code, for the diagnostics.
   public static func describe(_ error: any Error) -> String {
     let error = error as NSError
@@ -258,20 +309,32 @@ public protocol ListeningAudioSession: Sendable {
   }
 }
 
-/// Whichever comes first: the session's answer, the deadline or cancelling.
-@MainActor private final class ShazamRace<Outcome: Sendable> {
-  private var end: ShazamListenEnd<Outcome>?
-  private var waiter: CheckedContinuation<ShazamListenEnd<Outcome>, Never>?
+/// How a bounded step ended (`ShazamListening.bounded`).
+public enum ShazamBounded<Value: Sendable>: Sendable {
+  case finished(Value)
+  /// The limit passed first; the step was cancelled.
+  case timedOut
+  /// The caller was cancelled.
+  case cancelled
+}
+
+extension ShazamBounded: Equatable where Value: Equatable {}
+extension ShazamBounded: Hashable where Value: Hashable {}
+
+/// Whichever comes first: the answer, the deadline or cancelling.
+@MainActor private final class ShazamRace<End: Sendable> {
+  private var end: End?
+  private var waiter: CheckedContinuation<End, Never>?
   var isFinished: Bool { end != nil }
 
-  func finish(_ end: ShazamListenEnd<Outcome>) {
+  func finish(_ end: End) {
     guard self.end == nil else { return }
     self.end = end
     waiter?.resume(returning: end)
     waiter = nil
   }
 
-  func wait() async -> ShazamListenEnd<Outcome> {
+  func wait() async -> End {
     if let end { return end }
     return await withCheckedContinuation { waiter = $0 }
   }

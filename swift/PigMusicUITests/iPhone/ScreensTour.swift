@@ -268,7 +268,6 @@ final class ScreensTour: XCTestCase {
           if open(app.buttons["Song actions"], "now-playing-menu") { closeMenu() }
           scrolled("now-playing", pages: 2)
           if open(begins("More actions for "), "queue-row-menu") { closeMenu() }
-          if open(app.buttons["Edit"], "queue") { back() }
           closeSheet()
         }
       }

@@ -15,8 +15,10 @@ public enum SongMenuItem: Hashable, Sendable {
   case paused
   /// The favourite toggle; the song's state now (#212).
   case favourite(Bool)
-  /// The favourite state isn't known on this iPhone yet: reads it.
-  case loadFavourite
+  /// The favourite state isn't known on this iPhone (the library holds no
+  /// Favourites playlist yet): plain "Favourite", which makes it one (#284).
+  /// The menu never asks the person to load the state.
+  case favouriteUnknown
   /// A submenu of the person's playlists.
   case addToPlaylist
   /// A submenu: the original or a smaller AAC copy (D-106).
@@ -83,7 +85,7 @@ public enum SongMenu {
       if paused && [.requested, .request].contains(state) { state = .paused }
       mine.append(state)
     }
-    mine.append(favourite.map(SongMenuItem.favourite) ?? .loadFavourite)
+    mine.append(favourite.map(SongMenuItem.favourite) ?? .favouriteUnknown)
     mine.append(.addToPlaylist)
     sections.append(mine)
     let yours = looked && (track.serverState == "in_library" || track.serverState == nil)

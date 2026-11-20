@@ -18,6 +18,8 @@ import WatchConnectivity
   var error: String?
   @ObservationIgnored var onContext: (@MainActor (CompanionContext) async -> Void)?
   @ObservationIgnored var onFile: (@MainActor (URL, Data) async -> Void)?
+  /// A file reached the inbox (its envelope), before it is handed to `onFile` (#219).
+  @ObservationIgnored var onReceived: (@MainActor (Data) -> Void)?
   @ObservationIgnored var onMessage: (@MainActor (Data) async -> Void)?
   @ObservationIgnored var onRequest: (@MainActor (Data) async -> Data)?
   @ObservationIgnored var onActivated: (@MainActor () async -> Void)?
@@ -32,6 +34,8 @@ import WatchConnectivity
     session?.activate()
   }
   var supported: Bool { session != nil }
+  /// Songs, contexts or messages are waiting to be delivered to this app.
+  var contentPending: Bool { session?.hasContentPending == true }
   /// Install and reachability can change while the app is suspended without a
   /// delegate callback reaching it, so re-read them when the app returns.
   func refreshState() {
@@ -138,10 +142,16 @@ import WatchConnectivity
     let deadline = ContinuousClock.now + .seconds(20)
     while !Task.isCancelled, ContinuousClock.now < deadline {
       if session?.activationState == .activated, session?.hasContentPending != true {
+        let finished = deliveries.finished
         await recoverInbox()
         // Give already dispatched delegate callbacks a chance to finish their actor work.
         await Task.yield()
-        if session?.hasContentPending != true, deliveries.isEmpty { return }
+        // A delivery that finished during this pass (a manifest, say) may
+        // have let files kept in the inbox through while this pass held one
+        // of them: they get one more pass before the task ends (#219).
+        if session?.hasContentPending != true, deliveries.isEmpty, deliveries.finished == finished {
+          return
+        }
       }
       try? await Task.sleep(for: .milliseconds(100))
     }
@@ -266,6 +276,7 @@ import WatchConnectivity
       deliveries.begin()
       Task { @MainActor in
         defer { self.deliveries.end() }
+        self.onReceived?(envelope)
         await self.deliver(destination, envelope)
       }
     } catch {
@@ -354,7 +365,15 @@ private final class ReplyBox: @unchecked Sendable {
 private final class DeliveryCounter: @unchecked Sendable {
   private let lock = NSLock()
   private var count = 0
+  private var ended = 0
   func begin() { lock.withLock { count += 1 } }
-  func end() { lock.withLock { count -= 1 } }
+  func end() {
+    lock.withLock {
+      count -= 1
+      ended += 1
+    }
+  }
   var isEmpty: Bool { lock.withLock { count == 0 } }
+  /// Deliveries finished so far.
+  var finished: Int { lock.withLock { ended } }
 }

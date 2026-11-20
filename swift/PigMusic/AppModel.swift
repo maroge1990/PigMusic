@@ -80,6 +80,9 @@ enum PlayOrigin: Hashable {
   var foundSearch: FoundSearch?
   /// Favourite state by song, shared by the player's star and Song actions.
   var favourites = FavouriteStates()
+  /// The library's Favourites playlist indexed once per version, for the
+  /// song menus' lookups and each sync (Codex round 2 on batch G).
+  @ObservationIgnored private var favouriteIndex = FavouriteIndexCache()
   /// What this person opened or played from search, newest first (D-61).
   private(set) var recentSearches = RecentSearches()
   @ObservationIgnored private var recentSearchesLoaded = false
@@ -767,6 +770,13 @@ enum PlayOrigin: Hashable {
     self.albums = albums
     self.artists = artists
     self.playlists = playlists
+    // Stars and song menus follow the synced Favourites playlist, except a
+    // tap still being saved (FavouriteStates keeps those) or waiting to be
+    // sent (Codex rounds 1 and 2 on batch G).
+    // The index is built once per version of the playlist and the waiting
+    // edits read once (Codex round 2 on batch G).
+    favourites.synced(
+      favouriteIndex.index(playlists), waiting: FavouriteStates.waiting(in: pendingEdits))
     songCount = count
     songSeconds = seconds
     albumCategoryCounts = categoryCounts
@@ -1021,12 +1031,17 @@ enum PlayOrigin: Hashable {
     // Every answer belongs to this account: a sign-out while reading drops it (#101).
     let stamp = account.generation
     let store = self.store
+    // Each sync keeps it current (Codex round 1 on batch G).
+    favourites.follow(track)
     if let value = EditOutbox.favourite(track.id, in: pendingEdits) {
       // The edit waiting on this phone is the newest state; a refused one
       // isn't (Codex on #212).
       favourites.change(track.id, value)
       return
     }
+    // A tap still on its way into the outbox is the newest state: no read
+    // starts for it (Codex round 2 on batch G).
+    guard !favourites.isSaving(track.id) else { return }
     // Until a read answers, the song waits for a retry (Codex on #212).
     favourites.wanted(track)
     // A change made while this reads wins over what the read finds.
@@ -1045,13 +1060,20 @@ enum PlayOrigin: Hashable {
     else { return }
     try? await store?.cache(confirmed, key: key)
   }
-  /// A song's favourite state from this iPhone alone, a waiting edit or the
-  /// cached answer, without asking the server (#229): read for each song whose
-  /// ⋯ menu could open, so the menu shows its favourite item at once.
+  /// A song's favourite state from this iPhone alone, a waiting edit, the
+  /// library's Favourites playlist (#284) or the cached answer, without asking
+  /// the server (#229): read for each song whose ⋯ menu could open, so the
+  /// menu shows its favourite item at once.
   func peekFavourite(_ track: Track) async {
+    // Each sync keeps it current, also once known (Codex round 1 on batch G).
+    favourites.follow(track)
     guard favourites[track.id] == nil else { return }
     if let value = EditOutbox.favourite(track.id, in: pendingEdits) {
       favourites.change(track.id, value)
+      return
+    }
+    if let index = favouriteIndex.index(playlists) {
+      favourites.answer(track.id, index.contains(track), since: favourites.revision(track.id))
       return
     }
     let stamp = account.generation
@@ -1066,13 +1088,16 @@ enum PlayOrigin: Hashable {
   /// Flips a song's favourite at once (#212) and saves it through the edit
   /// outbox; a refused save puts the old state back. The new state, and
   /// whether the server confirmed it (false when it waits on this phone);
-  /// nil while the state is unknown.
-  @discardableResult func tapFavourite(_ track: Track) async throws -> (
-    value: Bool, confirmed: Bool
-  )? {
+  /// nil while the state is unknown, unless `orFavourite` makes it one (#284).
+  @discardableResult func tapFavourite(
+    _ track: Track, orFavourite: Bool = false
+  ) async throws -> (value: Bool, confirmed: Bool)? {
     let stamp = account.generation
     let store = self.store
-    guard let tap = favourites.tap(track.id) else { return nil }
+    guard let tap = favourites.tap(track.id, orFavourite: orFavourite) else { return nil }
+    // Until its save ends, no read or sync undoes the tap (Codex round 2 on
+    // batch G): FavouriteStates holds it as saving.
+    defer { favourites.settled(tap) }
     let mutation = OfflineMutation(action: "favourite", track: track, favourite: tap.value)
     do {
       let outcome = try await saveEditOutcome(mutation)
@@ -1141,9 +1166,17 @@ enum PlayOrigin: Hashable {
   /// Saves an edit and says whether the server confirmed it, it waits on
   /// this phone, or it was refused (Codex on #212).
   func saveEditOutcome(_ mutation: OfflineMutation) async throws -> EditOutbox.Outcome {
+    try await saveEditsOutcome([mutation])
+  }
+  /// Edits that belong together (a new playlist and its songs, #285): all
+  /// enter the outbox in one transaction, or none, before any is sent
+  /// (Codex round 1 on batch G). The outcome is the last one's: edits to one
+  /// playlist are sent in order.
+  func saveEditsOutcome(_ mutations: [OfflineMutation]) async throws -> EditOutbox.Outcome {
     guard let store, person != nil else { throw NativeFailure.authentication }
+    guard let mutation = mutations.last else { return .confirmed }
     let stamp = account.generation
-    try await store.enqueueMutation(mutation)
+    try await store.enqueueMutations(mutations)
     guard let pending = try await EditOutbox.pending(
       store: store, isCurrent: { [account] in account.isCurrent(stamp) })
     else {
@@ -1159,8 +1192,10 @@ enum PlayOrigin: Hashable {
     try account.check(stamp)
     // Only the server's receipt confirms it: an edit discarded meanwhile has
     // also left the outbox (Codex, batch 9).
+    let confirmed = appliedEdits.remove(mutation.id) != nil
+    for edit in mutations { appliedEdits.remove(edit.id) }
     return EditOutbox.outcome(
-      of: mutation.id, confirmed: appliedEdits.remove(mutation.id) != nil,
+      of: mutation.id, confirmed: confirmed,
       pending: (try? await store.pendingMutations()) ?? pendingEdits)
   }
   /// Edits the server's receipts confirmed, until saveEdit reads them.
@@ -1191,6 +1226,12 @@ enum PlayOrigin: Hashable {
       // Any favourite the server refused, tapped now or long ago, goes back.
       let refused = try await EditOutbox.settleRefusedFavourites(store: store)
       if account.isCurrent(stamp), !refused.isEmpty { favouritesRefused(refused) }
+      // A new playlist the server refused leaves with its songs, said once
+      // (Codex round 2 on batch G).
+      let dropped = try await EditOutbox.settleRefusedCreates(store: store)
+      if account.isCurrent(stamp) {
+        for name in dropped { notify("Couldn't create \(name). Try again.") }
+      }
       if let pending = try await EditOutbox.pending(
         store: store, isCurrent: { [account] in account.isCurrent(stamp) })
       {
@@ -2134,6 +2175,34 @@ enum PlayOrigin: Hashable {
         try await saveEdit(OfflineMutation(action: "append", playlistId: playlist.id, track: track))
       }
       confirmations += 1
+    } catch is CancellationError {} catch { notify(error) }
+  }
+  /// A menu's New playlist (#285): while set, the page under the menu asks
+  /// for the name (NewPlaylistPrompt).
+  var newPlaylist: NewPlaylistRequest?
+  /// Makes the playlist, then adds the request's songs to it, through the
+  /// edit outbox as the Playlists tab's New playlist and Add to playlist do.
+  /// Only for the account that asked.
+  func createPlaylist(named name: String, adding request: NewPlaylistRequest) async {
+    guard account.isCurrent(request.generation) else { return }
+    // The server's rule, before anything is queued (Codex round 2 on batch G).
+    guard PlaylistName.accepted(name) != nil else {
+      notify(PlaylistName.refusal)
+      return
+    }
+    let read = await request.songs()
+    guard account.isCurrent(request.generation) else { return }
+    // A collection whose songs couldn't be read makes no empty playlist.
+    guard let songs = read else {
+      notify("Couldn't load \(request.name). Try again.")
+      return
+    }
+    do {
+      // The playlist and its songs enter the outbox together or not at all.
+      // Queued (offline) is a success; a refused create has already said so
+      // once, as the outbox let it go with its songs (flushEdits).
+      let outcome = try await saveEditsOutcome(NewPlaylistEdits.make(name: name, songs: songs))
+      if outcome != .refused { confirmations += 1 }
     } catch is CancellationError {} catch { notify(error) }
   }
   /// D-103: a success tap, no text; a failure says why.

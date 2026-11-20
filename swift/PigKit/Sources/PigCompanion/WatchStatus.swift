@@ -128,7 +128,7 @@ public struct WatchLibraryStatus: Equatable, Sendable {
   /// The headline's words and what to do next, for the home and Storage.
   public var title: String {
     switch headline {
-    case .ready: "Ready for your run"
+    case .ready: "Ready to play"
     case .storageFull: "Storage full"
     case .couldntSave(let count): "Couldn't save \(count) song\(count == 1 ? "" : "s")"
     case .iPhoneAway: "Can't reach your iPhone"

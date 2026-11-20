@@ -29,4 +29,25 @@ struct MutationOutboxTests {
     try await restored.acknowledgeMutation(first.id)
     #expect(try await store.pendingMutations().map(\.id) == [second.id])
   }
+
+  /// Codex round 1 on batch G (#285): a new playlist and its songs enter the
+  /// outbox together or not at all. With 999 edits waiting, the create used
+  /// to take the last place and its first song was refused.
+  @Test func aGroupThatDoesNotFitLeavesNothingBehind() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = try LibraryStore(path: root.appendingPathComponent("person.sqlite").path)
+    for index in 0..<999 {
+      try await store.enqueueMutation(OfflineMutation(action: "create", name: "List \(index)"))
+    }
+    let song = Track(id: "song", title: "Song", artist: "Artist")
+    let group = NewPlaylistEdits.make(name: "Road trip", songs: [song])
+    await #expect(throws: MutationRejection.self) { try await store.enqueueMutations(group) }
+    #expect(try await store.pendingMutations().count == 999)
+    // One that fits goes in whole, in order.
+    try await store.acknowledgeMutation(store.pendingMutations()[0].id)
+    try await store.enqueueMutations(group)
+    #expect(try await store.pendingMutations().suffix(2).map(\.id) == group.map(\.id))
+  }
 }

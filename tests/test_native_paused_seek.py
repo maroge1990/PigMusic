@@ -73,6 +73,14 @@ struct QueueStartAdapter {
   func seconds(for occurrence: Occurrence?) -> Double { 0 }
   mutating func seek(_ queue: Queue, to seconds: Double) {}
 }
+struct CGSize { var width: Double; var height: Double }
+struct ArtworkAdapter { func image(at size: CGSize) -> String? { nil } }
+struct StartTimerAdapter { mutating func cancel() {} }
+@MainActor final class RecoveryAdapter {
+  func cancel() {}
+  func suspend() {}
+  func seeked(to position: Double) {}
+}
 @MainActor final class EngineAdapter { func pause() {}; func seek(_ seconds: Double) {} }
 let MPMediaItemPropertyTitle = "title"
 let MPMediaItemPropertyArtist = "artist"
@@ -98,7 +106,10 @@ let MPMediaItemPropertyArtwork = "artwork"
   var playing = true
   var usingEngine = false
   var engine: EngineAdapter?
-  var currentArtwork: String?
+  var currentArtwork: ArtworkAdapter?
+  var startTimer = StartTimerAdapter()
+  let recovery = RecoveryAdapter()
+  var onNowPlaying: ((Song?, Bool, String?) -> Void)?
   var checkpointTime = Date.distantPast
   var onCheckpoint: ((PlaybackCheckpoint) -> Void)?
   func measureListen() {}

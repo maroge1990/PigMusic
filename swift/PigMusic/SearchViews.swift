@@ -402,7 +402,13 @@ private struct FoundResultsView: View {
       Section {
         if groups.isEmpty {
           if search.loading {
-            ProgressView("Searching…")
+            // The shared status line, as "No matches" below; a labelled
+            // ProgressView set its words in the larger body size (#290).
+            HStack(spacing: 8) {
+              ProgressView()
+              StatusText("Searching…")
+            }
+            .accessibilityElement(children: .combine)
           } else if let error = search.error {
             StatusText(error, kind: .error)
           } else {
@@ -1061,6 +1067,7 @@ private struct ShazamSection: View {
   var body: some View {
     VStack(spacing: 4) {
       Button {
+        DiagnosticsLog.shared.record("shazam", "What's playing? tapped")
         listening = true
       } label: {
         Label("What's playing?", systemImage: "shazam.logo")
@@ -1096,6 +1103,10 @@ private struct ShazamListenView: View {
   let model: AppModel
   @Environment(\.dismiss) private var dismiss
   @State private var attempt = 0
+  /// This screen, so closing it ends only its own attempt (#124).
+  @State private var owner = UUID()
+  /// Done was tapped: the attempt it ends says nothing while the screen goes.
+  @State private var closing = false
   @State private var found: ShazamSong?
   @State private var failure: ShazamFailure?
   /// PigMusic's song paused for listening (#124).
@@ -1135,6 +1146,7 @@ private struct ShazamListenView: View {
       .toolbar { Button("Done", action: close) }
     }
     .task(id: attempt) {
+      DiagnosticsLog.shared.record("shazam", "listening screen started try \(attempt + 1)")
       found = nil
       failure = nil
       // Listening records through PigMusic's own audio session and would
@@ -1146,19 +1158,32 @@ private struct ShazamListenView: View {
         player.pause()
         listeningPause = ListeningPause(after: player.playbackMark)
       }
-      let outcome = await ShazamListener.shared.identify(playbackHolds: {
-        player.audioSessionActive
-      })
-      switch outcome {
-      case .success(let song): found = song
-      case .failure(.cancelled): break
-      case .failure(let reason): failure = reason
+      let owner = owner
+      // A step the listening limit doesn't cover never leaves the screen on
+      // "Listening…": past the outer limit it stops and says so (#124).
+      let end = await ShazamListening.bounded(ShazamListening.outerLimit) {
+        await ShazamListener.shared.identify(owner: owner, playbackHolds: {
+          player.audioSessionActive
+        })
+      }
+      if case .timedOut = end {
+        DiagnosticsLog.shared.record(
+          "shazam", "no answer within \(ShazamListening.outerLimit): stopped")
+        ShazamListener.shared.cancel(owner: owner)
+      }
+      // Silent only when this screen closed or started another try; any
+      // other ending shows the song or the reason with Try again.
+      switch ShazamScreen.after(end, screenClosed: Task.isCancelled || closing) {
+      case .found(let song)?: found = song
+      case .failed(let reason)?: failure = reason
+      case nil: break
       }
     }
-    .onDisappear { ShazamListener.shared.cancel() }
+    .onDisappear { ShazamListener.shared.cancel(owner: owner) }
   }
   private func close() {
-    ShazamListener.shared.cancel()
+    closing = true
+    ShazamListener.shared.cancel(owner: owner)
     dismiss()
   }
 }

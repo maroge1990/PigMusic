@@ -22,16 +22,24 @@ import WatchKit
         }
         .onChange(of: scenePhase) { _, phase in
           model.sceneActive = phase == .active
-          if phase == .active { DiagnosticsLog.shared.foreground() }
+          if phase == .active {
+            DiagnosticsLog.shared.foreground()
+            model.opened()
+          }
           if phase == .background {
             DiagnosticsLog.shared.background()
             // Removals waiting for their Undo are sent before the Watch sleeps.
             model.undo.sendAll()
+            // Songs still on their way: watchOS wakes the app to take them (#219).
+            model.closed()
+            model.planRefresh()
           }
           if phase == .active { Task { await model.reload() } }
         }
     }
-    .backgroundTask(.watchConnectivity) { await model.finishBackgroundDelivery() }
+    .backgroundTask(.watchConnectivity) { await model.linkBackgroundTask() }
+    // Songs the iPhone handed to the link while the app wasn't running (#219).
+    .backgroundTask(.appRefresh(WatchModel.refreshIdentifier)) { await model.backgroundRefresh() }
   }
 }
 
@@ -422,15 +430,14 @@ private struct WatchSongs: View {
   var body: some View {
     let marks = model.status.marks
     List {
-      // The latest removal, with its Undo, until it is sent.
+      // The latest removal, with its Undo, until it is sent. The same row as
+      // the songs below (#293: a Label's symbol drew its own grey circle
+      // inside the row's shape).
       if let item = model.undo.items.last {
         Button {
           model.undo.undo(item.id)
         } label: {
-          VStack(alignment: .leading) {
-            Label("Undo", systemImage: "arrow.uturn.backward").font(PigType.headline)
-            Text(item.label).font(PigType.caption).foregroundStyle(.secondary).lineLimit(2)
-          }
+          WatchRow(title: "Undo", detail: item.label, symbol: "arrow.uturn.backward")
         }
         .accessibilityLabel("Undo: " + item.label)
       }

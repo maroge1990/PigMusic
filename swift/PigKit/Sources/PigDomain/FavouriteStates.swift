@@ -13,6 +13,12 @@ public struct FavouriteStates: Sendable {
   /// Songs shown with an unknown state, waiting for a server read to answer;
   /// retried after each successful refresh (Codex on #212).
   private var waiting: [String: Track] = [:]
+  /// Songs whose star or menu has been shown, kept up to date by each sync
+  /// of the library's Favourites playlist (Codex round 1 on batch G, #230).
+  private var followed: [String: Track] = [:]
+  /// Taps whose save hasn't ended, by song (Codex round 2 on batch G): until
+  /// it has, no read or sync replaces the tap's state.
+  private var saving: [String: Int] = [:]
   public init() {}
   /// The one star design (#227): filled for a favourite, outlined for not,
   /// on the player's star and the song sheet's button alike.
@@ -34,7 +40,7 @@ public struct FavouriteStates: Sendable {
   @discardableResult public mutating func answer(_ id: String, _ value: Bool, since revision: Int)
     -> Bool
   {
-    guard self.revision(id) == revision else { return false }
+    guard self.revision(id) == revision, saving[id] == nil else { return false }
     values[id] = value
     waiting[id] = nil
     return true
@@ -52,16 +58,66 @@ public struct FavouriteStates: Sendable {
   public func canTap(_ id: String) -> Bool { values[id] != nil }
   /// A person's tap, shown at once (#212): flips the state before anything
   /// is saved and returns the change to save, or nil while it is unknown.
-  public mutating func tap(_ id: String) -> FavouriteTap? {
-    guard let current = values[id] else { return nil }
-    change(id, !current)
-    return FavouriteTap(id: id, value: !current, revision: revision(id))
+  /// With `orFavourite`, a song whose state isn't known becomes a favourite:
+  /// the song menu's plain "Favourite" (#284).
+  public mutating func tap(_ id: String, orFavourite: Bool = false) -> FavouriteTap? {
+    let current = values[id]
+    guard current != nil || orFavourite else { return nil }
+    let value = !(current ?? false)
+    change(id, value)
+    saving[id, default: 0] += 1
+    return FavouriteTap(id: id, value: value, previous: current, revision: revision(id))
   }
-  /// The save of `tap` was refused: its old state comes back, unless a newer
-  /// tap, change or clear has come since.
+  /// Whether a tap on the song is still being saved: a read must not start
+  /// for it, and its answer won't count (Codex round 2 on batch G).
+  public func isSaving(_ id: String) -> Bool { saving[id] != nil }
+  /// The save of `tap` ended, however it ended. A tap from before a
+  /// sign-out counts for nothing after it.
+  public mutating func settled(_ tap: FavouriteTap) {
+    guard tap.revision >> 32 == epoch, let count = saving[tap.id] else { return }
+    saving[tap.id] = count > 1 ? count - 1 : nil
+  }
+  /// The save of `tap` was refused: its old state comes back, unknown again
+  /// when it was unknown, unless a newer tap, change or clear has come since.
   public mutating func refused(_ tap: FavouriteTap) {
     guard revision(tap.id) == tap.revision else { return }
-    change(tap.id, !tap.value)
+    if let previous = tap.previous {
+      change(tap.id, previous)
+    } else {
+      invalidate(tap.id)
+      values[tap.id] = nil
+    }
+  }
+  /// Whether the Favourites playlist this iPhone's library holds lists the
+  /// song (#284), by the server's own test (FavouriteMatch). Nil while the
+  /// library holds no Favourites playlist with its songs: the state isn't
+  /// known here. Builds the index each time: the app keeps one per
+  /// revision instead (FavouriteIndexCache).
+  public static func listed(_ track: Track, in playlists: [Playlist]) -> Bool? {
+    FavouriteMatch.Index(playlists)?.contains(track)
+  }
+  /// A song's star or menu is shown: later syncs keep its state current.
+  public mutating func follow(_ track: Track) { followed[track.id] = track }
+  /// The library synced (Codex round 1 on batch G, #230). Which state wins:
+  /// a tap still being saved, or a favourite edit of the person's still
+  /// waiting to be sent (`waiting`, FavouriteStates.waiting(in:)), keeps
+  /// their tap; otherwise the synced Favourites playlist (`index`) sets
+  /// every followed song's state, over an older read or cached answer, and
+  /// a read started before the sync no longer counts. Nothing changes while
+  /// the library holds no Favourites playlist with its songs (nil).
+  public mutating func synced(_ index: FavouriteMatch.Index?, waiting: Set<String>) {
+    guard let index else { return }
+    for (id, track) in followed where saving[id] == nil && !waiting.contains(id) {
+      change(id, index.contains(track))
+    }
+  }
+  /// The songs with a favourite edit still waiting to be sent, read once
+  /// for a whole sync (Codex round 2 on batch G); a refused edit is not
+  /// waiting (as EditOutbox.favourite).
+  public static func waiting(in pending: [PendingMutation]) -> Set<String> {
+    Set(
+      pending.lazy.filter { $0.state == "queued" && $0.mutation.action == "favourite" }
+        .compactMap(\.mutation.track?.id))
   }
   /// A refused save settled (#212): the newest tap still waiting, or none,
   /// and then the state is unknown until the server is read again.
@@ -78,6 +134,8 @@ public struct FavouriteStates: Sendable {
     values = [:]
     revisions = [:]
     waiting = [:]
+    followed = [:]
+    saving = [:]
     epoch += 1
   }
 }
@@ -86,6 +144,8 @@ public struct FavouriteStates: Sendable {
 public struct FavouriteTap: Sendable, Equatable {
   public let id: String
   public let value: Bool
+  /// The state before the tap; nil when it wasn't known.
+  public let previous: Bool?
   fileprivate let revision: Int
 }
 
