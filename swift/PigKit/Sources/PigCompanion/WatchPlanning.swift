@@ -194,7 +194,7 @@ public enum WatchAttention: Equatable, Sendable {
   }
 }
 
-/// "Ready for your run": only songs the Watch confirmed count.
+/// "Ready to play": only songs the Watch confirmed count.
 public struct WatchReadinessSummary: Equatable, Sendable {
   public var ready: Int
   public var waiting: Int

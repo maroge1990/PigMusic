@@ -51,6 +51,9 @@ REMOVED = {
         "Phone unavailable",
         "Albums play gapless",
     ],
+    # D-122 (#292): the Watch is not only for running.
+    "PigKit/Sources/PigCompanion/WatchStatus.swift": ["Ready for your run"],
+    "PigMusicUITests/Watch/WatchDemoTests.swift": ["Ready for your run"],
 }
 
 KEPT = {
@@ -70,6 +73,7 @@ KEPT = {
         'case .library: "Find music"',
     ],
     "PigMusicShare/ShareViewController.swift": ["Added to PigMusic's Shazamed list"],
+    "PigKit/Sources/PigCompanion/WatchStatus.swift": ['case .ready: "Ready to play"'],
 }
 
 

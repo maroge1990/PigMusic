@@ -50,10 +50,11 @@ final class WatchDemoTests: XCTestCase {
   }
 
   /// #252: the home names its state; every demo song is on the Watch.
+  /// D-122 (#292): "Ready to play".
   func testTheHomeSaysTheWatchIsReady() {
     launchPlaying()
     let ready = app.descendants(matching: .any)
-      .matching(NSPredicate(format: "label BEGINSWITH %@", "Ready for your run")).firstMatch
+      .matching(NSPredicate(format: "label BEGINSWITH %@", "Ready to play")).firstMatch
     for _ in 0..<5 where !ready.exists { app.swipeUp() }
     expect(ready)
   }

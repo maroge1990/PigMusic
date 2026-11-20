@@ -25,12 +25,13 @@ struct WatchStatusTests {
     #expect(!WatchSongState.isReady(id: "a", checksum: "sum-a", stored: nil))
   }
 
-  @Test func everySongThereIsReadyForARun() {
+  @Test func everySongThereIsReadyToPlay() {
     let status = WatchLibraryStatus(
       songs: [song("a"), song("b")], stored: ["a": "sum-a", "b": "sum-b"], usedBytes: 1,
       limitBytes: gigabyte, iPhoneReachable: false)
     #expect(status.headline == .ready)
-    #expect(status.title == "Ready for your run")
+    // D-122: the Watch is not only for running.
+    #expect(status.title == "Ready to play")
     #expect(status.count == "2 songs")
     #expect(status.advice == nil)
     // A newer library is announced and not here yet.
