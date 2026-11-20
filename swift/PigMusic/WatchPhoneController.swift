@@ -111,7 +111,8 @@ import UIKit
   /// PigMusic's complication is on the active watch face (#219). `songs`:
   /// the ids handed over; a retry of songs already announced pushes nothing,
   /// and the push names only the new ones, the Watch's evidence that songs
-  /// were sent (Codex round 1 on batch J).
+  /// were sent (Codex round 1 on batch J). Exactly the ids in the payload
+  /// wait as pending until WatchConnectivity reports the push (round 2).
   private func wakeWatch(songs: [String], now: Date = Date()) {
     guard let link, let enabled = link.complicationEnabled,
       let remaining = link.complicationPushesLeft
@@ -121,15 +122,27 @@ import UIKit
     let decision = pushes.handed(
       now: now, songs: songs, enabled: enabled, remaining: remaining,
       watchAppOpen: link.reachable)
-    let fresh = songs.filter { pushes.pushedSongs[$0] == nil }
-    if decision == .send,
-      let data = try? JSONEncoder().encode(CompanionWake(sentAt: now, songs: fresh)),
+    let fresh = songs.filter { pushes.pushedSongs[$0] == nil && pushes.pendingSongs[$0] == nil }
+    let wake = CompanionWake(sentAt: now, songs: fresh)
+    if decision == .send, let data = try? JSONEncoder().encode(wake),
       link.pushComplication(data)
     {
-      pushes.sent(at: now, songs: fresh)
+      pushes.sent(at: now, songs: wake.songs ?? [])
       DiagnosticsLog.shared.record(
-        "watch", "woke the Watch app through its complication; \(remaining - 1) pushes left today")
+        "watch",
+        "complication push queued to wake the Watch app; \(remaining - 1) pushes left today")
     }
+    savePushes(pushes)
+  }
+  /// WatchConnectivity reported a complication push: delivered, its songs
+  /// count as announced; failed, they are released for a later push.
+  func wakeFinished(_ data: Data, delivered: Bool) {
+    guard let wake = CompanionWake.decode(data) else { return }
+    var pushes = complicationPushes
+    pushes.finished(songs: wake.songs ?? [], sentAt: wake.sentAt, delivered: delivered)
+    savePushes(pushes)
+  }
+  private func savePushes(_ pushes: WatchComplicationPushes) {
     guard pushes != complicationPushes else { return }
     complicationPushes = pushes
     if let data = try? JSONEncoder().encode(pushes) {
@@ -197,6 +210,9 @@ import UIKit
         await publish()
         // A reinstalled Watch lost the phone's song: send it again (Codex on #220).
         resendNowPlaying()
+      }
+      link?.onWakeFinished = { [weak self] data, delivered in
+        self?.wakeFinished(data, delivered: delivered)
       }
       link?.onMessage = { [weak self] data in
         if let diagnostics = CompanionDiagnostics.decode(data), diagnostics.text != nil {

@@ -202,19 +202,26 @@ public struct WatchComplicationPushes: Codable, Equatable, Sendable {
   public private(set) var remaining: Int?
   /// The last push sent.
   public private(set) var lastSent: Date?
-  /// Songs announced by a push in the last `keep`, and when.
+  /// Songs a delivered push announced in the last `keep`, and when it was sent.
   public private(set) var pushedSongs: [String: Date] = [:]
+  /// Songs in a push queued and not yet reported delivered or failed, and
+  /// when it was sent (Codex round 2 on batch J). Held at most `pendingKeep`.
+  public private(set) var pendingSongs: [String: Date] = [:]
+  public static let pendingKeep: TimeInterval = 86400
   public init() {}
 
   /// Songs (`songs`, their ids) were handed to the Watch link at `now`:
   /// whether to push. A `.send` is recorded only once `sent(at:songs:)`
-  /// confirms it went. Songs all announced before are a retry: no push, and
-  /// no burst starts. (No ids at all can't be judged and count as new.)
+  /// confirms it was queued. Songs all announced before, or in a push still
+  /// on its way, are a retry: no push, and no burst starts. (No ids at all
+  /// can't be judged and count as new.)
   public mutating func handed(
     now: Date, songs: [String] = [], enabled: Bool, remaining: Int, watchAppOpen: Bool = false
   ) -> Decision {
     forgetOldSongs(now: now)
-    if !songs.isEmpty, songs.allSatisfy({ pushedSongs[$0] != nil }) {
+    if !songs.isEmpty,
+      songs.allSatisfy({ pushedSongs[$0] != nil || pendingSongs[$0] != nil })
+    {
       note(Event(at: now, decision: .retry))
       return .retry
     }
@@ -235,23 +242,39 @@ public struct WatchComplicationPushes: Codable, Equatable, Sendable {
     }
     return decision
   }
-  /// The push went, announcing `songs`: this burst has had its push.
+  /// A push was queued, carrying exactly `songs` (the ids in its payload):
+  /// this burst has had its push, and the attempt counts for the spacing
+  /// (the reserve is WatchConnectivity's own count). Its songs wait as
+  /// pending until `finished` says whether it was delivered.
   public mutating func sent(at date: Date, songs: [String] = []) {
     burstPushed = true
     lastSent = date
-    for id in songs { pushedSongs[id] = date }
+    for id in songs { pendingSongs[id] = date }
     forgetOldSongs(now: date)
     note(Event(at: date, decision: .send))
+  }
+  /// WatchConnectivity reported the push sent at `sentAt`, carrying
+  /// `songs`: delivered, its songs are announced; failed, they are released
+  /// so a later hand-off may push for them again. A later push of the same
+  /// songs keeps them pending.
+  public mutating func finished(songs: [String], sentAt: Date, delivered: Bool) {
+    for id in songs where pendingSongs[id] == sentAt {
+      pendingSongs[id] = nil
+      if delivered { pushedSongs[id] = sentAt }
+    }
+    forgetOldSongs(now: sentAt)
   }
   /// Drops songs announced more than `keep` ago, then the oldest beyond
   /// `pushedCapacity`.
   private mutating func forgetOldSongs(now: Date) {
-    pushedSongs = pushedSongs.filter { now.timeIntervalSince($0.value) <= Self.keep }
-    if pushedSongs.count > Self.pushedCapacity {
-      let kept = pushedSongs.sorted { ($0.value, $0.key) > ($1.value, $1.key) }
-        .prefix(Self.pushedCapacity)
-      pushedSongs = Dictionary(uniqueKeysWithValues: kept.map { ($0.key, $0.value) })
-    }
+    pushedSongs = Self.bounded(pushedSongs.filter { now.timeIntervalSince($0.value) <= Self.keep })
+    pendingSongs = Self.bounded(
+      pendingSongs.filter { now.timeIntervalSince($0.value) <= Self.pendingKeep })
+  }
+  private static func bounded(_ songs: [String: Date]) -> [String: Date] {
+    guard songs.count > pushedCapacity else { return songs }
+    let kept = songs.sorted { ($0.value, $0.key) > ($1.value, $1.key) }.prefix(pushedCapacity)
+    return Dictionary(uniqueKeysWithValues: kept.map { ($0.key, $0.value) })
   }
 
   /// The rule. A last push more than `spacing` ahead of `now` is from a

@@ -92,12 +92,33 @@ def test_the_iphone_wakes_the_watch_app_through_the_budget():
     assert "watchAppOpen: link.reachable" in wake
     # Sent only on the rule's say-so, and counted only once it went.
     assert wake.index("decision == .send") < wake.index("link.pushComplication(data)")
+    # Exactly the ids in the payload wait as pending (Codex round 2 on J).
     assert wake.index("link.pushComplication(data)") < wake.index(
-        "pushes.sent(at: now, songs: fresh)"
+        "pushes.sent(at: now, songs: wake.songs ?? [])"
     )
-    # The push names only songs no earlier push announced (Codex round 1 on J).
-    assert "let fresh = songs.filter { pushes.pushedSongs[$0] == nil }" in wake
-    assert "CompanionWake(sentAt: now, songs: fresh)" in wake
+    # The push names only songs no earlier push announced or holds (round 1).
+    assert (
+        "songs.filter { pushes.pushedSongs[$0] == nil && pushes.pendingSongs[$0] == nil }"
+        in wake
+    )
+    assert "let wake = CompanionWake(sentAt: now, songs: fresh)" in wake
+    assert "JSONEncoder().encode(wake)" in wake
+    # WatchConnectivity's report settles them: delivered or released.
+    finished = body(phone, "  func wakeFinished(_ data: Data, delivered: Bool) {")
+    assert (
+        "pushes.finished(songs: wake.songs ?? [], sentAt: wake.sentAt, delivered: delivered)"
+        in finished
+    )
+    assert "self?.wakeFinished(data, delivered: delivered)" in phone
+    report = link.split("didFinish userInfoTransfer: WCSessionUserInfoTransfer", 1)[1]
+    report = report.split("\n    }\n", 1)[0]
+    assert "guard userInfoTransfer.isCurrentComplicationInfo" in report
+    assert "let delivered = error == nil" in report
+    assert "self.onWakeFinished?(data, delivered)" in report
+    ios = link.split("  #if os(iOS)\n    nonisolated func sessionDidBecomeInactive", 1)[
+        1
+    ]
+    assert "didFinish userInfoTransfer" in ios.split("  #endif", 1)[0]
     # Saved, so a background launch keeps the clock.
     assert phone.count("Self.complicationPushesKey") == 2
     # One place sends it, on the iPhone only, and only with the complication on the face.

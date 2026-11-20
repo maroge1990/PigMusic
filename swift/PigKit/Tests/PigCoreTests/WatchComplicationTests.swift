@@ -266,16 +266,64 @@ struct WatchComplicationTests {
     // Announced songs are forgotten after a week.
     var later = WatchComplicationPushes()
     later.sent(at: at(minutes: 0), songs: ["x"])
+    later.finished(songs: ["x"], sentAt: at(minutes: 0), delivered: true)
     #expect(
       later.handed(now: at(minutes: 8 * 24 * 60), songs: ["x"], enabled: true, remaining: 50)
         == .send)
+  }
+
+  /// Codex round 2 on batch J: a 501-song hand-off put 500 ids in the push
+  /// but marked all 501 announced, so a retry of the 501st never pushed.
+  @Test func onlyTheIdsInThePayloadAreAnnounced() {
+    var pushes = WatchComplicationPushes()
+    let songs = (1...501).map { "s\($0)" }
+    #expect(pushes.handed(now: at(minutes: 0), songs: songs, enabled: true, remaining: 50) == .send)
+    let wake = CompanionWake(sentAt: at(minutes: 0), songs: songs)
+    pushes.sent(at: at(minutes: 0), songs: wake.songs ?? [])
+    pushes.finished(songs: wake.songs ?? [], sentAt: at(minutes: 0), delivered: true)
+    #expect(
+      pushes.handed(now: at(minutes: 40), songs: ["s501"], enabled: true, remaining: 49) == .send)
+    #expect(
+      pushes.handed(now: at(minutes: 80), songs: ["s1"], enabled: true, remaining: 49) == .retry)
+  }
+
+  /// A push still on its way holds its songs; a failed one releases them,
+  /// and the attempt still counts for the spacing.
+  @Test func aFailedPushReleasesItsSongs() {
+    var pushes = WatchComplicationPushes()
+    #expect(pushes.handed(now: at(minutes: 0), songs: ["x"], enabled: true, remaining: 50) == .send)
+    pushes.sent(at: at(minutes: 0), songs: ["x"])
+    #expect(pushes.pendingSongs["x"] == at(minutes: 0) && pushes.pushedSongs["x"] == nil)
+    // Queued, not yet reported: a retry.
+    #expect(
+      pushes.handed(now: at(minutes: 12), songs: ["x"], enabled: true, remaining: 49) == .retry)
+    pushes.finished(songs: ["x"], sentAt: at(minutes: 0), delivered: false)
+    #expect(pushes.pendingSongs.isEmpty && pushes.pushedSongs.isEmpty)
+    // Released, but the failed attempt still spaces the next push.
+    #expect(
+      pushes.handed(now: at(minutes: 13), songs: ["x"], enabled: true, remaining: 49) == .spacing)
+    #expect(pushes.handed(now: at(minutes: 21), songs: ["x"], enabled: true, remaining: 49) == .send)
+    // A late report for an older push doesn't touch a newer one's songs.
+    pushes.sent(at: at(minutes: 21), songs: ["x"])
+    pushes.finished(songs: ["x"], sentAt: at(minutes: 0), delivered: true)
+    #expect(pushes.pendingSongs["x"] == at(minutes: 21) && pushes.pushedSongs["x"] == nil)
+    pushes.finished(songs: ["x"], sentAt: at(minutes: 21), delivered: true)
+    #expect(pushes.pushedSongs["x"] == at(minutes: 21) && pushes.pendingSongs.isEmpty)
+    // Never reported: pending ends after a day.
+    var lost = WatchComplicationPushes()
+    lost.sent(at: at(minutes: 0), songs: ["y"])
+    #expect(
+      lost.handed(now: at(minutes: 25 * 60), songs: ["y"], enabled: true, remaining: 50) == .send)
   }
 
   @Test func theAnnouncedSongsStayBounded() {
     var pushes = WatchComplicationPushes()
     let many = (0..<(WatchComplicationPushes.pushedCapacity + 50)).map { "s\($0)" }
     pushes.sent(at: at(minutes: 0), songs: Array(many.prefix(100)))
+    pushes.finished(songs: Array(many.prefix(100)), sentAt: at(minutes: 0), delivered: true)
     pushes.sent(at: at(minutes: 1), songs: Array(many.dropFirst(100)))
+    #expect(pushes.pendingSongs.count == many.count - 100)
+    pushes.finished(songs: Array(many.dropFirst(100)), sentAt: at(minutes: 1), delivered: true)
     #expect(pushes.pushedSongs.count == WatchComplicationPushes.pushedCapacity)
     // The oldest went first.
     #expect(pushes.pushedSongs["s0"] == nil && pushes.pushedSongs["s2049"] != nil)
