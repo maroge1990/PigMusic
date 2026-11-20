@@ -50,8 +50,10 @@ public actor QueuePCMStream {
   /// A finished song's source is being released; the next song is chosen
   /// right after, from the list as it is then.
   private var betweenSongs = false
-  /// `next()` has returned the end or thrown: an edit can no longer reach the audio.
-  private var finished = false
+  /// `next()` has thrown: an edit can no longer reach the audio. After it
+  /// returned the end, an edit adding songs carries on: `next()` asked again
+  /// plays them straight after (#279, Codex round 1 on batch L).
+  private var failed = false
   private var cycle = 0
   private var upcomingOccurrence: PlaybackOccurrence?
   /// The queue position being prepared to follow; unavailable songs are passed over.
@@ -172,7 +174,7 @@ public actor QueuePCMStream {
   public func replaceUpcoming(
     _ newItems: [PlaybackOccurrence], repeatMode newMode: PlaybackRepeat, version: Int
   ) -> UpcomingEdit {
-    guard !closed, !finished, sourceFailure == nil else { return .tooLate }
+    guard !closed, !failed, sourceFailure == nil else { return .tooLate }
     if transitionReady, incoming == nil { return .tooLate }
     let decision = UpcomingEditRule.decide(
       version: version, lastVersion: editVersion, old: items, new: newItems, current: index,
@@ -287,11 +289,9 @@ public actor QueuePCMStream {
     reading = true
     defer { reading = false }
     do {
-      let block = try await produce()
-      if block == nil { finished = true }
-      return block
+      return try await produce()
     } catch {
-      finished = true
+      failed = true
       throw error
     }
   }

@@ -177,7 +177,17 @@ private func eventually(_ condition: @Sendable () async -> Bool) async throws {
     #expect(markers.map(\.index) == [0, 1, 2])
     #expect(markers.map(\.occurrenceID) == orders[4].map(\.id))
     #expect(await stream.passedOverSongs.isEmpty)
-    #expect(await stream.replaceUpcoming(orders[4], repeatMode: .off, version: 9) == .tooLate)
+    // Past its end, a song added still follows, straight after.
+    #expect(
+      await stream.replaceUpcoming(orders[4] + [items[4]], repeatMode: .off, version: 9)
+        == .applied)
+    var added: [Float] = []
+    while let block = try await stream.next() {
+      added += block.pcm.channels[0]
+      markers += block.markers
+    }
+    #expect(firstBreak(added, [("e", 0..<short)], length: short) == nil)
+    #expect(markers.last?.index == 3 && markers.last?.originFrame == Int64(3 * short))
     await stream.close()
     #expect(await sources.busy == 0)
     #expect(await sources.peak <= 2)
@@ -533,6 +543,41 @@ private func eventually(_ condition: @Sendable () async -> Bool) async throws {
     #expect(restarts.first?.occurrenceID == items[2].id)
     #expect(
       firstBreak(output.captured.dropFirst(mark), [("c", 0..<length)], length: length) == nil)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+
+  /// Similar songs arriving as the queue ends: the last song is all decoded
+  /// and the stream has said so, but seconds of it are still to be heard.
+  /// The new songs follow it with nothing stopped or replayed (Codex round 1
+  /// on batch L).
+  @Test(arguments: editRates) @MainActor
+  func songsAddedWhileTheLastSongDrainsFollowIt(rate: Double) async throws {
+    let root = try editRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (session, output, sources, items) = try start(["a"], rate: rate, root: root)
+    try await waitUntil { session.snapshot.state == .playing }
+    let length = Int(rate)
+    while output.captured.count < length {
+      output.consume()
+      try await Task.sleep(for: .milliseconds(2))
+    }
+    // Room in the lookahead: the pump asks again and hears the end.
+    output.consume()
+    try await Task.sleep(for: .milliseconds(20))
+    #expect(output.captured.count == length && !output.pending.isEmpty)
+    #expect(session.snapshot.state == .playing)
+    let stops = output.stops
+    let added = [editTrack("s"), editTrack("t")]
+    session.updateUpcoming(items + added)
+    try await playToEnd(session, output)
+    #expect(output.stops == stops)
+    #expect(
+      firstBreak(
+        output.captured, [("a", 0..<length), ("s", 0..<length), ("t", 0..<length)],
+        length: length) == nil)
+    #expect(session.snapshot.index == 2 && session.snapshot.occurrenceID == added[1].id)
+    #expect(await sources.busy == 0)
     await session.stopAndWait()
     #expect(await sources.active.isEmpty)
   }

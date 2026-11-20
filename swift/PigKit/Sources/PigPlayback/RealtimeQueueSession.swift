@@ -183,6 +183,11 @@ public enum PlaybackSeek {
   /// it, so a marker is mapped to `items` through its entry's id (#279).
   private var streamItems: [PlaybackOccurrence] = []
   private var streamVersion = 0
+  /// The live stream took an edit: if it had reached its end, the pump asks
+  /// it again, so songs added while the last one drains follow it (#279).
+  private var streamResumed = false
+  /// Wakes the current generation's pump.
+  private var pumpWake: AsyncStream<Void>.Continuation?
 
   /// `lookaheadSeconds` is how much decoded audio stays scheduled ahead of the
   /// speaker. The pump runs on the main actor, so live output needs enough to
@@ -318,11 +323,19 @@ public enum PlaybackSeek {
       guard let self, generation == stamp, upcomingVersion == version else { return }
       let result = await stream.replaceUpcoming(items, repeatMode: repeatMode, version: version)
       guard generation == stamp else { return }
-      if result == .applied, version > streamVersion {
-        streamItems = items
-        streamVersion = version
+      if result == .applied {
+        if version > streamVersion {
+          streamItems = items
+          streamVersion = version
+        }
+        if liveStream === stream {
+          streamResumed = true
+          pumpWake?.yield(())
+          return
+        }
+        // The queue ended while the stream answered: its audio is gone.
       }
-      guard result == .tooLate, upcomingVersion == version else { return }
+      guard upcomingVersion == version else { return }
       restartWhereHeard()
     }
   }
@@ -361,6 +374,8 @@ public enum PlaybackSeek {
     liveStream = nil
     streamPending = false
     streamItems = []
+    streamResumed = false
+    pumpWake = nil
     pendingFrames = 0
     timeline = []
     let last = items.count - 1
@@ -409,6 +424,8 @@ public enum PlaybackSeek {
     liveStream = nil
     streamPending = false
     streamItems = []
+    streamResumed = false
+    pumpWake = nil
     pendingFrames = 0
     timeline = []
     snapshot = QueuePlaybackSnapshot()
@@ -440,6 +457,8 @@ public enum PlaybackSeek {
     liveStream = nil
     streamPending = false
     streamItems = []
+    streamResumed = false
+    pumpWake = nil
     pendingFrames = 0
     peakScheduledFrames = 0
     timeline = []
@@ -489,6 +508,7 @@ public enum PlaybackSeek {
         // buffering the latest wake also covers completions during decoding.
         let (consumed, wake) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         defer { wake.finish() }
+        pumpWake = wake
         var completions = consumed.makeAsyncIterator()
         @MainActor func send(_ block: QueuePCMBlock) throws {
           timeline.append(contentsOf: block.markers)
@@ -509,9 +529,12 @@ public enum PlaybackSeek {
           heldFrames = 0
         }
         if snapshot.wantsPlayback { startClock(generation: stamp) }
-        while !exhausted || pendingFrames > 0 || !held.isEmpty {
+        while !exhausted || pendingFrames > 0 || !held.isEmpty || streamResumed {
           try Task.checkCancellation()
           guard generation == stamp else { throw CancellationError() }
+          // An edit added songs after the end the stream had reached: ask again.
+          if exhausted, sourceFailure == nil, streamResumed { exhausted = false }
+          streamResumed = false
           // Start after a short cushion, then build the full one while playing.
           let target = ready ? lookaheadFrames : startFrames
           while !exhausted && pendingFrames <= Int64(target) {
@@ -564,7 +587,8 @@ public enum PlaybackSeek {
             // startup cushion, before waiting for the speaker to consume it.
             if !exhausted { continue }
           }
-          if exhausted && pendingFrames == 0 && held.isEmpty { break }
+          // Not while an edit just resumed it: its wake is already waiting.
+          if exhausted && pendingFrames == 0 && held.isEmpty && !streamResumed { break }
           _ = await completions.next()
         }
         try Task.checkCancellation()
@@ -592,6 +616,8 @@ public enum PlaybackSeek {
         liveStream = nil
         streamPending = false
         streamItems = []
+        streamResumed = false
+        pumpWake = nil
       }
       if let stream { await stream.close() }
     }
