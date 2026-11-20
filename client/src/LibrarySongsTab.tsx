@@ -27,7 +27,14 @@ export function LibrarySongsTab({
   onRemoved?: () => void;
 }) {
   const player = usePlayer();
-  const [songs, setSongs] = useState<Song[] | null>(null);
+  // The rows with the paging they were read under, committed together
+  // (#273): a row tapped while the next page lands plays from the rows it
+  // was drawn with, never from a later page's offset.
+  const [list, setList] = useState<{
+    songs: Song[];
+    next: number | null;
+    revision: string;
+  } | null>(null);
   const [count, setCount] = useState(total);
   const state = useRef({
     next: 0 as number | null,
@@ -59,7 +66,13 @@ export function LibrarySongsTab({
       s.next = page.next_offset;
       setCount(page.total);
       const added = page.items.map((t) => fromTrack(t));
-      setSongs((old) => (offset === 0 ? added : [...(old || []), ...added]));
+      const next = page.next_offset;
+      const revision = page.revision;
+      setList((old) => ({
+        songs: offset === 0 ? added : [...(old?.songs || []), ...added],
+        next,
+        revision,
+      }));
     } catch (e) {
       if (run !== s.run || generation !== currentSession()) return;
       s.notice = notifyError(
@@ -92,7 +105,7 @@ export function LibrarySongsTab({
   // The next page is read as the end of the list comes into view.
   useEffect(() => {
     const target = end.current;
-    if (!target || !songs) return;
+    if (!target || !list) return;
     const watcher = new IntersectionObserver(
       (seen) => {
         if (seen.some((e) => e.isIntersecting)) void load();
@@ -101,8 +114,9 @@ export function LibrarySongsTab({
     );
     watcher.observe(target);
     return () => watcher.disconnect();
-  }, [songs]);
-  if (!songs) return <Loading>Loading your songs…</Loading>;
+  }, [list]);
+  if (!list) return <Loading>Loading your songs…</Loading>;
+  const { songs } = list;
   return (
     <>
       <div className="songs-tab-header">
@@ -125,8 +139,8 @@ export function LibrarySongsTab({
                 songs,
                 index,
                 librarySource({
-                  next: state.current.next,
-                  revision: state.current.revision,
+                  next: list.next,
+                  revision: list.revision,
                   given: songs.map((s) => s.key),
                 }),
               )

@@ -152,3 +152,50 @@ test("a Songs row beyond 500 resumes as itself after a reload", async ({
   await page.reload();
   await expect(mini).toContainText("Song 550");
 });
+
+// Codex, batch E web part A (#273): a row tapped after the next page's
+// answer arrived but before its rows were drawn queued the drawn rows with
+// the later page's offset, so the queue skipped from Song 199 to Song 400.
+test("a Songs row tapped while the next page lands plays on without a gap", async ({
+  page,
+}) => {
+  await mockApi(page, {
+    answers: {
+      "/v1/library-pages/tracks": (route) =>
+        route.fulfill({ json: songPage(offsetOf(route), 800) }),
+    },
+  });
+  await page.route("**/api/v1/playback/*/url", (route) =>
+    route.fulfill({
+      json: { url: "/api/v1/playback/files/silence", expires_in: 60 },
+    }),
+  );
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = () => Promise.resolve();
+    // The tap lands once the second page's answer has been read, before
+    // React draws its rows (a render waits for a task; these are microtasks).
+    const json = Response.prototype.json;
+    let tapped = false;
+    Response.prototype.json = function () {
+      const read = json.call(this);
+      if (!tapped && this.url.includes("offset=200")) {
+        tapped = true;
+        let later = read.then(() => {});
+        for (let i = 0; i < 30; i++) later = later.then(() => {});
+        void later.then(() => {
+          const rows = document.querySelectorAll(".song-list .song-main");
+          (rows[rows.length - 1] as HTMLElement).click();
+        });
+      }
+      return read;
+    };
+  });
+  await page.goto("/#/library/songs");
+  await expect(rows(page)).toHaveCount(200);
+  await scrollToEnd(page);
+  const mini = page.locator(".mini-player");
+  await expect(mini).toContainText("Song 199");
+  await expect(rows(page)).toHaveCount(400);
+  await mini.getByRole("button", { name: "Next song" }).click();
+  await expect(mini).toContainText("Song 200");
+});
