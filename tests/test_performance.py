@@ -231,6 +231,28 @@ def test_report_script_prints_the_targets_from_a_copy(tmp_path, capsys):
     assert '"played_share": 0.5' in capsys.readouterr().out
 
 
+def test_one_unwritable_event_never_holds_back_the_rest(tmp_path):
+    """Codex round 1 (high): a row SQLite cannot store (a lone surrogate, an
+    integer past 2**63) failed the whole batch, which was put back and
+    failed every later flush with it. It is made storable when recorded,
+    and a row that still cannot be written is dropped and counted."""
+    counters = Performance(tmp_path)
+    now = time.time()
+    counters.record("artwork", "cover", "served", None, "bad \udcff item", at=now)
+    counters.record("tap", "none", "played", 10**30, at=now)
+    with counters.lock:  # Past record(): the flush's own guard.
+        counters.pending.append((now, "tap", "x\udcff", "played", None, None))
+        counters.pending.append((now, "tap", "big", "played", 2**70, None))
+    counters.record("tap", "Prepared mix", "played", 80, at=now)
+    assert counters.flush(now) == 3
+    rows = events(counters.path)
+    assert ("artwork", "cover", "served", None, "bad ? item") in rows
+    assert ("tap", "Prepared mix", "played", 80, None) in rows
+    assert counters.dropped == 2 and counters.pending == []
+    counters.record("tap", "Prepared mix", "played", 90, at=now)
+    assert counters.flush(now + 1) == 1
+
+
 def test_report_script_breaks_no_matches_down_by_reason(tmp_path, capsys):
     """#282: `--no-match` says why each source's nearest result was not the
     song, from the detail a no match keeps, with the newest examples."""
