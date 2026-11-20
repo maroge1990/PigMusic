@@ -645,6 +645,49 @@ private func eventually(_ condition: @Sendable () async -> Bool) async throws {
     #expect(await sources.active.isEmpty)
   }
 
+  /// Songs added just before the last buffer finishes: the queue must not
+  /// end while the stream's answer is on its way. No `.ended` in between,
+  /// and it plays on (Codex round 2 on batch L: it published `.ended`, and
+  /// the restart that followed was paused).
+  @Test(arguments: editRates) @MainActor
+  func songsAddedAsTheLastBufferFinishesNeverEndTheQueue(rate: Double) async throws {
+    let root = try editRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (session, output, sources, items) = try start(["a"], rate: rate, root: root)
+    var states: [QueuePlaybackState] = []
+    session.onUpdate = { states.append($0.state) }
+    try await waitUntil { session.snapshot.state == .playing }
+    let length = Int(rate)
+    // All of "a" scheduled, the stream at its end, one buffer left to hear.
+    let deadline = ContinuousClock.now + .seconds(10)
+    while !(output.captured.count == length && output.pending.count == 1) {
+      guard ContinuousClock.now < deadline else { throw AudioPipelineFailure.stalled }
+      output.consume()
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    let stops = output.stops
+    let added = editTrack("s")
+    states = []
+    session.updateUpcoming(items + [added])
+    // The last buffer finishes before the stream has answered.
+    output.consume()
+    let end = ContinuousClock.now + .seconds(10)
+    while session.snapshot.state != .ended, session.snapshot.wantsPlayback,
+      ContinuousClock.now < end
+    {
+      output.consume()
+      try await Task.sleep(for: .milliseconds(1))
+    }
+    #expect(session.snapshot.state == .ended)
+    #expect(states.filter { $0 == .ended }.count == 1)
+    #expect(session.snapshot.occurrenceID == added.id)
+    #expect(output.stops == stops)
+    #expect(
+      firstBreak(output.captured, [("a", 0..<length), ("s", 0..<length)], length: length) == nil)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+
   /// The same, with nothing after the removed song: the queue ends there.
   @Test @MainActor func removingTheLastSongAlreadyHeardEndsTheQueue() async throws {
     let root = try editRoot()

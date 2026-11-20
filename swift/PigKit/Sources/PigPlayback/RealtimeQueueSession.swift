@@ -192,6 +192,10 @@ public enum PlaybackSeek {
   private var streamResumed = false
   /// Wakes the current generation's pump.
   private var pumpWake: AsyncStream<Void>.Continuation?
+  /// Edits sent to a stream whose answer has not come back, by number. The
+  /// pump hears them before it ends the queue: one may add songs.
+  private var editsInFlight: [Int: Task<Void, Never>] = [:]
+  private var editNumber = 0
 
   /// `lookaheadSeconds` is how much decoded audio stays scheduled ahead of the
   /// speaker. The pump runs on the main actor, so live output needs enough to
@@ -325,8 +329,15 @@ public enum PlaybackSeek {
     let items = items
     let repeatMode = repeatMode
     let identity = identity
-    Task { [weak self] in
-      guard let self, generation == stamp, upcomingVersion == version else { return }
+    editNumber += 1
+    let number = editNumber
+    editsInFlight[number] = Task { [weak self] in
+      guard let self else { return }
+      // Removed as its last step, so one still listed has not finished.
+      defer { editsInFlight[number] = nil }
+      guard generation == stamp, upcomingVersion == version else { return }
+      // The stream's answer has no suspension of its own; a closed stream
+      // answers at once, so this never waits on a stream that is gone.
       let result = await stream.replaceUpcoming(
         items, repeatMode: repeatMode, version: version, identity: identity)
       guard generation == stamp else { return }
@@ -538,7 +549,9 @@ public enum PlaybackSeek {
           heldFrames = 0
         }
         if snapshot.wantsPlayback { startClock(generation: stamp) }
-        while !exhausted || pendingFrames > 0 || !held.isEmpty || streamResumed {
+        while !exhausted || pendingFrames > 0 || !held.isEmpty || streamResumed
+          || !editsInFlight.isEmpty
+        {
           try Task.checkCancellation()
           guard generation == stamp else { throw CancellationError() }
           // An edit added songs after the end the stream had reached: ask again.
@@ -597,7 +610,17 @@ public enum PlaybackSeek {
             if !exhausted { continue }
           }
           // Not while an edit just resumed it: its wake is already waiting.
-          if exhausted && pendingFrames == 0 && held.isEmpty && !streamResumed { break }
+          if exhausted && pendingFrames == 0 && held.isEmpty && !streamResumed {
+            // An edit still waiting for the stream's answer may add songs:
+            // hear it before ending (Codex round 2 on batch L).
+            if let edit = editsInFlight.values.first {
+              await edit.value
+              try Task.checkCancellation()
+              guard generation == stamp else { throw CancellationError() }
+              continue
+            }
+            break
+          }
           _ = await completions.next()
         }
         try Task.checkCancellation()
