@@ -42,6 +42,9 @@ public actor QueuePCMStream {
   /// Every id each queue entry has gone by, so an edit naming an entry by
   /// its first id or a later listening's matches it.
   private var identity = OccurrenceIdentity()
+  /// Entries (first ids) already played in this pass, passed over until the
+  /// order wraps round (#303): a queue restarted part-way through a pass.
+  private var skipping: Set<UUID>
   /// Raised whenever the upcoming fetch is replaced or dropped, so a
   /// replaced fetch's outcome is never read as its song's failure.
   private var fetchVersion = 0
@@ -114,7 +117,9 @@ public actor QueuePCMStream {
     items: [PlaybackOccurrence], startingAt: Int = 0, startSeconds: Double = 0,
     crossfade: Bool = false, fadeSeconds: Double = 3, repeatMode: PlaybackRepeat = .off,
     sampleRate: Double = 48000,
-    blockFrames: Int = 2048, acquire: @escaping Acquire, release: @escaping Release
+    blockFrames: Int = 2048, skipping: Set<UUID> = [],
+    identity: OccurrenceIdentity = OccurrenceIdentity(),
+    acquire: @escaping Acquire, release: @escaping Release
   ) async throws {
     guard items.indices.contains(startingAt), startSeconds.isFinite, startSeconds >= 0,
       fadeSeconds.isFinite, (0...12).contains(fadeSeconds),
@@ -122,6 +127,8 @@ public actor QueuePCMStream {
       let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)
     else { throw AudioPipelineFailure.invalidConfiguration }
     self.items = items
+    self.skipping = skipping
+    self.identity = identity
     self.index = startingAt
     self.acquire = acquire
     self.release = release
@@ -162,7 +169,11 @@ public actor QueuePCMStream {
   }
 
   private func following(_ position: Int) -> Int? {
-    UpcomingEditRule.following(position, count: items.count, mode: repeatMode)
+    guard !skipping.isEmpty else {
+      return UpcomingEditRule.following(position, count: items.count, mode: repeatMode)
+    }
+    return UpcomingEditRule.following(
+      position, in: items.map { identity.root($0.id) }, mode: repeatMode, skipping: skipping)
   }
   private func configureUpcoming() {
     passedOver = 0
@@ -186,7 +197,9 @@ public actor QueuePCMStream {
       version: version, lastVersion: editVersion, old: items.map { identity.key($0) },
       new: newItems.map { identity.key($0) }, current: index,
       oldMode: repeatMode, newMode: newMode, prepared: incoming?.index, fetching: upcomingIndex,
-      fetchIntact: passedOver == 0 && !fetchFailed, betweenSongs: betweenSongs)
+      fetchIntact: passedOver == 0 && !fetchFailed, betweenSongs: betweenSongs,
+      skipped: skipping.isEmpty
+        ? [] : Set(newItems.map { identity.key($0) }.filter { skipping.contains($0.entry) }))
     switch decision {
     case .stale: return .applied
     case .tooLate: return .tooLate
@@ -464,7 +477,11 @@ public actor QueuePCMStream {
       incomingLease = nil
       incomingDecoder = nil
       incomingMarker = nil
-      if followingIndex <= index { cycle += 1 }
+      if followingIndex <= index {
+        cycle += 1
+        // A new pass: every song plays again.
+        skipping = []
+      }
       index = followingIndex
       ended = false
       transitionReady = false

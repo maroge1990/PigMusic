@@ -137,6 +137,25 @@ import Testing
     #expect(stream.root(fourth) == first)
   }
 
+  @Test func songsPlayedInThisPassArePassedOverUntilItWraps() {
+    let items = Array("axbc")
+    func next(_ position: Int, _ mode: PlaybackRepeat, _ skip: Set<Character>) -> Int? {
+      UpcomingEditRule.following(position, in: items, mode: mode, skipping: skip)
+    }
+    #expect(next(1, .off, ["b"]) == 3)
+    #expect(next(1, .off, ["b", "c"]) == nil)
+    // A new pass plays every song again.
+    #expect(next(1, .all, ["b", "c"]) == 0)
+    #expect(next(3, .all, ["a"]) == 0)
+    #expect(next(1, .one, ["x"]) == 1)
+    // The rule chooses the same song: a fetch for "c" is kept.
+    #expect(
+      UpcomingEditRule.decide(
+        version: 1, lastVersion: nil, old: items, new: items, current: 1, oldMode: .off,
+        newMode: .off, prepared: nil, fetching: 3, fetchIntact: true, betweenSongs: false,
+        skipped: ["b"]) == .keep)
+  }
+
   private func late(
     _ edited: String, anchor: Int = 0, heard: Int?, played: Set<Character> = [],
     repeatAll: Bool = false
