@@ -213,3 +213,18 @@ def test_up_next_swipes_to_remove_in_the_player_with_no_edit():
     menu = library.split("private struct UpNextRow: View {", 1)[1]
     for item in (".moveEarlier", ".moveLater", ".removeFromUpNext"):
         assert item in menu.split("\n}\n", 1)[0], item
+
+
+def test_a_playlists_add_says_what_happened_past_the_reload():
+    """#260: the playlist page's Add missing songs wrote its result to the
+    page's own line, which the reload after the Add cleared at once. The
+    result goes to the app's notice bar, which the reload doesn't touch."""
+    page = (APP / "PlaylistViews.swift").read_text()
+    page = page.split("struct PlaylistView: View {", 1)[1]
+    add = page.split("private func addMissing() async {", 1)[1].split("\n  }\n", 1)[0]
+    assert "model.notifyDone(AcquisitionResult.playlistNotice(" in add
+    assert "message" not in add
+    assert "reloadAfterEdit = true" in add
+    load = page.split("private func load() async {", 1)[1].split("\n  }\n", 1)[0]
+    assert "notices" not in load
+
