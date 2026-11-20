@@ -148,6 +148,29 @@ def generate():
         share_sources.append(
             add("share-build-" + path.name, "PBXBuildFile", fileRef=ref)
         )
+    # The Watch's watch-face complication (D-125): a WidgetKit extension in
+    # the Watch app. With it on the active face watchOS gives the Watch app
+    # background time, and the iPhone may wake it when it hands songs over.
+    complication_sources = []
+    for path in sorted((SWIFT / "PigMusicWatchComplication").glob("*.swift")):
+        ref = add(
+            "complication-" + path.name,
+            "PBXFileReference",
+            lastKnownFileType="sourcecode.swift",
+            path=f"PigMusicWatchComplication/{path.name}",
+            sourceTree="<group>",
+        )
+        files.append(ref)
+        complication_sources.append(
+            add("complication-build-" + path.name, "PBXBuildFile", fileRef=ref)
+        )
+    complication_product = add(
+        "complication-product",
+        "PBXFileReference",
+        explicitFileType="wrapper.app-extension",
+        path="PigMusicWatchComplication.appex",
+        sourceTree="BUILT_PRODUCTS_DIR",
+    )
     share_product = add(
         "share-product",
         "PBXFileReference",
@@ -217,7 +240,7 @@ def generate():
     products = add(
         "products",
         "PBXGroup",
-        children=[product, watch_product, share_product],
+        children=[product, watch_product, share_product, complication_product],
         name="Products",
         sourceTree="<group>",
     )
@@ -384,7 +407,56 @@ def generate():
             runOnlyForDeploymentPostprocessing="0",
         )
     )
+    complication_dependencies = []
+    complication_frameworks = []
+    for name in ("PigBrand", "PigCompanion"):
+        dependency = add(
+            "complication-" + name,
+            "XCSwiftPackageProductDependency",
+            package=package,
+            productName=name,
+        )
+        complication_dependencies.append(dependency)
+        complication_frameworks.append(
+            add("complication-framework-" + name, "PBXBuildFile", productRef=dependency)
+        )
+    complication_phases = [
+        add(
+            "complication-sources",
+            "PBXSourcesBuildPhase",
+            buildActionMask="2147483647",
+            files=complication_sources,
+            runOnlyForDeploymentPostprocessing="0",
+        ),
+        add(
+            "complication-frameworks",
+            "PBXFrameworksBuildPhase",
+            buildActionMask="2147483647",
+            files=complication_frameworks,
+            runOnlyForDeploymentPostprocessing="0",
+        ),
+    ]
+    watch_phases.append(
+        add(
+            "embed-complication",
+            "PBXCopyFilesBuildPhase",
+            buildActionMask="2147483647",
+            dstPath="",
+            dstSubfolderSpec="13",
+            files=[
+                add(
+                    "embed-complication-file",
+                    "PBXBuildFile",
+                    fileRef=complication_product,
+                    settings={"ATTRIBUTES": ["RemoveHeadersOnCopy"]},
+                )
+            ],
+            name="Embed Foundation Extensions",
+            runOnlyForDeploymentPostprocessing="0",
+        )
+    )
     watch_configs = []
+    complication_configs = []
     share_configs = []
     project_configs = []
     target_configs = []
@@ -443,6 +515,8 @@ def generate():
             "WATCHOS_DEPLOYMENT_TARGET": "11.0",
             "TARGETED_DEVICE_FAMILY": "4",
             "CODE_SIGN_STYLE": "Automatic",
+            # The App Group its complication reads the status from (D-125).
+            "CODE_SIGN_ENTITLEMENTS": "PigMusicWatch/PigMusicWatch.entitlements",
             "SKIP_INSTALL": "YES",
             "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
             "INFOPLIST_KEY_CFBundleDisplayName": "PigMusic",
@@ -467,6 +541,32 @@ def generate():
             "LD_RUNPATH_SEARCH_PATHS": "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks",
             "INFOPLIST_KEY_CFBundleDisplayName": "PigMusic",
         }
+        complication_settings = {
+            "PRODUCT_NAME": "$(TARGET_NAME)",
+            "PRODUCT_BUNDLE_IDENTIFIER": "au.com.pig.music.watchkitapp.complication",
+            "GENERATE_INFOPLIST_FILE": "YES",
+            "INFOPLIST_FILE": "PigMusicWatchComplication/Info.plist",
+            "MARKETING_VERSION": "0.2.0",
+            "CURRENT_PROJECT_VERSION": "30",
+            "SDKROOT": "watchos",
+            "SUPPORTED_PLATFORMS": "watchos watchsimulator",
+            "WATCHOS_DEPLOYMENT_TARGET": "11.0",
+            "TARGETED_DEVICE_FAMILY": "4",
+            "CODE_SIGN_STYLE": "Automatic",
+            "CODE_SIGN_ENTITLEMENTS": "PigMusicWatchComplication/PigMusicWatchComplication.entitlements",
+            "SKIP_INSTALL": "YES",
+            "APPLICATION_EXTENSION_API_ONLY": "YES",
+            "LD_RUNPATH_SEARCH_PATHS": "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks",
+            "INFOPLIST_KEY_CFBundleDisplayName": "PigMusic",
+        }
+        complication_configs.append(
+            add(
+                f"complication-target-{name}",
+                "XCBuildConfiguration",
+                buildSettings=complication_settings,
+                name=name,
+            )
+        )
         share_configs.append(
             add(
                 f"share-target-{name}",
@@ -519,6 +619,39 @@ def generate():
         defaultConfigurationIsVisible="0",
         defaultConfigurationName="Release",
     )
+    complication_list = add(
+        "complication-list",
+        "XCConfigurationList",
+        buildConfigurations=complication_configs,
+        defaultConfigurationIsVisible="0",
+        defaultConfigurationName="Release",
+    )
+    complication_target = add(
+        "complication-target",
+        "PBXNativeTarget",
+        buildConfigurationList=complication_list,
+        buildPhases=complication_phases,
+        buildRules=[],
+        dependencies=[],
+        name="PigMusicWatchComplication",
+        productName="PigMusicWatchComplication",
+        productReference=complication_product,
+        productType="com.apple.product-type.app-extension",
+        packageProductDependencies=complication_dependencies,
+    )
+    complication_dependency = add(
+        "complication-target-dependency",
+        "PBXTargetDependency",
+        target=complication_target,
+        targetProxy=add(
+            "complication-proxy",
+            "PBXContainerItemProxy",
+            containerPortal=identity("project"),
+            proxyType="1",
+            remoteGlobalIDString=complication_target,
+            remoteInfo="PigMusicWatchComplication",
+        ),
+    )
     share_target = add(
         "share-target",
         "PBXNativeTarget",
@@ -551,7 +684,7 @@ def generate():
         buildConfigurationList=watch_list,
         buildPhases=watch_phases,
         buildRules=[],
-        dependencies=[],
+        dependencies=[complication_dependency],
         name="PigMusicWatch",
         productName="PigMusicWatch",
         productReference=watch_product,
@@ -600,7 +733,7 @@ def generate():
         productRefGroup=products,
         projectDirPath="",
         projectRoot="",
-        targets=[target, watch_target, share_target],
+        targets=[target, watch_target, share_target, complication_target],
         packageReferences=[package],
     )
     directory = SWIFT / "PigMusic.xcodeproj"
