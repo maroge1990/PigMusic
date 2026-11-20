@@ -78,6 +78,45 @@ public enum FavouriteMatch {
         ?? false
     }
   }
+}
+
+/// The Favourites index, built once per version of the playlist and reused
+/// by every lookup until the playlist changes (Codex round 2 on batch G: a
+/// menu lookup or a sync rebuilt it each time). A version is the playlist's
+/// id (its owner's), its revision, which the server raises on every change,
+/// and its number of songs.
+public struct FavouriteIndexCache: Sendable {
+  private struct Version: Equatable, Sendable {
+    let id: String
+    let revision: Int
+    let count: Int
+  }
+  private var version: Version?
+  private var index: FavouriteMatch.Index?
+  /// How many times an index was built, for tests.
+  public private(set) var builds = 0
+  public init() {}
+  /// The index of `playlists`' Favourites, nil while they hold none with
+  /// its songs.
+  public mutating func index(_ playlists: [Playlist]) -> FavouriteMatch.Index? {
+    guard let favourites = playlists.first(where: { $0.favourites == true }),
+      let entries = favourites.entries
+    else {
+      version = nil
+      index = nil
+      return nil
+    }
+    let current = Version(id: favourites.id, revision: favourites.revision, count: entries.count)
+    if current != version || index == nil {
+      index = FavouriteMatch.Index([favourites])
+      version = current
+      builds += 1
+    }
+    return index
+  }
+}
+
+extension FavouriteMatch {
 
   /// Python's `\w` in a str pattern, from its own data: a binary search of
   /// the generated ranges.

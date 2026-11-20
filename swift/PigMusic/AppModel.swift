@@ -80,6 +80,9 @@ enum PlayOrigin: Hashable {
   var foundSearch: FoundSearch?
   /// Favourite state by song, shared by the player's star and Song actions.
   var favourites = FavouriteStates()
+  /// The library's Favourites playlist indexed once per version, for the
+  /// song menus' lookups and each sync (Codex round 2 on batch G).
+  @ObservationIgnored private var favouriteIndex = FavouriteIndexCache()
   /// What this person opened or played from search, newest first (D-61).
   private(set) var recentSearches = RecentSearches()
   @ObservationIgnored private var recentSearchesLoaded = false
@@ -770,7 +773,10 @@ enum PlayOrigin: Hashable {
     // Stars and song menus follow the synced Favourites playlist, except a
     // tap still being saved (FavouriteStates keeps those) or waiting to be
     // sent (Codex rounds 1 and 2 on batch G).
-    favourites.synced(playlists) { id in EditOutbox.favourite(id, in: pendingEdits) != nil }
+    // The index is built once per version of the playlist and the waiting
+    // edits read once (Codex round 2 on batch G).
+    favourites.synced(
+      favouriteIndex.index(playlists), waiting: FavouriteStates.waiting(in: pendingEdits))
     songCount = count
     songSeconds = seconds
     albumCategoryCounts = categoryCounts
@@ -1066,8 +1072,8 @@ enum PlayOrigin: Hashable {
       favourites.change(track.id, value)
       return
     }
-    if let listed = FavouriteStates.listed(track, in: playlists) {
-      favourites.answer(track.id, listed, since: favourites.revision(track.id))
+    if let index = favouriteIndex.index(playlists) {
+      favourites.answer(track.id, index.contains(track), since: favourites.revision(track.id))
       return
     }
     let stamp = account.generation

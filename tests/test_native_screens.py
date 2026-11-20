@@ -61,7 +61,8 @@ def test_the_song_menu_never_asks_to_load_the_favourite_state():
     assert [n for n, t in app.items() if "Load favourite" in t] == []
     model = app["AppModel.swift"]
     peek = model.split("func peekFavourite(", 1)[1].split("\n  }\n", 1)[0]
-    assert "FavouriteStates.listed(track, in: playlists)" in peek
+    assert "favouriteIndex.index(playlists)" in peek
+    assert "index.contains(track)" in peek
     menu = app["PersonalActionsViews.swift"]
     unknown = menu.split("case .favouriteUnknown:", 1)[1].split("case .", 1)[0]
     assert 'Button("Favourite", systemImage: "star")' in unknown
@@ -76,7 +77,13 @@ def test_a_sync_keeps_shown_favourite_states_current():
     waiting to be sent keeps its state."""
     model = (APP / "AppModel.swift").read_text()
     reload = model.split("private func loadCache(", 1)[1].split("\n  }\n", 1)[0]
-    assert "favourites.synced(playlists)" in reload
+    # Codex round 2 on batch G: the index is kept per version of the
+    # playlist, never rebuilt per lookup, and waiting edits are read once.
+    assert (
+        "favouriteIndex.index(playlists), waiting: FavouriteStates.waiting(" in reload
+    )
+    assert "FavouriteStates.listed(" not in model
+    assert "private var favouriteIndex = FavouriteIndexCache()" in model
     for name in ("func peekFavourite(", "func loadFavourite("):
         body = model.split(name, 1)[1].split("\n  }\n", 1)[0]
         assert "favourites.follow(track)" in body, name

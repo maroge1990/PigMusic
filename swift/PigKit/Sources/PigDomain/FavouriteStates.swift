@@ -91,7 +91,8 @@ public struct FavouriteStates: Sendable {
   /// Whether the Favourites playlist this iPhone's library holds lists the
   /// song (#284), by the server's own test (FavouriteMatch). Nil while the
   /// library holds no Favourites playlist with its songs: the state isn't
-  /// known here.
+  /// known here. Builds the index each time: the app keeps one per
+  /// revision instead (FavouriteIndexCache).
   public static func listed(_ track: Track, in playlists: [Playlist]) -> Bool? {
     FavouriteMatch.Index(playlists)?.contains(track)
   }
@@ -99,16 +100,24 @@ public struct FavouriteStates: Sendable {
   public mutating func follow(_ track: Track) { followed[track.id] = track }
   /// The library synced (Codex round 1 on batch G, #230). Which state wins:
   /// a tap still being saved, or a favourite edit of the person's still
-  /// waiting to be sent (`editWaiting`), keeps their tap; otherwise the synced Favourites playlist sets every
-  /// followed song's state, over an older read or cached answer, and a read
-  /// started before the sync no longer counts. Nothing changes while the
-  /// library holds no Favourites playlist with its songs.
-  public mutating func synced(_ playlists: [Playlist], editWaiting: (String) -> Bool) {
-    // Indexed once per sync: every song shown is looked up in it.
-    guard let index = FavouriteMatch.Index(playlists) else { return }
-    for (id, track) in followed where saving[id] == nil && !editWaiting(id) {
+  /// waiting to be sent (`waiting`, FavouriteStates.waiting(in:)), keeps
+  /// their tap; otherwise the synced Favourites playlist (`index`) sets
+  /// every followed song's state, over an older read or cached answer, and
+  /// a read started before the sync no longer counts. Nothing changes while
+  /// the library holds no Favourites playlist with its songs (nil).
+  public mutating func synced(_ index: FavouriteMatch.Index?, waiting: Set<String>) {
+    guard let index else { return }
+    for (id, track) in followed where saving[id] == nil && !waiting.contains(id) {
       change(id, index.contains(track))
     }
+  }
+  /// The songs with a favourite edit still waiting to be sent, read once
+  /// for a whole sync (Codex round 2 on batch G); a refused edit is not
+  /// waiting (as EditOutbox.favourite).
+  public static func waiting(in pending: [PendingMutation]) -> Set<String> {
+    Set(
+      pending.lazy.filter { $0.state == "queued" && $0.mutation.action == "favourite" }
+        .compactMap(\.mutation.track?.id))
   }
   /// A refused save settled (#212): the newest tap still waiting, or none,
   /// and then the state is unknown until the server is read again.

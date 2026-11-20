@@ -73,4 +73,55 @@ struct FavouriteMatchTests {
     let underscored = Track(id: "u", title: "Ma_e", artist: "Artist", album: "Album")
     #expect(FavouriteStates.listed(underscored, in: playlists) == false)
   }
+
+  private func favourites(count: Int, revision: Int) throws -> [Playlist] {
+    let entries = (0..<count).map { index in
+      #"{"entry_id":"f:\#(index)","title":"Song \#(index)","artist":"Artist \#(index % 300)","album":"Album \#(index % 900)","position":\#(index)}"#
+    }
+    let json =
+      #"[{"id":"pig-favourites:me","name":"Favourites","revision":\#(revision),"favourites":true,"entries":["#
+      + entries.joined(separator: ",") + "]}]"
+    return try LibraryCodec.decoder().decode([Playlist].self, from: Data(json.utf8))
+  }
+
+  /// Codex round 2 on batch G: each menu lookup and each sync rebuilt the
+  /// whole index (1.61 s for 20 first-time lookups with 10,000 favourites).
+  /// It is built once per version of the playlist and reused.
+  @Test func theIndexIsBuiltOncePerVersionOfThePlaylist() throws {
+    var cache = FavouriteIndexCache()
+    let first = try favourites(count: 10_000, revision: 1)
+    for index in 0..<20 {
+      let song = Track(
+        id: "s\(index)", title: "Song \(index)", artist: "Artist \(index % 300)",
+        album: "Album \(index % 900)")
+      #expect(cache.index(first)?.contains(song) == true)
+    }
+    #expect(cache.builds == 1)
+    // The same version read again from the store: still one build.
+    #expect(cache.index(try favourites(count: 10_000, revision: 1)) != nil)
+    #expect(cache.builds == 1)
+    // A new revision (a favourite added elsewhere) builds it again, once.
+    let next = try favourites(count: 10_001, revision: 2)
+    let added = Track(id: "n", title: "Song 10000", artist: "Artist 100", album: "Album 100")
+    #expect(cache.index(next)?.contains(added) == true)
+    #expect(cache.index(next) != nil && cache.builds == 2)
+    // No Favourites playlist: nothing, and a later one is built afresh.
+    #expect(cache.index([]) == nil)
+    #expect(cache.index(next) != nil && cache.builds == 3)
+  }
+
+  /// Waiting favourite edits are gathered once per sync, queued ones only.
+  @Test func waitingFavouritesAreGatheredOnce() {
+    let song = Track(id: "s", title: "Song", artist: "Artist")
+    let other = Track(id: "o", title: "Other", artist: "Artist")
+    var refused = PendingMutation(
+      mutation: OfflineMutation(action: "favourite", track: other, favourite: true))
+    refused.state = "rejected"
+    let pending = [
+      PendingMutation(mutation: OfflineMutation(action: "favourite", track: song, favourite: true)),
+      refused,
+      PendingMutation(mutation: OfflineMutation(action: "append", playlistId: "p", track: other)),
+    ]
+    #expect(FavouriteStates.waiting(in: pending) == ["s"])
+  }
 }

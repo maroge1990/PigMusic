@@ -236,22 +236,22 @@ private func favourites(_ titles: [String]) throws -> [Playlist] {
   // Another device favourites road; the person taps light here, not sent yet.
   let tapped = states.tap(light.id)
   if let tapped { states.settled(tapped) }  // Saved into the outbox.
-  states.synced(try favourites(["Open Road"]), editWaiting: { $0 == light.id })
+  states.synced(FavouriteMatch.Index(try favourites(["Open Road"])), waiting: [light.id])
   #expect(states[road.id] == true)  // The synced playlist, over the cached false.
   #expect(states[light.id] == true)  // The waiting tap is kept.
   let late = states.answer(road.id, false, since: before)
   #expect(!late)  // A read started before the sync loses.
   #expect(states[road.id] == true)
   // Unfavourited elsewhere: the next sync says so; songs never shown stay unknown.
-  states.synced(try favourites([]), editWaiting: { _ in false })
+  states.synced(FavouriteMatch.Index(try favourites([])), waiting: [])
   #expect(states[road.id] == false && states[light.id] == false)
   #expect(states[rain.id] == nil)
   // No Favourites playlist with its songs: nothing changes.
-  states.synced([], editWaiting: { _ in false })
+  states.synced(FavouriteMatch.Index([]), waiting: [])
   #expect(states[road.id] == false)
   // Sign-out forgets what was followed.
   states.clear()
-  states.synced(try favourites(["Open Road"]), editWaiting: { _ in false })
+  states.synced(FavouriteMatch.Index(try favourites(["Open Road"])), waiting: [])
   #expect(states[road.id] == nil)
 }
 
@@ -275,7 +275,7 @@ private func favourites(_ titles: [String]) throws -> [Playlist] {
   #expect(!stale)
   #expect(states[road.id] == true)
   // A sync from before the save reached the server doesn't undo it either.
-  states.synced(try favourites([]), editWaiting: { _ in false })
+  states.synced(FavouriteMatch.Index(try favourites([])), waiting: [])
   #expect(states[road.id] == true)
   // Two taps: the first ending leaves the second still saving.
   let again = states.tap(road.id)
@@ -287,7 +287,7 @@ private func favourites(_ titles: [String]) throws -> [Playlist] {
   // Saved: the next read and sync count again.
   let fresh = states.answer(road.id, true, since: states.revision(road.id))
   #expect(fresh && states[road.id] == true)
-  states.synced(try favourites([]), editWaiting: { _ in false })
+  states.synced(FavouriteMatch.Index(try favourites([])), waiting: [])
   #expect(states[road.id] == false)
   // A tap from before a sign-out settles nothing after it.
   let old = states.tap(road.id)
