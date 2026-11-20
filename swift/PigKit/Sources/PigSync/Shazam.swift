@@ -18,9 +18,9 @@ public struct ShazamRequestOutcome: Sendable, Hashable {
   public var skipped = 0
   /// Songs the person paused before: left paused (#264).
   public var paused = 0
-  /// The Shazam ids of songs the server took (#259): only these show Adding.
-  /// A song left out or left paused is not among them, so it can be added
-  /// again.
+  /// The Shazam ids of songs the server took or that are in your library
+  /// now (#259): no longer missing. A song left out, left paused, or one an
+  /// older server's totals can't place is not among them.
   public var taken: [String] = []
   /// The Shazam ids of songs the catalogue has no exact version of: not requested.
   public var unmatched: [String] = []
@@ -78,30 +78,12 @@ public enum ShazamRequests {
       outcome.skipped += result.skipped
       outcome.paused += result.paused
       outcome.downloadsEnabled = outcome.downloadsEnabled && result.downloadsEnabled
-      if result.tookAll(batch.count) {
-        outcome.taken += batch.flatMap { shazamIds[$0] }
-      } else {
-        outcome.taken += await taken(tracks, batch, shazamIds, source: source, current: current)
+      // Each song by the server's answer for it; the Add is sent once and
+      // never again to find out (Codex round 1 on batch K).
+      for (index, taken) in zip(batch, result.songsTaken(batch.count)) where taken {
+        outcome.taken += shazamIds[index]
       }
     }
     return outcome
-  }
-  /// A batch the server didn't take whole answers with totals only (#259):
-  /// each song is asked again on its own to learn which it took. Asking
-  /// again never doubles a request (the server answers `existing`), and a
-  /// song left out or left paused stays so. A failure, a cancel or another
-  /// account marks no more songs: they stay addable.
-  private static func taken(
-    _ tracks: [Track], _ batch: Range<Int>, _ shazamIds: [[String]],
-    source: any ShazamRequestSource, current: @Sendable () async -> Bool
-  ) async -> [String] {
-    var taken: [String] = []
-    for index in batch {
-      guard !Task.isCancelled, await current(),
-        let alone = try? await source.requestMusic([tracks[index]])
-      else { break }
-      if alone.tookIt { taken += shazamIds[index] }
-    }
-    return taken
   }
 }

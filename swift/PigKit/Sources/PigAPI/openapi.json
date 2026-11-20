@@ -30,6 +30,22 @@
             "title": "Existing",
             "type": "integer"
           },
+          "outcomes": {
+            "default": [],
+            "items": {
+              "enum": [
+                "created",
+                "existing",
+                "added",
+                "paused",
+                "excluded",
+                "in_library"
+              ],
+              "type": "string"
+            },
+            "title": "Outcomes",
+            "type": "array"
+          },
           "paused": {
             "default": 0,
             "title": "Paused",

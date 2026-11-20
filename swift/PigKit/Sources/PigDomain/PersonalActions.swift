@@ -33,20 +33,25 @@ public struct AcquisitionResult: Codable, Sendable {
   public let paused: Int
   /// The server requests those songs were left paused under (#276).
   public let pausedIds: [String]
+  /// What happened to each song sent, in order (Codex round 1 on batch K):
+  /// created, existing, added, paused, excluded or in_library. Empty from
+  /// an older server.
+  public let outcomes: [String]
   public let downloadsEnabled: Bool
   public init(
     created: Int, existing: Int, skipped: Int, paused: Int = 0, pausedIds: [String] = [],
-    downloadsEnabled: Bool
+    outcomes: [String] = [], downloadsEnabled: Bool
   ) {
     self.created = created
     self.existing = existing
     self.skipped = skipped
     self.paused = paused
     self.pausedIds = pausedIds
+    self.outcomes = outcomes
     self.downloadsEnabled = downloadsEnabled
   }
   private enum CodingKeys: String, CodingKey {
-    case created, existing, skipped, paused, pausedIds, downloadsEnabled
+    case created, existing, skipped, paused, pausedIds, outcomes, downloadsEnabled
   }
   public init(from decoder: any Decoder) throws {
     let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -56,6 +61,7 @@ public struct AcquisitionResult: Codable, Sendable {
     // An older server doesn't say.
     paused = try values.decodeIfPresent(Int.self, forKey: .paused) ?? 0
     pausedIds = try values.decodeIfPresent([String].self, forKey: .pausedIds) ?? []
+    outcomes = try values.decodeIfPresent([String].self, forKey: .outcomes) ?? []
     downloadsEnabled = try values.decode(Bool.self, forKey: .downloadsEnabled)
   }
   /// Nothing new was asked for and a paused song stays paused (#264): the
@@ -67,9 +73,17 @@ public struct AcquisitionResult: Codable, Sendable {
   public func tookAll(_ count: Int) -> Bool {
     skipped == 0 && paused == 0 && created + existing == count
   }
-  /// One song sent alone: the server is getting it, new or already asked
-  /// for, not left out or left paused.
-  public var tookIt: Bool { created + existing > 0 }
+  /// For each of the `count` songs sent together, in order: whether the
+  /// server is getting it or it is in your library now, so it is no longer
+  /// missing (#259). From the server's answer for each song; from an older
+  /// server, which gives totals only, every song when it took them all and
+  /// none otherwise: which was left out can't be told, and asking again to
+  /// find out could undo a cancel made meanwhile (Codex round 1 on batch K).
+  public func songsTaken(_ count: Int) -> [Bool] {
+    if outcomes.count == count { return outcomes.map(Self.taking.contains) }
+    return Array(repeating: tookAll(count), count: count)
+  }
+  private static let taking: Set = ["created", "existing", "added", "in_library"]
   public static let pausedNotice = "Paused. Resume it in Downloads."
 }
 extension AcquisitionResult {

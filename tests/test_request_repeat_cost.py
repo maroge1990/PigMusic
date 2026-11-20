@@ -142,6 +142,7 @@ def test_songs_the_household_has_are_taken_up_once_per_request(tmp_path, monkeyp
         "skipped": 0,
         "paused": 0,
         "paused_ids": [],
+        "outcomes": ["added"] * 30 + ["existing"],
         "downloads_enabled": False,
     }
     assert calls == [[f"have-{i}" for i in range(30)]]
@@ -299,6 +300,7 @@ def test_one_pass_leaves_the_queue_as_one_per_song_did(tmp_path, monkeypatch):
             "skipped": 0,
             "paused": 0,
             "paused_ids": [],
+            "outcomes": [],
         }
         scopes = user_library.request_scope(tracks)
         with monkeypatch.context() as patch:

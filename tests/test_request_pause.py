@@ -408,6 +408,53 @@ def test_withdrawing_from_an_older_shared_pause_does_not_pass_it_on(tmp_path):
     assert status(store, key) == "waiting_for_sources"
 
 
+def test_an_add_says_what_happened_to_each_song_in_order(tmp_path):
+    """Codex round 1 on batch K: a batch's totals can't say which song was
+    taken, and the iPhone asking again song by song recreated a request
+    cancelled meanwhile. The answer names each song's outcome, in order."""
+    store, owner, member = fixture(tmp_path)
+    users = store.user_libraries
+    household = {
+        "title": "Song 0",
+        "artist": "Artist",
+        "album_artist": "Artist",
+        "album": "Album",
+        "duration": 100,
+    }
+    kept = {**song("Kept"), "status": "missing"}
+    users.request(member, [kept])
+    with store.connect() as conn:
+        (key,) = conn.execute("SELECT id FROM queue").fetchone()
+        conn.execute(
+            "INSERT INTO documents VALUES (?,?)",
+            ("excluded:fixture", json.dumps({"track": song("Unwanted")})),
+        )
+    users.pause_request(member, key)
+    new = {**song("New", 2), "status": "missing"}
+    result = store.submit_catalogue(
+        [
+            new,
+            {**household, "status": "downloaded"},
+            {**song("Unwanted"), "status": "missing"},
+            {**kept},
+            {**new},
+            {**household, "status": "downloaded"},
+        ],
+        user_id=member,
+        resume_paused=True,
+    )
+    assert result["outcomes"] == [
+        "created",
+        "added",
+        "excluded",
+        "paused",
+        "existing",
+        "in_library",
+    ]
+    assert (result["created"], result["existing"], result["skipped"]) == (1, 2, 2)
+    assert result["paused"] == 1 and result["paused_ids"] == [key]
+
+
 def test_an_add_left_paused_names_the_paused_request(tmp_path, monkeypatch):
     """#276: the iPhone clears a song's Paused mark when the request it was
     left paused under resumes, so the answer names that request: here one
@@ -439,4 +486,6 @@ def test_an_add_left_paused_names_the_paused_request(tmp_path, monkeypatch):
     assert again.status_code == 200, again.text
     assert again.json()["paused"] == 1
     assert again.json()["paused_ids"] == [key]
+    assert first.json()["outcomes"] == ["created"]
+    assert again.json()["outcomes"] == ["paused"]
     assert status(store, key) == "paused"

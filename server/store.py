@@ -1797,6 +1797,10 @@ class Store:
         # The paused requests an Add left paused, by request ID, so the iPhone
         # clears a song's Paused mark when that request resumes (#276).
         paused_ids = []
+        # What happened to each song, in the order given (Codex round 1 on
+        # batch K): a batch's totals can't say which song was taken, and
+        # asking again to find out could undo a cancel.
+        outcomes = []
         # Songs that already had an unfinished job: the queue is reconciled
         # for them once, after the last song, not once each (#237). Nothing
         # below reads what a reconcile writes (quality target, claim token,
@@ -1834,6 +1838,7 @@ class Store:
                     )
                 ):
                     skipped += 1
+                    outcomes.append("excluded")
                     continue
                 if track["status"] == "downloaded":
                     if user_id:
@@ -1860,8 +1865,10 @@ class Store:
                                 # not left out (#211). The iPhone reads a
                                 # skipped song as excluded from downloads.
                                 existing += 1
+                                outcomes.append("added")
                                 continue
                     skipped += 1
+                    outcomes.append("in_library")
                     continue
                 payload = {
                     k: v
@@ -1970,6 +1977,7 @@ class Store:
                 ):
                     # Their own pause: Add leaves it, Resume resumes (#264).
                     paused += 1
+                    outcomes.append("paused")
                     paused_ids.append(key)
                 elif prior and prior[0] not in {"cancelled", "failed"}:
                     if user_id:
@@ -1996,18 +2004,21 @@ class Store:
                     else:
                         joined = True
                     existing += 1
+                    outcomes.append("existing")
                 elif prior:
                     conn.execute(
                         "UPDATE queue SET status='waiting_for_sources',payload=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                         (json.dumps(payload), key),
                     )
                     created += 1
+                    outcomes.append("created")
                 else:
                     conn.execute(
                         "INSERT INTO queue(id,payload,status) VALUES (?,?,'waiting_for_sources')",
                         (key, json.dumps(payload)),
                     )
                     created += 1
+                    outcomes.append("created")
             if taken_up or joined:
                 from .household_policy import HouseholdPolicy
 
@@ -2022,6 +2033,7 @@ class Store:
             "skipped": skipped,
             "paused": paused,
             "paused_ids": paused_ids,
+            "outcomes": outcomes,
             "downloads_enabled": settings["enabled"],
         }
 

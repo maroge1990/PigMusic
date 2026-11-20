@@ -193,22 +193,27 @@ private struct SwitchingServer: ShazamRequestSource {
 }
 
 /// The server leaves "Viva la Vida" out (excluded from downloads) and gets
-/// "Fix You", answering a batch with totals only.
+/// "Fix You"; `perSong` false answers like an older server, with totals only.
 private struct LeavesOneOut: ShazamRequestSource {
   let calls: Calls
+  var perSong = true
   func resolveApple(kind: String, appleId: Int) async throws -> ResolvedApple? {
     try await Server(calls: calls).resolveApple(kind: kind, appleId: appleId)
   }
   func requestMusic(_ tracks: [Track]) async throws -> AcquisitionResult {
     await calls.request(tracks)
-    let out = tracks.filter { $0.musicbrainzRecordingId == "rec-viva" }.count
+    let outcomes = tracks.map { $0.musicbrainzRecordingId == "rec-viva" ? "excluded" : "created" }
+    let out = outcomes.filter { $0 == "excluded" }.count
     return AcquisitionResult(
-      created: tracks.count - out, existing: 0, skipped: out, downloadsEnabled: true)
+      created: tracks.count - out, existing: 0, skipped: out,
+      outcomes: perSong ? outcomes : [], downloadsEnabled: true)
   }
 }
 
 /// #259: a song the server left out never shows Adding and can be added
-/// again; the songs it took (both Shazams of one recording) do.
+/// again; the songs it took (both Shazams of one recording) do. Codex round
+/// 1 on batch K: the Add is sent once, never again song by song to find
+/// out, which recreated a request cancelled meanwhile.
 @Test func onlySongsTheServerTookAreMarkedAdding() async throws {
   let calls = Calls()
   let songs = [
@@ -218,8 +223,15 @@ private struct LeavesOneOut: ShazamRequestSource {
   let outcome = try await ShazamRequests.requestMissing(songs, source: LeavesOneOut(calls: calls))
   #expect(outcome.created == 1 && outcome.skipped == 1)
   #expect(outcome.taken.sorted() == ["3", "7"])
-  // The batch, then each song on its own to learn which was taken.
-  #expect(await calls.requested.map(\.count) == [2, 1, 1])
+  #expect(await calls.requested.map(\.count) == [2])
+
+  // An older server's totals can't say which was left out: none is marked,
+  // and nothing more is sent.
+  let older = Calls()
+  let unsure = try await ShazamRequests.requestMissing(
+    songs, source: LeavesOneOut(calls: older, perSong: false))
+  #expect(unsure.taken.isEmpty)
+  #expect(await older.requested.map(\.count) == [2])
 
   // A batch taken whole is asked once and marks every song.
   let whole = Calls()
