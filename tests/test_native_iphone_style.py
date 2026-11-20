@@ -168,6 +168,31 @@ def test_pushed_pages_have_inline_titles_and_one_toolbar_rule():
     assert found(".toolbarBackground(") == []
 
 
+def toolbars(text):
+    """The contents of every `.toolbar { … }` in a source, braces balanced."""
+    blocks = []
+    for m in re.finditer(r"\.toolbar \{", text):
+        depth, i = 1, m.end()
+        while depth:
+            depth += {"{": 1, "}": -1}.get(text[i], 0)
+            i += 1
+        blocks.append(text[m.end() : i - 1])
+    return blocks
+
+
+def test_a_toolbar_menu_is_one_plain_ellipsis():
+    """#286: the playlist page's ⋯ in the toolbar drew its own filled circle
+    (CollectionMenuButton) inside the toolbar's button, a second shape around
+    the dots. In a toolbar the menu's label is the plain ellipsis, as on the
+    mix page; the drawn round buttons stay in the pages' own action rows."""
+    for name, text in sources().items():
+        for block in toolbars(text):
+            for drawn in ("CollectionMenuButton(", "RoundIconLabel(", "RoundIcon("):
+                assert drawn not in block, f"{name}: {drawn}"
+    playlist = toolbars(sources()["PlaylistViews.swift"])
+    assert any('Image(systemName: "ellipsis")' in block for block in playlist)
+
+
 def test_playlist_and_mix_pages_use_the_detail_layout():
     """#158: inset-grouped cells, Section("Settings") and a hand-made header."""
     playlist = sources()["PlaylistViews.swift"]

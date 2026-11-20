@@ -248,11 +248,17 @@ struct PlaylistView: View {
     }.listStyle(.plain).pigCanvas().navigationTitle(playlist.name).navigationBarTitleDisplayMode(.inline)
       .toolbar {
         if playlist.favourites != true && empty == nil { EditButton() }
-        // The playlist's one menu (D-118), with Download and Add N songs to library.
-        CollectionMenuButton(label: "More actions for \(playlist.name)") {
+        // The playlist's one menu (D-118), with Download and Add N songs to
+        // library. A plain ellipsis, as the mix page's: the toolbar draws the
+        // button, and a drawn circle sat inside it as a second shape (#286).
+        Menu {
           PlaylistActionsMenu(
             model: model, playlist: playlist, missing: missing.count, addMissing: addMissing)
+        } label: {
+          Image(systemName: "ellipsis").accessibilityLabel("More actions for \(playlist.name)")
         }
+        // The same order wherever it opens (D-118).
+        .menuOrder(.fixed)
       }
       // Pull down to refresh replaces the toolbar's Refresh (D-120).
       .refreshable { if !removing { await load() } }
