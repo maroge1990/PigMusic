@@ -73,3 +73,18 @@ public enum MutationRejection: Error, LocalizedError, Sendable {
     "The server refused this edit. Review or discard it to continue."
   }
 }
+
+/// A menu's New playlist (#285): the playlist and its songs as edits for
+/// the outbox, in order. The new playlist's id is chosen here (the server
+/// takes it, a UUID), so the songs can be added to it before it has reached
+/// the server, and every edit is for that one playlist: a refused create
+/// holds its songs back with it. No edits for a name that is only spaces.
+public enum NewPlaylistEdits {
+  public static func make(name: String, songs: [Track]) -> [OfflineMutation] {
+    let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !name.isEmpty else { return [] }
+    let playlist = UUID().uuidString.lowercased()
+    return [OfflineMutation(action: "create", playlistId: playlist, name: name)]
+      + songs.map { OfflineMutation(action: "append", playlistId: playlist, track: $0) }
+  }
+}

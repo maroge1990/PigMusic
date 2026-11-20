@@ -899,6 +899,8 @@ struct NowPlayingView: View {
       .navigationTitle("Now playing").navigationBarTitleDisplayMode(.inline)
       .toolbar { Button("Done") { dismiss() } }
     }.pigBrandedCanvas()
+      // The song menus' New playlist while the player is open (#285).
+      .modifier(NewPlaylistPrompt(model: model))
   }
   private var current: Track? { player.queue.current?.track }
   private var position: Double { scrubbing ?? player.elapsed }

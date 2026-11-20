@@ -247,6 +247,8 @@ struct LibraryShell: View {
   private var playing: Bool { model.player.queue.current != nil }
   var body: some View {
     tabs
+      // A menu's New playlist on the tabs; the player asks for its own (#285).
+      .modifier(NewPlaylistPrompt(model: model, active: !showPlayer && !showAccount))
       .sheet(isPresented: $showPlayer) {
         // The player's artist link: pushed onto the selected tab once the player closes.
         NowPlayingView(model: model) { model.pageRoute = PageRoute(.artist($0)) }

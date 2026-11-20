@@ -66,3 +66,36 @@ def test_the_song_menu_never_asks_to_load_the_favourite_state():
     unknown = menu.split("case .favouriteUnknown:", 1)[1].split("case .", 1)[0]
     assert 'Button("Favourite", systemImage: "star")' in unknown
     assert "orFavourite: true" in unknown
+
+
+def test_add_to_playlist_offers_a_new_playlist_first():
+    """#285: Add to playlist had no way to make a playlist. Song and
+    collection menus (albums, artists, playlists, mixes) offer New playlist
+    with the plus (D-116) first; the page under the menu asks for the name in
+    the Playlists tab's words, and the songs go to the playlist it makes."""
+    app = {p.name: p.read_text() for p in APP.glob("*.swift")}
+    menus = app["PersonalActionsViews.swift"]
+    pickers = menus.split('Menu("Add to playlist", systemImage: "text.badge.plus") {')[
+        1:
+    ]
+    assert len(pickers) == 2
+    for picker in pickers:
+        body = picker.split("}.disabled(!model.canMutate)", 1)[0]
+        new = body.index('Button("New playlist", systemImage: "plus")')
+        assert new < body.index("ForEach(playlists)")
+        assert "model.newPlaylist = NewPlaylistRequest(" in body
+    prompt = menus.split("struct NewPlaylistPrompt: ViewModifier {", 1)[1]
+    prompt = prompt.split("\n}\n", 1)[0]
+    tools = app["PlaylistViews.swift"]
+    for words in ('"New playlist"', '"Playlist name"', '"Create playlist"'):
+        assert words in prompt and words in tools, words
+    assert "model.createPlaylist(named: value, adding: request)" in prompt
+    # The tabs ask unless the player (or Account) is open; the player asks then.
+    shell = app["PigMusicApp.swift"]
+    assert (
+        "NewPlaylistPrompt(model: model, active: !showPlayer && !showAccount)" in shell
+    )
+    player = app["LibraryViews.swift"].split("struct NowPlayingView: View {", 1)[1]
+    assert ".modifier(NewPlaylistPrompt(model: model))" in player.split("\n  }\n", 1)[0]
+    model = app["AppModel.swift"].split("func createPlaylist(named", 1)[1]
+    assert "NewPlaylistEdits.make(name: name, songs: songs)" in model

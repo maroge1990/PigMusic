@@ -72,6 +72,12 @@ struct SongActionsMenu: View {
     case .addToPlaylist:
       let playlists = model.playlists.filter { $0.favourites != true }
       Menu("Add to playlist", systemImage: "text.badge.plus") {
+        // Named in the page's prompt, then the song is added (#285).
+        Button("New playlist", systemImage: "plus") {
+          model.newPlaylist = NewPlaylistRequest(
+            generation: model.currentGeneration, name: track.title
+          ) { [track] in [track] }
+        }
         ForEach(playlists) { playlist in
           Button(playlist.name) { Task { await add(track, to: playlist) } }
         }
@@ -264,6 +270,11 @@ struct CollectionActionsMenu: View {
     case .addToPlaylist:
       let playlists = model.playlists.filter { $0.favourites != true && $0.id != playlistId }
       Menu("Add to playlist", systemImage: "text.badge.plus") {
+        // Named in the page's prompt, then the songs are read and added (#285).
+        Button("New playlist", systemImage: "plus") {
+          model.newPlaylist = NewPlaylistRequest(
+            generation: model.currentGeneration, name: name, songs: songs)
+        }
         ForEach(playlists) { playlist in
           Button(playlist.name) { withSongs { await model.add($0, to: playlist) } }
         }
@@ -293,6 +304,42 @@ struct CollectionActionsMenu: View {
           hidden?()
         }
       }
+    }
+  }
+}
+
+/// What a menu's New playlist adds (#285), for the account that chose it;
+/// `name` names the songs if they can't be read.
+@MainActor struct NewPlaylistRequest {
+  let generation: Int
+  let name: String
+  /// Nil when they couldn't be read.
+  let songs: @MainActor () async -> [Track]?
+}
+
+/// The name a menu's New playlist asks for (#285), worded as the Playlists
+/// tab's New playlist. A menu closes as its item is chosen, so the page
+/// under it asks: the tabs, or the player while it is open (`active`).
+struct NewPlaylistPrompt: ViewModifier {
+  let model: AppModel
+  var active = true
+  @State private var name = ""
+  func body(content: Content) -> some View {
+    content.alert(
+      "New playlist",
+      isPresented: Binding(
+        get: { active && model.newPlaylist != nil },
+        set: { if !$0 { model.newPlaylist = nil } })
+    ) {
+      let request = model.newPlaylist
+      TextField("Playlist name", text: $name)
+      Button("Create playlist") {
+        let value = name
+        name = ""
+        if let request { Task { await model.createPlaylist(named: value, adding: request) } }
+      }
+      .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+      Button("Cancel", role: .cancel) { name = "" }
     }
   }
 }

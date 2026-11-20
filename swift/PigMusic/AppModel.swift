@@ -2141,6 +2141,30 @@ enum PlayOrigin: Hashable {
       confirmations += 1
     } catch is CancellationError {} catch { notify(error) }
   }
+  /// A menu's New playlist (#285): while set, the page under the menu asks
+  /// for the name (NewPlaylistPrompt).
+  var newPlaylist: NewPlaylistRequest?
+  /// Makes the playlist, then adds the request's songs to it, through the
+  /// edit outbox as the Playlists tab's New playlist and Add to playlist do.
+  /// Only for the account that asked.
+  func createPlaylist(named name: String, adding request: NewPlaylistRequest) async {
+    guard account.isCurrent(request.generation),
+      !NewPlaylistEdits.make(name: name, songs: []).isEmpty
+    else { return }
+    let read = await request.songs()
+    guard account.isCurrent(request.generation) else { return }
+    // A collection whose songs couldn't be read makes no empty playlist.
+    guard let songs = read else {
+      notify("Couldn't load \(request.name). Try again.")
+      return
+    }
+    do {
+      for edit in NewPlaylistEdits.make(name: name, songs: songs) {
+        try await saveEdit(edit)
+      }
+      confirmations += 1
+    } catch is CancellationError {} catch { notify(error) }
+  }
   /// D-103: a success tap, no text; a failure says why.
   func sendToWatch(_ tracks: [Track], origin: DownloadOrigin = .direct) async {
     switch await watch?.enqueue(tracks, origin: origin) {
