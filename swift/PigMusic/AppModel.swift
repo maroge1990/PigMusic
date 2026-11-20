@@ -66,7 +66,8 @@ enum PlayOrigin: Hashable {
   var syncing = false
   var message: String?
   var songSort: LibrarySort = .title
-  var albumSort: LibrarySort = .title
+  /// Recently added first (D-120 screen 30, #281).
+  var albumSort: LibrarySort = .recentlyAdded
   var artistSort: LibrarySort = .title
   var songs: [Track] = []
   var albums: [Album] = []

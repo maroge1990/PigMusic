@@ -10,6 +10,9 @@ public actor LibraryStore {
   /// The migration that asks for one full resync so saved songs, albums
   /// and artists gain their cover address (#168).
   static let coverAddressResync = "cover-addresses-v11"
+  /// The migration that asks for one full resync so saved albums gain when
+  /// they were added (#281).
+  static let albumAddedResync = "album-added-v12"
   public init(path: String) throws { try self.init(path: path, upTo: nil) }
   /// `upTo` stops after the named migration: a store as an earlier build
   /// left it, for tests.
@@ -123,6 +126,13 @@ public actor LibraryStore {
       // succeeds the revision stays missing, so offline, signed out or
       // interrupted it is simply tried again. Downloads, the outboxes and
       // everything cached are not touched.
+      try db.execute(sql: "DELETE FROM metadata WHERE key='revision'")
+    }
+    migrator.registerMigration(LibraryStore.albumAddedResync) { db in
+      // Albums gained `added_at` (#281). The server sends every album once
+      // when it gains the field, but a build without it may have read that
+      // and saved albums without it: force one full resync, as for cover
+      // addresses. Only the saved revision goes; nothing else is touched.
       try db.execute(sql: "DELETE FROM metadata WHERE key='revision'")
     }
     if let last { try migrator.migrate(queue, upTo: last) } else { try migrator.migrate(queue) }
@@ -494,6 +504,9 @@ public actor LibraryStore {
     // Newest first; music without a year after it.
     case .year:
       "json_extract(CAST(payload AS TEXT),'$.year') IS NULL, CAST(json_extract(CAST(payload AS TEXT),'$.year') AS TEXT) DESC, name COLLATE sortname, id"
+    // Newest added first (#281); albums with no added time after, in title order.
+    case .recentlyAdded:
+      "json_extract(CAST(payload AS TEXT),'$.added_at') IS NULL, json_extract(CAST(payload AS TEXT),'$.added_at') DESC, name COLLATE sortname, id"
     }
   }
 

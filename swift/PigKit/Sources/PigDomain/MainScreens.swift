@@ -136,7 +136,7 @@ public enum LibrarySortChoice {
   public static func options(_ collection: LibraryCollection) -> [LibrarySort] {
     switch collection {
     case .artists: [.title, .titleDescending]
-    case .albums: [.title, .titleDescending, .artist, .year]
+    case .albums: [.recentlyAdded, .title, .titleDescending, .artist, .year]
     case .tracks, .playlists: [.title, .titleDescending, .artist]
     }
   }
@@ -147,6 +147,7 @@ public enum LibrarySortChoice {
     case .titleDescending: return noun + " Z–A"
     case .artist: return "Artist"
     case .year: return "Year"
+    case .recentlyAdded: return "Recently added"
     }
   }
 }
