@@ -50,7 +50,8 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
     /// A manifest listed songs the previous one didn't: the window reopens.
     case listed
     /// The iPhone's complication push arrived (it handed songs to the link,
-    /// D-125); `active` whether the app was on screen. The window reopens.
+    /// D-125); `active` whether the app was on screen. Only new songs in it
+    /// move the window on (`phonePushed`).
     case phonePush
   }
   public struct Event: Codable, Sendable, Equatable {
@@ -118,12 +119,37 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
   @discardableResult public mutating func songsListed(
     _ ids: some Sequence<String>, previous: some Sequence<String>, at date: Date = Date()
   ) -> Bool {
-    let current = Array(ids)
-    let before = Array(previous)
+    guard newSongs(Array(ids), alsoKnown: Array(previous), at: date) else { return false }
+    note(Event(at: date, kind: .listed))
+    return true
+  }
+  /// The iPhone's complication push (D-125). It always counts as a wake
+  /// (the caller takes what the link has waiting), but it moves the window
+  /// on, or reopens it, only with evidence of new songs: `songs`, the ids it
+  /// handed over, judged by the same rule as a manifest's (each song once
+  /// since the app was opened, the reopenings charged only when a stopped
+  /// window reopens), and only when it is fresh: sent less than `pushMaxAge`
+  /// before it arrived, and not further ahead than `clockSlack`. So a retry
+  /// of songs already seen, or a push delivered late, keeps nothing awake
+  /// (Codex round 1 on batch J). Returns whether the window moved on.
+  @discardableResult public mutating func phonePushed(
+    songs: [String], sentAt: Date, active: Bool, at date: Date = Date()
+  ) -> Bool {
+    note(Event(at: date, kind: .phonePush, active: active))
+    let age = date.timeIntervalSince(sentAt)
+    guard age < Self.pushMaxAge, age > -WatchRefreshPlan.clockSlack else { return false }
+    return newSongs(songs, alsoKnown: [], at: date)
+  }
+  /// A push older than this when it arrives wakes but extends nothing.
+  public static let pushMaxAge: TimeInterval = 30 * 60
+  /// Songs in `ids` not in `alsoKnown` nor listed since the app was last
+  /// opened move the window on (#300: a reopening is used only when a
+  /// stopped window reopens). Once the memory is full nothing does.
+  private mutating func newSongs(_ ids: [String], alsoKnown: [String], at date: Date) -> Bool {
     var seen = listedSeen ?? []
     let full = seen.count >= Self.listedCapacity
-    let fresh = Set(current).subtracting(before).subtracting(seen)
-    for id in before + current where seen.count < Self.listedCapacity { seen.insert(id) }
+    let fresh = Set(ids).subtracting(alsoKnown).subtracting(seen)
+    for id in alsoKnown + ids where seen.count < Self.listedCapacity { seen.insert(id) }
     listedSeen = seen
     guard !full, !fresh.isEmpty else { return false }
     if !windowOpen(at: date) {
@@ -132,17 +158,7 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
     }
     lastListed = date
     refreshStoppedAt = nil
-    note(Event(at: date, kind: .listed))
     return true
-  }
-  /// The iPhone's complication push (D-125): it has just handed songs to
-  /// the link, the explicit sign the person sent songs. It reopens the
-  /// window whatever the listed-song memory or the reopening count say;
-  /// what bounds it is the iPhone's own push budget (#300).
-  public mutating func phonePushed(active: Bool, at date: Date = Date()) {
-    lastListed = date
-    refreshStoppedAt = nil
-    note(Event(at: date, kind: .phonePush, active: active))
   }
   /// WidgetKit's count of PigMusic complications on watch faces.
   public mutating func complicationsOnFaces(_ count: Int) {

@@ -133,7 +133,9 @@ public struct WatchComplicationReload: Equatable, Sendable {
 /// one per hand-off burst (hand-offs less than `burstGap` apart), never
 /// within `spacing` of the last one, never when the complication isn't on
 /// the face or PigMusic is open on Apple Watch already (it takes the songs
-/// itself), and always keeping `reserve` of the day's allowance. Saved on
+/// itself), never for a hand-off that only retries songs an earlier push
+/// already announced (they are no new burst, Codex round 1 on batch J),
+/// and always keeping `reserve` of the day's allowance. Saved on
 /// the iPhone, so a background launch keeps the clock.
 public struct WatchComplicationPushes: Codable, Equatable, Sendable {
   public enum Decision: String, Codable, Sendable {
@@ -149,6 +151,8 @@ public struct WatchComplicationPushes: Codable, Equatable, Sendable {
     case spacing
     /// This burst of hand-offs already had its push.
     case alreadyThisBurst
+    /// Every song handed over was in an earlier push: a retry, not a new burst.
+    case retry
   }
   public struct Event: Codable, Equatable, Sendable {
     public var at: Date
@@ -163,6 +167,8 @@ public struct WatchComplicationPushes: Codable, Equatable, Sendable {
   /// Events older than this are dropped.
   public static let keep: TimeInterval = 7 * 86400
   public static let capacity = 500
+  /// Songs remembered as announced by a push.
+  public static let pushedCapacity = 2000
 
   /// Pushes sent and hand-offs that sent none (not those in a burst that
   /// already had one), newest last.
@@ -176,13 +182,22 @@ public struct WatchComplicationPushes: Codable, Equatable, Sendable {
   public private(set) var remaining: Int?
   /// The last push sent.
   public private(set) var lastSent: Date?
+  /// Songs announced by a push in the last `keep`, and when.
+  public private(set) var pushedSongs: [String: Date] = [:]
   public init() {}
 
-  /// Songs were handed to the Watch link at `now`: whether to push. A
-  /// `.send` is recorded only once `sent(at:)` confirms it went.
+  /// Songs (`songs`, their ids) were handed to the Watch link at `now`:
+  /// whether to push. A `.send` is recorded only once `sent(at:songs:)`
+  /// confirms it went. Songs all announced before are a retry: no push, and
+  /// no burst starts. (No ids at all can't be judged and count as new.)
   public mutating func handed(
-    now: Date, enabled: Bool, remaining: Int, watchAppOpen: Bool = false
+    now: Date, songs: [String] = [], enabled: Bool, remaining: Int, watchAppOpen: Bool = false
   ) -> Decision {
+    forgetOldSongs(now: now)
+    if !songs.isEmpty, songs.allSatisfy({ pushedSongs[$0] != nil }) {
+      note(Event(at: now, decision: .retry))
+      return .retry
+    }
     if let lastHanded {
       let since = now.timeIntervalSince(lastHanded)
       if since >= Self.burstGap || since < -Self.burstGap { burstPushed = false }
@@ -200,11 +215,23 @@ public struct WatchComplicationPushes: Codable, Equatable, Sendable {
     }
     return decision
   }
-  /// The push went: this burst has had its push.
-  public mutating func sent(at date: Date) {
+  /// The push went, announcing `songs`: this burst has had its push.
+  public mutating func sent(at date: Date, songs: [String] = []) {
     burstPushed = true
     lastSent = date
+    for id in songs { pushedSongs[id] = date }
+    forgetOldSongs(now: date)
     note(Event(at: date, decision: .send))
+  }
+  /// Drops songs announced more than `keep` ago, then the oldest beyond
+  /// `pushedCapacity`.
+  private mutating func forgetOldSongs(now: Date) {
+    pushedSongs = pushedSongs.filter { now.timeIntervalSince($0.value) <= Self.keep }
+    if pushedSongs.count > Self.pushedCapacity {
+      let kept = pushedSongs.sorted { ($0.value, $0.key) > ($1.value, $1.key) }
+        .prefix(Self.pushedCapacity)
+      pushedSongs = Dictionary(uniqueKeysWithValues: kept.map { ($0.key, $0.value) })
+    }
   }
 
   /// The rule. A last push more than `spacing` ahead of `now` is from a
@@ -247,7 +274,8 @@ public struct WatchComplicationPushes: Codable, Equatable, Sendable {
       "Hand-offs with no push: \(count(.disabled, now: now)) with no complication on the face, "
         + "\(count(.reserve, now: now)) to keep the reserve, "
         + "\(count(.spacing, now: now)) too soon after the last push, "
-        + "\(count(.watchAppOpen, now: now)) with PigMusic open on Apple Watch.",
+        + "\(count(.watchAppOpen, now: now)) with PigMusic open on Apple Watch, "
+        + "\(count(.retry, now: now)) retrying songs already announced.",
     ]
     if let lastHanded {
       lines.append("Songs last handed to the Apple Watch link: \(lastHanded.formatted(.iso8601)).")
@@ -259,9 +287,16 @@ public struct WatchComplicationPushes: Codable, Equatable, Sendable {
 /// The message a complication push carries; the Watch tells it apart from
 /// the other messages on the link.
 public struct CompanionWake: Codable, Equatable, Sendable {
+  /// Song ids carried at most: one new one is evidence enough.
+  public static let maxSongs = 500
   public var kind = "wake"
   public var sentAt: Date
-  public init(sentAt: Date) { self.sentAt = sentAt }
+  /// The ids of the songs just handed over: the Watch's evidence of new songs.
+  public var songs: [String]?
+  public init(sentAt: Date, songs: [String] = []) {
+    self.sentAt = sentAt
+    self.songs = Array(songs.prefix(Self.maxSongs))
+  }
   public static func decode(_ data: Data) -> CompanionWake? {
     guard let wake = try? JSONDecoder().decode(CompanionWake.self, from: data), wake.kind == "wake"
     else { return nil }

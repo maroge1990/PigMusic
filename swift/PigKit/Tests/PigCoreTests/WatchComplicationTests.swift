@@ -223,6 +223,52 @@ struct WatchComplicationTests {
     #expect(pushes.handed(now: at(minutes: 15), enabled: true, remaining: 50) == .spacing)
   }
 
+  /// Codex round 1 on batch J: the same song retried every 30 minutes
+  /// pushed every time. A retry of songs already announced is no new burst.
+  @Test func retriesOfAnnouncedSongsDontPush() {
+    var pushes = WatchComplicationPushes()
+    #expect(pushes.handed(now: at(minutes: 0), songs: ["x"], enabled: true, remaining: 50) == .send)
+    pushes.sent(at: at(minutes: 0), songs: ["x"])
+    for step in 1...8 {
+      #expect(
+        pushes.handed(
+          now: at(minutes: Double(step) * 30), songs: ["x"], enabled: true, remaining: 49)
+          == .retry)
+    }
+    #expect(pushes.count(.send, now: at(minutes: 300)) == 1)
+    #expect(pushes.count(.retry, now: at(minutes: 300)) == 8)
+    // A retry starts no burst: a new song right after still pushes.
+    #expect(
+      pushes.handed(now: at(minutes: 301), songs: ["x", "y"], enabled: true, remaining: 49)
+        == .send)
+    // Announced songs are forgotten after a week.
+    var later = WatchComplicationPushes()
+    later.sent(at: at(minutes: 0), songs: ["x"])
+    #expect(
+      later.handed(now: at(minutes: 8 * 24 * 60), songs: ["x"], enabled: true, remaining: 50)
+        == .send)
+  }
+
+  @Test func theAnnouncedSongsStayBounded() {
+    var pushes = WatchComplicationPushes()
+    let many = (0..<(WatchComplicationPushes.pushedCapacity + 50)).map { "s\($0)" }
+    pushes.sent(at: at(minutes: 0), songs: Array(many.prefix(100)))
+    pushes.sent(at: at(minutes: 1), songs: Array(many.dropFirst(100)))
+    #expect(pushes.pushedSongs.count == WatchComplicationPushes.pushedCapacity)
+    // The oldest went first.
+    #expect(pushes.pushedSongs["s0"] == nil && pushes.pushedSongs["s2049"] != nil)
+  }
+
+  @Test func theWakeCarriesTheNewSongs() throws {
+    let wake = CompanionWake(sentAt: start, songs: (0..<600).map { "s\($0)" })
+    #expect(wake.songs?.count == CompanionWake.maxSongs)
+    let decoded = CompanionWake.decode(try JSONEncoder().encode(wake))
+    #expect(decoded == wake)
+    // From a build before the songs were carried: no evidence.
+    let old = Data(#"{"kind":"wake","sentAt":0}"#.utf8)
+    #expect(CompanionWake.decode(old)?.songs == nil)
+  }
+
   @Test func pushesAreSavedAndSummarised() throws {
     var pushes = WatchComplicationPushes()
     _ = pushes.handed(now: at(minutes: 0), enabled: false, remaining: 50)
@@ -236,7 +282,8 @@ struct WatchComplicationTests {
     #expect(text.contains("Pushes that wake PigMusic on Apple Watch: 1 in the last 7 days; last at "))
     #expect(text.contains("Pushes left today: 47 (10 are always kept)."))
     #expect(text.contains("Hand-offs with no push: 1 with no complication on the face, 0 to keep"))
-    #expect(text.contains("0 with PigMusic open on Apple Watch."))
+    #expect(
+      text.contains("0 with PigMusic open on Apple Watch, 0 retrying songs already announced."))
     // With no link, what WatchConnectivity last said.
     #expect(saved.summary(now: at(minutes: 40), enabled: nil, remaining: nil).contains("left today: 48"))
     #expect(

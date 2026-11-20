@@ -182,14 +182,17 @@ import WidgetKit
     planRefresh()
   }
   /// The iPhone's complication push (D-125): it just handed songs to the
-  /// link. Noted (it reopens the refresh window, #300), then the songs are
-  /// taken as in the link's background task and the next refresh planned.
+  /// link. Noted (new songs in it, sent recently, move the refresh window
+  /// on; a retry or a late push doesn't), then whatever waits is taken as in
+  /// the link's background task and the next refresh planned.
   /// Run apart from the message that brought it: the delivery waits for
   /// the link's deliveries to finish, that message among them.
   @ObservationIgnored private var phoneWake: Task<Void, Never>?
-  func wokenByPhone(at date: Date = Date()) {
+  func wokenByPhone(_ wake: CompanionWake, at date: Date = Date()) {
     let active = appActive
-    noteWake { $0.phonePushed(active: active, at: date) }
+    noteWake {
+      _ = $0.phonePushed(songs: wake.songs ?? [], sentAt: wake.sentAt, active: active, at: date)
+    }
     guard phoneWake == nil else { return }
     phoneWake = Task { [weak self] in
       await self?.finishBackgroundDelivery()
@@ -405,8 +408,8 @@ import WidgetKit
         await self?.flushListens()
       }
       link?.onMessage = { [weak self] data in
-        if CompanionWake.decode(data) != nil {
-          self?.wokenByPhone()
+        if let wake = CompanionWake.decode(data) {
+          self?.wokenByPhone(wake)
           return
         }
         if let state = PhoneNowPlaying.decode(data) {

@@ -83,15 +83,21 @@ def test_the_iphone_wakes_the_watch_app_through_the_budget():
     link = LINK.read_text()
     publish = phone.split("  private func publishOnce(force: Bool) async {", 1)[1]
     publish = publish.split("\n  }\n", 1)[0]
-    assert publish.rstrip().endswith("if handed > 0 { wakeWatch() }")
-    wake = body(phone, "  private func wakeWatch(now: Date = Date()) {")
-    assert "pushes.handed(" in wake and "watchAppOpen: link.reachable" in wake
+    assert publish.rstrip().endswith("if handed > 0 { wakeWatch(songs: handedIds) }")
+    assert "handed += 1\n        handedIds.append(song.id)" in publish
+    wake = body(
+        phone, "  private func wakeWatch(songs: [String], now: Date = Date()) {"
+    )
+    assert "pushes.handed(\n      now: now, songs: songs," in wake
+    assert "watchAppOpen: link.reachable" in wake
     # Sent only on the rule's say-so, and counted only once it went.
     assert wake.index("decision == .send") < wake.index("link.pushComplication(data)")
     assert wake.index("link.pushComplication(data)") < wake.index(
-        "pushes.sent(at: now)"
+        "pushes.sent(at: now, songs: fresh)"
     )
-    assert "CompanionWake(sentAt: now)" in wake
+    # The push names only songs no earlier push announced (Codex round 1 on J).
+    assert "let fresh = songs.filter { pushes.pushedSongs[$0] == nil }" in wake
+    assert "CompanionWake(sentAt: now, songs: fresh)" in wake
     # Saved, so a background launch keeps the clock.
     assert phone.count("Self.complicationPushesKey") == 2
     # One place sends it, on the iPhone only, and only with the complication on the face.
@@ -124,12 +130,18 @@ def test_the_watch_takes_songs_when_the_iphone_wakes_it():
     model = MODEL.read_text()
     message = model.split("link?.onMessage = { [weak self] data in", 1)[1]
     assert message.lstrip().startswith(
-        "if CompanionWake.decode(data) != nil {\n          self?.wokenByPhone()"
+        "if let wake = CompanionWake.decode(data) {\n          self?.wokenByPhone(wake)"
     )
-    wake = body(model, "  func wokenByPhone(at date: Date = Date()) {")
-    # Noted first (it reopens the refresh window, #300), then the delivery
-    # runs apart from the message, which it would otherwise wait for.
-    assert "$0.phonePushed(active: active, at: date)" in wake
+    wake = body(
+        model, "  func wokenByPhone(_ wake: CompanionWake, at date: Date = Date()) {"
+    )
+    # Noted first, with its songs and send time (only new songs, sent
+    # recently, move the window on), then the delivery runs apart from the
+    # message, which it would otherwise wait for.
+    assert (
+        "$0.phonePushed(songs: wake.songs ?? [], sentAt: wake.sentAt, active: active, at: date)"
+        in wake
+    )
     assert "guard phoneWake == nil else { return }" in wake
     task = wake.split("phoneWake = Task {", 1)[1]
     assert task.index("await self?.finishBackgroundDelivery()") < task.index(

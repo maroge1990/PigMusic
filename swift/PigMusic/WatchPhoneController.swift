@@ -108,19 +108,25 @@ import UIKit
   private static let complicationPushesKey = "pig.watch.complication-pushes"
   /// Songs were just handed to the Watch link: wake the Watch app to take
   /// them, once per burst and within watchOS's daily allowance, while
-  /// PigMusic's complication is on the active watch face (#219).
-  private func wakeWatch(now: Date = Date()) {
+  /// PigMusic's complication is on the active watch face (#219). `songs`:
+  /// the ids handed over; a retry of songs already announced pushes nothing,
+  /// and the push names only the new ones, the Watch's evidence that songs
+  /// were sent (Codex round 1 on batch J).
+  private func wakeWatch(songs: [String], now: Date = Date()) {
     guard let link, let enabled = link.complicationEnabled,
       let remaining = link.complicationPushesLeft
     else { return }
     var pushes = complicationPushes
     // Reachable: PigMusic is open on Apple Watch and takes the songs itself.
     let decision = pushes.handed(
-      now: now, enabled: enabled, remaining: remaining, watchAppOpen: link.reachable)
-    if decision == .send, let data = try? JSONEncoder().encode(CompanionWake(sentAt: now)),
+      now: now, songs: songs, enabled: enabled, remaining: remaining,
+      watchAppOpen: link.reachable)
+    let fresh = songs.filter { pushes.pushedSongs[$0] == nil }
+    if decision == .send,
+      let data = try? JSONEncoder().encode(CompanionWake(sentAt: now, songs: fresh)),
       link.pushComplication(data)
     {
-      pushes.sent(at: now)
+      pushes.sent(at: now, songs: fresh)
       DiagnosticsLog.shared.record(
         "watch", "woke the Watch app through its complication; \(remaining - 1) pushes left today")
     }
@@ -977,6 +983,7 @@ import UIKit
     let nextContext = CompanionContext(
       revision: max(context.revision, peerRevision) + 1, account: namespace)
     var handed = 0
+    var handedIds: [String] = []
     for (song, isAhead) in audio.send.map({ ($0, false) }) + audio.ahead.map({ ($0, true) }) {
       guard let file = files[song.id] else { continue }
       let identity = WatchDelivery.identity(song)
@@ -988,10 +995,11 @@ import UIKit
         sent.mark("audio:" + identity)
         noteDelivery { $0.handed(song.id) }
         handed += 1
+        handedIds.append(song.id)
       }
     }
     if handed > 0, !foreground { noteBackground { $0.note(.sent, count: handed) } }
-    if handed > 0 { wakeWatch() }
+    if handed > 0 { wakeWatch(songs: handedIds) }
   }
   /// The iPhone's copy of a song goes once the Watch confirms holding it, and
   /// a song the Watch later loses is fetched from the server again (#218).

@@ -299,32 +299,84 @@ struct WatchWakeLogTests {
     #expect(reopened == WatchWakeLog.reopeningLimit)
   }
 
-  /// #300 item 2: three full-size lists fill the listed-song memory, and a
-  /// later first send couldn't restart wake-ups; the iPhone's complication
-  /// push (D-125) says new songs were sent whatever the memory holds.
-  @Test func theIPhonesPushReopensWhateverTheMemorySays() {
+  /// Codex round 1 on batch J: the iPhone retried the same song every 30
+  /// minutes, each retry pushed, and every push restarted the two hours,
+  /// with no song ever accepted. A push now moves the window on only with
+  /// new songs: retries of songs already seen leave it to stop.
+  @Test func retryOnlyPushesLetTheWindowStop() {
     var log = WatchWakeLog()
     log.opened(at: at(0))
-    let many = (0..<WatchWakeLog.listedCapacity).map { "id\($0)" }
-    log.songsListed(many, previous: [], at: at(0))
-    #expect(log.refreshPlan(now: at(3), waiting: 5) == .none)
-    #expect(log.refreshStoppedAt == at(3))
-    // A first send of new songs: the memory is full, the list reopens nothing.
-    #expect(log.songsListed(many + ["new"], previous: many, at: at(4)) == false)
-    #expect(log.refreshPlan(now: at(4), waiting: 6) == .none)
-    // The iPhone's push reopens it, in the background too.
-    let reopenings = log.reopenings
-    log.phonePushed(active: false, at: at(4, minutes: 1))
-    #expect(log.refreshStoppedAt == nil)
-    #expect(log.refreshPlan(now: at(4, minutes: 1), waiting: 6) == .at(at(4, minutes: 31)))
-    #expect(log.count(.phonePush, now: at(5)) == 1)
-    // Uncounted against the reopenings, and still the 2-hour limit from there.
-    log.phonePushed(active: true, at: at(7))
-    #expect(log.reopenings == reopenings)
-    #expect(log.refreshPlan(now: at(9, minutes: 1), waiting: 6) == .none)
-    let summary = log.summary(now: at(10))
+    let first = log.phonePushed(songs: ["x"], sentAt: at(0), active: false, at: at(0))
+    #expect(first)
+    for step in 1...8 {
+      let time = at(0, minutes: Double(step) * 30)
+      let moved = log.phonePushed(songs: ["x"], sentAt: time, active: false, at: time)
+      #expect(!moved)
+    }
+    // Two hours from the last real mark (opened, and "x" first sent).
+    #expect(log.refreshPlan(now: at(2, minutes: 1), waiting: 1) == .none)
+    #expect(log.refreshStoppedAt == at(2, minutes: 1))
+    #expect(log.refreshPlan(now: at(4), waiting: 1) == .none)
+    // Every push still counted as a wake.
+    #expect(log.count(.phonePush, now: at(5)) == 9)
     #expect(
-      summary.contains("Woken by the iPhone's complication push: 2 times (1 while the app was not open)."))
+      log.summary(now: at(5)).contains(
+        "Woken by the iPhone's complication push: 9 times (9 while the app was not open)."))
+  }
+
+  @Test func genuinelyNewSongsInAPushReopenAStoppedWindow() {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    #expect(log.refreshPlan(now: at(3), waiting: 2) == .none)
+    #expect(log.refreshStoppedAt != nil)
+    let reopened = log.phonePushed(songs: ["x", "y"], sentAt: at(4), active: false, at: at(4))
+    #expect(reopened)
+    #expect(log.refreshStoppedAt == nil)
+    #expect(log.refreshPlan(now: at(4), waiting: 2) == .at(at(4, minutes: 30)))
+    // A stopped window reopening uses a reopening, as for a manifest.
+    #expect(log.reopenings == 1)
+    // The manifest naming the same songs then adds nothing more.
+    #expect(log.songsListed(["x", "y"], previous: [], at: at(4, minutes: 1)) == false)
+    // Nor does an empty list of songs.
+    let empty = log.phonePushed(songs: [], sentAt: at(5), active: false, at: at(5))
+    #expect(!empty)
+  }
+
+  /// A push that arrives late, or from a clock far ahead, wakes but extends nothing.
+  @Test func aDelayedPushWakesButDoesntExtend() {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    #expect(log.refreshPlan(now: at(3), waiting: 2) == .none)
+    let late = log.phonePushed(
+      songs: ["x"], sentAt: at(3), active: false,
+      at: at(3).addingTimeInterval(WatchWakeLog.pushMaxAge))
+    #expect(!late)
+    #expect(log.refreshStoppedAt != nil)
+    let ahead = log.phonePushed(songs: ["y"], sentAt: at(5, minutes: 10), active: false, at: at(5))
+    #expect(!ahead)
+    // A few minutes either way is a clock difference, and counts.
+    let skewed = log.phonePushed(songs: ["z"], sentAt: at(6, minutes: 4), active: false, at: at(6))
+    #expect(skewed)
+    #expect(log.count(.phonePush, now: at(7)) == 3)
+  }
+
+  /// The listed-song memory and the reopening limit hold for pushes too.
+  @Test func pushesShareTheManifestsMemoryAndLimit() {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    var reopened = 0
+    for step in 0..<10 {
+      let time = at(3 + Double(step) * 3)
+      if log.phonePushed(songs: ["s\(step)"], sentAt: time, active: false, at: time) {
+        reopened += 1
+      }
+    }
+    #expect(reopened == WatchWakeLog.reopeningLimit)
+    let many = (0..<WatchWakeLog.listedCapacity).map { "id\($0)" }
+    var full = WatchWakeLog()
+    full.songsListed(many, previous: [], at: at(0))
+    let pushed = full.phonePushed(songs: ["new"], sentAt: at(3), active: false, at: at(3))
+    #expect(!pushed)
   }
 
   @Test func saysWhetherAComplicationIsOnAWatchFace() throws {
