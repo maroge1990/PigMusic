@@ -77,7 +77,7 @@
   bottom: 122px;
 }
 .has-player .notice-area {
-  bottom: 150px;
+  --notice-bottom: 150px;
 }
 
 .provider-key {

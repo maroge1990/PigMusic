@@ -248,3 +248,71 @@ test("on a short screen a live Undo stays in view below the warnings", async ({
   await page.clock.runFor(20_000);
   expect(deleted).toEqual([]);
 });
+
+// Codex, batch D web part 2 (#269): on a short landscape screen with three
+// warnings and two live Undos, the Undo part left the opened warning list
+// no height, so nothing in it could be reached until the Undos were sent.
+test("on a short screen with two Undos, opened warnings can still be reached", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 667, height: 320 });
+  await page.clock.install();
+  const playlist = (id: string, name: string) => (route: Route) =>
+    route.fulfill({ json: { id, name, revision: 1, entries: [] } });
+  await mockApi(page, {
+    answers: {
+      "/v1/playlists": (route) =>
+        route.fulfill({
+          json: {
+            playlists: [
+              { id: "p1", name: "Gym" },
+              { id: "p3", name: "Old" },
+              { id: "p4", name: "Older" },
+            ],
+          },
+        }),
+      "/v1/playlists/p1": playlist("p1", "Gym"),
+      "/v1/playlists/p1/songs": (route) =>
+        route.fulfill({ status: 502, body: "Bad gateway" }),
+      "/v1/playlists/p3": playlist("p3", "Old"),
+      "/v1/playlists/p4": playlist("p4", "Older"),
+    },
+  });
+  await page.goto(`/#/library/album/${album.id}`);
+  const dots = page.getByRole("button", {
+    name: "More options for Von dutch",
+  });
+  for (let i = 0; i < 3; i++) {
+    await dots.click();
+    await page.getByRole("menuitem", { name: "Add to playlist" }).click();
+    await page.getByRole("menuitem", { name: "Gym" }).click();
+    await expect(
+      page.getByRole("menu", { name: "Add Von dutch to playlist" }),
+    ).toBeHidden();
+  }
+  for (const id of ["p3", "p4"]) {
+    await page.goto(`/#/library/playlist/${id}`);
+    await page.getByText("Playlist options").click();
+    await page.getByRole("button", { name: "Delete playlist" }).click();
+  }
+  const undos = notices(page).getByRole("button", { name: "Undo" });
+  await expect(undos).toHaveCount(2);
+  await notices(page).getByRole("button", { name: "1 more" }).click();
+  const warnings = notices(page)
+    .locator(".notice")
+    .filter({ hasText: "Check the playlist" });
+  await expect(warnings).toHaveCount(3);
+  // Each opened warning is reached by scrolling, and each Undo too.
+  for (const notice of [...(await warnings.all()), ...(await undos.all())]) {
+    await notice.scrollIntoViewIfNeeded();
+    await expect(notice).toBeInViewport({ ratio: 0.9 });
+  }
+  const fewer = notices(page).getByRole("button", { name: "Show fewer" });
+  await expect(fewer).toBeInViewport();
+  await fewer.click();
+  // Folded again, both Undos are reachable.
+  for (const undo of await undos.all()) {
+    await undo.scrollIntoViewIfNeeded();
+    await expect(undo).toBeInViewport({ ratio: 1 });
+  }
+});

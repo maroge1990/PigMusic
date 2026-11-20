@@ -45,7 +45,9 @@
 /* The one notice area (#250): stacked newest last above the player. */
 .notice-area {
   position: fixed;
-  bottom: 30px;
+  /* Moved up by the player and the phone's tab bar. */
+  --notice-bottom: 30px;
+  bottom: var(--notice-bottom);
   /* Centred: the layout has no sidebar to offset it by (#154). */
   left: 50%;
   transform: translateX(-50%);
@@ -60,8 +62,11 @@
   max-height: min(60dvh, calc(100dvh - 12rem));
   pointer-events: none;
 }
+/* The warnings give way to the Undo part; an opened list keeps room of its
+   own, and then the Undo part scrolls within what is left (#269). */
 .notice-list {
   display: flex;
+  flex: 0 1000 auto;
   flex-direction: column;
   align-items: center;
   gap: var(--space-8);
@@ -76,7 +81,20 @@
   align-items: center;
   gap: var(--space-8);
 }
+/* An opened list always keeps room to scroll through, however many Undos
+   are live on a short screen. */
+.notice-area.is-expanded {
+  max-height: calc(100dvh - var(--notice-bottom) - var(--space-16));
+}
 .notice-area.is-expanded .notice-list {
+  min-height: 3.75rem;
+  pointer-events: auto;
+}
+.notice-area.is-expanded .notice-actions {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   pointer-events: auto;
 }
 .notice {

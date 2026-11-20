@@ -27,7 +27,7 @@
   }
   .notice-area,
   .has-player .notice-area {
-    bottom: calc(
+    --notice-bottom: calc(
       var(--mobile-nav-height, 4rem) + var(--player-height, 0px) +
         var(--space-16)
     );
