@@ -688,6 +688,50 @@ private func eventually(_ condition: @Sendable () async -> Bool) async throws {
     #expect(await sources.active.isEmpty)
   }
 
+  enum LateEdit: String, CaseIterable, Sendable { case playNext, removedAndAppended }
+  /// "b" already heard (not yet shown) when an edit arrives too late for
+  /// the stream: a song the edit put before "b" (Play next), or the song
+  /// added after "b" was removed, still plays; the removed one never does
+  /// (Codex round 2 on batch L: both were skipped).
+  @Test(arguments: LateEdit.allCases, editRates) @MainActor
+  func aLateEditStillPlaysTheSongsItQueued(_ edit: LateEdit, rate: Double) async throws {
+    let root = try editRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let short = Int(rate / 4)
+    let ids = edit == .playNext ? ["a", "b", "c"] : ["a", "b"]
+    let (session, output, sources, items) = try start(
+      ids, rate: rate, frames: ["a": short], root: root)
+    try await waitUntil { session.snapshot.state == .playing }
+    while output.captured.count < short + 4096 {
+      output.consume()
+      try await Task.sleep(for: .milliseconds(2))
+    }
+    while output.positionFrames <= Int64(short) + 1024, !output.pending.isEmpty {
+      output.consume()
+    }
+    #expect(session.snapshot.occurrenceID == items[0].id)
+    let stops = output.stops
+    var restarts: [QueuePlaybackSnapshot] = []
+    session.onUpdate = { if $0.state == .preparing { restarts.append($0) } }
+    let mark = output.captured.count
+    let queued = editTrack(edit == .playNext ? "x" : "d")
+    let edited =
+      edit == .playNext ? [items[0], queued, items[1], items[2]] : [items[0], queued]
+    session.updateUpcoming(edited)
+    try await waitUntil { !restarts.isEmpty }
+    try await playToEnd(session, output)
+    let length = Int(rate)
+    #expect(output.stops == stops + 1)
+    #expect(restarts.map(\.index) == [1] && restarts.map(\.elapsed) == [0])
+    #expect(restarts.first?.occurrenceID == queued.id)
+    let after: [(id: String, frames: Range<Int>)] =
+      edit == .playNext
+      ? [("x", 0..<length), ("b", 0..<length), ("c", 0..<length)] : [("d", 0..<length)]
+    #expect(firstBreak(output.captured.dropFirst(mark), after, length: length) == nil)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+
   /// The same, with nothing after the removed song: the queue ends there.
   @Test @MainActor func removingTheLastSongAlreadyHeardEndsTheQueue() async throws {
     let root = try editRoot()

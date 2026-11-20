@@ -100,3 +100,34 @@ enum UpcomingEditRule {
     return .refetch
   }
 }
+
+/// Where the queue restarts after an edit came too late (#279). The song
+/// heard may already be past the one shown when the edit was made (the
+/// `anchor`, a position in the edited queue). Songs the edit placed between
+/// the two that the listener has not heard (Play next, or a song added after
+/// a removed one) play first, from their start; only then the song heard,
+/// from where it was. Neither app can be told of another order, so the
+/// edited order stands: up to a clock tick of the song heard plays again
+/// later from its start. A removed song is never chosen.
+enum LateEditRestart {
+  /// - Parameters:
+  ///   - edited: the edited queue, by entry.
+  ///   - heard: the heard song's position in it (nil: the edit removed it).
+  ///   - played: entries heard between the anchor and the heard song.
+  /// - Returns: the position to start and whether it keeps the heard
+  ///   song's place in it; nil when nothing is left to play.
+  static func point<Entry: Hashable>(
+    edited: [Entry], anchor: Int, heard: Int?, played: Set<Entry>, repeatAll: Bool
+  ) -> (index: Int, keepsPosition: Bool)? {
+    if let heard, heard <= anchor { return (heard, true) }
+    let stop = min(heard ?? edited.count, edited.count)
+    if anchor + 1 < stop {
+      for position in (anchor + 1)..<stop where !played.contains(edited[position]) {
+        return (position, false)
+      }
+    }
+    if let heard { return (heard, true) }
+    if repeatAll, !edited.isEmpty { return (0, false) }
+    return nil
+  }
+}

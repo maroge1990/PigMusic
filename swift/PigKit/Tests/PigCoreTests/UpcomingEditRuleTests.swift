@@ -129,4 +129,30 @@ import Testing
     other.merge(identity)
     #expect(other.root(third) == first)
   }
+
+  private func late(
+    _ edited: String, anchor: Int = 0, heard: Int?, played: Set<Character> = [],
+    repeatAll: Bool = false
+  ) -> [Int]? {
+    LateEditRestart.point(
+      edited: Array(edited), anchor: anchor, heard: heard, played: played, repeatAll: repeatAll
+    ).map { [$0.index, $0.keepsPosition ? 1 : 0] }
+  }
+  @Test func aLateEditRestartsWhereNothingQueuedIsSkipped() {
+    // The song shown is still heard, or the next one: it carries on.
+    #expect(late("abc", heard: 0) == [0, 1])
+    #expect(late("abc", heard: 1) == [1, 1])
+    // Play next put "x" before the heard "b": "x" first, from its start.
+    #expect(late("axbc", heard: 2) == [1, 0])
+    // "b" (heard) removed: the next song queued from its start, even one
+    // added after it.
+    #expect(late("ac", heard: nil) == [1, 0])
+    #expect(late("ad", heard: nil) == [1, 0])
+    // Nothing left: the queue ends; under Repeat All it wraps.
+    #expect(late("a", heard: nil) == nil)
+    #expect(late("a", heard: nil, repeatAll: true) == [0, 0])
+    // Songs heard on the way to the heard one are not played again.
+    #expect(late("abcd", heard: 2, played: ["b"]) == [2, 1])
+    #expect(late("abd", heard: nil, played: ["b"]) == [2, 0])
+  }
 }

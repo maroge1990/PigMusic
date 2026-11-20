@@ -329,6 +329,7 @@ public enum PlaybackSeek {
     let items = items
     let repeatMode = repeatMode
     let identity = identity
+    let anchor = snapshot.index
     editNumber += 1
     let number = editNumber
     editsInFlight[number] = Task { [weak self] in
@@ -354,7 +355,7 @@ public enum PlaybackSeek {
         // The queue ended while the stream answered: its audio is gone.
       }
       guard upcomingVersion == version else { return }
-      restartWhereHeard()
+      restartWhereHeard(anchor: anchor)
     }
   }
   /// The fallback when an edit came too late: restarts the occurrence heard
@@ -362,22 +363,33 @@ public enum PlaybackSeek {
   /// removed it, the next song still queued starts from its beginning: its
   /// place in the queue is not its position in the song (Codex round 1 on
   /// batch L).
-  private func restartWhereHeard() {
-    let heard = refreshPosition()
-    guard let heard, heard.index == nil else {
+  /// `anchor`: the song shown when the edit was made, in the edited queue.
+  /// Songs the edit queued before the one heard are not skipped (Codex
+  /// round 2 on batch L): see `LateEditRestart`.
+  private func restartWhereHeard(anchor: Int) {
+    guard let heard = refreshPosition() else {
       restart(index: snapshot.index, seconds: snapshot.elapsed, autoplay: snapshot.wantsPlayback)
       return
     }
-    let following = heard.list.indices.contains(heard.marker.index + 1)
-      ? heard.list[(heard.marker.index + 1)...] : []
-    let next = following.lazy.compactMap { entry in self.position(of: entry.id) }.first
-    if let next {
-      restart(index: next, seconds: 0, autoplay: snapshot.wantsPlayback)
-    } else if repeatMode == .all, !items.isEmpty {
-      restart(index: 0, seconds: 0, autoplay: snapshot.wantsPlayback)
-    } else {
-      endWithoutRemovedSong()
+    // The songs of the stream's order heard between the anchor and now.
+    var played = Set<UUID>()
+    if items.indices.contains(anchor) {
+      let root = identity.root(items[anchor].id)
+      let list = heard.list
+      if let from = list[...heard.marker.index].lastIndex(where: { identity.root($0.id) == root }),
+        from + 1 < heard.marker.index
+      {
+        for entry in list[(from + 1)..<heard.marker.index] { played.insert(identity.root(entry.id)) }
+      }
     }
+    guard
+      let point = LateEditRestart.point(
+        edited: items.map { identity.root($0.id) }, anchor: anchor, heard: heard.index,
+        played: played, repeatAll: repeatMode == .all)
+    else { return endWithoutRemovedSong() }
+    restart(
+      index: point.index, seconds: point.keepsPosition ? snapshot.elapsed : 0,
+      autoplay: snapshot.wantsPlayback)
   }
   /// The song heard was removed and nothing follows it: the queue has ended.
   private func endWithoutRemovedSong() {
