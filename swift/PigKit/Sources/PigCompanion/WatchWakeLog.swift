@@ -42,6 +42,8 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
     /// Two hours passed without a new song: no refresh is asked for until
     /// the app is opened.
     case refreshStopped
+    /// A manifest listed songs the previous one didn't: the window reopens.
+    case listed
   }
   public struct Event: Codable, Sendable, Equatable {
     public var at: Date
@@ -62,8 +64,10 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
   public private(set) var pendingRefresh: Date?
   /// When that refresh was asked for.
   public private(set) var pendingAskedAt: Date?
-  /// When the 2-hour window ran out; nil while refreshes may be asked for.
-  /// Only the app being opened clears it.
+  /// When a manifest last listed songs the previous one didn't.
+  public private(set) var lastListed: Date?
+  /// When the 2-hour window ran out with songs waiting; nil while refreshes
+  /// may be asked for. Only the app being opened or new songs listed clear it.
   public private(set) var refreshStoppedAt: Date?
   public init() {}
 
@@ -81,6 +85,13 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
   public mutating func sawPerson(at date: Date = Date()) {
     lastOpened = date
     refreshStoppedAt = nil
+  }
+  /// The person sent new songs (a manifest listing songs the previous one
+  /// didn't): the window counts from here and any stop is lifted.
+  public mutating func newSongsListed(at date: Date = Date()) {
+    lastListed = date
+    refreshStoppedAt = nil
+    note(Event(at: date, kind: .listed))
   }
   public mutating func linkTask(pending: Bool, at date: Date = Date()) {
     note(Event(at: date, kind: .linkTask, pending: pending))
@@ -107,10 +118,12 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
   /// known; `newSong` false when the Watch already had that copy. In the
   /// background the window is judged first, on the old marks: a song taken
   /// after it ran out never reopens it. Only a new song moves the window on.
+  /// `waiting`: songs not ready on the Watch before this one.
   public mutating func accepted(
-    receivedAt: Date?, active: Bool, newSong: Bool = true, at date: Date = Date()
+    receivedAt: Date?, active: Bool, newSong: Bool = true, waiting: Int = 1,
+    at date: Date = Date()
   ) {
-    if !active { latchRefreshStop(at: date) }
+    if !active { latchRefreshStop(at: date, waiting: waiting) }
     if newSong { lastAccepted = date }
     let gap = receivedAt.map { max(0, date.timeIntervalSince($0)) }
     note(Event(at: date, kind: .accepted, active: active, gap: gap, newSong: newSong))
@@ -119,14 +132,16 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
   /// the first time the window has run out. `waiting`: songs the manifest
   /// lists that are not ready on the Watch.
   public mutating func refreshPlan(now: Date = Date(), waiting: Int) -> WatchRefreshPlan {
-    latchRefreshStop(at: now)
+    latchRefreshStop(at: now, waiting: waiting)
     return WatchRefreshPlan.next(
       now: now, waiting: waiting, lastAccepted: lastAccepted, lastOpened: lastOpened,
-      stopped: refreshStoppedAt != nil)
+      lastListed: lastListed, stopped: refreshStoppedAt != nil)
   }
-  private mutating func latchRefreshStop(at now: Date) {
-    guard refreshStoppedAt == nil,
-      !WatchRefreshPlan.windowOpen(now: now, lastAccepted: lastAccepted, lastOpened: lastOpened)
+  /// With nothing waiting there is nothing to time out: no stop is recorded.
+  private mutating func latchRefreshStop(at now: Date, waiting: Int) {
+    guard refreshStoppedAt == nil, waiting > 0,
+      !WatchRefreshPlan.windowOpen(
+        now: now, lastAccepted: lastAccepted, lastOpened: lastOpened, lastListed: lastListed)
     else { return }
     refreshStoppedAt = now
     note(Event(at: now, kind: .refreshStopped))
@@ -176,7 +191,7 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
     if let refreshStoppedAt {
       lines.append(
         "Scheduled refreshes stopped at \(time(refreshStoppedAt)) (2 h without a new song); "
-          + "none asked for until the app is opened.")
+          + "none asked for until the app is opened or new songs are sent.")
     }
     if count(.refreshAsked, now: now) > 0, refresh == 0 {
       lines.append(

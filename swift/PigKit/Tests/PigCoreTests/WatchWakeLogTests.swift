@@ -181,6 +181,46 @@ struct WatchWakeLogTests {
     #expect(log.refreshPlan(now: at(3), waiting: 1) == .at(at(3, minutes: 30)))
   }
 
+  /// D-124 as refined on 20 Nov: the stop guards stuck delivery, never
+  /// fresh songs. The owner leaves the Watch app shut for days.
+  @Test func quietWithNothingWaitingThenNewSongsAsksForARefresh() {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    // Three hours with nothing waiting: no window runs, no stop.
+    #expect(log.refreshPlan(now: at(3), waiting: 0) == .none)
+    #expect(log.refreshStoppedAt == nil)
+    log.newSongsListed(at: at(72))
+    #expect(log.refreshPlan(now: at(72), waiting: 4) == .at(at(72, minutes: 30)))
+    // Still the 2-hour limit from there.
+    #expect(log.refreshPlan(now: at(74), waiting: 4) == .none)
+    #expect(log.refreshStoppedAt == at(74))
+  }
+
+  @Test func stuckThenADuplicateCopyStaysStopped() {
+    var log = WatchWakeLog()
+    log.newSongsListed(at: at(0))
+    #expect(log.refreshPlan(now: at(2), waiting: 3) == .none)
+    #expect(log.refreshStoppedAt == at(2))
+    log.accepted(receivedAt: at(2, minutes: 10), active: false, newSong: false, waiting: 3, at: at(2, minutes: 10))
+    #expect(log.refreshPlan(now: at(2, minutes: 10), waiting: 3) == .none)
+  }
+
+  @Test func stoppedThenNewSongsListedReopens() {
+    var log = WatchWakeLog()
+    log.newSongsListed(at: at(0))
+    #expect(log.refreshPlan(now: at(3), waiting: 3) == .none)
+    log.newSongsListed(at: at(5))
+    #expect(log.refreshStoppedAt == nil)
+    #expect(log.refreshPlan(now: at(5), waiting: 4) == .at(at(5, minutes: 30)))
+  }
+
+  @Test func aBackgroundSongWithNothingWaitingBeforeRecordsNoStop() {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    log.accepted(receivedAt: at(5), active: false, newSong: false, waiting: 0, at: at(5))
+    #expect(log.refreshStoppedAt == nil)
+  }
+
   @Test func survivesBeingSaved() throws {
     var log = WatchWakeLog()
     log.launched(background: true, at: at(0))

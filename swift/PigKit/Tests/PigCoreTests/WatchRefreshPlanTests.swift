@@ -98,6 +98,26 @@ struct WatchRefreshPlanTests {
     #expect(!WatchRefreshPlan.windowOpen(now: at(2), lastAccepted: nil, lastOpened: at(0)))
   }
 
+  /// Only songs the last applied library didn't list reopen the window.
+  @Test func onlyNewlyListedSongsCountAsNewWork() {
+    #expect(WatchRefreshPlan.addsSongs(["a", "b", "c"], over: ["a", "b"]))
+    #expect(!WatchRefreshPlan.addsSongs(["a", "b"], over: ["a", "b"]))
+    #expect(!WatchRefreshPlan.addsSongs(["a"], over: ["a", "b"]))
+    #expect(!WatchRefreshPlan.addsSongs([String](), over: ["a"]))
+    #expect(WatchRefreshPlan.addsSongs(["c"], over: ["a", "b"]))
+    // A stopped window: removing songs keeps it stopped (the caller adds
+    // nothing), new songs listed count as a mark like an opening.
+    #expect(
+      WatchRefreshPlan.next(
+        now: at(5), waiting: 2, lastAccepted: at(0), lastOpened: at(0), lastListed: at(5))
+        == .at(at(5, minutes: 30)))
+    // A listing a day ahead of the clock is ignored, as the other marks are.
+    #expect(
+      WatchRefreshPlan.next(
+        now: at(5), waiting: 2, lastAccepted: at(0), lastOpened: at(0), lastListed: at(29))
+        == .none)
+  }
+
   @Test func oneRefreshPendingAtATime() {
     let plan = WatchRefreshPlan.at(at(0, minutes: 30))
     // Nothing pending: ask.

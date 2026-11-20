@@ -37,7 +37,8 @@ def test_the_watch_counts_its_wakes_and_sends_them_with_its_log():
     assert "self.onReceived?(envelope)" in link
     assert "$0.received()" in model
     assert (
-        "$0.accepted(receivedAt: receivedAt, active: active, newSong: newSong)" in model
+        "$0.accepted(receivedAt: receivedAt, active: active, newSong: newSong, waiting: waiting)"
+        in model
     )
     # Saved, so a background launch adds to the same record.
     assert model.count('"watch.wake-log"') == 2
@@ -104,3 +105,20 @@ def test_a_background_wake_gives_kept_files_a_pass_after_their_manifest():
     assert "deliveries.isEmpty, deliveries.finished == finished" in finish
     # The 20 s cap stays.
     assert ".seconds(20)" in finish
+
+
+def test_new_songs_sent_reopen_the_refresh_window():
+    """D-124 as refined on 20 Nov: a manifest listing songs the archive's
+    saved library didn't have reopens the window, checked after it is
+    applied and against the archive's snapshot, not memory."""
+    model = MODEL.read_text()
+    manifest = model.split('if envelope.kind == "manifest" {', 1)[1].split(
+        '} else if envelope.kind == "audio"', 1
+    )[0]
+    assert "let previous = await archive.snapshot()" in manifest
+    apply = manifest.index("try await archive.apply(manifest)")
+    listed = manifest.index(
+        "WatchRefreshPlan.addsSongs(manifest.songs.map(\\.id), over: previous.songs.map(\\.id))"
+    )
+    assert apply < listed
+    assert "$0.newSongsListed()" in manifest[listed:]

@@ -601,6 +601,11 @@ import WatchKit
           let unchanged = manifest.keepsPlaying(queue.map(\.track.id), replacing: previous)
           if !unchanged { await stop() }
           try await archive.apply(manifest)
+          // New songs sent: the refresh window reopens (D-124, 20 Nov). Judged
+          // against the library the archive kept, so a relaunch adds nothing.
+          if WatchRefreshPlan.addsSongs(manifest.songs.map(\.id), over: previous.songs.map(\.id)) {
+            noteWake { $0.newSongsListed() }
+          }
           DiagnosticsLog.shared.record(
             "sync",
             "manifest revision \(manifest.context.revision) applied: \(manifest.songs.count) songs"
@@ -621,9 +626,12 @@ import WatchKit
             .resourceValues(forKeys: [.creationDateKey]).creationDate
           // A copy the Watch already had is no progress (Codex round 1 on batch G).
           let newSong = receipt?.ready[ticket.songId] != ticket.checksum
+          let waiting = status.waiting
           try await archive.accept(file, ticket: ticket)
           let active = appActive
-          noteWake { $0.accepted(receivedAt: receivedAt, active: active, newSong: newSong) }
+          noteWake {
+            $0.accepted(receivedAt: receivedAt, active: active, newSong: newSong, waiting: waiting)
+          }
         }
         DiagnosticsLog.shared.record("sync", "audio accepted for revision \(ticket.context.revision)")
       } else {
