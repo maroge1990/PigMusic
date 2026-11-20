@@ -120,3 +120,22 @@ def test_the_watch_takes_songs_when_the_iphone_wakes_it():
     assert task.index("await self?.finishBackgroundDelivery()") < task.index(
         "self?.planRefresh()"
     )
+
+
+def test_both_exports_say_whether_the_watch_is_being_woken():
+    """The iPhone's Watch delivery section carries the pushes and their
+    budget; the Watch's wake summary counts the pushes it got and whether a
+    complication is on a face, as WidgetKit says."""
+    tools = (ROOT / "swift/PigMusic/AccountToolsViews.swift").read_text()
+    section = tools.split('"== Watch delivery =="', 1)[1].split("parts +=", 1)[0]
+    assert "watch.complicationPushes.summary(" in section
+    assert "enabled: watch.link?.complicationEnabled" in section
+    assert "remaining: watch.link?.complicationPushesLeft" in section
+    model = MODEL.read_text()
+    check = body(model, "  func checkComplications() {")
+    assert "WidgetCenter.shared.getCurrentConfigurations" in check
+    assert "$0.kind == WatchComplicationState.widgetKind" in check
+    assert "$0.complicationsOnFaces(count)" in check
+    assert "checkComplications()" in body(model, "  func opened() {")
+    send = body(model, "  func sendDiagnostics() {")
+    assert send.index("checkComplications()") < send.index("wakeLog.summary()")

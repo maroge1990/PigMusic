@@ -69,7 +69,20 @@ import WidgetKit
     noteWake { $0.launched(background: background) }
   }
   /// The person opened the app.
-  func opened() { noteWake { $0.opened() } }
+  func opened() {
+    noteWake { $0.opened() }
+    checkComplications()
+  }
+  /// Asks WidgetKit how many PigMusic complications are on watch faces, for
+  /// the wake summary (D-125): background time depends on one being there.
+  func checkComplications() {
+    // @Sendable: WidgetKit may answer on another queue.
+    WidgetCenter.shared.getCurrentConfigurations { @Sendable [weak self] result in
+      guard case .success(let widgets) = result else { return }
+      let count = widgets.filter { $0.kind == WatchComplicationState.widgetKind }.count
+      Task { @MainActor in self?.noteWake { $0.complicationsOnFaces(count) } }
+    }
+  }
   /// The person left the app: the refresh window counts from here.
   func closed() { noteWake { $0.sawPerson() } }
   /// The library's songs, without those being removed.
@@ -301,7 +314,9 @@ import WidgetKit
     let info = Bundle.main.infoDictionary
     let version =
       "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
-    // When watchOS woke the Watch app, above its log (#219).
+    // When watchOS woke the Watch app, above its log (#219). The
+    // complication count is asked for again for the next time.
+    checkComplications()
     let wakes = "Background wakes:\n" + wakeLog.summary() + "\n\n"
     let payload = CompanionDiagnostics(
       version: version,

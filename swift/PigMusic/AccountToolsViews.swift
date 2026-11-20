@@ -455,6 +455,10 @@ struct DiagnosticsView: View {
     if let pending = model.refreshFailurePending { parts.append("[sync] \(pending)") }
     if let watch = model.watch, watch.supported {
       parts += ["", "== Watch delivery ==", watch.deliveryLog.summary()]
+      // The complication's wake-ups for the Watch app (D-125).
+      parts.append(
+        watch.complicationPushes.summary(
+          enabled: watch.link?.complicationEnabled, remaining: watch.link?.complicationPushesLeft))
       parts += ["", "== Watch copies in the background ==", watch.backgroundWork.summary()]
     }
     // What the app's work cost the battery, as iOS measures it (D-113).
