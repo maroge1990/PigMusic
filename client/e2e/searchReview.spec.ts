@@ -164,6 +164,54 @@ test("only the same catalogue artist is folded into the server's", async ({
   );
 });
 
+// Codex, batch E web part B (#272): a catalogue artist focused before the
+// ranked search answered lost focus when the answer brought the server's
+// row for the same artist, so Enter did nothing.
+test("a focused catalogue artist keeps focus when the ranked answer lands", async ({
+  page,
+}) => {
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  await mockApi(page, {
+    answers: {
+      "/v1/search/results": async (route) => {
+        await held;
+        return route.fulfill({
+          json: {
+            ...nothing,
+            artists: [
+              { ...artist, in_library: true, musicbrainz_artist_id: "mb-1" },
+            ],
+          },
+        });
+      },
+      "/v1/catalogue/artists": (route) =>
+        route.fulfill({
+          json: {
+            artists: [
+              { id: "mb-1", name: artist.name, description: "English singer" },
+            ],
+            offset: 0,
+            total: 1,
+            next_offset: null,
+          },
+        }),
+      [`/v1/catalogue/library-artists/${artist.id}`]: (route) =>
+        route.fulfill({ json: { id: "mb-1", name: artist.name } }),
+    },
+  });
+  await page.goto("/#/search?q=Charli");
+  const artists = page.getByRole("region", { name: "Artists" });
+  const link = artists.getByRole("link", { name: /English singer/ });
+  await link.focus();
+  release();
+  await expect(artists).toContainText("in your library");
+  await expect(artists.getByRole("link")).toHaveCount(1);
+  await expect(artists.getByRole("link")).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/#\/search\/artist\/mb-1\?/);
+});
+
 test("Search opens when the browser refuses storage", async ({ page }) => {
   await mockApi(page, {
     answers: {

@@ -31,7 +31,6 @@ import {
   withRecent,
   type CatalogueArtist,
   type FoundAlbum,
-  type FoundArtist,
   type Local,
 } from "./searchAnswers";
 import type { Library } from "./types";
@@ -522,33 +521,42 @@ export function SearchPage({
               <SectionHeader id="search-artists" title="Artists" />
               {artistCount > 0 && (
                 <ul className="discover-list">
-                  {serverArtists.map((a) => (
-                    <ServerArtist
-                      key={a.id}
-                      artist={a}
-                      open={(e) => openArtist(e, a.id)}
-                    />
-                  ))}
-                  {catalogueArtists.map((artist) => (
-                    <li key={artist.id}>
-                      <a href={"#" + discoverUrl(artist)}>
-                        <Cover
-                          title={artist.name}
-                          src={catalogueArtistCover(artist.id)}
-                          artist
-                          sizes="48px"
-                        />
-                        <span className="discover-text">
-                          <strong>{artist.name}</strong>
-                          <span>
-                            {["Artist", artist.description]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          </span>
-                        </span>
-                      </a>
-                    </li>
-                  ))}
+                  {/* One list keyed by the artist's catalogue identity
+                      (#272): when the ranked answer brings the server's
+                      own row for a catalogue artist already shown, the
+                      same link stays, keeping keyboard focus. */}
+                  {[
+                    ...serverArtists.map((a) => (
+                      <ArtistRow
+                        key={
+                          a.musicbrainz_artist_id
+                            ? "mb:" + a.musicbrainz_artist_id
+                            : "server:" + a.id
+                        }
+                        name={a.name}
+                        href={"#/search?q=" + encodeURIComponent(a.name)}
+                        cover={a.cover_url}
+                        caption={
+                          a.in_library && a.album_count
+                            ? `${plural(a.album_count, "album")} in your library`
+                            : "Artist"
+                        }
+                        inLibrary={a.in_library}
+                        open={(e) => openArtist(e, a.id)}
+                      />
+                    )),
+                    ...catalogueArtists.map((artist) => (
+                      <ArtistRow
+                        key={"mb:" + artist.id}
+                        name={artist.name}
+                        href={"#" + discoverUrl(artist)}
+                        cover={catalogueArtistCover(artist.id)}
+                        caption={["Artist", artist.description]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      />
+                    )),
+                  ]}
                 </ul>
               )}
               {catalogue === null ? (
@@ -593,26 +601,33 @@ export function SearchPage({
   );
 }
 
-function ServerArtist({
-  artist,
+/** An artist in search: the server's (opened by its catalogue identity)
+ * or the catalogue's own. Both are the same element, so one can replace the
+ * other in place. */
+function ArtistRow({
+  name,
+  href,
+  cover,
+  caption,
+  inLibrary = false,
   open,
 }: {
-  artist: FoundArtist;
-  open: (event: React.MouseEvent) => void;
+  name: string;
+  href: string;
+  cover?: string | null;
+  caption: string;
+  inLibrary?: boolean;
+  open?: (event: React.MouseEvent) => void;
 }) {
   return (
     <li>
-      <a href={"#/search?q=" + encodeURIComponent(artist.name)} onClick={open}>
-        <Cover title={artist.name} src={artist.cover_url} artist sizes="48px" />
+      <a href={href} onClick={open}>
+        <Cover title={name} src={cover} artist sizes="48px" />
         <span className="discover-text">
-          <strong>{artist.name}</strong>
-          <span>
-            {artist.in_library && artist.album_count
-              ? `${plural(artist.album_count, "album")} in your library`
-              : "Artist"}
-          </span>
+          <strong>{name}</strong>
+          <span>{caption}</span>
         </span>
-        {artist.in_library && <StateBadge state="library" iconOnly />}
+        {inLibrary && <StateBadge state="library" iconOnly />}
       </a>
     </li>
   );
