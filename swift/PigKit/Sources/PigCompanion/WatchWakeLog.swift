@@ -110,9 +110,11 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
   /// the Watch had applied listed. Songs listed in neither that library nor
   /// any other since the app was last opened are new songs the person sent:
   /// the window counts from here and any stop is lifted. So membership that
-  /// comes and goes (A, B, A, B) reopens it at most once per song, and at
-  /// most `reopeningLimit` times, until the app is opened (Codex round 2 on
-  /// batch G). Returns whether it reopened.
+  /// comes and goes (A, B, A, B) reopens it at most once per song (Codex
+  /// round 2 on batch G). Only reopening a window that had closed (stopped,
+  /// or run out) uses one of the `reopeningLimit` reopenings allowed until
+  /// the app is opened; new songs while it is open only move it on (#300).
+  /// Returns whether the window moved on or reopened.
   @discardableResult public mutating func songsListed(
     _ ids: some Sequence<String>, previous: some Sequence<String>, at date: Date = Date()
   ) -> Bool {
@@ -123,8 +125,11 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
     let fresh = Set(current).subtracting(before).subtracting(seen)
     for id in before + current where seen.count < Self.listedCapacity { seen.insert(id) }
     listedSeen = seen
-    guard !full, !fresh.isEmpty, reopenings < Self.reopeningLimit else { return false }
-    listedReopenings = reopenings + 1
+    guard !full, !fresh.isEmpty else { return false }
+    if !windowOpen(at: date) {
+      guard reopenings < Self.reopeningLimit else { return false }
+      listedReopenings = reopenings + 1
+    }
     lastListed = date
     refreshStoppedAt = nil
     note(Event(at: date, kind: .listed))
@@ -142,6 +147,13 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
   /// WidgetKit's count of PigMusic complications on watch faces.
   public mutating func complicationsOnFaces(_ count: Int) {
     faceComplications = max(0, count)
+  }
+  /// Whether refreshes may still be asked for: not stopped, and less than
+  /// the limit since the later mark.
+  private func windowOpen(at date: Date) -> Bool {
+    refreshStoppedAt == nil
+      && WatchRefreshPlan.windowOpen(
+        now: date, lastAccepted: lastAccepted, lastOpened: lastOpened, lastListed: lastListed)
   }
   public mutating func linkTask(pending: Bool, at date: Date = Date()) {
     note(Event(at: date, kind: .linkTask, pending: pending))

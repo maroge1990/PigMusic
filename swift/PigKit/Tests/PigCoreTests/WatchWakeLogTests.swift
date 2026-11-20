@@ -250,7 +250,9 @@ struct WatchWakeLogTests {
       if log.songsListed(ids, previous: previous, at: at(Double(step) * 3)) { reopened += 1 }
       previous = ids
     }
-    #expect(reopened == WatchWakeLog.reopeningLimit)
+    // The first list came with the app just opened: the window was open, so
+    // it moved on without using a reopening (#300); then the limit.
+    #expect(reopened == WatchWakeLog.reopeningLimit + 1)
     #expect(log.reopenings == WatchWakeLog.reopeningLimit)
     #expect(log.refreshPlan(now: at(60), waiting: 1) == .none)
     // Opening the app starts afresh.
@@ -267,6 +269,34 @@ struct WatchWakeLogTests {
     // Full: a song never seen still counts as seen.
     #expect(log.songsListed(many + ["extra"], previous: many, at: at(3)) == false)
     #expect(log.seenSinceOpened.count == WatchWakeLog.listedCapacity)
+  }
+
+  /// #300 item 2: lists with new songs while the window is open used up the
+  /// reopenings before the window ever stopped.
+  @Test func newSongsWhileTheWindowIsOpenDontUseTheReopenings() {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    var previous: [String] = []
+    for step in 0..<20 {
+      let ids = previous + ["song\(step)"]
+      // Every 10 minutes, well inside the window.
+      let moved = log.songsListed(ids, previous: previous, at: at(0, minutes: Double(step) * 10))
+      #expect(moved)
+      previous = ids
+    }
+    #expect(log.reopenings == 0)
+    // Each one moved the window on: two hours from the last.
+    #expect(log.refreshPlan(now: at(5), waiting: 3) == .at(at(5, minutes: 30)))
+    #expect(log.refreshPlan(now: at(5, minutes: 11), waiting: 3) == .none)
+    #expect(log.refreshStoppedAt != nil)
+    // Once it has stopped, the full allowance of reopenings is still there.
+    var reopened = 0
+    for step in 0..<10 {
+      let ids = previous + ["late\(step)"]
+      if log.songsListed(ids, previous: previous, at: at(6 + Double(step) * 3)) { reopened += 1 }
+      previous = ids
+    }
+    #expect(reopened == WatchWakeLog.reopeningLimit)
   }
 
   /// #300 item 2: three full-size lists fill the listed-song memory, and a
@@ -332,7 +362,8 @@ struct WatchWakeLogTests {
     log.songsListed(["b"], previous: ["a"], at: at(3))
     var saved = try JSONDecoder().decode(WatchWakeLog.self, from: JSONEncoder().encode(log))
     #expect(saved == log)
-    #expect(saved.seenSinceOpened == ["a", "b"] && saved.reopenings == 2)
+    // "a" came while the window was open (#300): only "b" reopened it.
+    #expect(saved.seenSinceOpened == ["a", "b"] && saved.reopenings == 1)
     #expect(saved.songsListed(["a"], previous: ["b"], at: at(6)) == false)
     // A log saved before these existed decodes with nothing remembered.
     var old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(WatchWakeLog()))
