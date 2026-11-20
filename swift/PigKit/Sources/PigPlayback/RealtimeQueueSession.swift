@@ -171,6 +171,13 @@ public enum PlaybackSeek {
   private var ready = false
   private var clock: Task<Void, Never>?
   private var sourceWaiting = false
+  /// The current generation's stream once built; edits go to it (#279).
+  private var liveStream: QueuePCMStream?
+  /// The current generation's pump is building its stream: an edit now is
+  /// handed to the stream as soon as it exists.
+  private var streamPending = false
+  /// Raised by every edit to the upcoming songs or the repeat mode.
+  private var upcomingVersion = 0
 
   /// `lookaheadSeconds` is how much decoded audio stays scheduled ahead of the
   /// speaker. The pump runs on the main actor, so live output needs enough to
@@ -266,19 +273,49 @@ public enum PlaybackSeek {
     }
     publish()
   }
-  /// Explicit queue edits invalidate prepared future audio while preserving the current position.
+  /// Queue edits and repeat changes reach the playing stream while the
+  /// current song plays on (#279); only when that is too late (the next song
+  /// is already joining the audio) does the song restart at its position.
   public func setRepeatMode(_ mode: PlaybackRepeat) {
     repeatMode = mode
     guard !items.isEmpty else { return }
-    refreshPosition()
-    restart(index: snapshot.index, seconds: snapshot.elapsed, autoplay: snapshot.wantsPlayback)
+    upcomingVersion += 1
+    editUpcoming(refreshing: true)
   }
   public func updateUpcoming(_ updated: [PlaybackOccurrence]) {
     guard updated.indices.contains(snapshot.index), items.indices.contains(snapshot.index),
       updated[snapshot.index].id == items[snapshot.index].id
     else { return }
     items = updated
-    restart(index: snapshot.index, seconds: snapshot.elapsed, autoplay: snapshot.wantsPlayback)
+    upcomingVersion += 1
+    editUpcoming(refreshing: false)
+  }
+  /// `refreshing`: what the restart without a stream did before (#279).
+  private func editUpcoming(refreshing: Bool) {
+    // The stream being built takes the edit once it exists.
+    if streamPending { return }
+    guard liveStream != nil else {
+      if refreshing { refreshPosition() }
+      restart(index: snapshot.index, seconds: snapshot.elapsed, autoplay: snapshot.wantsPlayback)
+      return
+    }
+    applyUpcoming()
+  }
+  /// Hands the latest edit to the live stream; a later edit supersedes it.
+  /// Too late, and nothing newer since: restart at the position heard now.
+  private func applyUpcoming() {
+    guard let stream = liveStream else { return }
+    let stamp = generation
+    let version = upcomingVersion
+    let items = items
+    let repeatMode = repeatMode
+    Task { [weak self] in
+      guard let self, generation == stamp, upcomingVersion == version else { return }
+      let result = await stream.replaceUpcoming(items, repeatMode: repeatMode, version: version)
+      guard result == .tooLate, generation == stamp, upcomingVersion == version else { return }
+      refreshPosition()
+      restart(index: snapshot.index, seconds: snapshot.elapsed, autoplay: snapshot.wantsPlayback)
+    }
   }
   public func seek(_ seconds: Double) {
     guard !items.isEmpty, seconds.isFinite else { return }
@@ -316,6 +353,8 @@ public enum PlaybackSeek {
     output.stop()
     ready = false
     sourceWaiting = false
+    liveStream = nil
+    streamPending = false
     pendingFrames = 0
     timeline = []
     snapshot = QueuePlaybackSnapshot()
@@ -344,6 +383,8 @@ public enum PlaybackSeek {
     output.stop()
     ready = false
     sourceWaiting = false
+    liveStream = nil
+    streamPending = false
     pendingFrames = 0
     peakScheduledFrames = 0
     timeline = []
@@ -360,7 +401,9 @@ public enum PlaybackSeek {
     let crossfade = crossfade
     let fade = fadeSeconds
     let repeatMode = repeatMode
+    let version = upcomingVersion
     guard let acquire, let release else { return }
+    streamPending = true
     // Old cleanup completes before a new source reservation can race the same preparer.
     pump = Task { [weak self] in
       await old?.value
@@ -375,6 +418,10 @@ public enum PlaybackSeek {
         stream = current
         try Task.checkCancellation()
         guard generation == stamp else { throw CancellationError() }
+        liveStream = current
+        streamPending = false
+        // Edits made while it was built (during a seek, say) reach it now (#279).
+        if upcomingVersion != version { applyUpcoming() }
         try output.configure(sampleRate: rate, blockFrames: blockFrames)
         var exhausted = false
         var sourceFailure: Error?
@@ -484,6 +531,9 @@ public enum PlaybackSeek {
       if generation == stamp {
         clock?.cancel()
         clock = nil
+        // Ended or failed: an edit from now on restarts, as before (#279).
+        liveStream = nil
+        streamPending = false
       }
       if let stream { await stream.close() }
     }

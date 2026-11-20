@@ -217,3 +217,352 @@ private func eventually(_ condition: @Sendable () async -> Bool) async throws {
     #expect(await sources.active.isEmpty)
   }
 }
+
+@MainActor private final class EditOutput: QueueAudioOutput {
+  var positionFrames: Int64 = 0
+  var pending: [(Int, @Sendable () -> Void)] = []
+  var playing = false
+  var stops = 0
+  var captured: [Float] = []
+  func configure(sampleRate: Double, blockFrames: Int) { positionFrames = 0 }
+  func schedule(_ block: PCMBlock, completion: @escaping @Sendable () -> Void) {
+    pending.append((block.frameCount, completion))
+    captured.append(contentsOf: block.channels[0])
+  }
+  func resume() throws { playing = true }
+  func pause() { playing = false }
+  func stop() {
+    pending = []
+    positionFrames = 0
+    playing = false
+    stops += 1
+  }
+  func consume() {
+    guard playing, !pending.isEmpty else { return }
+    let first = pending.removeFirst()
+    positionFrames += Int64(first.0)
+    first.1()
+  }
+}
+
+@MainActor private func waitUntil(_ predicate: () -> Bool) async throws {
+  let deadline = ContinuousClock.now + .seconds(10)
+  while !predicate() {
+    guard ContinuousClock.now < deadline else { throw AudioPipelineFailure.stalled }
+    try await Task.sleep(for: .milliseconds(2))
+  }
+}
+/// Plays everything scheduled until the queue ends.
+@MainActor private func playToEnd(_ session: RealtimeQueueSession, _ output: EditOutput)
+  async throws
+{
+  let deadline = ContinuousClock.now + .seconds(20)
+  while session.snapshot.state != .ended {
+    guard ContinuousClock.now < deadline, session.snapshot.state != .failed else {
+      Issue.record("state \(session.snapshot.state) \(session.snapshot.error ?? "")")
+      throw AudioPipelineFailure.stalled
+    }
+    output.consume()
+    try await Task.sleep(for: .milliseconds(1))
+  }
+}
+
+@Suite(.serialized) struct UpcomingEditSessionTests {
+  @MainActor private func start(
+    _ ids: [String], rate: Double, frames: [String: Int] = [:], held: Set<String> = [],
+    crossfade: Bool = false, root: URL
+  ) throws -> (RealtimeQueueSession, EditOutput, EditSources, [PlaybackOccurrence]) {
+    let all = Set(ids).union(["a", "b", "c", "d", "e", "x", "s", "t"]).sorted()
+    let sources = EditSources(
+      files: try rampSongs(root, all, frames: frames, rate: rate), held: held)
+    let output = EditOutput()
+    let session = try RealtimeQueueSession(output: output, sampleRate: rate)
+    let items = ids.map(editTrack)
+    session.replace(
+      items, crossfade: crossfade, fadeSeconds: 0.25, acquire: { try await sources.get($0) },
+      release: { await sources.release($0) })
+    return (session, output, sources, items)
+  }
+
+  /// Removing the next song mid-song: the playing song is never stopped or
+  /// replayed, and the song after the removed one follows it gaplessly.
+  @Test(arguments: editRates) @MainActor
+  func removingTheNextSongNeverStopsThePlayingOne(rate: Double) async throws {
+    let root = try editRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (session, output, sources, items) = try start(["a", "b", "c"], rate: rate, root: root)
+    try await waitUntil { session.snapshot.state == .playing }
+    output.consume()
+    let stops = output.stops
+    session.updateUpcoming([items[0], items[2]])
+    try await playToEnd(session, output)
+    let length = Int(rate)
+    #expect(output.stops == stops)
+    #expect(
+      firstBreak(output.captured, [("a", 0..<length), ("c", 0..<length)], length: length) == nil)
+    #expect(session.snapshot.index == 1 && session.snapshot.occurrenceID == items[2].id)
+    #expect(await sources.busy == 0)
+    #expect(await sources.peak <= 2)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+
+  /// Cross-fade on, the next song's fetch still waiting: removing it drops
+  /// the fetch, and the song after it fades in instead.
+  @Test(arguments: editRates) @MainActor
+  func aHeldFetchIsDroppedAndTheNewNextSongFadesIn(rate: Double) async throws {
+    let root = try editRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (session, output, sources, items) = try start(
+      ["a", "b", "c"], rate: rate, held: ["b"], crossfade: true, root: root)
+    try await waitUntil { session.snapshot.state == .playing }
+    try await eventually { await sources.entered.contains("b") }
+    let stops = output.stops
+    session.updateUpcoming([items[0], items[2]])
+    try await playToEnd(session, output)
+    let length = Int(rate)
+    let fade = Int(0.25 * rate)
+    #expect(output.stops == stops)
+    #expect(output.captured.count == 2 * length - fade)
+    #expect(
+      firstBreak(output.captured.prefix(length - fade), [("a", 0..<length - fade)], length: length)
+        == nil)
+    #expect(
+      firstBreak(output.captured.suffix(length - fade), [("c", fade..<length)], length: length)
+        == nil)
+    #expect(session.snapshot.occurrenceID == items[2].id)
+    #expect(await sources.acquired == ["a", "b", "c"])
+    #expect(await sources.busy == 0)
+    #expect(await sources.peak <= 2)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+
+  /// The playing song has all been heard and the queue waits for the next
+  /// song's source: an edit then is not that song failing.
+  @Test(arguments: editRates) @MainActor
+  func anEditWhileWaitingForTheNextSongIsNotAFailure(rate: Double) async throws {
+    let root = try editRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let short = Int(rate / 4)
+    let (session, output, sources, items) = try start(
+      ["a", "b", "c"], rate: rate, frames: ["a": short], held: ["b"], root: root)
+    var states: [QueuePlaybackState] = []
+    session.onUpdate = { states.append($0.state) }
+    try await waitUntil { session.snapshot.state == .playing }
+    let deadline = ContinuousClock.now + .seconds(10)
+    while session.snapshot.state != .buffering {
+      guard ContinuousClock.now < deadline else { throw AudioPipelineFailure.stalled }
+      output.consume()
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    let stops = output.stops
+    session.updateUpcoming([items[0], items[2]])
+    try await playToEnd(session, output)
+    let length = Int(rate)
+    #expect(!states.contains(.failed))
+    #expect(output.stops == stops)
+    #expect(firstBreak(output.captured.prefix(short), [("a", 0..<short)], length: short) == nil)
+    #expect(
+      firstBreak(output.captured.dropFirst(short), [("c", 0..<length)], length: length) == nil)
+    #expect(session.snapshot.occurrenceID == items[2].id)
+    #expect(await sources.busy == 0)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+
+  /// Five edits in one go: the last one is what plays; nothing stops, no
+  /// more than two sources at once, none left over.
+  @Test(arguments: editRates) @MainActor
+  func fiveEditsInARowPlayTheLastOrder(rate: Double) async throws {
+    let root = try editRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (session, output, sources, items) = try start(
+      ["a", "b", "c", "d", "e"], rate: rate, root: root)
+    let byID = Dictionary(uniqueKeysWithValues: items.map { ($0.track.id, $0) })
+    try await waitUntil { session.snapshot.state == .playing }
+    output.consume()
+    let stops = output.stops
+    for order in ["acbde", "adbce", "aebcd", "abe", "aed"] {
+      session.updateUpcoming(order.map { byID[String($0)]! })
+    }
+    try await playToEnd(session, output)
+    let length = Int(rate)
+    #expect(output.stops == stops)
+    #expect(
+      firstBreak(
+        output.captured, [("a", 0..<length), ("e", 0..<length), ("d", 0..<length)],
+        length: length) == nil)
+    #expect(await sources.busy == 0)
+    #expect(await sources.peak <= 2)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+
+  /// An edit while a seek prepares the song is taken by the stream once it
+  /// is built: the seek's own stop is the only one.
+  @Test(arguments: editRates) @MainActor
+  func anEditDuringASeekUsesTheNewList(rate: Double) async throws {
+    let root = try editRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (session, output, sources, items) = try start(["a", "b", "c"], rate: rate, root: root)
+    try await waitUntil { session.snapshot.state == .playing }
+    output.consume()
+    let stops = output.stops
+    let mark = output.captured.count
+    session.seek(0.5)
+    #expect(session.snapshot.state == .preparing)
+    session.updateUpcoming([items[0], items[2]])
+    try await playToEnd(session, output)
+    let length = Int(rate)
+    #expect(output.stops == stops + 1)
+    #expect(
+      firstBreak(
+        output.captured.dropFirst(mark), [("a", length / 2..<length), ("c", 0..<length)],
+        length: length) == nil)
+    #expect(await sources.busy == 0)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+
+  /// Repeat One mid-song: the song plays again from its start, no stop.
+  @Test(arguments: editRates) @MainActor
+  func repeatOneMidSongRepeatsWithoutAStop(rate: Double) async throws {
+    let root = try editRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (session, output, sources, items) = try start(["a", "b"], rate: rate, root: root)
+    try await waitUntil { session.snapshot.state == .playing }
+    output.consume()
+    let stops = output.stops
+    session.setRepeatMode(.one)
+    let length = Int(rate)
+    let deadline = ContinuousClock.now + .seconds(20)
+    while output.captured.count < 2 * length + 4096 {
+      guard ContinuousClock.now < deadline, session.snapshot.state != .failed else {
+        throw AudioPipelineFailure.stalled
+      }
+      output.consume()
+      try await Task.sleep(for: .milliseconds(1))
+    }
+    #expect(output.stops == stops)
+    #expect(
+      firstBreak(
+        output.captured.prefix(2 * length), [("a", 0..<length), ("a", 0..<length)],
+        length: length) == nil)
+    // Now Playing moves to the new listening of the same song.
+    try await waitUntil { session.snapshot.occurrenceID != items[0].id }
+    #expect(session.snapshot.index == 0)
+    #expect(await sources.busy == 0)
+    #expect(await sources.peak <= 2)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+
+  /// Once the next song is fading in, removing it is too late: the queue
+  /// restarts once, from the position heard at that moment.
+  @Test(arguments: editRates) @MainActor
+  func anEditAfterTheTransitionIsReadyRestartsOnceWhereItWas(rate: Double) async throws {
+    let root = try editRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let half = Int(rate / 2)
+    let fade = Int(0.25 * rate)
+    let (session, output, sources, items) = try start(
+      ["a", "b", "c"], rate: rate, frames: ["a": half], crossfade: true, root: root)
+    try await waitUntil { session.snapshot.state == .playing }
+    // Mixed audio has been scheduled: the cross-fade into "b" has begun.
+    while output.captured.count <= half - fade {
+      output.consume()
+      try await Task.sleep(for: .milliseconds(2))
+    }
+    let stops = output.stops
+    var restarts: [Double] = []
+    session.onUpdate = { if $0.state == .preparing { restarts.append($0.elapsed) } }
+    // Heard since the last clock reading: only a fresh position has it.
+    output.consume()
+    let heard = output.positionFrames
+    let mark = output.captured.count
+    session.updateUpcoming([items[0], items[2]])
+    try await waitUntil { !restarts.isEmpty }
+    try await playToEnd(session, output)
+    #expect(output.stops == stops + 1)
+    #expect(restarts == [Double(heard) / rate])
+    // From where it was: "a" at the frame heard, and "c" to its end.
+    let after = output.captured.dropFirst(mark)
+    let first = after.first.map { decodeRamp($0, frames: half) }
+    let last = after.last.map { decodeRamp($0, frames: Int(rate)) }
+    #expect(first?.code == 1 && first?.frame == Int(heard))
+    #expect(last?.code == 3 && last?.frame == Int(rate) - 1)
+    #expect(session.snapshot.occurrenceID == items[2].id)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+
+  /// A song added at the end while the next one fades in leaves the fade alone.
+  @Test(arguments: editRates) @MainActor
+  func anEditBeyondAFadingInSongLeavesItPlaying(rate: Double) async throws {
+    let root = try editRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let half = Int(rate / 2)
+    let fade = Int(0.25 * rate)
+    let (session, output, sources, items) = try start(
+      ["a", "b", "c"], rate: rate, frames: ["a": half], crossfade: true, root: root)
+    try await waitUntil { session.snapshot.state == .playing }
+    while output.captured.count <= half - fade {
+      output.consume()
+      try await Task.sleep(for: .milliseconds(2))
+    }
+    let stops = output.stops
+    let added = editTrack("d")
+    session.updateUpcoming(items + [added])
+    try await playToEnd(session, output)
+    #expect(output.stops == stops)
+    #expect(session.snapshot.index == 3 && session.snapshot.occurrenceID == added.id)
+    #expect(output.captured.count == half + 3 * Int(rate) - 3 * fade)
+    #expect(await sources.busy == 0)
+    #expect(await sources.peak <= 2)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+
+  enum Edit: String, CaseIterable, Sendable {
+    case moveLaterSongUp, playNext, furtherDown, similarSongsAfterTheLast
+  }
+  /// Everyday edits mid-song: the new order plays, gaplessly, with no stop.
+  @Test(arguments: Edit.allCases, editRates) @MainActor
+  func everydayEditsPlayTheNewOrderWithoutAStop(_ edit: Edit, rate: Double) async throws {
+    let root = try editRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (before, after): (String, String) =
+      switch edit {
+      case .moveLaterSongUp: ("abcd", "adbc")
+      case .playNext: ("abc", "axbc")
+      case .furtherDown: ("abc", "abdc")
+      case .similarSongsAfterTheLast: ("a", "ast")
+      }
+    let (session, output, sources, items) = try start(
+      before.map(String.init), rate: rate, root: root)
+    var byID = Dictionary(uniqueKeysWithValues: items.map { ($0.track.id, $0) })
+    for id in after.map(String.init) where byID[id] == nil { byID[id] = editTrack(id) }
+    let edited = after.map { byID[String($0)]! }
+    try await waitUntil { session.snapshot.state == .playing }
+    output.consume()
+    let stops = output.stops
+    session.updateUpcoming(edited)
+    try await playToEnd(session, output)
+    let length = Int(rate)
+    #expect(output.stops == stops)
+    #expect(
+      firstBreak(output.captured, after.map { (String($0), 0..<length) }, length: length) == nil)
+    #expect(
+      session.snapshot.index == edited.count - 1
+        && session.snapshot.occurrenceID == edited.last!.id)
+    if edit == .furtherDown {
+      // The next song's fetch was left alone.
+      #expect(await sources.acquired.filter { $0 == "b" }.count == 1)
+    }
+    #expect(await sources.busy == 0)
+    #expect(await sources.peak <= 2)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+}
