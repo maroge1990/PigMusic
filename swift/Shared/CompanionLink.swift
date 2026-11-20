@@ -18,6 +18,8 @@ import WatchConnectivity
   var error: String?
   @ObservationIgnored var onContext: (@MainActor (CompanionContext) async -> Void)?
   @ObservationIgnored var onFile: (@MainActor (URL, Data) async -> Void)?
+  /// A file reached the inbox (its envelope), before it is handed to `onFile` (#219).
+  @ObservationIgnored var onReceived: (@MainActor (Data) -> Void)?
   @ObservationIgnored var onMessage: (@MainActor (Data) async -> Void)?
   @ObservationIgnored var onRequest: (@MainActor (Data) async -> Data)?
   @ObservationIgnored var onActivated: (@MainActor () async -> Void)?
@@ -32,6 +34,8 @@ import WatchConnectivity
     session?.activate()
   }
   var supported: Bool { session != nil }
+  /// Songs, contexts or messages are waiting to be delivered to this app.
+  var contentPending: Bool { session?.hasContentPending == true }
   /// Install and reachability can change while the app is suspended without a
   /// delegate callback reaching it, so re-read them when the app returns.
   func refreshState() {
@@ -266,6 +270,7 @@ import WatchConnectivity
       deliveries.begin()
       Task { @MainActor in
         defer { self.deliveries.end() }
+        self.onReceived?(envelope)
         await self.deliver(destination, envelope)
       }
     } catch {

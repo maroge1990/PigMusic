@@ -8,6 +8,7 @@ import PigCompanion
 import PigDomain
 import PigPlayback
 import UIKit
+import WatchKit
 
 @MainActor @Observable final class WatchModel {
   var manifest = CompanionManifest(context: CompanionContext(revision: 0, account: nil), songs: [])
@@ -43,6 +44,31 @@ import UIKit
   var lastSynced = UserDefaults.standard.object(forKey: "watch.synced") as? Date {
     didSet { UserDefaults.standard.set(lastSynced, forKey: "watch.synced") }
   }
+  /// When watchOS gave the app time and what it did with it (#219). Saved,
+  /// so a background launch adds to the same record.
+  @ObservationIgnored private(set) var wakeLog =
+    UserDefaults.standard.data(forKey: "watch.wake-log")
+    .flatMap { try? JSONDecoder().decode(WatchWakeLog.self, from: $0) } ?? WatchWakeLog()
+  /// Song files that reached the inbox since this launch.
+  @ObservationIgnored private var receivedThisRun = 0
+  private func noteWake(_ change: (inout WatchWakeLog) -> Void) {
+    var next = wakeLog
+    change(&next)
+    guard next != wakeLog else { return }
+    wakeLog = next
+    if let data = try? JSONEncoder().encode(next) {
+      UserDefaults.standard.set(data, forKey: "watch.wake-log")
+    }
+  }
+  /// Whether the app is on screen, as watchOS sees it.
+  private var appActive: Bool { WKApplication.shared().applicationState == .active }
+  /// How this launch began, noted once the app is running (#219).
+  private func noteLaunch() {
+    let background = WKApplication.shared().applicationState == .background
+    noteWake { $0.launched(background: background) }
+  }
+  /// The person opened the app.
+  func opened() { noteWake { $0.opened() } }
   /// The library's songs, without those being removed.
   var songs: [CompanionSong] { manifest.songs.filter { !removing.contains($0.id) } }
   /// Whether the iPhone is in reach; nil when the link can't tell (demo, not activated).
@@ -91,6 +117,15 @@ import UIKit
   func finishBackgroundDelivery() async {
     await link?.finishBackgroundDelivery()
     await reload()
+  }
+  /// watchOS woke the app for the iPhone link (#219): noted, with whether
+  /// anything was waiting for it.
+  func linkBackgroundTask() async {
+    let pending = link?.contentPending == true
+    let received = receivedThisRun
+    await finishBackgroundDelivery()
+    let delivered = receivedThisRun > received
+    noteWake { $0.linkTask(pending: pending || delivered) }
   }
   func retry() async {
     guard queue.indices.contains(playback.index) else { return }
@@ -168,9 +203,13 @@ import UIKit
     let info = Bundle.main.infoDictionary
     let version =
       "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
+    // When watchOS woke the Watch app, above its log (#219).
+    let wakes = "Background wakes:\n" + wakeLog.summary() + "\n\n"
     let payload = CompanionDiagnostics(
       version: version,
-      text: DiagnosticsLog.shared.text(maximumBytes: CompanionDiagnostics.maximumTextBytes),
+      text: wakes
+        + DiagnosticsLog.shared.text(
+          maximumBytes: CompanionDiagnostics.maximumTextBytes - wakes.utf8.count),
       endedUnexpectedly: DiagnosticsLog.shared.previousRunEndedUnexpectedly)
     if let data = try? JSONEncoder().encode(payload) { link?.message(data) }
   }
@@ -224,6 +263,7 @@ import UIKit
       version:
         "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
     )
+    Task { [weak self] in self?.noteLaunch() }
     openArchive()
     do {
       // The demo library never talks to the phone, so a real one can't replace it.
@@ -232,6 +272,13 @@ import UIKit
       }
       link?.onContext = { [weak self] context in await self?.contextReceived(context) }
       link?.onFile = { [weak self] file, data in await self?.fileReceived(file, data: data) }
+      link?.onReceived = { [weak self] data in
+        guard let envelope = try? JSONDecoder().decode(CompanionEnvelope.self, from: data),
+          envelope.kind == "audio"
+        else { return }
+        self?.receivedThisRun += 1
+        self?.noteWake { $0.received() }
+      }
       link?.onActivated = { [weak self] in
         // After an unexpected end, the phone gets the log without being asked.
         if let self, DiagnosticsLog.shared.previousRunEndedUnexpectedly, !self.sentCrashNotice {
@@ -524,7 +571,13 @@ import UIKit
         switch await archive.arrival(of: ticket) {
         case .wait: return
         case .stale: throw CompanionFailure.stale
-        case .accept: try await archive.accept(file, ticket: ticket)
+        case .accept:
+          // The envelope beside it was written when the file reached the inbox.
+          let receivedAt = try? file.deletingPathExtension().appendingPathExtension("json")
+            .resourceValues(forKeys: [.creationDateKey]).creationDate
+          try await archive.accept(file, ticket: ticket)
+          let active = appActive
+          noteWake { $0.accepted(receivedAt: receivedAt, active: active) }
         }
         DiagnosticsLog.shared.record("sync", "audio accepted for revision \(ticket.context.revision)")
       } else {

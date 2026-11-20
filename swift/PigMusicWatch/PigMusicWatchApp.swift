@@ -22,7 +22,10 @@ import WatchKit
         }
         .onChange(of: scenePhase) { _, phase in
           model.sceneActive = phase == .active
-          if phase == .active { DiagnosticsLog.shared.foreground() }
+          if phase == .active {
+            DiagnosticsLog.shared.foreground()
+            model.opened()
+          }
           if phase == .background {
             DiagnosticsLog.shared.background()
             // Removals waiting for their Undo are sent before the Watch sleeps.
@@ -31,7 +34,7 @@ import WatchKit
           if phase == .active { Task { await model.reload() } }
         }
     }
-    .backgroundTask(.watchConnectivity) { await model.finishBackgroundDelivery() }
+    .backgroundTask(.watchConnectivity) { await model.linkBackgroundTask() }
   }
 }
 
