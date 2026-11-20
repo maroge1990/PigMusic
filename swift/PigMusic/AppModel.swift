@@ -2016,7 +2016,8 @@ enum PlayOrigin: Hashable {
   /// A playlist's songs as its page and its menus use them: less those
   /// removed here, waiting for their Undo or already applied (Codex round 1).
   func shownEntries(_ playlist: Playlist) -> [(position: Int, entry: PlaylistEntry)] {
-    PlaylistRemoval.shown(playlist, ledger: removals) { undo.hides($0) }
+    // A removal still waiting offline is left out too (#277).
+    PlaylistRemoval.shown(playlist, ledger: removals, pending: pendingEdits) { undo.hides($0) }
   }
   static func undoKey(mix: String, song: String) -> String { "mix-song:" + mix + ":" + song }
   static func undoKey(download id: String) -> String { "download:" + id }
