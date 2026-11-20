@@ -259,7 +259,7 @@ struct LibraryArtistsView: View {
   @Bindable var model: AppModel
   var body: some View {
     ScrollView {
-      LazyVStack(alignment: .leading, spacing: 16) {
+      LazyVStack(alignment: .leading, spacing: PigSpacing.page) {
         LibrarySortPicker(model: model, collection: .artists, selected: model.artistSort)
         LazyVGrid(columns: cardColumns, spacing: 18) {
           ForEach(model.artists) { artist in
@@ -286,7 +286,7 @@ struct LibraryAlbumsView: View {
   @Bindable var model: AppModel
   var body: some View {
     ScrollView {
-      LazyVStack(alignment: .leading, spacing: 16) {
+      LazyVStack(alignment: .leading, spacing: PigSpacing.page) {
         let categories = AlbumCategory.allCases.filter {
           $0 == .album || model.albumCategoryCounts[$0.key, default: 0] > 0
         }

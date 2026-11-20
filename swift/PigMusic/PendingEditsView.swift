@@ -85,6 +85,8 @@ private struct PendingChangeRow: View {
   /// Remove from this list: a withdrawn change, forgotten on this iPhone.
   let forget: () -> Void
   @Environment(\.colorScheme) private var scheme
+  // The ⋯ grows with Dynamic Type (#162).
+  @ScaledMetric(relativeTo: .body) private var moreWidth: CGFloat = 32
   private var playlist: Playlist? {
     pending.mutation.playlistId.flatMap { id in model.playlists.first { $0.id == id } }
   }
@@ -122,7 +124,8 @@ private struct PendingChangeRow: View {
             .disabled(busy)
         }
       } label: {
-        Image(systemName: "ellipsis").frame(width: 32, height: 44).foregroundStyle(.secondary)
+        Image(systemName: "ellipsis").frame(minWidth: moreWidth, minHeight: 44)
+          .foregroundStyle(.secondary)
       }
       .buttonStyle(.borderless).accessibilityLabel("More actions for this change")
     }

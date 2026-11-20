@@ -1220,18 +1220,20 @@ struct CoverMosaicView: View {
 struct PlayShuffleRow: View {
   let play: () -> Void
   let shuffle: () -> Void
-  @Environment(\.colorScheme) private var scheme
   var body: some View {
     HStack(spacing: 12) {
       Button(action: play) {
         Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity, minHeight: 36)
       }
       .pigPrimaryAction()
+      // The one secondary button (#161, #283), grown to Play's height.
       Button(action: shuffle) {
-        Label("Shuffle", systemImage: "shuffle").frame(maxWidth: .infinity, minHeight: 36)
+        Label("Shuffle", systemImage: "shuffle").frame(maxWidth: .infinity, maxHeight: .infinity)
       }
-      .buttonStyle(.bordered).tint(PigBrand.accent(scheme))
+      .buttonStyle(.pigSecondary)
     }
+    // Both as tall as the taller, Play.
+    .fixedSize(horizontal: false, vertical: true)
     .font(.body.weight(.semibold))
     .controlSize(.large)
   }

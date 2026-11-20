@@ -232,11 +232,8 @@ struct SessionsView: View {
   private func row(_ session: AccountSession) -> some View {
     let name = session.deviceName.isEmpty ? session.platformName : session.deviceName
     return HStack(spacing: 12) {
-      Image(systemName: Self.symbol(session))
-        .font(.title3).foregroundStyle(PigBrand.secondary(scheme))
-        .frame(width: 40, height: 40)
-        .background(PigBrand.raised(scheme), in: .rect(cornerRadius: 10))
-        .accessibilityHidden(true)
+      // The shared thumb, as Changes not sent yet's rows (#283).
+      SymbolThumb(systemImage: Self.symbol(session))
       VStack(alignment: .leading, spacing: 3) {
         HStack(spacing: 8) {
           Text(name).font(.body.weight(.semibold)).lineLimit(1)

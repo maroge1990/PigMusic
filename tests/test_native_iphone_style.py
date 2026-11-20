@@ -154,6 +154,16 @@ ROOT_TITLES = {
 }
 
 
+# D-123 (#283): the Library's pushed Artists, Albums, Songs and Playlists
+# pages keep their large titles; every other pushed page is inline.
+LARGE_PUSHED_TITLES = [
+    'LibraryViews.swift: "Artists"',
+    'LibraryViews.swift: "Albums"',
+    'LibraryViews.swift: "Songs"',
+    'LibraryViews.swift: "Playlists"',
+]
+
+
 def test_pushed_pages_have_inline_titles_and_one_toolbar_rule():
     """#158: .inline on 15 screens, the default on 24; the artist hero
     re-enabled the toolbar background PigCanvas hides everywhere else."""
@@ -164,7 +174,7 @@ def test_pushed_pages_have_inline_titles_and_one_toolbar_rule():
         ):
             if not m.group(2) and m.group(1) not in ROOT_TITLES:
                 large.append(f"{name}: {m.group(1)}")
-    assert large == []
+    assert sorted(large) == sorted(LARGE_PUSHED_TITLES)
     assert found(".toolbarBackground(") == []
 
 
