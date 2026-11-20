@@ -278,3 +278,9 @@ def test_paused_marks_follow_resumes_and_the_request_list():
     load = load.split("\n  }\n", 1)[0]
     assert "model.requestedSongs.reconcile(" in load
     assert "complete:" not in load
+    # Codex confirmation on batch K: the list is stamped before it is asked
+    # for, and only ever clears marks.
+    assert load.index("let fetched = model.requestedSongs.asking()") < load.index(
+        "model.readCatalogue"
+    )
+    assert "fetched: fetched)" in load

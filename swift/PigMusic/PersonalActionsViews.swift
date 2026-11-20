@@ -609,6 +609,9 @@ struct RequestsView: View {
     error = nil
     defer { loading = false }
     let offset = reset ? 0 : (next ?? 0)
+    // Before the list is asked for: it clears no paused mark made after
+    // (Codex confirmation on batch K).
+    let fetched = model.requestedSongs.asking()
     do {
       let page = try await model.readCatalogue { try await $0.requestGroups(offset: offset) }
       if reset {
@@ -629,7 +632,8 @@ struct RequestsView: View {
       // request it leaves out keeps its mark (Codex round 2).
       model.requestedSongs.reconcile(
         statuses: Dictionary(
-          page.groups.flatMap(\.items).map { ($0.id, $0.status) }, uniquingKeysWith: { a, _ in a }))
+          page.groups.flatMap(\.items).map { ($0.id, $0.status) }, uniquingKeysWith: { a, _ in a }),
+        fetched: fetched)
       enabled = page.downloadsEnabled
       model.serverActiveRequests = page.active
       loaded = true

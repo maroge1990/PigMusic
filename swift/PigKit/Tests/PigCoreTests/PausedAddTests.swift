@@ -10,6 +10,12 @@ struct PausedAddTests {
     try LibraryCodec.decoder().decode(AcquisitionResult.self, from: Data(json.utf8))
   }
 
+  /// The request list, fetched after every mark made so far.
+  private func listed(_ marks: inout RequestMarks, _ statuses: [String: String]) {
+    let fetched = marks.asking()
+    marks.reconcile(statuses: statuses, fetched: fetched)
+  }
+
   @Test func anAlbumWhoseSongsWerePausedSaysWhereToResumeThem() throws {
     let result = try decode(
       #"{"created":0,"existing":0,"skipped":0,"paused":3,"downloads_enabled":true}"#)
@@ -139,11 +145,11 @@ struct PausedAddTests {
       ["elsewhere": ["r1"], "still": ["r2"], "unlisted": ["r3"]], asked: asked)
     // A request the list leaves out says nothing, even on a one-page list:
     // the server folds a song's jobs into one entry (Codex round 2).
-    marks.reconcile(statuses: ["r1": "waiting_for_sources", "r2": "paused"])
+    listed(&marks, ["r1": "waiting_for_sources", "r2": "paused"])
     #expect(marks.paused == ["still", "unlisted"])
-    marks.reconcile(statuses: ["r2": "paused"])
+    listed(&marks, ["r2": "paused"])
     #expect(marks.paused == ["still", "unlisted"])
-    marks.reconcile(statuses: ["r2": "completed", "r3": "waiting_for_sources"])
+    listed(&marks, ["r2": "completed", "r3": "waiting_for_sources"])
     #expect(marks.paused.isEmpty)
   }
 
@@ -153,7 +159,7 @@ struct PausedAddTests {
     marks.queued("old")
     let asked = marks.asking()
     marks.pausedOnServer(["old": []], asked: asked)
-    marks.reconcile(statuses: [:])
+    listed(&marks, [:])
     #expect(marks.paused == ["old"])
   }
 
@@ -173,24 +179,33 @@ struct PausedAddTests {
     #expect(marks.contains("first"))
   }
 
-  /// Codex round 2 on batch K: a pause the Add's answer was too old to
-  /// show heals when the request list reports the request paused.
-  @Test func theRequestListMarksAPauseTheAnswerMissed() {
+  /// Codex confirmation on batch K: the request list only ever clears
+  /// marks. A page that reports a request paused never marks a song (a page
+  /// fetched before a Resume could otherwise restore Paused after it).
+  @Test func theRequestListNeverSetsAMark() {
     var marks = RequestMarks()
     marks.queued("song")
     let asked = marks.asking()
     marks.resumed(request: "r1")
     marks.pausedOnServer(["song": ["r1"]], asked: asked)
     #expect(marks.paused.isEmpty)
-    marks.reconcile(statuses: ["r1": "paused"])
-    #expect(marks.paused == ["song"])
-    // Resumed again: cleared, and the list agrees.
-    marks.resumed(request: "r1")
-    marks.reconcile(statuses: ["r1": "waiting_for_sources"])
+    listed(&marks, ["r1": "paused"])
     #expect(marks.paused.isEmpty)
-    // A song now in the library is never marked again.
-    marks.settled(["song"])
-    marks.reconcile(statuses: ["r1": "paused"])
+  }
+
+  /// Codex confirmation on batch K: a list fetched before a newer paused
+  /// answer arrived can't clear the mark that answer made.
+  @Test func aListFetchedBeforeAMarkCantClearIt() {
+    var marks = RequestMarks()
+    marks.queued("song")
+    let fetched = marks.asking()
+    let asked = marks.asking()
+    marks.pausedOnServer(["song": ["r1"]], asked: asked)
+    marks.reconcile(statuses: ["r1": "waiting_for_sources"], fetched: fetched)
+    #expect(marks.paused == ["song"])
+    // A list fetched after the mark clears it.
+    let later = marks.asking()
+    marks.reconcile(statuses: ["r1": "waiting_for_sources"], fetched: later)
     #expect(marks.paused.isEmpty)
   }
 
@@ -201,9 +216,9 @@ struct PausedAddTests {
     marks.queued("song")
     let asked = marks.asking()
     marks.pausedOnServer(["song": ["a", "b"]], asked: asked)
-    marks.reconcile(statuses: ["a": "waiting_for_sources"])
+    listed(&marks, ["a": "waiting_for_sources"])
     #expect(marks.paused == ["song"])
-    marks.reconcile(statuses: ["a": "waiting_for_sources", "b": "downloading"])
+    listed(&marks, ["a": "waiting_for_sources", "b": "downloading"])
     #expect(marks.paused.isEmpty)
   }
 }

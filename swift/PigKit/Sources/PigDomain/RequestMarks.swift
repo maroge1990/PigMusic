@@ -29,11 +29,10 @@ public struct RequestMarks: Sendable, Equatable {
   /// 1 on batch K), and when each request's last Resume here went through.
   private var clock = 0
   private var resumedAt: [String: Int] = [:]
-  /// Every request the server named for a song an Add left paused here,
-  /// kept after a Resume (Codex round 2 on batch K): when the request list
-  /// reports one of them paused again, the song is marked again.
-  private var named: [String: Set<String>] = [:]
-  /// Taken before an Add is sent: its answer is placed by when it started.
+  /// When each paused mark was made: a request list fetched before it may
+  /// be older than the answer that made it (Codex confirmation on batch K).
+  private var markedAt: [String: Int] = [:]
+  /// Taken before an Add is sent, or a request list is fetched: its answer is placed by when it started.
   public mutating func asking() -> Int {
     clock += 1
     return clock
@@ -52,15 +51,17 @@ public struct RequestMarks: Sendable, Equatable {
   /// `pausedOnServer`, each song's Add taken when its own request was sent
   /// (Codex round 2 on batch K: one tick for a whole drain made a fresh
   /// pause after a Resume look stale). A song with no tick counts as asked
-  /// before any Resume: not marked, which the request list heals.
+  /// before any Resume: not marked. A pause missed so shows again with
+  /// the next Add's answer; the request list never sets a mark.
   public mutating func pausedOnServer(_ requests: [String: [String]], askedAt: [String: Int]) {
     for (id, requestIds) in requests where waiting.remove(id) != nil {
-      named[id, default: []].formUnion(requestIds)
       let asked = askedAt[id] ?? 0
       let current = requestIds.filter { resumedAt[$0].map { $0 < asked } ?? true }
       guard current.isEmpty, !requestIds.isEmpty else {
         paused.insert(id)
         pausedSongs[id, default: []].formUnion(current)
+        clock += 1
+        markedAt[id] = clock
         continue
       }
       sent.insert(id)
@@ -86,19 +87,13 @@ public struct RequestMarks: Sendable, Equatable {
   /// finished, cancelled). A request the list leaves out says nothing: the
   /// server folds a song's jobs into one entry, so a paused job can be
   /// missing from even a one-page list (Codex round 2): the mark stays. An
-  /// older server's mark with no request is left as it is.
-  /// A song whose named request the list reports paused is marked paused
-  /// again (Codex round 2 on batch K): a pause an Add's answer was too old
-  /// to show, or one made on another device after a Resume, heals here.
-  public mutating func reconcile(statuses: [String: String]) {
-    for (song, requestIds) in named {
-      let pausedNow = requestIds.filter { statuses[$0] == "paused" }
-      guard !pausedNow.isEmpty, !waiting.contains(song) else { continue }
-      sent.remove(song)
-      paused.insert(song)
-      pausedSongs[song, default: []].formUnion(pausedNow)
-    }
+  /// older server's mark with no request is left as it is. The list only
+  /// ever clears marks (Codex confirmation on batch K): one fetched from
+  /// `fetched` (a tick taken before it was asked for) clears no mark made
+  /// after, whose answer may be newer than the list.
+  public mutating func reconcile(statuses: [String: String], fetched: Int) {
     for (song, requestIds) in pausedSongs where !requestIds.isEmpty {
+      guard (markedAt[song] ?? 0) < fetched else { continue }
       let reported = requestIds.compactMap { statuses[$0] }
       if reported.count == requestIds.count, !reported.contains("paused") {
         paused.remove(song)
@@ -116,14 +111,12 @@ public struct RequestMarks: Sendable, Equatable {
     sent.subtract(ids)
     paused.subtract(ids)
     pausedSongs = pausedSongs.filter { paused.contains($0.key) }
-    named = named.filter { !ids.contains($0.key) }
   }
   /// A request was cancelled or cleared: forget every sent and paused mark.
   public mutating func requestsChanged() {
     sent = []
     paused = []
     pausedSongs = [:]
-    named = [:]
   }
   /// Every marked song.
   public var all: Set<String> { waiting.union(sent).union(paused) }
@@ -135,7 +128,6 @@ public struct RequestMarks: Sendable, Equatable {
     sent.subtract(ids)
     paused.subtract(ids)
     pausedSongs = pausedSongs.filter { paused.contains($0.key) }
-    named = named.filter { !ids.contains($0.key) }
   }
   /// A fresh server answer about these songs (#211): one the server says is
   /// in the library, or whose request failed, is no longer marked, under
