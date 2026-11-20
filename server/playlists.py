@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from .library import identifier
 from .library import normalise
 from .lifecycle import coordinated
-from .matching import context
+from .matching import IDENTITIES, context, same_in_context
 
 
 class PlaylistConflict(ValueError):
@@ -26,6 +26,54 @@ class PlaylistFull(ValueError):
 def ensure_room(tracks):
     if len(tracks) >= MAX_PLAYLIST_ENTRIES:
         raise PlaylistFull()
+
+
+class ContextSongs:
+    """Playlist entries that share one context, indexed by release and
+    recording ID (#268). A lookup compares a song only with the entries whose
+    IDs can agree with its own (the same ID, or none), so a near-limit
+    playlist of one title and artist stays quick; a song without IDs is still
+    compared with every entry. `same_in_context` makes every decision."""
+
+    def __init__(self):
+        self.entries = []
+        self.by_pair = defaultdict(list)
+        self.by_release = defaultdict(list)
+        self.by_recording = defaultdict(list)
+
+    @staticmethod
+    def ids(track):
+        return tuple(track.get(k) or "" for k in IDENTITIES)
+
+    def add(self, track):
+        release, recording = self.ids(track)
+        self.entries.append(track)
+        self.by_pair[release, recording].append(track)
+        self.by_release[release].append(track)
+        self.by_recording[recording].append(track)
+
+    def candidates(self, track):
+        release, recording = self.ids(track)
+        if release and recording:
+            groups = [
+                self.by_pair.get(pair, ())
+                for pair in {
+                    (release, recording),
+                    (release, ""),
+                    ("", recording),
+                    ("", ""),
+                }
+            ]
+        elif recording:
+            groups = [self.by_recording.get(k, ()) for k in (recording, "")]
+        elif release:
+            groups = [self.by_release.get(k, ()) for k in (release, "")]
+        else:
+            groups = [self.entries]
+        return (entry for group in groups for entry in group)
+
+    def has(self, track):
+        return any(same_in_context(t, track) for t in self.candidates(track))
 
 
 class Playlists:
@@ -209,18 +257,20 @@ class Playlists:
             repeat = allow_repeat and not payload.get("favourites")
             entries = list(payload["tracks"])
             # Same-song needs the same context, so only songs that share one
-            # are compared; a bulk append near the limit stays quick.
-            by_context = defaultdict(list)
+            # are compared, and within it only those whose IDs can agree; a
+            # bulk append near the limit stays quick.
+            by_context = defaultdict(ContextSongs)
             if not repeat:
                 for entry in entries:
-                    by_context[context(entry)].append(entry)
+                    by_context[context(entry)].add(entry)
             for track in tracks:
-                bucket = by_context[context(track)] if not repeat else []
-                if repeat or not any(self.same_song(t, track) for t in bucket):
+                bucket = by_context[context(track)] if not repeat else None
+                if repeat or not bucket.has(track):
                     # Raises before anything is written: the whole batch fails.
                     ensure_room(entries)
                     entries.append(track)
-                    bucket.append(track)
+                    if bucket is not None:
+                        bucket.add(track)
             payload["tracks"] = entries
             payload["revision"] = payload.get("revision", 0) + 1
             conn.execute(

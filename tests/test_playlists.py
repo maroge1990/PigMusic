@@ -146,3 +146,98 @@ def test_bulk_append_near_the_limit_stays_fast(tmp_path):
         )
     assert len(saved["tracks"]) == 9750
     assert elapsed < 2, f"add_many took {elapsed:.1f}s"
+
+
+def seed(store, playlist_id, tracks):
+    with store.connect() as conn:
+        payload = json.loads(
+            conn.execute(
+                "SELECT payload FROM playlists WHERE id=?", (playlist_id,)
+            ).fetchone()[0]
+        )
+        payload["tracks"] = tracks
+        conn.execute(
+            "UPDATE playlists SET payload=? WHERE id=?",
+            (json.dumps(payload), playlist_id),
+        )
+
+
+def saved_tracks(store, playlist_id):
+    with store.connect() as conn:
+        return json.loads(
+            conn.execute(
+                "SELECT payload FROM playlists WHERE id=?", (playlist_id,)
+            ).fetchone()[0]
+        )["tracks"]
+
+
+@pytest.mark.loop_timing
+def test_bulk_append_into_one_title_and_artist_stays_fast(tmp_path):
+    """Codex (#268): 9,500 entries and 500 new songs, all one title, artist
+    and album with distinct recording IDs, held the lifecycle lock for ~18 s;
+    within a context only songs whose IDs can agree are compared now."""
+    store = Store(tmp_path)
+    playlists = Playlists(store)
+    created = playlists.create("One song, many recordings")
+
+    def song(i):
+        return {
+            "title": "Same",
+            "artist": "Artist",
+            "album": "Album",
+            "duration": 200,
+            "musicbrainz_release_id": "release",
+            "musicbrainz_recording_id": f"recording-{i}",
+        }
+
+    seed(store, created["id"], [song(i) for i in range(9500)])
+    # Half are already in (deduplicated), half are new.
+    batch = [song(i) for i in range(9250, 9750)]
+    started = time.perf_counter()
+    playlists.add_many(created["id"], batch)
+    elapsed = time.perf_counter() - started
+    assert len(saved_tracks(store, created["id"])) == 9750
+    assert elapsed < 2, f"add_many took {elapsed:.1f}s"
+
+
+def test_bulk_append_keeps_every_same_song_decision(tmp_path):
+    """The indexed append (#268) adds exactly the songs the plain rule would:
+    each new song is compared by `same_song` with every entry and every song
+    added before it. Mixed inputs share a few contexts, with and without
+    release and recording IDs and lengths, and include live versions."""
+    import random
+    from server.matching import same_song
+
+    rng = random.Random(268)
+
+    def song():
+        track = {
+            "title": rng.choice(["Same", "Same (Live)", "Same - 2011 Remaster"]),
+            "artist": rng.choice(["Artist", "ARTIST", "Other"]),
+            "album": rng.choice(["Album", "Live at Leeds"]),
+        }
+        if rng.random() < 0.7:
+            track["duration"] = rng.choice([0, 200, 203, 206, 212, 250])
+        for key, pool in (
+            ("musicbrainz_release_id", ["rel-a", "rel-b", "", None]),
+            ("musicbrainz_recording_id", ["rec-a", "rec-b", "rec-c", "", None]),
+        ):
+            if rng.random() < 0.75:
+                track[key] = rng.choice(pool)
+        if rng.random() < 0.2:
+            track["album_artist"] = rng.choice(["Artist", "Various Artists"])
+        return track
+
+    store = Store(tmp_path)
+    playlists = Playlists(store)
+    for attempt in range(60):
+        existing = [song() for _ in range(rng.randint(0, 30))]
+        batch = [song() for _ in range(rng.randint(1, 30))]
+        expected = list(existing)
+        for track in batch:
+            if not any(same_song(t, track) for t in expected):
+                expected.append(track)
+        created = playlists.create(f"Round {attempt}")
+        seed(store, created["id"], existing)
+        playlists.add_many(created["id"], batch)
+        assert saved_tracks(store, created["id"]) == expected, attempt

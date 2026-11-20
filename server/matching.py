@@ -174,8 +174,13 @@ def context(track):
 
 
 def same_song(left, right):
-    if context(left) != context(right):
-        return False
+    return context(left) == context(right) and same_in_context(left, right)
+
+
+def same_in_context(left, right):
+    """`same_song` for two songs already known to share a context: their
+    release and recording IDs agree where both are known, and so do their
+    lengths."""
     if any(left.get(k) and right.get(k) and left[k] != right[k] for k in IDENTITIES):
         return False
     return not (
