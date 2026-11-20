@@ -81,3 +81,14 @@ def test_a_reinstalled_watch_gets_the_phone_song_again():
     assert "nowPlayingSent = nil" in resend
     send = controller[controller.index("func sendNowPlaying(") :]
     assert send.index("nowPlayingLatest =") < send.index("guard link?.available")
+
+
+def test_the_undo_row_is_drawn_like_the_song_rows():
+    """#293: after a removal, the Undo row's button showed an inner grey
+    circle: unlike every other Watch row it drew a Label with a symbol
+    inside the row. It now uses the one Watch row (D-120)."""
+    watch = WATCH.read_text()
+    undo = watch[watch.index("if let item = model.undo.items.last {") :]
+    undo = undo[: undo.index('.accessibilityLabel("Undo: " + item.label)')]
+    assert "Label(" not in undo
+    assert 'WatchRow(title: "Undo", detail: item.label' in undo

@@ -422,15 +422,14 @@ private struct WatchSongs: View {
   var body: some View {
     let marks = model.status.marks
     List {
-      // The latest removal, with its Undo, until it is sent.
+      // The latest removal, with its Undo, until it is sent. The same row as
+      // the songs below (#293: a Label's symbol drew its own grey circle
+      // inside the row's shape).
       if let item = model.undo.items.last {
         Button {
           model.undo.undo(item.id)
         } label: {
-          VStack(alignment: .leading) {
-            Label("Undo", systemImage: "arrow.uturn.backward").font(PigType.headline)
-            Text(item.label).font(PigType.caption).foregroundStyle(.secondary).lineLimit(2)
-          }
+          WatchRow(title: "Undo", detail: item.label, symbol: "arrow.uturn.backward")
         }
         .accessibilityLabel("Undo: " + item.label)
       }
