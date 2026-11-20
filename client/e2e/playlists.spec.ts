@@ -266,3 +266,55 @@ test("a refused new playlist keeps the dialog and its name", async ({
   await expect(dialog).toBeVisible();
   await expect(name).toHaveValue("Road trip");
 });
+
+// Codex, batch E web part A (#275): the create was saved but a proxy gave
+// up waiting. The dialog stayed modal with Create ready, and a second click
+// made a second playlist.
+test("an unconfirmed new playlist shows the refreshed list and keeps the name", async ({
+  page,
+}) => {
+  let creates = 0;
+  let saved = false;
+  await mockApi(page, {
+    answers: {
+      "/v1/playlists": (route) => {
+        if (route.request().method() !== "POST")
+          return route.fulfill({
+            json: {
+              playlists: saved
+                ? [{ id: "p1", name: "Road trip", track_count: 0 }]
+                : [],
+            },
+          });
+        creates++;
+        saved = true;
+        return route.fulfill({
+          status: 504,
+          contentType: "text/html",
+          body: "<html><body>504 Gateway Time-out</body></html>",
+        });
+      },
+      "/v1/playlists/p1": (route) =>
+        route.fulfill({
+          json: { id: "p1", name: "Road trip", revision: 1, entries: [] },
+        }),
+    },
+  });
+  await page.goto("/#/library/playlists");
+  const create = page.getByRole("button", { name: "New playlist" });
+  await create.click();
+  const dialog = page.getByRole("dialog", { name: "New playlist" });
+  await dialog.getByLabel("Playlist name").fill("Road trip");
+  await dialog.getByRole("button", { name: "Create playlist" }).click();
+  await expect(page.locator(".notice-area")).toContainText(
+    "may or may not have been saved",
+  );
+  await expect(dialog).toBeHidden();
+  await expect(
+    page.locator(".album-card", { hasText: "Road trip" }),
+  ).toBeVisible();
+  expect(creates).toBe(1);
+  // The name waits in New playlist if it wasn't saved after all.
+  await create.click();
+  await expect(dialog.getByLabel("Playlist name")).toHaveValue("Road trip");
+});

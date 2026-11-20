@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Play, Plus, Shuffle, Star, X } from "lucide-react";
-import { api } from "./api";
+import { api, isUnconfirmed } from "./api";
 import {
   CollectionCard,
   playlistSongList,
@@ -8,6 +8,7 @@ import {
 } from "./CollectionMenu";
 import { Cover } from "./Cover";
 import { formatListSize } from "./format";
+import { notifyError } from "./notices";
 import type { Entry, Playlist, PlaylistSummary } from "./libraryTypes";
 import { Empty, InlineError } from "./EmptyState";
 import { SortControl, byName } from "./SortControl";
@@ -166,6 +167,8 @@ function NewPlaylistCard({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // A name whose create the server couldn't confirm, kept for the next try.
+  const [draft, setDraft] = useState("");
   const dialog = useRef<HTMLDialogElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -211,14 +214,31 @@ function NewPlaylistCard({
               setBusy(true);
               setError("");
               void createPlaylist(name)
-                .then(() => dialog.current?.close())
-                .catch((e) => setError(e.message))
+                .then(() => {
+                  setDraft("");
+                  dialog.current?.close();
+                })
+                .catch((e) => {
+                  if (!isUnconfirmed(e)) return setError(e.message);
+                  // The playlist may have been made (#275): the dialog
+                  // steps aside so the refreshed list shows whether it was,
+                  // and keeps the name for New playlist.
+                  setDraft(name);
+                  dialog.current?.close();
+                  notifyError(e.message, undefined, "new-playlist");
+                })
                 .finally(() => setBusy(false));
             }}
           >
             <label>
               Playlist name
-              <input name="name" autoFocus required maxLength={100} />
+              <input
+                name="name"
+                autoFocus
+                required
+                maxLength={100}
+                defaultValue={draft}
+              />
             </label>
             <button type="submit" className="primary-button" disabled={busy}>
               Create playlist

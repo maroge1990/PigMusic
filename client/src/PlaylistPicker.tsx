@@ -4,7 +4,8 @@ import { ListPlus, Plus, X } from "lucide-react";
 import { ReportedFailure, createPlaylist, loadPlaylists } from "./playlists";
 import { EmptyLine, InlineError } from "./EmptyState";
 import { focusMenuItem, menuKeys } from "./menuKeys";
-import { notify } from "./notices";
+import { isUnconfirmed } from "./api";
+import { notify, notifyError } from "./notices";
 
 type Playlist = { id: string; name: string };
 
@@ -186,7 +187,13 @@ export function PlaylistPicker({
                   dialog.current?.close();
                   notify("Playlist created and songs added");
                 })
-                .catch((e) => setError(e.message))
+                .catch((e) => {
+                  if (!isUnconfirmed(e)) return setError(e.message);
+                  // The playlist may have been made (#275): no second
+                  // Create from here; the notice says to check first.
+                  dialog.current?.close();
+                  notifyError(e.message, undefined, "new-playlist");
+                })
                 .finally(() => setBusy(false));
             }}
           >

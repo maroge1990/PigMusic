@@ -127,6 +127,42 @@ test("Add to playlist from the menu is the one picker, with arrow keys", async (
   await expect(dots).toBeFocused();
 });
 
+// #275: a new playlist the server couldn't confirm may have been made; the
+// picker's dialog must not offer Create again for a second copy.
+test("an unconfirmed new playlist from the picker is not offered again", async ({
+  page,
+}) => {
+  let creates = 0;
+  await mockApi(page, {
+    answers: {
+      "/v1/favourites": (route) =>
+        route.fulfill({ json: { favourited: false } }),
+      "/v1/playlists": (route) => {
+        if (route.request().method() !== "POST")
+          return route.fulfill({ json: { playlists: [] } });
+        creates++;
+        return route.fulfill({
+          status: 504,
+          contentType: "text/html",
+          body: "<html><body>504 Gateway Time-out</body></html>",
+        });
+      },
+    },
+  });
+  await page.goto(`/#/library/album/${album.id}`);
+  await page.getByRole("button", { name: "More options for 360" }).click();
+  await page.getByRole("menuitem", { name: "Add to playlist" }).click();
+  await page.getByRole("menuitem", { name: "New playlist" }).click();
+  const dialog = page.locator(".new-playlist-dialog");
+  await dialog.getByLabel("Playlist name").fill("Road trip");
+  await dialog.getByRole("button", { name: "Create playlist" }).click();
+  await expect(page.locator(".notice-area")).toContainText(
+    "may or may not have been saved",
+  );
+  await expect(dialog).toBeHidden();
+  expect(creates).toBe(1);
+});
+
 test("a song tapped in search plays alone; on an album it plays on", async ({
   page,
 }) => {
