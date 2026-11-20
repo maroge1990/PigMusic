@@ -38,9 +38,7 @@ import UIKit
           if value == .active { Task { await model.receiveShazamShares() } }
         }
         // iOS is short of memory: let go of what pages can read again (#253).
-        .onReceive(
-          NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)
-        ) { _ in model.receivedMemoryWarning() }
+        .modifier(MemoryWarning(model: model))
     }
     // Watch copies the server was still preparing when the app left (#219).
     .backgroundTask(.appRefresh(WatchPhoneController.refreshIdentifier)) {
@@ -125,19 +123,29 @@ private struct AppHaptics: ViewModifier {
   let model: AppModel
   func body(content: Content) -> some View {
     content
-      .sensoryFeedback(trigger: model.undo.items.count) { old, new in
+      .sensoryFeedback(trigger: model.undo.items.count) { (old: Int, new: Int) -> SensoryFeedback? in
         new > old ? SensoryFeedback.impact(weight: .light) : nil
       }
       .sensoryFeedback(.success, trigger: model.confirmations)
-      .sensoryFeedback(trigger: downloading) { was, now in
+      .sensoryFeedback(trigger: downloading) { (was: Bool, now: Bool) -> SensoryFeedback? in
         was && !now ? SensoryFeedback.success : nil
-      }
-      .sensoryFeedback(trigger: model.message) { _, now in
-        now == nil ? nil : SensoryFeedback.error
       }
       .modifier(NoticeHaptic(model: model))
   }
   private var downloading: Bool { model.downloads?.running ?? false }
+}
+
+/// iOS is short of memory (#253): the model lets go of what pages can read
+/// again. Its own modifier, so the app's body type-checks fast.
+private struct MemoryWarning: ViewModifier {
+  let model: AppModel
+  func body(content: Content) -> some View {
+    content.onReceive(
+      NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)
+    ) { (_: Notification) in
+      model.receivedMemoryWarning()
+    }
+  }
 }
 
 /// The error haptic for a failed action's notice (#245), apart so
@@ -145,9 +153,13 @@ private struct AppHaptics: ViewModifier {
 private struct NoticeHaptic: ViewModifier {
   let model: AppModel
   func body(content: Content) -> some View {
-    content.sensoryFeedback(trigger: failure) { _, now in
-      now == nil ? nil : SensoryFeedback.error
-    }
+    content
+      .sensoryFeedback(trigger: model.message) { (_: String?, now: String?) -> SensoryFeedback? in
+        now == nil ? nil : SensoryFeedback.error
+      }
+      .sensoryFeedback(trigger: failure) { (_: Int?, now: Int?) -> SensoryFeedback? in
+        now == nil ? nil : SensoryFeedback.error
+      }
   }
   /// Something done (a mix saved) answers with success instead (D-118).
   private var failure: Int? {

@@ -248,7 +248,9 @@ def test_a_memory_warning_lets_go_of_page_answers():
     diagnostics log. The day's memory figures go in the export."""
     app = (APP / "PigMusicApp.swift").read_text()
     assert "UIApplication.didReceiveMemoryWarningNotification" in app
-    assert "{ _ in model.receivedMemoryWarning() }" in app
+    memory = app.split("private struct MemoryWarning: ViewModifier {", 1)[1]
+    assert "model.receivedMemoryWarning()" in memory.split("\n}\n", 1)[0]
+    assert ".modifier(MemoryWarning(model: model))" in app
     assert "metrics.peakMemory = bytes(payload.memoryMetrics?.peakMemoryUsage)" in app
     assert "averageSuspendedMemory.averageMeasurement" in app
     model = (APP / "AppModel.swift").read_text()
