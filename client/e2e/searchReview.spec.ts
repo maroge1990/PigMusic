@@ -212,6 +212,53 @@ test("a focused catalogue artist keeps focus when the ranked answer lands", asyn
   await expect(page).toHaveURL(/#\/search\/artist\/mb-1\?/);
 });
 
+// Codex, batch F (#272): the ranked answer made the focused catalogue
+// artist its Top result; the Artists link went and focus with it.
+test("a focused catalogue artist promoted to Top result keeps focus", async ({
+  page,
+}) => {
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  const server = { ...artist, in_library: true, musicbrainz_artist_id: "mb-1" };
+  await mockApi(page, {
+    answers: {
+      "/v1/search/results": async (route) => {
+        await held;
+        return route.fulfill({
+          json: {
+            ...nothing,
+            top: [{ kind: "artist", id: artist.id }],
+            artists: [server],
+          },
+        });
+      },
+      "/v1/catalogue/artists": (route) =>
+        route.fulfill({
+          json: {
+            artists: [
+              { id: "mb-1", name: artist.name, description: "English singer" },
+            ],
+            offset: 0,
+            total: 1,
+            next_offset: null,
+          },
+        }),
+      [`/v1/catalogue/library-artists/${artist.id}`]: (route) =>
+        route.fulfill({ json: { id: "mb-1", name: artist.name } }),
+    },
+  });
+  await page.goto("/#/search?q=Charli");
+  const artists = page.getByRole("region", { name: "Artists" });
+  await artists.getByRole("link", { name: /English singer/ }).focus();
+  release();
+  const top = page.getByRole("region", { name: "Top result" });
+  const promoted = top.getByRole("link", { name: new RegExp(artist.name) });
+  await expect(promoted).toBeVisible();
+  await expect(promoted).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/#\/search\/artist\/mb-1\?/);
+});
+
 test("Search opens when the browser refuses storage", async ({ page }) => {
   await mockApi(page, {
     answers: {

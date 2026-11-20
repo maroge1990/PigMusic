@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Disc3,
   ListMusic,
@@ -99,6 +105,20 @@ export function SearchPage({
   const shown = useRef(active);
   shown.current = active;
   const typed = useRef(false);
+  // The catalogue identity of the artist link with keyboard focus (#272):
+  // when the ranked answer moves that artist to Top result, its new link
+  // takes the focus over.
+  const focusedArtist = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const id = focusedArtist.current;
+    const now = document.activeElement;
+    if (!id || (now && now !== document.body)) return;
+    document
+      .querySelector<HTMLElement>(
+        `.search-results a[data-artist="${CSS.escape(id)}"]`,
+      )
+      ?.focus();
+  });
   const [recent, setRecent] = useState(() => recentSearches(person));
   useEffect(() => setRecent(recentSearches(person)), [person]);
   const keepRecent = (q: string) => {
@@ -343,6 +363,7 @@ export function SearchPage({
             className="search-top-card"
             href={"#/search?q=" + encodeURIComponent(topArtist.name)}
             onClick={(e) => openArtist(e, topArtist.id)}
+            data-artist={topArtist.musicbrainz_artist_id || undefined}
           >
             <Cover
               title={topArtist.name}
@@ -454,6 +475,18 @@ export function SearchPage({
       {active && (
         <div
           className="search-results"
+          onFocus={(e) => {
+            focusedArtist.current =
+              (e.target as HTMLElement).dataset.artist ?? null;
+          }}
+          onBlur={(e) => {
+            // Moved elsewhere, not removed with a new answer.
+            const link = e.target;
+            queueMicrotask(() => {
+              if (link.isConnected && document.activeElement !== link)
+                focusedArtist.current = null;
+            });
+          }}
           // Opening a result keeps the search among the recent ones.
           onClickCapture={(e) => {
             if ((e.target as HTMLElement).closest("a, button"))
@@ -543,11 +576,13 @@ export function SearchPage({
                         }
                         inLibrary={a.in_library}
                         open={(e) => openArtist(e, a.id)}
+                        identity={a.musicbrainz_artist_id}
                       />
                     )),
                     ...catalogueArtists.map((artist) => (
                       <ArtistRow
                         key={"mb:" + artist.id}
+                        identity={artist.id}
                         name={artist.name}
                         href={"#" + discoverUrl(artist)}
                         cover={catalogueArtistCover(artist.id)}
@@ -611,6 +646,7 @@ function ArtistRow({
   caption,
   inLibrary = false,
   open,
+  identity,
 }: {
   name: string;
   href: string;
@@ -618,10 +654,12 @@ function ArtistRow({
   caption: string;
   inLibrary?: boolean;
   open?: (event: React.MouseEvent) => void;
+  /** The catalogue artist ID, which keeps focus across a new answer. */
+  identity?: string | null;
 }) {
   return (
     <li>
-      <a href={href} onClick={open}>
+      <a href={href} onClick={open} data-artist={identity || undefined}>
         <Cover title={name} src={cover} artist sizes="48px" />
         <span className="discover-text">
           <strong>{name}</strong>
