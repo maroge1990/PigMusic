@@ -40,14 +40,18 @@ export function sessionMap<K, V>() {
 let artworkRevision: number | undefined;
 
 /** A request; `anySession` sends a write without naming a session (ending
- * an old session by its id after an offline sign-out). */
-export type ApiInit = RequestInit & { anySession?: boolean };
+ * an old session by its id after an offline sign-out); `unshared` sends a
+ * read of its own instead of joining an identical one already on its way. */
+export type ApiInit = RequestInit & {
+  anySession?: boolean;
+  unshared?: boolean;
+};
 
 export async function apiFetch(
   path: string,
   init?: ApiInit,
 ): Promise<Response> {
-  const { anySession, ...rest } = init ?? {};
+  const { anySession, unshared, ...rest } = init ?? {};
   let options: RequestInit | undefined = init && rest;
   // U01-4: only the versioned API exists; an old path is a client bug.
   if (!path.startsWith("/api/v1/"))
@@ -71,7 +75,7 @@ export async function apiFetch(
   }
   options = { ...options, headers, credentials: "same-origin" };
 
-  if (method !== "GET" || options?.signal) {
+  if (method !== "GET" || options?.signal || unshared) {
     // The session this request began in: a late refusal for an earlier one
     // must not end the session signed in now (Codex).
     const generation = sessionGeneration;

@@ -220,7 +220,12 @@ test("restarting the radio while a refill is held still lets Next move on", asyn
   // Start the radio again: a new queue, while the first refill is held.
   await radio.click();
   await expect(mini).toContainText("Radio song 0");
+  // The new queue's refill is its own request (#271): it never waits on the
+  // old queue's, which stays held until the new radio has moved on.
+  await expect.poll(() => refills).toBe(2);
   await mini.getByRole("button", { name: "Next song" }).click();
+  await expect(mini).toContainText("Radio song 1");
   releaseFirst();
+  await page.waitForTimeout(300);
   await expect(mini).toContainText("Radio song 1");
 });

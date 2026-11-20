@@ -361,8 +361,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     // new queue or another account in the meantime discards it.
     const songs = queue.current;
     const generation = currentSession();
+    // Its own HTTP request (#271): an identical refill from an abandoned
+    // queue may stall or fail, and must not hold this queue's Next.
     const request: Promise<number> = api<{ tracks: Track[] }>(
       "/v1/radio?after=" + encodeURIComponent(last.cache_id),
+      { unshared: true },
     )
       .then((batch) => {
         if (queue.current !== songs || currentSession() !== generation)
