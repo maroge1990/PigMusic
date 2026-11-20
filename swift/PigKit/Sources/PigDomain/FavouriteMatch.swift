@@ -9,28 +9,32 @@ import Foundation
 /// Two songs are the same when their artist, title, album and album artist
 /// (the artist when empty) normalise alike, no release or recording id
 /// conflicts where both are known, and lengths, where both are known and
-/// not 0, are within 5 s. Normalising is `library.normalise`: NFKC, Python's
-/// case folding, then the runs of word characters (letters, digits and
-/// "_", Python's `\w`) joined by single spaces.
+/// not 0, are within 5 s. Normalising is `library.normalise`, in its order:
+/// NFKC, then Python's `str.casefold()`, then the runs of Python's `\w`
+/// characters joined by single spaces. Case folding and `\w` come from
+/// tables generated from Python's own Unicode data (FavouriteFolding,
+/// scripts/generate_favourite_folding.py; Codex round 2 on batch G), and
+/// tests/fixtures/favourite_normalise.json checks the whole of it.
 public enum FavouriteMatch {
   /// One field, normalised, as Unicode scalar values: compared as the server
   /// compares strings, by code point, not by Swift's canonical equivalence.
   public typealias Words = [UInt32]
 
   public static func normalise(_ text: String) -> Words {
-    let folded = casefold(text.precomposedStringWithCompatibilityMapping)
-    var words: [Words] = []
-    var word: Words = []
-    for scalar in folded.unicodeScalars {
-      if isWordCharacter(scalar) {
-        word.append(scalar.value)
-      } else if !word.isEmpty {
-        words.append(word)
-        word = []
+    var result: Words = []
+    var pendingSpace = false
+    for scalar in text.precomposedStringWithCompatibilityMapping.unicodeScalars {
+      for value in FavouriteFolding.folds[scalar.value] ?? [scalar.value] {
+        if isWordCharacter(value) {
+          if pendingSpace { result.append(32) }
+          pendingSpace = false
+          result.append(value)
+        } else if !result.isEmpty {
+          pendingSpace = true
+        }
       }
     }
-    if !word.isEmpty { words.append(word) }
-    return Array(words.joined(separator: [32]))
+    return result
   }
 
   /// The four fields that place a song (`matching.context`).
@@ -75,27 +79,23 @@ public enum FavouriteMatch {
     }
   }
 
-  /// Python's `str.casefold()` for the comparisons that matter here: full
-  /// case folding equates what upper-casing then lower-casing equates
-  /// ("ß", "SS" and "ss"; "ς", "Σ" and "σ"; "ſ" and "s").
-  static func casefold(_ text: String) -> String {
-    String(String.UnicodeScalarView(text.unicodeScalars.flatMap { scalar in
-      scalar.properties.uppercaseMapping.unicodeScalars.flatMap {
-        $0.properties.lowercaseMapping.unicodeScalars
+  /// Python's `\w` in a str pattern, from its own data: a binary search of
+  /// the generated ranges.
+  static func isWordCharacter(_ value: UInt32) -> Bool {
+    let ranges = FavouriteFolding.wordRanges
+    var low = 0
+    var high = ranges.count - 1
+    while low <= high {
+      let middle = (low + high) / 2
+      let (first, last) = ranges[middle]
+      if value < first {
+        high = middle - 1
+      } else if value > last {
+        low = middle + 1
+      } else {
+        return true
       }
-    }))
-  }
-
-  /// Python's `\w` in a str pattern: `str.isalnum()` or "_", that is any
-  /// letter (L*) or number (N*), not a mark or punctuation.
-  static func isWordCharacter(_ scalar: Unicode.Scalar) -> Bool {
-    if scalar == "_" { return true }
-    switch scalar.properties.generalCategory {
-    case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter,
-      .decimalNumber, .letterNumber, .otherNumber:
-      return true
-    default:
-      return scalar.properties.numericType != nil
     }
+    return false
   }
 }

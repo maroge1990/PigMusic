@@ -17,12 +17,38 @@ struct FavouriteMatchTests {
     let pairs: [Pair]
   }
 
+  private static let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    .deletingLastPathComponent()
+
   private func fixture() throws -> Fixture {
-    let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-      .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-      .deletingLastPathComponent()
-    let url = root.appendingPathComponent("tests/fixtures/favourite_same_song.json")
+    let url = Self.root.appendingPathComponent("tests/fixtures/favourite_same_song.json")
     return try LibraryCodec.decoder().decode(Fixture.self, from: Data(contentsOf: url))
+  }
+
+  private struct Normalised: Decodable {
+    struct Case: Decodable {
+      let text: String
+      let normalised: String
+    }
+    let cases: [Case]
+  }
+
+  /// Codex round 2 on batch G: case folding and word characters differed
+  /// from Python's (ı, ẞ). tests/fixtures/favourite_normalise.json, made by
+  /// scripts/generate_favourite_folding.py from the server's own normalise,
+  /// holds every character case folding changes and every mark, punctuation,
+  /// symbol and separator below U+3000; each must normalise as on the server.
+  @Test func everyTextNormalisesAsTheServerNormalisesIt() throws {
+    let url = Self.root.appendingPathComponent("tests/fixtures/favourite_normalise.json")
+    let cases = try JSONDecoder().decode(Normalised.self, from: Data(contentsOf: url)).cases
+    #expect(cases.count > 5000)
+    var wrong: [String] = []
+    for item in cases
+    where FavouriteMatch.normalise(item.text) != item.normalised.unicodeScalars.map(\.value) {
+      wrong.append(item.text.unicodeScalars.map { String($0.value, radix: 16) }.joined(separator: " "))
+    }
+    #expect(wrong.isEmpty, "\(wrong.count) of \(cases.count) differ: \(wrong.prefix(20))")
   }
 
   @Test func everyPairIsAnsweredAsTheServerAnswersIt() throws {

@@ -26,6 +26,18 @@
       "right": {"id": "b", "title": "MASSE", "artist": "Artist", "album": "Album"}
     },
     {
+      "note": "Codex round 2: Turkish dotless ı is not i",
+      "same": false,
+      "left": {"id": "a", "title": "Kırmızı", "artist": "Artist", "album": "Album"},
+      "right": {"id": "b", "title": "Kirmizi", "artist": "Artist", "album": "Album"}
+    },
+    {
+      "note": "Codex round 2: capital ẞ folds to ss",
+      "same": true,
+      "left": {"id": "a", "title": "STRAẞE", "artist": "Artist", "album": "Album"},
+      "right": {"id": "b", "title": "strasse", "artist": "Artist", "album": "Album"}
+    },
+    {
       "note": "accents are kept: Café is not Cafe",
       "same": false,
       "left": {"id": "a", "title": "Café", "artist": "Artist", "album": "Album"},

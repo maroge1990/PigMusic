@@ -23,6 +23,29 @@ def test_the_server_answers_each_pair_as_the_fixture_says(pair):
     assert same_song(pair["right"], pair["left"]) is pair["same"]
 
 
+def test_the_generated_folding_and_fixture_are_this_pythons():
+    """Codex round 2 on batch G: Swift's own case folding differed from
+    Python's (ı, ẞ). The Swift tables and the normalise fixture come from
+    this interpreter's Unicode data; after an upgrade this fails until
+    scripts/generate_favourite_folding.py is run again."""
+    import importlib.util
+
+    root = Path(__file__).resolve().parents[1]
+    script = root / "scripts/generate_favourite_folding.py"
+    if not script.exists() or not (root / "swift").exists():
+        pytest.skip("the generator and native sources are not in this image")
+    spec = importlib.util.spec_from_file_location("folding", script)
+    folding = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(folding)
+    from server.library import normalise
+
+    # The generator's copy of normalise is the server's.
+    for case in json.loads(folding.FIXTURE.read_text())["cases"]:
+        assert normalise(case["text"]) == case["normalised"], case["text"]
+    assert folding.SWIFT.read_text() == folding.swift_source()
+    assert folding.FIXTURE.read_text() == folding.fixture_source()
+
+
 def test_the_swift_test_reads_the_same_fixture():
     swift = (
         Path(__file__).resolve().parents[1]

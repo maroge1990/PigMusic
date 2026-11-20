@@ -60,6 +60,9 @@ def test_the_swift_rule_strips_what_python_strips():
     }
     spaces = {c for c in range(sys.maxunicode + 1) if chr(c).isspace()}
     assert listed == spaces
-    assert "tests/fixtures/playlist_names.json" in (
-        ROOT / "swift/PigKit/Tests/PigCoreTests/PlaylistNameTests.swift"
-    ).read_text()
+    assert (
+        "tests/fixtures/playlist_names.json"
+        in (
+            ROOT / "swift/PigKit/Tests/PigCoreTests/PlaylistNameTests.swift"
+        ).read_text()
+    )
