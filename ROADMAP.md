@@ -13,7 +13,10 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 - **Batch G (iPhone and Watch), branch `feature/batch-g` (27 commits, `199e1b9`), NOT on main:** device-round fixes
   #284–#287, #290–#293, #124 (Shazam), #283, and the Watch wake-up rule and counters (#219, D-124, D-126). Two Codex
   rounds and a final confirmation: no high; mediums are #300. Both apps compile and PigKit tests pass on GitHub; the
-  **tap-through run 44740297439 was still going**. Next: when it passes, merge to main, push, then
+  **tap-through run 44740297439 failed one test**, the new
+  `DemoLibraryTests.testASwipeRemovesASongFromUpNextWithUndo` (line 485: "unable to perform Swipe left"), so the
+  swipe-to-remove in the player (#287) is unproven: find out whether the test's row lookup or the List's swipe is at
+  fault before merging. Then: merge to main, push, then
   `git push origin <commit>:refs/heads/testflight-YYYYMMDD-bN` (Xcode Cloud), delete that branch once the build arrives.
   New sentence for Mark to OK: "Couldn't create <name>. Try again."
 - **Built, in Codex round 1, none compiled on Apple platforms yet, each to be its own TestFlight build after G:**
