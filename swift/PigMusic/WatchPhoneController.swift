@@ -102,6 +102,34 @@ import UIKit
   /// clock the app left with.
   @ObservationIgnored private(set) var backgroundWork = WatchBackgroundWork()
   private static let backgroundWorkKey = "pig.watch.background-work"
+  /// The wake-ups sent to the Watch app through its complication, and the
+  /// budget they keep (D-125). Saved, so a background launch keeps the clock.
+  @ObservationIgnored private(set) var complicationPushes = WatchComplicationPushes()
+  private static let complicationPushesKey = "pig.watch.complication-pushes"
+  /// Songs were just handed to the Watch link: wake the Watch app to take
+  /// them, once per burst and within watchOS's daily allowance, while
+  /// PigMusic's complication is on the active watch face (#219).
+  private func wakeWatch(now: Date = Date()) {
+    guard let link, let enabled = link.complicationEnabled,
+      let remaining = link.complicationPushesLeft
+    else { return }
+    var pushes = complicationPushes
+    // Reachable: PigMusic is open on Apple Watch and takes the songs itself.
+    let decision = pushes.handed(
+      now: now, enabled: enabled, remaining: remaining, watchAppOpen: link.reachable)
+    if decision == .send, let data = try? JSONEncoder().encode(CompanionWake(sentAt: now)),
+      link.pushComplication(data)
+    {
+      pushes.sent(at: now)
+      DiagnosticsLog.shared.record(
+        "watch", "woke the Watch app through its complication; \(remaining - 1) pushes left today")
+    }
+    guard pushes != complicationPushes else { return }
+    complicationPushes = pushes
+    if let data = try? JSONEncoder().encode(pushes) {
+      defaults.set(data, forKey: Self.complicationPushesKey)
+    }
+  }
   /// Ready copies on the iPhone last noted as a finished background download.
   @ObservationIgnored private var readyNoted = 0
   private func noteBackground(_ change: (inout WatchBackgroundWork) -> Void) {
@@ -141,6 +169,10 @@ import UIKit
       defaults.data(forKey: Self.backgroundWorkKey)
       .flatMap { try? JSONDecoder().decode(WatchBackgroundWork.self, from: $0) }
       ?? WatchBackgroundWork()
+    complicationPushes =
+      defaults.data(forKey: Self.complicationPushesKey)
+      .flatMap { try? JSONDecoder().decode(WatchComplicationPushes.self, from: $0) }
+      ?? WatchComplicationPushes()
     context = CompanionContext(
       revision: Int64(defaults.integer(forKey: "pig.watch.revision")),
       account: defaults.string(forKey: "pig.watch.account"))
@@ -959,6 +991,7 @@ import UIKit
       }
     }
     if handed > 0, !foreground { noteBackground { $0.note(.sent, count: handed) } }
+    if handed > 0 { wakeWatch() }
   }
   /// The iPhone's copy of a song goes once the Watch confirms holding it, and
   /// a song the Watch later loses is fetched from the server again (#218).

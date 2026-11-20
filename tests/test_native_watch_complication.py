@@ -70,3 +70,53 @@ def test_the_watch_writes_its_status_where_the_complication_reads_it():
         "Couldn't",
     ):
         assert not any(words in line for line in code)
+
+
+PHONE = ROOT / "swift/PigMusic/WatchPhoneController.swift"
+LINK = ROOT / "swift/Shared/CompanionLink.swift"
+
+
+def test_the_iphone_wakes_the_watch_app_through_the_budget():
+    """After a publish hands songs to the link, one complication push may
+    wake the Watch app, only as WatchComplicationPushes allows."""
+    phone = PHONE.read_text()
+    link = LINK.read_text()
+    publish = phone.split("  private func publishOnce(force: Bool) async {", 1)[1]
+    publish = publish.split("\n  }\n", 1)[0]
+    assert publish.rstrip().endswith("if handed > 0 { wakeWatch() }")
+    wake = body(phone, "  private func wakeWatch(now: Date = Date()) {")
+    assert "pushes.handed(" in wake and "watchAppOpen: link.reachable" in wake
+    # Sent only on the rule's say-so, and counted only once it went.
+    assert wake.index("decision == .send") < wake.index("link.pushComplication(data)")
+    assert wake.index("link.pushComplication(data)") < wake.index(
+        "pushes.sent(at: now)"
+    )
+    assert "CompanionWake(sentAt: now)" in wake
+    # Saved, so a background launch keeps the clock.
+    assert phone.count("Self.complicationPushesKey") == 2
+    # One place sends it, on the iPhone only, and only with the complication on the face.
+    sources = "".join(path.read_text() for path in (ROOT / "swift").rglob("*.swift"))
+    assert sources.count("transferCurrentComplicationUserInfo(") == 1
+    push = link.split("    func pushComplication(_ data: Data) -> Bool {", 1)[1]
+    push = push.split("\n    }\n", 1)[0]
+    assert "session.isComplicationEnabled" in push
+    assert '["payload": data]' in push
+    ios = link.split("  #if os(iOS)\n    /// Whether PigMusic's complication", 1)[1]
+    assert "func pushComplication" in ios.split("  #endif", 1)[0]
+
+
+def test_the_watch_takes_songs_when_the_iphone_wakes_it():
+    model = MODEL.read_text()
+    message = model.split("link?.onMessage = { [weak self] data in", 1)[1]
+    assert message.lstrip().startswith(
+        "if CompanionWake.decode(data) != nil {\n          self?.wokenByPhone()"
+    )
+    wake = body(model, "  func wokenByPhone(at date: Date = Date()) {")
+    # Noted first (it reopens the refresh window, #300), then the delivery
+    # runs apart from the message, which it would otherwise wait for.
+    assert "$0.phonePushed(active: active, at: date)" in wake
+    assert "guard phoneWake == nil else { return }" in wake
+    task = wake.split("phoneWake = Task {", 1)[1]
+    assert task.index("await self?.finishBackgroundDelivery()") < task.index(
+        "self?.planRefresh()"
+    )

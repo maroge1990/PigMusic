@@ -132,12 +132,15 @@ public struct WatchComplicationReload: Equatable, Sendable {
 /// (`remainingComplicationUserInfoTransfers`, about 50 a day), so: at most
 /// one per hand-off burst (hand-offs less than `burstGap` apart), never
 /// within `spacing` of the last one, never when the complication isn't on
-/// the face, and always keeping `reserve` of the day's allowance. Saved on
+/// the face or PigMusic is open on Apple Watch already (it takes the songs
+/// itself), and always keeping `reserve` of the day's allowance. Saved on
 /// the iPhone, so a background launch keeps the clock.
 public struct WatchComplicationPushes: Codable, Equatable, Sendable {
   public enum Decision: String, Codable, Sendable {
     /// Send one now.
     case send
+    /// PigMusic is open on Apple Watch (the link is reachable): no need.
+    case watchAppOpen
     /// PigMusic's complication isn't on the active watch face.
     case disabled
     /// What is left of the day's allowance is the reserve.
@@ -171,14 +174,15 @@ public struct WatchComplicationPushes: Codable, Equatable, Sendable {
   /// What WatchConnectivity last said: complication on the face, pushes left today.
   public private(set) var enabled: Bool?
   public private(set) var remaining: Int?
-  public init() {}
-
   /// The last push sent.
-  public var lastSent: Date? { events.last { $0.decision == .send }?.at }
+  public private(set) var lastSent: Date?
+  public init() {}
 
   /// Songs were handed to the Watch link at `now`: whether to push. A
   /// `.send` is recorded only once `sent(at:)` confirms it went.
-  public mutating func handed(now: Date, enabled: Bool, remaining: Int) -> Decision {
+  public mutating func handed(
+    now: Date, enabled: Bool, remaining: Int, watchAppOpen: Bool = false
+  ) -> Decision {
     if let lastHanded {
       let since = now.timeIntervalSince(lastHanded)
       if since >= Self.burstGap || since < -Self.burstGap { burstPushed = false }
@@ -190,7 +194,7 @@ public struct WatchComplicationPushes: Codable, Equatable, Sendable {
     self.remaining = remaining
     let decision = Self.decide(
       now: now, enabled: enabled, remaining: remaining, lastSent: lastSent,
-      burstPushed: burstPushed)
+      burstPushed: burstPushed, watchAppOpen: watchAppOpen)
     if decision != .send, decision != .alreadyThisBurst {
       note(Event(at: now, decision: decision))
     }
@@ -199,15 +203,18 @@ public struct WatchComplicationPushes: Codable, Equatable, Sendable {
   /// The push went: this burst has had its push.
   public mutating func sent(at date: Date) {
     burstPushed = true
+    lastSent = date
     note(Event(at: date, decision: .send))
   }
 
   /// The rule. A last push more than `spacing` ahead of `now` is from a
   /// clock since set back and is ignored.
   public static func decide(
-    now: Date, enabled: Bool, remaining: Int, lastSent: Date?, burstPushed: Bool
+    now: Date, enabled: Bool, remaining: Int, lastSent: Date?, burstPushed: Bool,
+    watchAppOpen: Bool = false
   ) -> Decision {
     if burstPushed { return .alreadyThisBurst }
+    if watchAppOpen { return .watchAppOpen }
     if !enabled { return .disabled }
     if remaining <= reserve { return .reserve }
     if let lastSent {
@@ -239,9 +246,12 @@ public struct WatchComplicationPushes: Codable, Equatable, Sendable {
         + "(\(Self.reserve) are always kept).",
       "Hand-offs with no push: \(count(.disabled, now: now)) with no complication on the face, "
         + "\(count(.reserve, now: now)) to keep the reserve, "
-        + "\(count(.spacing, now: now)) too soon after the last push.",
+        + "\(count(.spacing, now: now)) too soon after the last push, "
+        + "\(count(.watchAppOpen, now: now)) with PigMusic open on Apple Watch.",
     ]
-    if let lastHanded { lines.append("Songs last handed to the Apple Watch link: \(lastHanded.formatted(.iso8601)).") }
+    if let lastHanded {
+      lines.append("Songs last handed to the Apple Watch link: \(lastHanded.formatted(.iso8601)).")
+    }
     return lines.joined(separator: "\n")
   }
 }

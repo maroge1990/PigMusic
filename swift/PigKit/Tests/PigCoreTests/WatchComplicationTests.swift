@@ -199,6 +199,30 @@ struct WatchComplicationTests {
         burstPushed: false) == .spacing)
   }
 
+  /// With PigMusic open on Apple Watch the songs go straight to it: no push,
+  /// and the burst keeps its push for when the app is closed.
+  @Test func noPushWhileTheWatchAppIsOpen() {
+    var pushes = WatchComplicationPushes()
+    #expect(
+      pushes.handed(now: at(minutes: 0), enabled: true, remaining: 50, watchAppOpen: true)
+        == .watchAppOpen)
+    #expect(pushes.handed(now: at(minutes: 3), enabled: true, remaining: 50) == .send)
+    #expect(pushes.count(.watchAppOpen, now: at(minutes: 3)) == 1)
+  }
+
+  /// Many skips never hide the last push from the spacing rule.
+  @Test func theLastPushOutlivesTheEventLog() {
+    var pushes = WatchComplicationPushes()
+    pushes.sent(at: at(minutes: 0))
+    for step in 0..<(WatchComplicationPushes.capacity + 10) {
+      _ = pushes.handed(
+        now: at(minutes: 0.01 * Double(step)), enabled: true, remaining: 50, watchAppOpen: true)
+    }
+    #expect(pushes.count(.send, now: at(minutes: 6)) == 0)
+    #expect(pushes.lastSent == at(minutes: 0))
+    #expect(pushes.handed(now: at(minutes: 15), enabled: true, remaining: 50) == .spacing)
+  }
+
   @Test func pushesAreSavedAndSummarised() throws {
     var pushes = WatchComplicationPushes()
     _ = pushes.handed(now: at(minutes: 0), enabled: false, remaining: 50)
@@ -212,6 +236,7 @@ struct WatchComplicationTests {
     #expect(text.contains("Pushes that wake PigMusic on Apple Watch: 1 in the last 7 days; last at "))
     #expect(text.contains("Pushes left today: 47 (10 are always kept)."))
     #expect(text.contains("Hand-offs with no push: 1 with no complication on the face, 0 to keep"))
+    #expect(text.contains("0 with PigMusic open on Apple Watch."))
     // With no link, what WatchConnectivity last said.
     #expect(saved.summary(now: at(minutes: 40), enabled: nil, remaining: nil).contains("left today: 48"))
     #expect(

@@ -123,6 +123,30 @@ import WatchConnectivity
     session.transferUserInfo(["payload": data])
     return true
   }
+  #if os(iOS)
+    /// Whether PigMusic's complication is on the active watch face (D-125);
+    /// nil while the session isn't active.
+    var complicationEnabled: Bool? {
+      guard let session, session.activationState == .activated else { return nil }
+      return session.isComplicationEnabled
+    }
+    /// Complication pushes watchOS still allows today; nil while the session isn't active.
+    var complicationPushesLeft: Int? {
+      guard let session, session.activationState == .activated else { return nil }
+      return session.remainingComplicationUserInfoTransfers
+    }
+    /// Wakes the Watch app through its complication (D-125, #219): watchOS
+    /// delivers the push at once, launching the app in the background, and
+    /// it arrives with the other messages (`onMessage`). False when it
+    /// couldn't be sent.
+    func pushComplication(_ data: Data) -> Bool {
+      guard let session, session.activationState == .activated, session.isPaired,
+        session.isWatchAppInstalled, session.isComplicationEnabled
+      else { return false }
+      _ = session.transferCurrentComplicationUserInfo(["payload": data])
+      return true
+    }
+  #endif
   func request(_ data: Data) async throws -> Data {
     guard let session, session.isReachable else { throw CompanionFailure.stale }
     return try await withCheckedThrowingContinuation { continuation in
