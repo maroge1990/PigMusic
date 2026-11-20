@@ -18,6 +18,11 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
   public static let capacity = 1000
   /// Wakes listed one per line at the end of the summary.
   public static let recentLines = 10
+  /// Song ids remembered as already listed since the app was last opened.
+  /// Once full, every id counts as seen: nothing more reopens the window.
+  public static let listedCapacity = 3000
+  /// Reopenings by new songs listed allowed between two openings of the app.
+  public static let reopeningLimit = 6
 
   public enum Kind: String, Codable, Sendable {
     /// The app was launched; `active` false when in the background.
@@ -69,6 +74,13 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
   /// When the 2-hour window ran out with songs waiting; nil while refreshes
   /// may be asked for. Only the app being opened or new songs listed clear it.
   public private(set) var refreshStoppedAt: Date?
+  /// Saved optional, so a log saved before they existed still decodes.
+  private var listedSeen: Set<String>?
+  private var listedReopenings: Int?
+  /// Song ids listed since the app was last opened (Codex round 2 on batch G).
+  public var seenSinceOpened: Set<String> { listedSeen ?? [] }
+  /// Times new songs reopened the window since the app was last opened.
+  public var reopenings: Int { listedReopenings ?? 0 }
   public init() {}
 
   /// A launch not in the background is the person opening the app.
@@ -85,13 +97,32 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
   public mutating func sawPerson(at date: Date = Date()) {
     lastOpened = date
     refreshStoppedAt = nil
+    listedSeen = nil
+    listedReopenings = nil
   }
-  /// The person sent new songs (a manifest listing songs the previous one
-  /// didn't): the window counts from here and any stop is lifted.
-  public mutating func newSongsListed(at date: Date = Date()) {
+  /// A manifest was applied: `ids` it lists, `previous` those the library
+  /// the Watch had applied listed. Songs listed in neither that library nor
+  /// any other since the app was last opened are new songs the person sent:
+  /// the window counts from here and any stop is lifted. So membership that
+  /// comes and goes (A, B, A, B) reopens it at most once per song, and at
+  /// most `reopeningLimit` times, until the app is opened (Codex round 2 on
+  /// batch G). Returns whether it reopened.
+  @discardableResult public mutating func songsListed(
+    _ ids: some Sequence<String>, previous: some Sequence<String>, at date: Date = Date()
+  ) -> Bool {
+    let current = Array(ids)
+    let before = Array(previous)
+    var seen = listedSeen ?? []
+    let full = seen.count >= Self.listedCapacity
+    let fresh = Set(current).subtracting(before).subtracting(seen)
+    for id in before + current where seen.count < Self.listedCapacity { seen.insert(id) }
+    listedSeen = seen
+    guard !full, !fresh.isEmpty, reopenings < Self.reopeningLimit else { return false }
+    listedReopenings = reopenings + 1
     lastListed = date
     refreshStoppedAt = nil
     note(Event(at: date, kind: .listed))
+    return true
   }
   public mutating func linkTask(pending: Bool, at date: Date = Date()) {
     note(Event(at: date, kind: .linkTask, pending: pending))

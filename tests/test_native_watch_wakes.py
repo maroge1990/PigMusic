@@ -124,7 +124,7 @@ def test_new_songs_sent_reopen_the_refresh_window():
     assert "let previous = await archive.snapshot()" in manifest
     apply = manifest.index("try await archive.apply(manifest)")
     listed = manifest.index(
-        "WatchRefreshPlan.addsSongs(manifest.songs.map(\\.id), over: previous.songs.map(\\.id))"
+        "_ = $0.songsListed(manifest.songs.map(\\.id), previous: previous.songs.map(\\.id))"
     )
     assert apply < listed
-    assert "$0.newSongsListed()" in manifest[listed:]
+    assert "newSongsListed" not in model

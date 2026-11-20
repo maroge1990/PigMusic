@@ -602,9 +602,10 @@ import WatchKit
           if !unchanged { await stop() }
           try await archive.apply(manifest)
           // New songs sent: the refresh window reopens (D-124, 20 Nov). Judged
-          // against the library the archive kept, so a relaunch adds nothing.
-          if WatchRefreshPlan.addsSongs(manifest.songs.map(\.id), over: previous.songs.map(\.id)) {
-            noteWake { $0.newSongsListed() }
+          // against the library the archive kept, so a relaunch adds nothing,
+          // and against the songs listed since the app was last opened.
+          noteWake {
+            _ = $0.songsListed(manifest.songs.map(\.id), previous: previous.songs.map(\.id))
           }
           DiagnosticsLog.shared.record(
             "sync",

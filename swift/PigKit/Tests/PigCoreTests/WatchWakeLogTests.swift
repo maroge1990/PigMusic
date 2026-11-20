@@ -189,7 +189,7 @@ struct WatchWakeLogTests {
     // Three hours with nothing waiting: no window runs, no stop.
     #expect(log.refreshPlan(now: at(3), waiting: 0) == .none)
     #expect(log.refreshStoppedAt == nil)
-    log.newSongsListed(at: at(72))
+    log.songsListed(["new"], previous: [], at: at(72))
     #expect(log.refreshPlan(now: at(72), waiting: 4) == .at(at(72, minutes: 30)))
     // Still the 2-hour limit from there.
     #expect(log.refreshPlan(now: at(74), waiting: 4) == .none)
@@ -198,7 +198,7 @@ struct WatchWakeLogTests {
 
   @Test func stuckThenADuplicateCopyStaysStopped() {
     var log = WatchWakeLog()
-    log.newSongsListed(at: at(0))
+    log.songsListed(["a"], previous: [], at: at(0))
     #expect(log.refreshPlan(now: at(2), waiting: 3) == .none)
     #expect(log.refreshStoppedAt == at(2))
     log.accepted(receivedAt: at(2, minutes: 10), active: false, newSong: false, waiting: 3, at: at(2, minutes: 10))
@@ -207,9 +207,9 @@ struct WatchWakeLogTests {
 
   @Test func stoppedThenNewSongsListedReopens() {
     var log = WatchWakeLog()
-    log.newSongsListed(at: at(0))
+    log.songsListed(["a"], previous: [], at: at(0))
     #expect(log.refreshPlan(now: at(3), waiting: 3) == .none)
-    log.newSongsListed(at: at(5))
+    log.songsListed(["a", "b"], previous: ["a"], at: at(5))
     #expect(log.refreshStoppedAt == nil)
     #expect(log.refreshPlan(now: at(5), waiting: 4) == .at(at(5, minutes: 30)))
   }
@@ -219,6 +219,84 @@ struct WatchWakeLogTests {
     log.opened(at: at(0))
     log.accepted(receivedAt: at(5), active: false, newSong: false, waiting: 0, at: at(5))
     #expect(log.refreshStoppedAt == nil)
+  }
+
+  /// Codex round 2 on batch G: A, B, A, B across expired windows reopened
+  /// it every time, with no song taken and the app never opened.
+  @Test func alternatingMembershipReopensAtMostOncePerSong() {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    #expect(log.songsListed(["a"], previous: [], at: at(0)) == true)
+    #expect(log.refreshPlan(now: at(3), waiting: 1) == .none)
+    #expect(log.songsListed(["b"], previous: ["a"], at: at(3)) == true)
+    #expect(log.refreshPlan(now: at(6), waiting: 1) == .none)
+    // a and b again, and again: both were listed since the app was opened.
+    #expect(log.songsListed(["a"], previous: ["b"], at: at(6)) == false)
+    #expect(log.songsListed(["b"], previous: ["a"], at: at(9)) == false)
+    #expect(log.refreshPlan(now: at(9), waiting: 1) == .none)
+    #expect(log.refreshStoppedAt != nil)
+    // A genuinely new album later still reopens it.
+    #expect(log.songsListed(["b", "c", "d"], previous: ["b"], at: at(20)) == true)
+    #expect(log.refreshPlan(now: at(20), waiting: 2) == .at(at(20, minutes: 30)))
+  }
+
+  @Test func churnCantKeepRefreshesGoingForEver() {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    var reopened = 0
+    var previous: [String] = []
+    for step in 0..<20 {
+      let ids = ["song\(step)"]
+      if log.songsListed(ids, previous: previous, at: at(Double(step) * 3)) { reopened += 1 }
+      previous = ids
+    }
+    #expect(reopened == WatchWakeLog.reopeningLimit)
+    #expect(log.reopenings == WatchWakeLog.reopeningLimit)
+    #expect(log.refreshPlan(now: at(60), waiting: 1) == .none)
+    // Opening the app starts afresh.
+    log.opened(at: at(61))
+    #expect(log.reopenings == 0 && log.seenSinceOpened.isEmpty)
+    #expect(log.songsListed(["song0"], previous: ["song19"], at: at(70)) == true)
+  }
+
+  @Test func aFullMemoryOfListedSongsReopensNothing() {
+    var log = WatchWakeLog()
+    let many = (0..<WatchWakeLog.listedCapacity).map { "id\($0)" }
+    #expect(log.songsListed(many, previous: [], at: at(0)) == true)
+    #expect(log.seenSinceOpened.count == WatchWakeLog.listedCapacity)
+    // Full: a song never seen still counts as seen.
+    #expect(log.songsListed(many + ["extra"], previous: many, at: at(3)) == false)
+    #expect(log.seenSinceOpened.count == WatchWakeLog.listedCapacity)
+  }
+
+  @Test func reSendingTheSameSongsAfterAStopDoesntReopen() {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    #expect(log.songsListed(["a", "b"], previous: [], at: at(0)) == true)
+    #expect(log.refreshPlan(now: at(3), waiting: 2) == .none)
+    // Removed, then sent again: the known residual, until the app is opened.
+    #expect(log.songsListed([], previous: ["a", "b"], at: at(4)) == false)
+    #expect(log.songsListed(["a", "b"], previous: [], at: at(5)) == false)
+    #expect(log.refreshPlan(now: at(5), waiting: 2) == .none)
+  }
+
+  @Test func whatWasListedSurvivesARelaunch() throws {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    log.songsListed(["a"], previous: [], at: at(0))
+    log.songsListed(["b"], previous: ["a"], at: at(3))
+    var saved = try JSONDecoder().decode(WatchWakeLog.self, from: JSONEncoder().encode(log))
+    #expect(saved == log)
+    #expect(saved.seenSinceOpened == ["a", "b"] && saved.reopenings == 2)
+    #expect(saved.songsListed(["a"], previous: ["b"], at: at(6)) == false)
+    // A log saved before these existed decodes with nothing remembered.
+    var old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(WatchWakeLog()))
+      as! [String: Any]
+    old.removeValue(forKey: "listedSeen")
+    old.removeValue(forKey: "listedReopenings")
+    let decoded = try JSONDecoder().decode(
+      WatchWakeLog.self, from: JSONSerialization.data(withJSONObject: old))
+    #expect(decoded.reopenings == 0 && decoded.seenSinceOpened.isEmpty)
   }
 
   @Test func survivesBeingSaved() throws {
