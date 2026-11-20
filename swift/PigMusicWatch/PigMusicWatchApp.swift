@@ -30,11 +30,15 @@ import WatchKit
             DiagnosticsLog.shared.background()
             // Removals waiting for their Undo are sent before the Watch sleeps.
             model.undo.sendAll()
+            // Songs still on their way: watchOS wakes the app to take them (#219).
+            model.planRefresh()
           }
           if phase == .active { Task { await model.reload() } }
         }
     }
     .backgroundTask(.watchConnectivity) { await model.linkBackgroundTask() }
+    // Songs the iPhone handed to the link while the app wasn't running (#219).
+    .backgroundTask(.appRefresh(WatchModel.refreshIdentifier)) { await model.backgroundRefresh() }
   }
 }
 

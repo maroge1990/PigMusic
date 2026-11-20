@@ -126,6 +126,42 @@ import WatchKit
     await finishBackgroundDelivery()
     let delivered = receivedThisRun > received
     noteWake { $0.linkTask(pending: pending || delivered) }
+    planRefresh()
+  }
+  /// The Watch's scheduled refresh, which takes songs the iPhone handed to
+  /// the link while the app wasn't running (#219).
+  static let refreshIdentifier = "au.com.pig.music.watch.refresh"
+  /// Asks watchOS to wake the app while songs wait, only as
+  /// `WatchRefreshPlan` allows (stops after 2 h without a new song until the
+  /// app is opened, D-113), with one refresh pending at a time.
+  func planRefresh(now: Date = Date()) {
+    guard link != nil else { return }
+    let plan = WatchRefreshPlan.next(
+      now: now, waiting: status.waiting, lastAccepted: wakeLog.lastAccepted,
+      lastOpened: wakeLog.lastOpened)
+    guard let date = WatchRefreshPlan.request(plan, pending: wakeLog.pendingRefresh, now: now)
+    else { return }
+    noteWake { $0.refreshAsked(for: date, at: now) }
+    // @Sendable: watchOS may call it from another queue.
+    WKApplication.shared().scheduleBackgroundRefresh(
+      withPreferredDate: date, userInfo: Self.refreshIdentifier as NSString
+    ) { @Sendable [weak self] error in
+      guard let error else { return }
+      let text = error.localizedDescription
+      Task { @MainActor in self?.refreshRefused(text) }
+    }
+  }
+  private func refreshRefused(_ text: String) {
+    DiagnosticsLog.shared.record("link", "background refresh not scheduled: \(text)")
+    noteWake { $0.refreshRefused() }
+  }
+  /// watchOS ran the scheduled refresh (#219): take what the link has
+  /// waiting, as its own background task does, then ask the plan again.
+  func backgroundRefresh() async {
+    noteWake { $0.refreshRan() }
+    link?.reconnect()
+    await finishBackgroundDelivery()
+    planRefresh()
   }
   func retry() async {
     guard queue.indices.contains(playback.index) else { return }
@@ -586,6 +622,8 @@ import WatchKit
       deleteInbox(file)
       await reload()
       await acknowledge()
+      // A new library or a song taken: wake again while songs wait (#219).
+      planRefresh()
       if envelope.kind == "manifest" { await link?.recoverInbox() }
     } catch CompanionFailure.stale { deleteInbox(file) } catch {
       DiagnosticsLog.shared.record(
