@@ -315,7 +315,9 @@ public enum PlaybackSeek {
     if streamPending { return }
     guard liveStream != nil else {
       if refreshing { refreshPosition() }
-      restart(index: snapshot.index, seconds: snapshot.elapsed, autoplay: snapshot.wantsPlayback)
+      restart(
+        index: snapshot.index, seconds: snapshot.elapsed, autoplay: snapshot.wantsPlayback,
+        resuming: true)
       return
     }
     applyUpcoming()
@@ -368,7 +370,9 @@ public enum PlaybackSeek {
   /// round 2 on batch L): see `LateEditRestart`.
   private func restartWhereHeard(anchor: Int) {
     guard let heard = refreshPosition() else {
-      restart(index: snapshot.index, seconds: snapshot.elapsed, autoplay: snapshot.wantsPlayback)
+      restart(
+        index: snapshot.index, seconds: snapshot.elapsed, autoplay: snapshot.wantsPlayback,
+        resuming: true)
       return
     }
     // The songs of the stream's order heard between the anchor and now.
@@ -389,7 +393,7 @@ public enum PlaybackSeek {
     else { return endWithoutRemovedSong() }
     restart(
       index: point.index, seconds: point.keepsPosition ? snapshot.elapsed : 0,
-      autoplay: snapshot.wantsPlayback)
+      autoplay: snapshot.wantsPlayback, resuming: point.keepsPosition)
   }
   /// The song heard was removed and nothing follows it: the queue has ended.
   private func endWithoutRemovedSong() {
@@ -421,7 +425,7 @@ public enum PlaybackSeek {
       index: snapshot.index,
       seconds: PlaybackSeek.target(
         seconds, duration: snapshot.duration, isEstimate: snapshot.durationIsEstimate),
-      autoplay: snapshot.wantsPlayback)
+      autoplay: snapshot.wantsPlayback, resuming: true)
   }
   public func next() {
     refreshPosition()
@@ -474,7 +478,11 @@ public enum PlaybackSeek {
     if generation == stamp { pump = nil }
   }
 
-  private func restart(index: Int, seconds: Double, autoplay: Bool) {
+  /// `resuming`: the song heard carries on (a seek, an output recovery, a
+  /// late edit's restart in place): its listening keeps its id, which the
+  /// apps count a listen and its history event by (#303). The next repeat
+  /// still gets a new one.
+  private func restart(index: Int, seconds: Double, autoplay: Bool, resuming: Bool = false) {
     generation += 1
     let stamp = generation
     let old = pump
@@ -498,12 +506,21 @@ public enum PlaybackSeek {
       && snapshot.duration > 0
     let estimate = known && snapshot.durationIsEstimate
     let duration = known ? snapshot.duration : items[index].track.duration ?? 0
+    // The listening heard, when it is this entry's (by any id it has had).
+    let entry = items[index]
+    let listening = snapshot.occurrenceID.flatMap {
+      resuming && identity.root($0) == identity.root(entry.id) ? $0 : nil
+    }
+    var playing = items
+    if let listening, listening != entry.id {
+      playing[index] = PlaybackOccurrence(track: entry.track, id: listening)
+    }
     snapshot = QueuePlaybackSnapshot(
-      state: .preparing, index: index, occurrenceID: items[index].id, elapsed: seconds,
+      state: .preparing, index: index, occurrenceID: listening ?? entry.id, elapsed: seconds,
       duration: estimate ? max(duration, seconds) : duration, durationIsEstimate: estimate,
       wantsPlayback: autoplay)
     publish()
-    let items = items
+    let items = playing
     let crossfade = crossfade
     let fade = fadeSeconds
     let repeatMode = repeatMode
@@ -672,7 +689,9 @@ public enum PlaybackSeek {
     // A configuration change may already have reset the hardware timeline.
     // Use the last published position (captured immediately by pause), rather
     // than overwriting it with the stopped output's zero position.
-    restart(index: snapshot.index, seconds: snapshot.elapsed, autoplay: snapshot.wantsPlayback)
+    restart(
+      index: snapshot.index, seconds: snapshot.elapsed, autoplay: snapshot.wantsPlayback,
+      resuming: true)
   }
   private func startClock(generation stamp: Int) {
     clock?.cancel()

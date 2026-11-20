@@ -732,6 +732,86 @@ private func eventually(_ condition: @Sendable () async -> Bool) async throws {
     #expect(await sources.active.isEmpty)
   }
 
+  enum Resume: String, CaseIterable, Sendable { case seek, recovery }
+  /// A seek or an output recovery during a repeated listening resumes that
+  /// listening: its id is kept (the apps count a listen and its history
+  /// event by it), and the next repeat still gets a new one (#303).
+  @Test(arguments: Resume.allCases, editRates) @MainActor
+  func resumingARepeatedListeningKeepsItsID(_ resume: Resume, rate: Double) async throws {
+    let root = try editRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (session, output, sources, items) = try start(["a", "b"], rate: rate, root: root)
+    try await waitUntil { session.snapshot.state == .playing }
+    session.setRepeatMode(.one)
+    let length = Int(rate)
+    @MainActor func play(to frames: Int) async throws {
+      let deadline = ContinuousClock.now + .seconds(20)
+      while output.positionFrames < Int64(frames) {
+        guard ContinuousClock.now < deadline else { throw AudioPipelineFailure.stalled }
+        output.consume()
+        try await Task.sleep(for: .milliseconds(1))
+      }
+    }
+    try await play(to: length + 2048)
+    try await waitUntil { session.snapshot.occurrenceID != items[0].id }
+    let listening = session.snapshot.occurrenceID
+    var resumed: [UUID?] = []
+    session.onUpdate = { if $0.state == .preparing { resumed.append($0.occurrenceID) } }
+    switch resume {
+    case .seek: session.seek(0.5)
+    case .recovery:
+      output.stop()
+      session.recoverOutput()
+    }
+    try await waitUntil { session.snapshot.state == .playing }
+    #expect(resumed == [listening])
+    #expect(session.snapshot.occurrenceID == listening)
+    // The next repeat is a new listening again.
+    let rest = resume == .seek ? length / 2 : length - Int(session.snapshot.elapsed * rate)
+    try await play(to: rest + 2048)
+    try await waitUntil { session.snapshot.occurrenceID != listening }
+    #expect(session.snapshot.occurrenceID != items[0].id)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+
+  /// The same for the restart after a too-late edit that resumes the song
+  /// heard (#303).
+  @Test(arguments: editRates) @MainActor
+  func aLateEditResumingARepeatedListeningKeepsItsID(rate: Double) async throws {
+    let root = try editRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let half = Int(rate / 2)
+    let fade = Int(0.25 * rate)
+    let (session, output, sources, items) = try start(
+      ["a", "b"], rate: rate, frames: ["a": half, "b": half], crossfade: true, root: root)
+    try await waitUntil { session.snapshot.state == .playing }
+    session.setRepeatMode(.all)
+    // "a" again starts at 2 x (half - fade) and is shown from its fade's middle.
+    let again = 2 * (half - fade)
+    let deadline = ContinuousClock.now + .seconds(20)
+    while output.positionFrames < Int64(again + fade / 2 + 1024) {
+      guard ContinuousClock.now < deadline else { throw AudioPipelineFailure.stalled }
+      output.consume()
+      try await Task.sleep(for: .milliseconds(1))
+    }
+    try await waitUntil { session.snapshot.occurrenceID != items[0].id }
+    let listening = session.snapshot.occurrenceID
+    #expect(session.snapshot.index == 0)
+    // Its cross-fade into "b" has begun: removing "b" is too late.
+    while output.captured.count <= again + half - fade {
+      output.consume()
+      try await Task.sleep(for: .milliseconds(2))
+    }
+    var resumed: [UUID?] = []
+    session.onUpdate = { if $0.state == .preparing { resumed.append($0.occurrenceID) } }
+    session.updateUpcoming([items[0]])
+    try await waitUntil { !resumed.isEmpty }
+    #expect(resumed == [listening])
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+
   /// The same, with nothing after the removed song: the queue ends there.
   @Test @MainActor func removingTheLastSongAlreadyHeardEndsTheQueue() async throws {
     let root = try editRoot()

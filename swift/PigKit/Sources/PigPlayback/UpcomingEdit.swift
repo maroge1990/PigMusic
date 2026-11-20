@@ -9,8 +9,16 @@ import PigDomain
 public struct OccurrenceIdentity: Sendable, Equatable {
   private var roots: [UUID: UUID] = [:]
   public init() {}
-  /// The entry's first id.
-  func root(_ id: UUID) -> UUID { roots[id] ?? id }
+  /// The entry's first id. Followed through: two owners may each have
+  /// learnt one step of the chain (a merge joins them).
+  func root(_ id: UUID) -> UUID {
+    var current = id
+    for _ in 0...roots.count {
+      guard let next = roots[current], next != current else { return current }
+      current = next
+    }
+    return current
+  }
   /// `id` is a later listening of the entry `entry` names.
   mutating func record(_ id: UUID, as entry: UUID) {
     let root = root(entry)

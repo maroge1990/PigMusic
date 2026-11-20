@@ -128,6 +128,13 @@ import Testing
     var other = OccurrenceIdentity()
     other.merge(identity)
     #expect(other.root(third) == first)
+    // Each side knows one step: a stream resumed on the second listening
+    // makes a fourth from it; the session knows the second's first id.
+    var stream = OccurrenceIdentity()
+    let fourth = UUID()
+    stream.record(fourth, as: second)
+    stream.merge(identity)
+    #expect(stream.root(fourth) == first)
   }
 
   private func late(
