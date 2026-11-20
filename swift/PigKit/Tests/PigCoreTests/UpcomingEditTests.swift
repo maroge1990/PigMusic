@@ -820,44 +820,6 @@ private func eventually(_ condition: @Sendable () async -> Bool) async throws {
     #expect(await sources.active.isEmpty)
   }
 
-  /// A short "b" has played whole and "c" begun while "a" is still shown
-  /// when Play next puts "x" after "a": "x" plays, then "c" from its start,
-  /// and "b" is not heard again in this pass (#303).
-  @Test(arguments: editRates) @MainActor
-  func aLatePlayNextDoesNotReplayASongAlreadyFinished(rate: Double) async throws {
-    let root = try editRoot()
-    defer { try? FileManager.default.removeItem(at: root) }
-    let short = Int(rate / 4)
-    let blip = 2048
-    let (session, output, sources, items) = try start(
-      ["a", "b", "c"], rate: rate, frames: ["a": short, "b": blip], root: root)
-    try await waitUntil { session.snapshot.state == .playing }
-    while output.captured.count < short + blip + 4096 {
-      output.consume()
-      try await Task.sleep(for: .milliseconds(2))
-    }
-    // Through "b" into "c" with no await: "a" is still shown.
-    while output.positionFrames <= Int64(short + blip) + 1024, !output.pending.isEmpty {
-      output.consume()
-    }
-    #expect(output.positionFrames > Int64(short + blip))
-    #expect(session.snapshot.occurrenceID == items[0].id)
-    let stops = output.stops
-    let mark = output.captured.count
-    let next = editTrack("x")
-    session.updateUpcoming([items[0], next, items[1], items[2]])
-    try await playToEnd(session, output)
-    let length = Int(rate)
-    #expect(output.stops == stops + 1)
-    #expect(
-      firstBreak(
-        output.captured.dropFirst(mark), [("x", 0..<length), ("c", 0..<length)], length: length)
-        == nil)
-    #expect(session.snapshot.index == 3 && session.snapshot.occurrenceID == items[2].id)
-    await session.stopAndWait()
-    #expect(await sources.active.isEmpty)
-  }
-
   /// The same, with nothing after the removed song: the queue ends there.
   @Test @MainActor func removingTheLastSongAlreadyHeardEndsTheQueue() async throws {
     let root = try editRoot()

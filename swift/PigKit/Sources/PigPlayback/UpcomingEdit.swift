@@ -29,7 +29,7 @@ public struct OccurrenceIdentity: Sendable, Equatable {
   }
   /// What an edit compares: the entry, and its song (a fresh copy of a song
   /// keeps its entry but is another file to fetch).
-  struct Key: Hashable {
+  struct Key: Equatable {
     let entry: UUID
     let track: Track
   }
@@ -62,19 +62,6 @@ enum UpcomingEditRule {
     case refetch
   }
 
-  /// The position that follows `position`, passing over songs already
-  /// played in this pass (`skipping`, #303) until the order wraps round to
-  /// a new pass, where every song plays again.
-  static func following<Item: Hashable>(
-    _ position: Int, in items: [Item], mode: PlaybackRepeat, skipping: Set<Item>
-  ) -> Int? {
-    var candidate = following(position, count: items.count, mode: mode)
-    // Rises until it wraps (to 0, never above `position`) or runs out.
-    while let next = candidate, next > position, skipping.contains(items[next]) {
-      candidate = following(next, count: items.count, mode: mode)
-    }
-    return candidate
-  }
   /// The position that follows `position`, as the stream plays it.
   static func following(_ position: Int, count: Int, mode: PlaybackRepeat) -> Int? {
     if mode == .one { return position }
@@ -92,12 +79,10 @@ enum UpcomingEditRule {
   ///     passed over) and has not given up.
   ///   - betweenSongs: the stream is releasing a finished song and chooses
   ///     the next one itself right after, from whatever list it then has.
-  ///   - skipped: songs already played in this pass, not chosen again.
-  static func decide<Item: Hashable>(
+  static func decide<Item: Equatable>(
     version: Int, lastVersion: Int?, old: [Item], new: [Item], current: Int,
     oldMode: PlaybackRepeat, newMode: PlaybackRepeat,
-    prepared: Int?, fetching: Int?, fetchIntact: Bool, betweenSongs: Bool,
-    skipped: Set<Item> = []
+    prepared: Int?, fetching: Int?, fetchIntact: Bool, betweenSongs: Bool
   ) -> Decision {
     if let lastVersion, version <= lastVersion { return .stale }
     // Everything up to the song being decoded is already audio: unchanged or too late.
@@ -105,7 +90,7 @@ enum UpcomingEditRule {
       new[...current] == old[...current]
     else { return .tooLate }
     if betweenSongs { return .keep }
-    let next = following(current, in: new, mode: newMode, skipping: skipped)
+    let next = following(current, count: new.count, mode: newMode)
     // Repeat One plays gapless; any other mode may cross-fade.
     let sameTransition = (oldMode == .one) == (newMode == .one)
     func unchanged(_ position: Int) -> Bool {

@@ -395,7 +395,7 @@ public enum PlaybackSeek {
     else { return endWithoutRemovedSong() }
     restart(
       index: point.index, seconds: point.keepsPosition ? snapshot.elapsed : 0,
-      autoplay: snapshot.wantsPlayback, resuming: point.keepsPosition, skipping: played)
+      autoplay: snapshot.wantsPlayback, resuming: point.keepsPosition)
   }
   /// The song heard was removed and nothing follows it: the queue has ended.
   private func endWithoutRemovedSong() {
@@ -484,12 +484,7 @@ public enum PlaybackSeek {
   /// late edit's restart in place): its listening keeps its id, which the
   /// apps count a listen and its history event by (#303). The next repeat
   /// still gets a new one.
-  /// `skipping`: entries already played in this pass, which the new stream
-  /// passes over until its order wraps round (#303).
-  private func restart(
-    index: Int, seconds: Double, autoplay: Bool, resuming: Bool = false,
-    skipping: Set<UUID> = []
-  ) {
+  private func restart(index: Int, seconds: Double, autoplay: Bool, resuming: Bool = false) {
     generation += 1
     let stamp = generation
     let old = pump
@@ -528,7 +523,6 @@ public enum PlaybackSeek {
       wantsPlayback: autoplay)
     publish()
     let items = playing
-    let identity = identity
     let crossfade = crossfade
     let fade = fadeSeconds
     let repeatMode = repeatMode
@@ -544,7 +538,7 @@ public enum PlaybackSeek {
         let current = try await QueuePCMStream(
           items: items, startingAt: index, startSeconds: seconds,
           crossfade: crossfade, fadeSeconds: fade, repeatMode: repeatMode, sampleRate: rate,
-          blockFrames: blockFrames, skipping: skipping, identity: identity,
+          blockFrames: blockFrames,
           acquire: acquire, release: release)
         stream = current
         try Task.checkCancellation()
