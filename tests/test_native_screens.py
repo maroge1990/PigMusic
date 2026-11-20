@@ -99,6 +99,13 @@ def test_add_to_playlist_offers_a_new_playlist_first():
     assert ".modifier(NewPlaylistPrompt(model: model))" in player.split("\n  }\n", 1)[0]
     model = app["AppModel.swift"].split("func createPlaylist(named", 1)[1]
     assert "NewPlaylistEdits.make(name: name, songs: songs)" in model
+    # Codex round 1 on batch G: the playlist and its songs enter the outbox
+    # in one transaction, never one saved edit at a time.
+    create = model.split("\n  }\n", 1)[0]
+    assert "saveEditsOutcome(NewPlaylistEdits.make(" in create
+    assert "saveEdit(" not in create
+    group = app["AppModel.swift"].split("func saveEditsOutcome(", 1)[1]
+    assert "store.enqueueMutations(mutations)" in group.split("\n  }\n", 1)[0]
 
 
 def test_searching_uses_the_shared_status_line():

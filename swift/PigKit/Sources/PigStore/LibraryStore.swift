@@ -657,14 +657,25 @@ public enum StoreSearchFailure: Error, Sendable { case invalidPage }
 
 extension LibraryStore {
   public func enqueueMutation(_ mutation: OfflineMutation) throws {
-    let payload = try LibraryCodec.encoder().encode(PendingMutation(mutation: mutation))
+    try enqueueMutations([mutation])
+  }
+  /// Edits that belong together (a new playlist and its songs, #285), in
+  /// order, in one transaction: all of them or none, the room checked for
+  /// the whole group (Codex round 1 on batch G).
+  public func enqueueMutations(_ mutations: [OfflineMutation]) throws {
+    let payloads = try mutations.map {
+      try LibraryCodec.encoder().encode(PendingMutation(mutation: $0))
+    }
     try database.write { db in
-      guard try Int.fetchOne(db, sql: "SELECT count(*) FROM mutation_outbox") ?? 0 < 1000 else {
+      let pending = try Int.fetchOne(db, sql: "SELECT count(*) FROM mutation_outbox") ?? 0
+      guard MutationOutboxRoom.fits(pending: pending, adding: mutations.count) else {
         throw MutationRejection.rejected
       }
-      try db.execute(
-        sql: "INSERT OR IGNORE INTO mutation_outbox(id,payload) VALUES (?,?)",
-        arguments: [mutation.id, payload])
+      for (mutation, payload) in zip(mutations, payloads) {
+        try db.execute(
+          sql: "INSERT OR IGNORE INTO mutation_outbox(id,payload) VALUES (?,?)",
+          arguments: [mutation.id, payload])
+      }
     }
   }
   public func pendingMutations() throws -> [PendingMutation] {

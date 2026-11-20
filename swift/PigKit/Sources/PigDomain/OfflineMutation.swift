@@ -88,3 +88,14 @@ public enum NewPlaylistEdits {
       + songs.map { OfflineMutation(action: "append", playlistId: playlist, track: $0) }
   }
 }
+
+/// The edit outbox's room (Codex round 1 on batch G): edits that belong
+/// together (a new playlist and its songs, #285) enter it together or not at
+/// all, so a full outbox never keeps the playlist and drops its songs.
+public enum MutationOutboxRoom {
+  public static let limit = 1000
+  /// Whether `adding` edits fit beside the `pending` ones already waiting.
+  public static func fits(pending: Int, adding: Int) -> Bool {
+    adding >= 0 && pending + adding <= limit
+  }
+}

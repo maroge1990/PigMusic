@@ -23,6 +23,15 @@ import Testing
   #expect(NewPlaylistEdits.make(name: "Road trip", songs: [])[0].playlistId != id)
 }
 
+/// Codex round 1 on batch G: the outbox's room is checked for the whole
+/// group, not one edit at a time.
+@Test func aGroupFitsTheOutboxOnlyWhole() {
+  #expect(MutationOutboxRoom.fits(pending: 999, adding: 1))
+  #expect(!MutationOutboxRoom.fits(pending: 999, adding: 2))
+  #expect(MutationOutboxRoom.fits(pending: 0, adding: MutationOutboxRoom.limit))
+  #expect(MutationOutboxRoom.fits(pending: 1000, adding: 0))
+}
+
 @Test func aNewPlaylistNeedsAName() {
   let song = Track(id: "a", title: "A", artist: "B")
   #expect(NewPlaylistEdits.make(name: "   ", songs: [song]).isEmpty)

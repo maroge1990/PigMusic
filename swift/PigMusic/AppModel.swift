@@ -1146,9 +1146,17 @@ enum PlayOrigin: Hashable {
   /// Saves an edit and says whether the server confirmed it, it waits on
   /// this phone, or it was refused (Codex on #212).
   func saveEditOutcome(_ mutation: OfflineMutation) async throws -> EditOutbox.Outcome {
+    try await saveEditsOutcome([mutation])
+  }
+  /// Edits that belong together (a new playlist and its songs, #285): all
+  /// enter the outbox in one transaction, or none, before any is sent
+  /// (Codex round 1 on batch G). The outcome is the last one's: edits to one
+  /// playlist are sent in order.
+  func saveEditsOutcome(_ mutations: [OfflineMutation]) async throws -> EditOutbox.Outcome {
     guard let store, person != nil else { throw NativeFailure.authentication }
+    guard let mutation = mutations.last else { return .confirmed }
     let stamp = account.generation
-    try await store.enqueueMutation(mutation)
+    try await store.enqueueMutations(mutations)
     guard let pending = try await EditOutbox.pending(
       store: store, isCurrent: { [account] in account.isCurrent(stamp) })
     else {
@@ -1164,8 +1172,10 @@ enum PlayOrigin: Hashable {
     try account.check(stamp)
     // Only the server's receipt confirms it: an edit discarded meanwhile has
     // also left the outbox (Codex, batch 9).
+    let confirmed = appliedEdits.remove(mutation.id) != nil
+    for edit in mutations { appliedEdits.remove(edit.id) }
     return EditOutbox.outcome(
-      of: mutation.id, confirmed: appliedEdits.remove(mutation.id) != nil,
+      of: mutation.id, confirmed: confirmed,
       pending: (try? await store.pendingMutations()) ?? pendingEdits)
   }
   /// Edits the server's receipts confirmed, until saveEdit reads them.
@@ -2159,9 +2169,8 @@ enum PlayOrigin: Hashable {
       return
     }
     do {
-      for edit in NewPlaylistEdits.make(name: name, songs: songs) {
-        try await saveEdit(edit)
-      }
+      // The playlist and its songs enter the outbox together or not at all.
+      _ = try await saveEditsOutcome(NewPlaylistEdits.make(name: name, songs: songs))
       confirmations += 1
     } catch is CancellationError {} catch { notify(error) }
   }
