@@ -190,8 +190,17 @@ import WidgetKit
   @ObservationIgnored private var phoneWake: Task<Void, Never>?
   func wokenByPhone(_ wake: CompanionWake, at date: Date = Date()) {
     let active = appActive
-    noteWake {
-      _ = $0.phonePushed(songs: wake.songs ?? [], sentAt: wake.sentAt, active: active, at: date)
+    // Songs of the library the Watch has applied are not new, judged from
+    // the archive's saved library as for a manifest (Codex round 2 on
+    // batch J). The wake and the delivery below run whatever this finds.
+    Task { [weak self] in
+      let applied = await self?.archive?.snapshot()
+      let known = applied?.songs.map(\.id) ?? []
+      self?.noteWake {
+        _ = $0.phonePushed(
+          songs: wake.songs ?? [], known: known, sentAt: wake.sentAt, active: active, at: date)
+      }
+      self?.planRefresh()
     }
     guard phoneWake == nil else { return }
     phoneWake = Task { [weak self] in

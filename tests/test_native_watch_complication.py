@@ -159,10 +159,17 @@ def test_the_watch_takes_songs_when_the_iphone_wakes_it():
     # Noted first, with its songs and send time (only new songs, sent
     # recently, move the window on), then the delivery runs apart from the
     # message, which it would otherwise wait for.
+    # The applied library's songs are known, read from the archive as the
+    # manifest path does (Codex round 2 on batch J), before the push is noted.
+    noting = wake.split("guard phoneWake == nil", 1)[0]
+    assert "let applied = await self?.archive?.snapshot()" in noting
+    assert "let known = applied?.songs.map(\\.id) ?? []" in noting
     assert (
-        "$0.phonePushed(songs: wake.songs ?? [], sentAt: wake.sentAt, active: active, at: date)"
-        in wake
+        "songs: wake.songs ?? [], known: known, sentAt: wake.sentAt, active: active, at: date)"
+        in noting
     )
+    assert noting.index("snapshot()") < noting.index("$0.phonePushed(")
+    # The wake and delivery don't wait for that.
     assert "guard phoneWake == nil else { return }" in wake
     task = wake.split("phoneWake = Task {", 1)[1]
     assert task.index("await self?.finishBackgroundDelivery()") < task.index(

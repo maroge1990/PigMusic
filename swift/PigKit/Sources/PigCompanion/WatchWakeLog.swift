@@ -131,14 +131,16 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
   /// window reopens), and only when it is fresh: sent less than `pushMaxAge`
   /// before it arrived, and not further ahead than `clockSlack`. So a retry
   /// of songs already seen, or a push delivered late, keeps nothing awake
-  /// (Codex round 1 on batch J). Returns whether the window moved on.
+  /// (Codex round 1 on batch J). `known`: the songs of the library the Watch
+  /// has applied, which are not new either, as for a manifest (round 2).
+  /// Returns whether the window moved on.
   @discardableResult public mutating func phonePushed(
-    songs: [String], sentAt: Date, active: Bool, at date: Date = Date()
+    songs: [String], known: [String] = [], sentAt: Date, active: Bool, at date: Date = Date()
   ) -> Bool {
     note(Event(at: date, kind: .phonePush, active: active))
     let age = date.timeIntervalSince(sentAt)
     guard age < Self.pushMaxAge, age > -WatchRefreshPlan.clockSlack else { return false }
-    return newSongs(songs, alsoKnown: [], at: date)
+    return newSongs(songs, alsoKnown: known, at: date)
   }
   /// A push older than this when it arrives wakes but extends nothing.
   public static let pushMaxAge: TimeInterval = 30 * 60

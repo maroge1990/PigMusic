@@ -342,6 +342,28 @@ struct WatchWakeLogTests {
     #expect(!empty)
   }
 
+  /// Codex round 2 on batch J: opening the app clears the listed-song
+  /// memory, and a push for audio of songs the applied library already
+  /// listed spent a reopening. Those songs are known, as for a manifest.
+  @Test func aPushForSongsTheLibraryListsIsNoNewSend() {
+    var log = WatchWakeLog()
+    log.songsListed(["a", "b"], previous: [], at: at(0))
+    log.opened(at: at(1))
+    #expect(log.refreshPlan(now: at(4), waiting: 2) == .none)
+    #expect(log.refreshStoppedAt != nil)
+    let moved = log.phonePushed(
+      songs: ["a", "b"], known: ["a", "b"], sentAt: at(5), active: false, at: at(5))
+    #expect(!moved)
+    #expect(log.reopenings == 0 && log.refreshStoppedAt != nil)
+    // Still a wake.
+    #expect(log.count(.phonePush, now: at(6)) == 1)
+    // A song the library doesn't list yet is new.
+    let new = log.phonePushed(
+      songs: ["a", "c"], known: ["a", "b"], sentAt: at(6), active: false, at: at(6))
+    #expect(new)
+    #expect(log.reopenings == 1)
+  }
+
   /// A push that arrives late, or from a clock far ahead, wakes but extends nothing.
   @Test func aDelayedPushWakesButDoesntExtend() {
     var log = WatchWakeLog()
