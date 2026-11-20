@@ -109,6 +109,8 @@ export function SearchPage({
   // when the ranked answer moves that artist to Top result, its new link
   // takes the focus over.
   const focusedArtist = useRef<string | null>(null);
+  // The element it was recorded from: only that element's blur forgets it.
+  const focusedLink = useRef<EventTarget | null>(null);
   useLayoutEffect(() => {
     const id = focusedArtist.current;
     const now = document.activeElement;
@@ -476,15 +478,23 @@ export function SearchPage({
         <div
           className="search-results"
           onFocus={(e) => {
+            focusedLink.current = e.target;
             focusedArtist.current =
               (e.target as HTMLElement).dataset.artist ?? null;
           }}
           onBlur={(e) => {
-            // Moved elsewhere, not removed with a new answer.
+            // Moved elsewhere, not removed with a new answer. A later
+            // focus (another artist) has already replaced it.
             const link = e.target;
             queueMicrotask(() => {
-              if (link.isConnected && document.activeElement !== link)
+              if (
+                focusedLink.current === link &&
+                link.isConnected &&
+                document.activeElement !== link
+              ) {
+                focusedLink.current = null;
                 focusedArtist.current = null;
+              }
             });
           }}
           // Opening a result keeps the search among the recent ones.
