@@ -1794,6 +1794,9 @@ class Store:
                     ),
                 )
         created = existing = skipped = paused = 0
+        # The paused requests an Add left paused, by request ID, so the iPhone
+        # clears a song's Paused mark when that request resumes (#276).
+        paused_ids = []
         # Songs that already had an unfinished job: the queue is reconciled
         # for them once, after the last song, not once each (#237). Nothing
         # below reads what a reconcile writes (quality target, claim token,
@@ -1967,6 +1970,7 @@ class Store:
                 ):
                     # Their own pause: Add leaves it, Resume resumes (#264).
                     paused += 1
+                    paused_ids.append(key)
                 elif prior and prior[0] not in {"cancelled", "failed"}:
                     if user_id:
                         previous = json.loads(prior[1])
@@ -2017,6 +2021,7 @@ class Store:
             "existing": existing,
             "skipped": skipped,
             "paused": paused,
+            "paused_ids": paused_ids,
             "downloads_enabled": settings["enabled"],
         }
 

@@ -527,6 +527,10 @@ class AcquisitionResultDTO(BaseModel):
     # Songs the person paused themselves: Add leaves them paused; Resume in
     # Downloads resumes them (#264).
     paused: int = 0
+    # Those paused requests' IDs, one per song left paused: Resume in
+    # Downloads names the request, so the iPhone clears that song's mark by
+    # it, never by title (#276).
+    paused_ids: list[str] = []
     downloads_enabled: bool
 
 

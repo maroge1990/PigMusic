@@ -35,6 +35,14 @@
             "title": "Paused",
             "type": "integer"
           },
+          "paused_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Paused Ids",
+            "type": "array"
+          },
           "skipped": {
             "title": "Skipped",
             "type": "integer"

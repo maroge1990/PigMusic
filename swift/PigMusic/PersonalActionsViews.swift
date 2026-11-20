@@ -579,15 +579,10 @@ struct RequestsView: View {
       }
       done.append(id)
     }
-    // Only a song whose Resume went through loses its paused mark; other
-    // songs' marks stay (Codex round 1 on batch D).
+    // Only the songs left paused under a request whose Resume went through
+    // lose their paused mark, by its ID (#276); other songs' marks stay.
     if tap == .resume {
-      let items = groups.flatMap { group in group.items.map { (group, $0) } }
-      for (group, item) in items where done.contains(item.id) {
-        model.requestedSongs.resumed(
-          title: item.title, artist: item.artist ?? group.artist,
-          album: item.album ?? (group.songs == 1 ? nil : group.title))
-      }
+      for id in done { model.requestedSongs.resumed(request: id) }
     }
     // Read the list first: reading it clears the page's message.
     await load(reset: true)

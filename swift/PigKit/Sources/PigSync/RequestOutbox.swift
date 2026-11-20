@@ -26,6 +26,8 @@ import PigStore
     public var skipped: [String] = []
     /// Paused by the person before: Add left them paused (#264).
     public var paused: [String] = []
+    /// The server requests each paused song was left paused under (#276).
+    public var pausedRequests: [String: [String]] = [:]
     /// Refused, with the server's reason.
     public var refused: [String] = []
     public var reason: String?
@@ -38,6 +40,7 @@ import PigStore
       requested += later.requested
       skipped += later.skipped
       paused += later.paused
+      pausedRequests.merge(later.pausedRequests) { $0 + $1 }
       refused += later.refused
       reason = later.reason ?? reason
       downloadsEnabled = downloadsEnabled && later.downloadsEnabled
@@ -97,6 +100,7 @@ import PigStore
         } else if result.paused > 0 {
           // The person paused it before: it stays paused (#264), not left out.
           report.paused.append(track.id)
+          report.pausedRequests[track.id] = result.pausedIds
         } else {
           report.skipped.append(track.id)
         }

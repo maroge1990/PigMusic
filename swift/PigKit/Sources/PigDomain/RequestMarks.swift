@@ -19,29 +19,29 @@ public struct RequestMarks: Sendable, Equatable {
   public func contains(_ id: String) -> Bool {
     waiting.contains(id) || sent.contains(id) || paused.contains(id)
   }
-  /// Each paused song's name, to match the request that resumes it: the
-  /// server's request list names songs, not this iPhone's ids.
-  private var pausedSongs: [String: String] = [:]
-  /// The server left these songs paused, as the person had them (#264).
-  public mutating func pausedOnServer(_ tracks: some Sequence<Track>) {
-    for track in tracks where waiting.remove(track.id) != nil {
-      paused.insert(track.id)
-      pausedSongs[track.id] = Self.song(title: track.title, artist: track.artist, album: track.album)
+  /// The server requests each paused song was left paused under (#276):
+  /// Resume in Downloads names a request, and the song an Add matched to it
+  /// may be another edition's, or share its title, artist and album with
+  /// another request, so the request ID is what identifies a paused mark.
+  /// An empty set: the server didn't name them (an older server).
+  private var pausedSongs: [String: Set<String>] = [:]
+  /// The server left these songs paused, as the person had them (#264), each
+  /// under the server requests named (track ID to request IDs).
+  public mutating func pausedOnServer(_ requests: [String: [String]]) {
+    for (id, requestIds) in requests where waiting.remove(id) != nil {
+      paused.insert(id)
+      pausedSongs[id, default: []].formUnion(requestIds)
     }
   }
-  /// The person resumed this song's request (Codex round 1 on batch D): only
-  /// its paused mark goes; other songs' marks stay.
-  public mutating func resumed(title: String, artist: String, album: String?) {
-    let name = Self.song(title: title, artist: artist, album: album)
-    for (id, song) in pausedSongs where song == name {
-      paused.remove(id)
-      pausedSongs[id] = nil
+  /// The person resumed this server request (Codex round 1 on batch D,
+  /// #276): only the songs left paused under it lose their paused mark;
+  /// other songs' marks stay, whatever their names. A mark the server didn't
+  /// name a request for goes on any Resume rather than stay stuck.
+  public mutating func resumed(request id: String) {
+    for (song, requestIds) in pausedSongs where requestIds.isEmpty || requestIds.contains(id) {
+      paused.remove(song)
+      pausedSongs[song] = nil
     }
-  }
-  private static func song(title: String, artist: String, album: String?) -> String {
-    [title, artist, album ?? ""]
-      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-      .joined(separator: "\u{1F}")
   }
   public mutating func queued(_ id: String) { waiting.insert(id) }
   public mutating func sent(_ ids: some Sequence<String>) {
@@ -51,6 +51,7 @@ public struct RequestMarks: Sendable, Equatable {
     waiting.subtract(ids)
     sent.subtract(ids)
     paused.subtract(ids)
+    pausedSongs = pausedSongs.filter { paused.contains($0.key) }
   }
   /// A request was cancelled or cleared: forget every sent and paused mark.
   public mutating func requestsChanged() {
@@ -66,6 +67,7 @@ public struct RequestMarks: Sendable, Equatable {
     waiting.subtract(ids)
     sent.subtract(ids)
     paused.subtract(ids)
+    pausedSongs = pausedSongs.filter { paused.contains($0.key) }
   }
   /// A fresh server answer about these songs (#211): one the server says is
   /// in the library, or whose request failed, is no longer marked, under

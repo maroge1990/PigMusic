@@ -60,9 +60,13 @@ private struct Offline: Error {}
     defer { try? FileManager.default.removeItem(at: root) }
     try await RequestOutbox.add(first, to: store)
     let report = try await RequestOutbox.send(store: store, isCurrent: { true }) { _ in
-      AcquisitionResult(created: 0, existing: 0, skipped: 0, paused: 1, downloadsEnabled: true)
+      AcquisitionResult(
+        created: 0, existing: 0, skipped: 0, paused: 1, pausedIds: ["request"],
+        downloadsEnabled: true)
     }
     #expect(report.paused == ["first"])
+    // Under the request the server named, which Resume clears (#276).
+    #expect(report.pausedRequests == ["first": ["request"]])
     #expect(report.skipped.isEmpty && report.requested.isEmpty)
     #expect(report.notice(titles: ["first": "First"]) == "Paused. Resume it in Downloads.")
     #expect(await RequestOutbox.pending(store).isEmpty)

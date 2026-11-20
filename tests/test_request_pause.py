@@ -406,3 +406,37 @@ def test_withdrawing_from_an_older_shared_pause_does_not_pass_it_on(tmp_path):
     result = users.request(owner, [wanted])
     assert (result["existing"], result["paused"]) == (1, 0)
     assert status(store, key) == "waiting_for_sources"
+
+
+def test_an_add_left_paused_names_the_paused_request(tmp_path, monkeypatch):
+    """#276: the iPhone clears a song's Paused mark when the request it was
+    left paused under resumes, so the answer names that request: here one
+    from another edition (Greatest Hits), which the added song's own title,
+    artist and album don't identify."""
+    app, owner, member, token, _ = household(tmp_path, monkeypatch)
+    store = app.state.store
+    hits = {
+        "title": "Wanted",
+        "artist": "Example",
+        "album": "Greatest Hits",
+        "album_artist": "Example",
+        "duration": 3,
+        "musicbrainz_release_id": "11111111-1111-4111-8111-111111111111",
+    }
+    with client_for(app, token) as client:
+        first = client.post("/api/v1/requests", json={"tracks": [hits]})
+        assert first.status_code == 200, first.text
+        assert first.json()["paused_ids"] == []
+        with store.connect() as conn:
+            (key,) = conn.execute("SELECT id FROM queue").fetchone()
+        assert client.post(f"/api/v1/requests/{key}/pause").status_code == 200
+        studio = {
+            **hits,
+            "album": "Studio",
+            "musicbrainz_release_id": "22222222-2222-4222-8222-222222222222",
+        }
+        again = client.post("/api/v1/requests", json={"tracks": [studio]})
+    assert again.status_code == 200, again.text
+    assert again.json()["paused"] == 1
+    assert again.json()["paused_ids"] == [key]
+    assert status(store, key) == "paused"

@@ -31,18 +31,22 @@ public struct AcquisitionResult: Codable, Sendable {
   public let skipped: Int
   /// Songs the person paused before: Add leaves them paused (#264).
   public let paused: Int
+  /// The server requests those songs were left paused under (#276).
+  public let pausedIds: [String]
   public let downloadsEnabled: Bool
   public init(
-    created: Int, existing: Int, skipped: Int, paused: Int = 0, downloadsEnabled: Bool
+    created: Int, existing: Int, skipped: Int, paused: Int = 0, pausedIds: [String] = [],
+    downloadsEnabled: Bool
   ) {
     self.created = created
     self.existing = existing
     self.skipped = skipped
     self.paused = paused
+    self.pausedIds = pausedIds
     self.downloadsEnabled = downloadsEnabled
   }
   private enum CodingKeys: String, CodingKey {
-    case created, existing, skipped, paused, downloadsEnabled
+    case created, existing, skipped, paused, pausedIds, downloadsEnabled
   }
   public init(from decoder: any Decoder) throws {
     let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -51,6 +55,7 @@ public struct AcquisitionResult: Codable, Sendable {
     skipped = try values.decode(Int.self, forKey: .skipped)
     // An older server doesn't say.
     paused = try values.decodeIfPresent(Int.self, forKey: .paused) ?? 0
+    pausedIds = try values.decodeIfPresent([String].self, forKey: .pausedIds) ?? []
     downloadsEnabled = try values.decode(Bool.self, forKey: .downloadsEnabled)
   }
   /// Nothing new was asked for and a paused song stays paused (#264): the
