@@ -157,6 +157,43 @@ struct PausedAddTests {
     #expect(marks.paused == ["old"])
   }
 
+  /// Codex round 2 on batch K: one drain sends its songs one by one. A
+  /// Resume between two of them, then a new pause, answered for the later
+  /// song, is a fresh pause: each song is timed by its own Add.
+  @Test func eachAddIsTimedWhenItIsSent() {
+    var marks = RequestMarks()
+    marks.queued("first")
+    marks.queued("later")
+    var askedAt: [String: Int] = [:]
+    askedAt["first"] = marks.asking()
+    marks.resumed(request: "r1")
+    askedAt["later"] = marks.asking()
+    marks.pausedOnServer(["first": ["r1"], "later": ["r1"]], askedAt: askedAt)
+    #expect(marks.paused == ["later"])
+    #expect(marks.contains("first"))
+  }
+
+  /// Codex round 2 on batch K: a pause the Add's answer was too old to
+  /// show heals when the request list reports the request paused.
+  @Test func theRequestListMarksAPauseTheAnswerMissed() {
+    var marks = RequestMarks()
+    marks.queued("song")
+    let asked = marks.asking()
+    marks.resumed(request: "r1")
+    marks.pausedOnServer(["song": ["r1"]], asked: asked)
+    #expect(marks.paused.isEmpty)
+    marks.reconcile(statuses: ["r1": "paused"])
+    #expect(marks.paused == ["song"])
+    // Resumed again: cleared, and the list agrees.
+    marks.resumed(request: "r1")
+    marks.reconcile(statuses: ["r1": "waiting_for_sources"])
+    #expect(marks.paused.isEmpty)
+    // A song now in the library is never marked again.
+    marks.settled(["song"])
+    marks.reconcile(statuses: ["r1": "paused"])
+    #expect(marks.paused.isEmpty)
+  }
+
   /// Codex round 2 on batch K: a song paused under two requests keeps its
   /// mark while the list reports only one of them, not paused.
   @Test func aMarkStaysWhileAnyOfItsRequestsIsUnreported() {

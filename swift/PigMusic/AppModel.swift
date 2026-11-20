@@ -1329,13 +1329,18 @@ enum PlayOrigin: Hashable {
         titles[track.id] = track.title
       }
       let report: RequestOutbox.Report
-      // Before the Add goes: a Resume after this can't be undone by its
-      // answer (Codex round 1 on batch K).
-      let asked = requestedSongs.asking()
+      // Each song's tick as its own Add goes: a Resume after it can't be
+      // undone by its answer (Codex round 1 on batch K), and a pause after a
+      // Resume is not mistaken for an old one (round 2).
+      var asked: [String: Int] = [:]
       do {
         report = try await RequestOutbox.send(
           store: store, isCurrent: { [account] in account.isCurrent(stamp) }
-        ) { try await service.requestMusic($0) }
+        ) { tracks in
+          let tick = self.requestedSongs.asking()
+          for track in tracks { asked[track.id] = tick }
+          return try await service.requestMusic(tracks)
+        }
       } catch {
         if account.isCurrent(stamp) { notify(error) }
         return
@@ -1346,7 +1351,7 @@ enum PlayOrigin: Hashable {
       requestedSongs.refused(report.skipped + report.refused)
       // Paused before, so left paused (#264): marked paused, never excluded.
       // Under the requests the server named, which Resume clears (#276).
-      requestedSongs.pausedOnServer(report.pausedRequests, asked: asked)
+      requestedSongs.pausedOnServer(report.pausedRequests, askedAt: asked)
       if !report.requested.isEmpty || !report.skipped.isEmpty || !report.refused.isEmpty
         || !report.paused.isEmpty
       {

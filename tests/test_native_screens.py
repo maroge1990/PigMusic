@@ -266,10 +266,13 @@ def test_paused_marks_follow_resumes_and_the_request_list():
     and the Downloads list reconciles the marks."""
     model = (APP / "AppModel.swift").read_text()
     flush = model.split("func flushRequests() async {", 1)[1].split("\n  }\n", 1)[0]
-    assert flush.index("let asked = requestedSongs.asking()") < flush.index(
-        "report = try await RequestOutbox.send("
+    # Codex round 2: the tick is taken per POST, inside the send.
+    send = flush.split("report = try await RequestOutbox.send(", 1)[1]
+    send = send.split("} catch {", 1)[0]
+    assert send.index("let tick = self.requestedSongs.asking()") < send.index(
+        "return try await service.requestMusic(tracks)"
     )
-    assert "pausedOnServer(report.pausedRequests, asked: asked)" in flush
+    assert "pausedOnServer(report.pausedRequests, askedAt: asked)" in flush
     views = (APP / "PersonalActionsViews.swift").read_text()
     load = views.split("private func load(reset: Bool) async {", 1)[1]
     load = load.split("\n  }\n", 1)[0]
