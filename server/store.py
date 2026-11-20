@@ -1841,8 +1841,10 @@ class Store:
                     outcomes.append("excluded")
                     continue
                 if track["status"] == "downloaded":
+                    review = False
                     if user_id:
-                        matched = self.index.match(track).track
+                        found = self.index.match(track)
+                        matched = found.track
                         if matched:
                             from .user_library import bump
 
@@ -1867,16 +1869,22 @@ class Store:
                                 existing += 1
                                 outcomes.append("added")
                                 continue
-                        else:
+                        elif found.status == "missing":
                             # The library changed since the song was matched
-                            # (Codex round 2 on batch K): no household copy
-                            # now, so it is asked for as any missing song,
-                            # never dropped nor reported as in the library.
-                            # (An ignored insert above means it is theirs.)
+                            # (Codex round 2 on batch K): the copy is gone,
+                            # so it is asked for as any missing song, never
+                            # dropped nor reported as in the library. (An
+                            # ignored insert above means it is theirs.)
                             track = {**track, "status": "missing"}
+                        else:
+                            # Two copies now match and need review (Codex
+                            # confirmation on batch K): never queued as
+                            # missing, which could download a third; left
+                            # out as before, and not said to be yours.
+                            review = True
                     if track["status"] == "downloaded":
                         skipped += 1
-                        outcomes.append("in_library")
+                        outcomes.append("excluded" if review else "in_library")
                         continue
                 payload = {
                     k: v

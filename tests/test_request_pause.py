@@ -455,6 +455,58 @@ def test_an_add_says_what_happened_to_each_song_in_order(tmp_path):
     assert result["paused"] == 1 and result["paused_ids"] == [key]
 
 
+def test_a_song_that_became_ambiguous_since_it_was_matched_is_not_queued(
+    tmp_path, monkeypatch
+):
+    """Codex confirmation on batch K: a refresh between matching and
+    submitting can leave two byte-distinct copies of the edition asked for.
+    The real index then answers `conflict`, with no copy: that is not a
+    missing song, so nothing is queued (a third download); it is left out
+    as before, and never said to be in the person's library."""
+    from server.matching import LibraryIndex
+
+    store, owner, member = fixture(tmp_path)
+    copy = {
+        "title": "Song 0",
+        "artist": "Artist",
+        "album_artist": "Artist",
+        "album": "Album",
+        "duration": 100,
+    }
+    refreshed = LibraryIndex(
+        {
+            "albums": [
+                {
+                    "id": "album",
+                    "title": "Album",
+                    "tracks": [
+                        {**copy, "id": "one", "sha256": "1" * 64},
+                        {**copy, "id": "two", "sha256": "2" * 64},
+                    ],
+                }
+            ]
+        }
+    )
+    asked = {**song("Song 0"), **copy, "explicit_edition": True}
+    assert refreshed.match(asked).kind == "conflict"
+    real = store.index.match
+    calls = []
+
+    def changing(track):
+        calls.append(track["title"])
+        return real(track) if len(calls) == 1 else refreshed.match(track)
+
+    monkeypatch.setattr(store.index, "match", changing)
+    result = store.user_libraries.request(member, [asked])
+    assert len(calls) == 2
+    assert result["outcomes"] == ["excluded"] and result["skipped"] == 1
+    with store.connect() as conn:
+        assert conn.execute("SELECT count(*) FROM queue").fetchone()[0] == 0
+        assert not conn.execute(
+            "SELECT 1 FROM library_members WHERE user_id=?", (member,)
+        ).fetchone()
+
+
 def test_a_song_gone_from_the_library_since_it_was_matched_is_asked_for(
     tmp_path, monkeypatch
 ):
