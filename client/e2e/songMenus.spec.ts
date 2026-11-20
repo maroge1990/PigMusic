@@ -375,6 +375,83 @@ test("a new playlist from the picker answered 502 after saving is not made twice
   expect(made.size).toBe(1);
 });
 
+// Codex (#288, high): a create from the picker whose answer came after
+// another account signed in offered Try again to that account, which then
+// made the old account's playlist and added its songs under the new one.
+test("a picker create answered after another sign-in shows and sends nothing", async ({
+  context,
+}) => {
+  let who = "u1";
+  let page: Page | undefined;
+  const here: string[] = [];
+  const writes: string[] = [];
+  let answer: () => void = () => {};
+  await mockApi(context, {
+    answers: {
+      "/v1/me": (route) => {
+        if (route.request().frame().page() === page) here.push(who);
+        return route.fulfill({
+          json: {
+            id: who,
+            username: who === "u1" ? "pat" : "sam",
+            display_name: who === "u1" ? "Pat" : "Sam",
+            role: "member",
+            session_id: who === "u1" ? "session-1" : "session-2",
+          },
+        });
+      },
+      "/v1/favourites": (route) =>
+        route.fulfill({ json: { favourited: false } }),
+      "/v1/playlists": async (route) => {
+        if (route.request().method() !== "POST")
+          return route.fulfill({ json: { playlists: [] } });
+        writes.push(
+          "create " + route.request().headers()["x-pig-expected-session"],
+        );
+        if (writes.length === 1)
+          await new Promise<void>((resolve) => (answer = resolve));
+        return route.fulfill({
+          status: 504,
+          contentType: "text/html",
+          body: "<html><body>504 Gateway Time-out</body></html>",
+        });
+      },
+      "/v1/playlists/p1/songs": (route) => {
+        writes.push("add");
+        return route.fulfill({ json: { revision: 2 } });
+      },
+    },
+  });
+  page = await context.newPage();
+  await page.goto(`/#/library/album/${album.id}`);
+  await page.getByRole("button", { name: "More options for 360" }).click();
+  await page.getByRole("menuitem", { name: "Add to playlist" }).click();
+  await page.getByRole("menuitem", { name: "New playlist" }).click();
+  const dialog = page.locator(".new-playlist-dialog");
+  await dialog.getByLabel("Playlist name").fill("Pat's mix");
+  await dialog.getByRole("button", { name: "Create playlist" }).click();
+  await expect.poll(() => writes).toEqual(["create session-1"]);
+  // Another tab signs in as Sam; then the create's answer arrives.
+  who = "u2";
+  const other = await context.newPage();
+  await other.goto("/#/home");
+  await other.evaluate(() => {
+    const channel = new BroadcastChannel("pig-music-session");
+    channel.postMessage({ change: "signed-in", tab: "other-tab", at: 1 });
+    channel.close();
+  });
+  await expect.poll(() => here.at(-1)).toBe("u2");
+  answer();
+  await page.waitForTimeout(500);
+  await expect(page.locator(".notice-area")).not.toContainText(
+    "may or may not have been saved",
+  );
+  await expect(
+    page.locator(".notice-area").getByRole("button", { name: "Try again" }),
+  ).toHaveCount(0);
+  expect(writes).toEqual(["create session-1"]);
+});
+
 test("a song tapped in search plays alone; on an album it plays on", async ({
   page,
 }) => {

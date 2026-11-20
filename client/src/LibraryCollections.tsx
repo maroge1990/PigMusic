@@ -11,6 +11,7 @@ import { FavouritesList, PlaylistGrid } from "./PlaylistCards";
 import { PlayLibrary } from "./PlayLibrary";
 import { LibrarySongsTab } from "./LibrarySongsTab";
 import type { Playlist, PlaylistSummary } from "./libraryTypes";
+import type { CreateAttempt } from "./playlists";
 import type { Album, Artist, Library, Track } from "./types";
 
 export const libraryTabs = [
@@ -94,7 +95,7 @@ export function LibraryCollections({
   favouriteList: Playlist | null;
   /** Renders a list of songs, as the detail pages do. */
   songs: (tracks: Track[], playlist?: Playlist) => ReactNode;
-  createPlaylist: (name: string, key: string) => Promise<void>;
+  createPlaylist: (attempt: CreateAttempt) => Promise<void>;
   refresh: () => Promise<void>;
 }) {
   const artists = library.artists.filter((a) => !a.compilation_only);

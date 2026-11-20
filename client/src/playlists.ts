@@ -51,6 +51,63 @@ export async function createPlaylist(
   }
 }
 
+/** One New playlist submission: its name and key, and the session it was
+ * made in (#288). Its create, Try again and the songs added after belong to
+ * that session only (Codex). */
+export type CreateAttempt = {
+  name: string;
+  key: string;
+  session: string | null;
+  generation: number;
+};
+
+/** A new attempt to make `name`, in the session signed in now. */
+export function newAttempt(name: string): CreateAttempt {
+  return {
+    name,
+    key: crypto.randomUUID(),
+    session: expectedSession(),
+    generation: currentSession(),
+  };
+}
+
+/** The attempt's session ended: whatever comes of it is not shown. */
+export class AttemptEnded extends Error {
+  constructor() {
+    super("Signed out");
+  }
+}
+
+/** Whether the attempt's session is still the one signed in. */
+export const attemptLive = (attempt: CreateAttempt) =>
+  !!attempt.session &&
+  attempt.generation === currentSession() &&
+  expectedSession() === attempt.session;
+
+/** Runs `start` for the attempt: refused (`AttemptEnded`) unless its session
+ * is still signed in, with the writes it starts bound to that session, and
+ * its answer, whatever it is, dropped as `AttemptEnded` if the session ended
+ * while it was on its way. */
+export async function forAttempt<T>(
+  attempt: CreateAttempt,
+  start: () => Promise<T>,
+): Promise<T> {
+  if (!attemptLive(attempt)) throw new AttemptEnded();
+  let result: T;
+  try {
+    result = await withSession(attempt.session, start);
+  } catch (e) {
+    if (!attemptLive(attempt)) throw new AttemptEnded();
+    throw e;
+  }
+  if (!attemptLive(attempt)) throw new AttemptEnded();
+  return result;
+}
+
+/** Makes the attempt's playlist, under its session only. */
+export const createAttempt = (attempt: CreateAttempt) =>
+  forAttempt(attempt, () => createPlaylist(attempt.name, attempt.key));
+
 type Sent = { title?: string; artist?: string };
 type Read = { revision: number; name?: string };
 

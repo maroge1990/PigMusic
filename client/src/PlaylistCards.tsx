@@ -9,6 +9,7 @@ import {
 import { Cover } from "./Cover";
 import { formatListSize } from "./format";
 import { notifyError } from "./notices";
+import { AttemptEnded, newAttempt, type CreateAttempt } from "./playlists";
 import type { Entry, Playlist, PlaylistSummary } from "./libraryTypes";
 import { Empty, InlineError } from "./EmptyState";
 import { SortControl, byName } from "./SortControl";
@@ -142,7 +143,7 @@ export function PlaylistGrid({
   /** The library's revision: the songs playlist entries match. */
   library?: string;
   favouriteList: Playlist | null;
-  createPlaylist: (name: string, key: string) => Promise<void>;
+  createPlaylist: (attempt: CreateAttempt) => Promise<void>;
 }) {
   const own = useMemo(
     () => playlists.filter((p) => !p.id.startsWith("pig-favourites:")),
@@ -184,7 +185,7 @@ export function PlaylistGrid({
 function NewPlaylistCard({
   createPlaylist,
 }: {
-  createPlaylist: (name: string, key: string) => Promise<void>;
+  createPlaylist: (attempt: CreateAttempt) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -235,33 +236,42 @@ function NewPlaylistCard({
               if (!name) return;
               setBusy(true);
               setError("");
-              // This submission's own key: only its Try again reuses it
-              // (#288).
-              const key = crypto.randomUUID();
+              // This submission's own key, and the session it belongs to:
+              // only its Try again reuses them (#288), and whatever comes of
+              // it after that session ended is dropped unseen (Codex).
+              const attempt = newAttempt(name);
               /** The notice's Try again: this same attempt, sent again. */
               const unconfirmed = (e: Error): number =>
                 notifyError(
                   e.message,
                   (): Promise<unknown> =>
-                    createPlaylist(name, key).then(
+                    createPlaylist(attempt).then(
                       () => setDraft(""),
                       (again) =>
-                        isUnconfirmed(again)
-                          ? unconfirmed(again)
-                          : notifyError(
-                              again.message,
-                              undefined,
-                              "new-playlist",
-                            ),
+                        again instanceof AttemptEnded
+                          ? undefined
+                          : isUnconfirmed(again)
+                            ? unconfirmed(again)
+                            : notifyError(
+                                again.message,
+                                undefined,
+                                "new-playlist",
+                              ),
                     ),
                   "new-playlist",
                 );
-              void createPlaylist(name, key)
+              let ended = false;
+              void createPlaylist(attempt)
                 .then(() => {
                   setDraft("");
                   dialog.current?.close();
                 })
                 .catch((e) => {
+                  // The session it was made in ended: nothing is shown.
+                  if (e instanceof AttemptEnded) {
+                    ended = true;
+                    return;
+                  }
                   if (!isUnconfirmed(e)) return setError(e.message);
                   // The playlist may have been made (#275): the dialog
                   // steps aside so the refreshed list shows whether it was,
@@ -270,7 +280,7 @@ function NewPlaylistCard({
                   dialog.current?.close();
                   unconfirmed(e);
                 })
-                .finally(() => setBusy(false));
+                .finally(() => !ended && setBusy(false));
             }}
           >
             <label>

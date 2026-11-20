@@ -84,3 +84,44 @@ test("a refusal and the server's own busy answer stay as they were", async () =>
   const error = await createPlaylist("Road trip").catch((e) => e);
   assert.equal(error.kind, "busy");
 });
+
+// Codex (#288): a create whose answer came after its session ended could
+// offer Try again to the next account, which then sent the old account's
+// name (and, from the picker, its songs) under the new session.
+test("an attempt's answers after its session ended are dropped, and it never goes under another", async () => {
+  const { AttemptEnded, createAttempt, forAttempt, newAttempt } = await import(
+    "../src/playlists.ts"
+  );
+  clearSessionReads();
+  setSessionId("session-1");
+  const sessions = [];
+  let answer;
+  globalThis.fetch = (_path, options) => {
+    sessions.push(new Headers(options.headers).get("X-Pig-Expected-Session"));
+    return new Promise((resolve) => (answer = resolve));
+  };
+  const attempt = newAttempt("Pat's mix");
+  // On its way under session 1; another account signs in meanwhile.
+  const first = createAttempt(attempt);
+  clearSessionReads();
+  setSessionId("session-2");
+  answer(new Response("<html>gateway</html>", { status: 504 }));
+  await assert.rejects(first, AttemptEnded);
+  // Its Try again, or the songs to add after it, send nothing now.
+  await assert.rejects(createAttempt(attempt), AttemptEnded);
+  let added = false;
+  await assert.rejects(
+    forAttempt(attempt, async () => (added = true)),
+    AttemptEnded,
+  );
+  assert.equal(added, false);
+  assert.deepEqual(sessions, ["session-1"]);
+  // A success after the session ended is dropped too.
+  const late = newAttempt("Sam's mix");
+  const second = createAttempt(late);
+  clearSessionReads();
+  setSessionId("session-3");
+  answer(Response.json({ id: "p9", name: "Sam's mix" }));
+  await assert.rejects(second, AttemptEnded);
+  assert.deepEqual(sessions, ["session-1", "session-2"]);
+});
