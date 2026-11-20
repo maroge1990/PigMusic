@@ -94,7 +94,7 @@ export function LibraryCollections({
   favouriteList: Playlist | null;
   /** Renders a list of songs, as the detail pages do. */
   songs: (tracks: Track[], playlist?: Playlist) => ReactNode;
-  createPlaylist: (name: string) => Promise<void>;
+  createPlaylist: (name: string, key: string) => Promise<void>;
   refresh: () => Promise<void>;
 }) {
   const artists = library.artists.filter((a) => !a.compilation_only);

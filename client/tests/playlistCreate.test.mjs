@@ -1,7 +1,7 @@
 // #288: a playlist create whose answer is lost, or comes back as a gateway
-// error, may have been saved. It is unconfirmed, and creating the same name
-// again goes under the same key, so the server answers with the playlist
-// it made instead of making a second.
+// error, may have been saved. It is unconfirmed, and that attempt's Try
+// again goes under the same key, so the server answers with the playlist it
+// made instead of making a second. A fresh create always has a new key.
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -51,49 +51,36 @@ for (const answer of [502, 503, 504, "lose"])
     setSessionId("session-1");
     const state = server();
     state.next = [answer];
-    const error = await createPlaylist("Road trip").catch((e) => e);
+    const error = await createPlaylist("Road trip", "key-1").catch((e) => e);
     assert.ok(isUnconfirmed(error), String(error));
-    const again = await createPlaylist("Road trip");
+    // That attempt's Try again: the playlist it made.
+    const again = await createPlaylist("Road trip", "key-1");
     assert.equal(again.id, "p1");
     assert.equal(state.made.size, 1);
-    assert.equal(state.keys[1], state.keys[0]);
-    // Confirmed: the next create of the name is a new playlist.
-    assert.equal((await createPlaylist("Road trip")).id, "p2");
-    assert.notEqual(state.keys[2], state.keys[0]);
+    assert.deepEqual(state.keys, ["key-1", "key-1"]);
   });
 
-test("a refused create's next try is a new create; another name has its own key", async () => {
+// Codex round 1: keys were kept per name, so a fresh New playlist of the
+// same name after an unconfirmed one got that earlier playlist (renamed
+// since, perhaps), and the picker added songs to it.
+test("every fresh create has its own key, whatever its name", async () => {
   clearSessionReads();
   setSessionId("session-1");
   const state = server();
-  state.next = ["refuse", 504];
-  await assert.rejects(createPlaylist("Road trip"), /Choose a playlist name/);
+  state.next = [504];
   await assert.rejects(createPlaylist("Road trip"), isUnconfirmed);
+  const fresh = await createPlaylist("Road trip");
+  assert.equal(fresh.id, "p2");
   assert.notEqual(state.keys[1], state.keys[0]);
-  await createPlaylist("Gym");
-  assert.notEqual(state.keys[2], state.keys[1]);
-  // The unconfirmed one's key is still kept for its name.
-  await createPlaylist("Road trip");
-  assert.equal(state.keys[3], state.keys[1]);
+  assert.match(state.keys[0], /^[0-9a-f-]{36}$/);
 });
 
-test("the server's own busy answer stays a busy error", async () => {
+test("a refusal and the server's own busy answer stay as they were", async () => {
   clearSessionReads();
   setSessionId("session-1");
   const state = server();
-  state.next = ["busy"];
+  state.next = ["refuse", "busy"];
+  await assert.rejects(createPlaylist("Road trip"), /Choose a playlist name/);
   const error = await createPlaylist("Road trip").catch((e) => e);
   assert.equal(error.kind, "busy");
-});
-
-test("a key is forgotten when the person signs out", async () => {
-  clearSessionReads();
-  setSessionId("session-1");
-  const state = server();
-  state.next = ["lose"];
-  await assert.rejects(createPlaylist("Road trip"), isUnconfirmed);
-  clearSessionReads();
-  setSessionId("session-2");
-  await createPlaylist("Road trip");
-  assert.notEqual(state.keys[1], state.keys[0]);
 });

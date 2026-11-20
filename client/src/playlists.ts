@@ -4,7 +4,6 @@ import {
   api,
   currentSession,
   forgetReads,
-  sessionMap,
 } from "./api";
 import { notifyError, notifyWarning } from "./notices";
 import { batches } from "./limits";
@@ -19,45 +18,33 @@ export async function loadPlaylists(): Promise<Playlist[]> {
   ).playlists.filter((p) => !p.id.startsWith("pig-favourites:"));
 }
 
-/** The key each name's create is tried under until the server has made it
- * or refused it (#288): trying the same name again after an answer that
- * was lost, a gateway error or a server fault reuses the key, and the
- * server answers with the playlist the earlier try made, if it made one.
- * Emptied when the person signs out. */
-const createKeys = sessionMap<string, string>();
-
 /** A proxy's answer that says nothing of whether the server saved the
  * create: a 502, a 504, or a 503 that isn't the server's own (no code). */
 const gatewayAnswer = (e: ApiError) =>
   e.status === 502 || e.status === 504 || (e.status === 503 && !e.body.code);
 
-/** Makes a playlist. A request with no answer at all (the connection
- * dropped) or a gateway's answer may have been saved, so it fails like a
- * 504 (#275, #288): unconfirmed, and open views read again, with new reads,
- * to show whether it was. Creating the same name again is then safe: it
- * goes under the same key. */
-export async function createPlaylist(name: string) {
-  const key = createKeys.get(name) ?? crypto.randomUUID();
-  createKeys.set(name, key);
-  const settled = () => {
-    if (createKeys.get(name) === key) createKeys.delete(name);
-  };
+/** Makes a playlist. `key` names this one create attempt (#288): every New
+ * playlist submission has its own, and only that attempt's Try again sends
+ * it again, so the server answers a retry with the playlist the attempt
+ * made, if it made one, and never gives an earlier attempt's playlist to a
+ * new one (Codex). A request with no answer at all (the connection dropped)
+ * or a gateway's answer may have been saved, so it fails like a 504 (#275):
+ * unconfirmed, and open views read again, with new reads, to show whether
+ * it was. */
+export async function createPlaylist(
+  name: string,
+  key: string = crypto.randomUUID(),
+) {
   try {
-    const playlist = await api<Playlist>("/v1/playlists", {
+    return await api<Playlist>("/v1/playlists", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, operation_id: key }),
     });
-    settled();
-    return playlist;
   } catch (e) {
-    if (e instanceof ApiError && !gatewayAnswer(e)) {
-      // The server's own refusal: nothing was made, so the next try of
-      // this name is a new create.
-      if (e.status && e.status >= 400 && e.status < 500) settled();
-      // An answer (or a refusal before sending: no session), as it was.
-      if (e.kind !== "unconfirmed") throw e;
-    }
+    // An answer (or a refusal before sending: no session), as it was.
+    if (e instanceof ApiError && !gatewayAnswer(e) && e.kind !== "unconfirmed")
+      throw e;
     forgetReads();
     window.dispatchEvent(new Event("music-library-changed"));
     throw new ApiError(UNCONFIRMED_MESSAGE, "unconfirmed", {}, "unconfirmed");

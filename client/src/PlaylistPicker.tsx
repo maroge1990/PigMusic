@@ -192,9 +192,31 @@ export function PlaylistPicker({
               setError("");
               const mine = opening.current;
               const open = () => opening.current === mine;
+              // This submission's own key: only its Try again reuses it
+              // (#288).
+              const key = crypto.randomUUID();
+              /** The notice's Try again: this same attempt (name, key and
+               * songs), sent again, then the songs added to what it made. */
+              const unconfirmed = (e: Error): number =>
+                notifyError(
+                  e.message,
+                  (): Promise<unknown> =>
+                    createPlaylist(name, key)
+                      .then((p) => add(p.id))
+                      .then(() => notify("Playlist created and songs added"))
+                      .catch((again): void => {
+                        if (again instanceof ReportedFailure) return;
+                        if (isUnconfirmed(again)) {
+                          unconfirmed(again);
+                          return;
+                        }
+                        notifyError(again.message, undefined, "new-playlist");
+                      }),
+                  "new-playlist",
+                );
               const playlist = made.current
                 ? Promise.resolve(made.current)
-                : createPlaylist(name).then((p) => {
+                : createPlaylist(name, key).then((p) => {
                     if (open()) made.current = p.id;
                     return p.id;
                   });
@@ -216,9 +238,10 @@ export function PlaylistPicker({
                     return;
                   }
                   // The playlist may have been made (#275): no second
-                  // Create from here; the notice says to check first.
+                  // Create from here; the notice says to check first, and
+                  // its Try again sends this attempt again (#288).
                   if (open()) dialog.current?.close();
-                  notifyError(e.message, undefined, "new-playlist");
+                  unconfirmed(e);
                 })
                 .finally(() => open() && setBusy(false));
             }}

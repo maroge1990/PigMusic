@@ -142,7 +142,7 @@ export function PlaylistGrid({
   /** The library's revision: the songs playlist entries match. */
   library?: string;
   favouriteList: Playlist | null;
-  createPlaylist: (name: string) => Promise<void>;
+  createPlaylist: (name: string, key: string) => Promise<void>;
 }) {
   const own = useMemo(
     () => playlists.filter((p) => !p.id.startsWith("pig-favourites:")),
@@ -184,7 +184,7 @@ export function PlaylistGrid({
 function NewPlaylistCard({
   createPlaylist,
 }: {
-  createPlaylist: (name: string) => Promise<void>;
+  createPlaylist: (name: string, key: string) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -235,7 +235,28 @@ function NewPlaylistCard({
               if (!name) return;
               setBusy(true);
               setError("");
-              void createPlaylist(name)
+              // This submission's own key: only its Try again reuses it
+              // (#288).
+              const key = crypto.randomUUID();
+              /** The notice's Try again: this same attempt, sent again. */
+              const unconfirmed = (e: Error): number =>
+                notifyError(
+                  e.message,
+                  (): Promise<unknown> =>
+                    createPlaylist(name, key).then(
+                      () => setDraft(""),
+                      (again) =>
+                        isUnconfirmed(again)
+                          ? unconfirmed(again)
+                          : notifyError(
+                              again.message,
+                              undefined,
+                              "new-playlist",
+                            ),
+                    ),
+                  "new-playlist",
+                );
+              void createPlaylist(name, key)
                 .then(() => {
                   setDraft("");
                   dialog.current?.close();
@@ -247,7 +268,7 @@ function NewPlaylistCard({
                   // and keeps the name for New playlist.
                   setDraft(name);
                   dialog.current?.close();
-                  notifyError(e.message, undefined, "new-playlist");
+                  unconfirmed(e);
                 })
                 .finally(() => setBusy(false));
             }}

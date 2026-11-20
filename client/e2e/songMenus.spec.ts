@@ -312,9 +312,9 @@ test("a made playlist whose add fails retries the add, never the create", async 
 
 // #288: a proxy answered 502 after the server made the playlist. The picker
 // showed a busy error with Create ready, and Create made a second one. Now
-// it is unconfirmed, and the same name from the picker again goes under the
-// same key: the server answers with the playlist it made, and the song goes
-// there.
+// it is unconfirmed, and the notice's Try again sends the same attempt
+// (Codex round 1): the server answers with the playlist it made, and the
+// song goes there.
 test("a new playlist from the picker answered 502 after saving is not made twice", async ({
   page,
 }) => {
@@ -352,18 +352,24 @@ test("a new playlist from the picker answered 502 after saving is not made twice
   });
   await page.goto(`/#/library/album/${album.id}`);
   const dialog = page.locator(".new-playlist-dialog");
-  for (const _ of [1, 2]) {
-    await page.getByRole("button", { name: "More options for 360" }).click();
-    await page.getByRole("menuitem", { name: "Add to playlist" }).click();
-    await page.getByRole("menuitem", { name: "New playlist" }).click();
-    await dialog.getByLabel("Playlist name").fill("Road trip");
-    await dialog.getByRole("button", { name: "Create playlist" }).click();
-    await expect(dialog).toBeHidden();
-  }
+  await page.getByRole("button", { name: "More options for 360" }).click();
+  await page.getByRole("menuitem", { name: "Add to playlist" }).click();
+  await page.getByRole("menuitem", { name: "New playlist" }).click();
+  await dialog.getByLabel("Playlist name").fill("Road trip");
+  await dialog.getByRole("button", { name: "Create playlist" }).click();
+  await expect(dialog).toBeHidden();
   await expect(page.locator(".notice-area")).toContainText(
     "may or may not have been saved",
   );
+  expect(adds).toHaveLength(0);
+  await page
+    .locator(".notice-area")
+    .getByRole("button", { name: "Try again" })
+    .click();
   await expect.poll(() => adds.length).toBe(1);
+  await expect(page.locator(".notice-area")).toContainText(
+    "Playlist created and songs added",
+  );
   expect(keys).toHaveLength(2);
   expect(keys[1]).toBe(keys[0]);
   expect(made.size).toBe(1);

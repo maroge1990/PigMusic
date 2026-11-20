@@ -646,8 +646,8 @@ export function PersonalLibrary({
           songs={songs}
           // A refusal reaches the dialog, which keeps the name and says why
           // (Codex round 2); only a created playlist closes it.
-          createPlaylist={async (name) => {
-            await createPlaylist(name);
+          createPlaylist={async (name, key) => {
+            await createPlaylist(name, key);
             notify("Playlist created");
             void refresh().catch((e) => setError(e.message));
           }}
