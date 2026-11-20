@@ -497,6 +497,69 @@ private func eventually(_ condition: @Sendable () async -> Bool) async throws {
     #expect(await sources.active.isEmpty)
   }
 
+  /// The queue has already moved on to "b" (heard, not yet shown) when "b"
+  /// is removed: too late for the stream, and the restart must not give
+  /// "b"'s elapsed time to "c", which takes its place in the queue. "c"
+  /// starts from its beginning (Codex round 1 on batch L, high).
+  @Test(arguments: editRates) @MainActor
+  func removingASongAlreadyHeardStartsItsSuccessorFromTheStart(rate: Double) async throws {
+    let root = try editRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let short = Int(rate / 4)
+    let (session, output, sources, items) = try start(
+      ["a", "b", "c"], rate: rate, frames: ["a": short], root: root)
+    try await waitUntil { session.snapshot.state == .playing }
+    // "b" is scheduled behind the rest of "a".
+    while output.captured.count < short + 4096 {
+      output.consume()
+      try await Task.sleep(for: .milliseconds(2))
+    }
+    // Into "b" with no await, so no clock reading has seen it.
+    while output.positionFrames <= Int64(short) + 1024, !output.pending.isEmpty {
+      output.consume()
+    }
+    #expect(output.positionFrames > Int64(short))
+    #expect(session.snapshot.occurrenceID == items[0].id)
+    let stops = output.stops
+    var restarts: [QueuePlaybackSnapshot] = []
+    session.onUpdate = { if $0.state == .preparing { restarts.append($0) } }
+    let mark = output.captured.count
+    session.updateUpcoming([items[0], items[2]])
+    try await waitUntil { !restarts.isEmpty }
+    try await playToEnd(session, output)
+    let length = Int(rate)
+    #expect(output.stops == stops + 1)
+    #expect(restarts.map(\.index) == [1] && restarts.map(\.elapsed) == [0])
+    #expect(restarts.first?.occurrenceID == items[2].id)
+    #expect(
+      firstBreak(output.captured.dropFirst(mark), [("c", 0..<length)], length: length) == nil)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+
+  /// The same, with nothing after the removed song: the queue ends there.
+  @Test @MainActor func removingTheLastSongAlreadyHeardEndsTheQueue() async throws {
+    let root = try editRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let short = 12000
+    let (session, output, sources, items) = try start(
+      ["a", "b"], rate: 48000, frames: ["a": short], root: root)
+    try await waitUntil { session.snapshot.state == .playing }
+    while output.captured.count < short + 4096 {
+      output.consume()
+      try await Task.sleep(for: .milliseconds(2))
+    }
+    while output.positionFrames <= Int64(short) + 1024, !output.pending.isEmpty {
+      output.consume()
+    }
+    session.updateUpcoming([items[0]])
+    try await waitUntil { session.snapshot.state == .ended }
+    #expect(session.snapshot.index == 0 && session.snapshot.occurrenceID == items[0].id)
+    #expect(!output.playing)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+
   /// A song added at the end while the next one fades in leaves the fade alone.
   @Test(arguments: editRates) @MainActor
   func anEditBeyondAFadingInSongLeavesItPlaying(rate: Double) async throws {
