@@ -228,3 +228,14 @@ def test_a_playlists_add_says_what_happened_past_the_reload():
     load = page.split("private func load() async {", 1)[1].split("\n  }\n", 1)[0]
     assert "notices" not in load
 
+
+def test_a_playlists_own_add_belongs_to_the_account_that_chose_it():
+    """#280: the collection menu's actions note the account and do nothing
+    once it ended (batch D), but the playlist page's own Add to library ran
+    unguarded, so songs read for one account could be added for the next."""
+    menus = (APP / "PersonalActionsViews.swift").read_text()
+    add = menus.split("case .addToLibrary:", 1)[1].split("case .addToPlaylist:", 1)[0]
+    page = add.split("if let addMissing {", 1)[1].split("} else {", 1)[0]
+    stamp = page.index("let stamp = model.currentGeneration")
+    guard = page.index("guard model.isCurrent(stamp) else { return }")
+    assert stamp < page.index("Task {") < guard < page.index("await addMissing()")

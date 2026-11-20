@@ -262,7 +262,13 @@ struct CollectionActionsMenu: View {
     case .addToLibrary:
       Button("Add \(missing) song\(missing == 1 ? "" : "s") to library", systemImage: "plus") {
         if let addMissing {
-          Task { await addMissing() }
+          // The page's own Add belongs to the account that chose it too: one
+          // that ended before it ran adds nothing (#280).
+          let stamp = model.currentGeneration
+          Task {
+            guard model.isCurrent(stamp) else { return }
+            await addMissing()
+          }
         } else {
           withSongs { await model.addToLibrary($0) }
         }
