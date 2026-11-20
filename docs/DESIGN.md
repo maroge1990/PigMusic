@@ -30,7 +30,7 @@ One word and one icon for each thing on web, iPhone and Watch (D-115 to D-117); 
 | Ask the server for music | `plus` / `Plus` | Add to library; Add N songs to library |
 | Saving a copy to a device | `arrow.down.circle` / `CircleArrowDown` | Download; Couldn't download |
 | Send to Apple Watch | `applewatch` | Send to Apple Watch; On Apple Watch; Waiting for Apple Watch |
-| Apple Watch status (D-120) | `checkmark.circle.fill`, `clock`, `iphone.slash`, `exclamationmark.circle` | Ready for your run; Arriving from iPhone; Can't reach your iPhone; Storage full; Couldn't save N songs; Sent to iPhone; Waiting to send |
+| Apple Watch status (D-120) | `checkmark.circle.fill`, `clock`, `iphone.slash`, `exclamationmark.circle` | Ready to play; Arriving from iPhone; Can't reach your iPhone; Storage full; Couldn't save N songs; Sent to iPhone; Waiting to send |
 | Favourite | `star` / `Star` | Favourite |
 | Remove from library, delete playlist | `trash` / `Trash2` | Remove from library (Undo) |
 | Remove a download from a device | `minus.circle` / `CircleMinus` | Remove download |
@@ -50,7 +50,7 @@ Row marks: in your library `checkmark.circle.fill` / `CircleCheck` ("In your lib
 
 Words: Apple Watch and iPhone (never watch or phone); songs and albums (never tracks or releases); your library; Storage limit; every error reads "Couldn't … Try again." or says what to do next.
 
-Apple Watch (D-120): every list uses one row (a small cover, the name, a second line) and files A to Z ignoring case and a leading "The"; Songs go by title. The home and Storage name the state from one rule for ready (the listed file is on the Watch): Ready for your run, Arriving from iPhone, Can't reach your iPhone, Storage full (pointing to the Storage limit), Couldn't save N songs. Storage reads "1.2 GB of 2 GB" beside a gauge, counted in 1,024s so it matches the limit. Passing notices ("Sent to iPhone", "Waiting to send") are grey and clear on their own; red with Try again is only for a playback error. A library that can't be opened says so, never "No music on Apple Watch yet".
+Apple Watch (D-120): every list uses one row (a small cover, the name, a second line) and files A to Z ignoring case and a leading "The"; Songs go by title. The home and Storage name the state from one rule for ready (the listed file is on the Watch): Ready to play, Arriving from iPhone, Can't reach your iPhone, Storage full (pointing to the Storage limit), Couldn't save N songs. Storage reads "1.2 GB of 2 GB" beside a gauge, counted in 1,024s so it matches the limit. Passing notices ("Sent to iPhone", "Waiting to send") are grey and clear on their own; red with Try again is only for a playback error. A library that can't be opened says so, never "No music on Apple Watch yet".
 
 ## Brand
 

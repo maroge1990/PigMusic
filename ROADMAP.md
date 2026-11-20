@@ -7,9 +7,9 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 *Overwritten at the end of every session. 20 Nov 2026, evening (Melbourne).*
 
-- **Live:** release `screens-20261119-v1` (server `91bc97d`). **main** now also has batch F (web findings #271–#275,
-  #269, server #268, and the native test pins brought up to D-120): two Codex rounds, fixes confirmed, no high left. Not
-  yet released.
+- **Live:** release `findings-20261120-v1` (server `1e3dae2`), applied 20 Nov ~22:36: batch F (web findings #271, #273–#275,
+  #269, the web half of #272, server #268). Two Codex rounds, fixes confirmed. Closed after release: #268, #269, #271,
+  #273, #274, #275. #272 waits for #289.
 - **Held back from batch F, each parked on a branch with Codex's findings on its issue:** #266 Undo for Remove from
   playlist (`batch-g-266-parked`; a high: closing the tab can lose queued removals, wants a server bulk remove) and #270
   saved listens across tabs (`batch-270-parked`; one medium left under a full store). #267 needs Mark's design choice.
@@ -28,7 +28,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   download or request turns up; #184's larger-text step passed, Shazam did not. Open questions for him, one at a time:
   #267 (what Play does on a catalogue card), #242 (queue limit numbers, proposal on the issue), #283's two design calls
   (large titles on the Library pages; Shuffle's button style), #266's two sentences.
-- **Decisions:** D-121, D-122 (20 Nov). Next: D-123.
+- **Decisions:** D-121 to D-124 (20 Nov). Next: D-125.
 - **Mac:** reachable as `ssh mac` (its address changes; match the host key); debugging only.
 - **Worktrees:** cleared on 20 Nov except seven kept for unmerged or private files (see `git worktree list`).
 
@@ -36,7 +36,8 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 1. **Next iPhone and Watch batch** from the device round: #284–#287, #290–#293, #283 (with the pytest step in
    `native.yml`), #124 (Shazam), then one TestFlight build.
-2. **Release batch F** to the live server once CI passes.
+2. **Watch delivery** (#219, D-124): scheduled Watch refresh and counters go in the batch G build; a complication if
+   that is not enough.
 3. **Mark's two-day Watch test** (#219), then its export.
 4. **Retirement, 28 Nov** (#201): remove what batches 4, 6 and 8 replaced once #191's pass marks are met.
 5. **Live checks that close with use:** #130, #142, #185, #188, #144/#145, #16/#17/#20/#22/#23/#54/#63 (#95).
