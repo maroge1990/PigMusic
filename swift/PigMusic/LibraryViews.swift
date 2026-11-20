@@ -1065,8 +1065,11 @@ struct NowPlayingView: View {
     }
     upNextRows(layout.similar)
   }
+  /// Every song, as the Queue page listed them: the list draws rows only as
+  /// they scroll into view, so song 51 and on keep their swipe and menu
+  /// (Codex round 1 on batch G).
   private func upNextRows(_ shown: [PlaybackOccurrence]) -> some View {
-    ForEach(shown.prefix(50)) { item in
+    ForEach(shown) { item in
       VStack(spacing: 0) {
         UpNextRow(model: model, item: item)
         RowSeparator()

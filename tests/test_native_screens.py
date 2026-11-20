@@ -156,6 +156,11 @@ def test_up_next_swipes_to_remove_in_the_player_with_no_edit():
     assert "List {" in body and "ScrollView" not in body
     rows = player.split("private func upNextRows(", 1)[1].split("\n  }\n", 1)[0]
     assert "UpNextRow(model: model, item: item)" in rows
+    # Codex round 1 on batch G: every song of Up next and of the similar
+    # songs is listed, as on the Queue page; none past the 50th is cut off.
+    assert "ForEach(shown) { item in" in rows and "prefix(" not in rows
+    assert "upNextRows(layout.chosen)" in player
+    assert "upNextRows(layout.similar)" in player
     swipe = rows.split(".swipeActions {", 1)[1]
     assert 'Button("Remove", systemImage: "xmark", role: .destructive)' in swipe
     assert "model.removeFromUpNextLater(item)" in swipe
