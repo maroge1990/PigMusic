@@ -46,13 +46,19 @@ def test_a_changed_song_stops_playback_only_when_it_is_queued():
     """#76 (D-56): any changed cached or downloaded song stopped playback and
     emptied the queue, even when it wasn't playing or queued."""
     player = (APP / "PlayerController.swift").read_text()
-    invalidate = body(player, "func invalidateSources(changed: Set<String>)")
+    invalidate = body(
+        player, "func invalidateSources(changed: Set<String>, fresh: [String: Track])"
+    )
     queued = invalidate.index("queue.items.contains(where: { changed.contains")
     assert queued < invalidate.index("stop()")
     assert "forget(ids: changed)" in invalidate
+    # Codex round 2 on batch E (7be8cfa): a queued song takes its fresh copy;
+    # playback stops only when the song playing was removed.
+    removed = invalidate.index("if refresh.current != .removed {")
+    assert queued < removed < invalidate.index("stop()")
     model = (APP / "AppModel.swift").read_text()
     assert "invalidateSources()" not in model
-    assert "invalidateSources(changed: changed)" in model
+    assert model.count("invalidateSources(changed: changed, fresh: fresh)") == 2
 
 
 def test_watch_copies_fit_the_watch_budget():

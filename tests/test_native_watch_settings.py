@@ -39,9 +39,13 @@ def test_the_watch_crossfade_switch_has_no_explanation():
 
 def test_the_controls_artist_line_is_secondary_and_labels_are_plain():
     watch = WATCH.read_text()
-    # The Text and the modifiers on its following lines.
-    artist = re.search(r"\.track\.artist\)[^\n]*(?:\n\s*\.[^\n]*)*", watch).group(0)
-    assert ".secondary" in artist
+    # D-120 screen 25: Controls name the song in one secondary line (the
+    # Text and the modifiers on its following lines); no headline title.
+    controls = watch.split("private struct WatchPlaybackDetails", 1)[1]
+    controls = controls.split("\nprivate struct", 1)[0]
+    song = re.search(r"\.track\.title\)[^\n]*(?:\n\s*\.[^\n]*)*", controls).group(0)
+    assert ".secondary" in song
+    assert ".headline" not in controls
     assert '"Play / pause"' not in watch
 
 

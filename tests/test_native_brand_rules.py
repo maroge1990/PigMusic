@@ -122,17 +122,20 @@ def test_compared_figures_use_rounded_tabular_numerals():
     )
     # #209: the Downloads hub's song counts, and the album and playlist rows'
     # counts and sizes on the iPhone and Watch pages (one shared section).
+    # D-120: the hub's places are cards with counts and a storage gauge.
     downloads = source("DownloadsView.swift")
-    assert (
-        "Text(detail).font(PigType.footnote).foregroundStyle(.secondary).pigFigures()"
-        in (downloads)
-    )
+    for line in ("Text(summary)", "Text(gauge.text)"):
+        assert (
+            f"{line}.font(PigType.footnote).foregroundStyle(.secondary).pigFigures()"
+            in downloads
+        ), line
     assert "subtitle: group.caption, subtitleFigures: true" in downloads
     assert "if subtitleFigures { line.pigFigures() }" in source("Components.swift")
     assert "DeviceGroupsSection(" in source("WatchDownloadsView.swift")
     assert ".font(.caption).pigFigures()" in source("LibraryViews.swift")
     watch = (ROOT / "swift/PigMusicWatch/PigMusicWatchApp.swift").read_text()
-    assert watch.count(".pigFigures()") == 4
+    # D-120 screen 24: Storage & sync's percent, "1.2 GB" and "of 2 GB".
+    assert watch.count(".pigFigures()") == 5
     # One way to set figures: no hand-rolled rounded digits left.
     for text in [watch] + [p.read_text() for p in APP.glob("*.swift")]:
         assert ".fontDesign(.rounded).monospacedDigit()" not in text

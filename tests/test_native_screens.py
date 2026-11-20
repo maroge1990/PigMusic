@@ -32,7 +32,12 @@ def test_the_library_section_tabs_have_no_shuffle_button():
     (Artists, Albums, Musicals…) is removed entirely."""
     library = (APP / "LibraryViews.swift").read_text()
     assert "Shuffle all songs" not in library
-    assert "shuffleLibrary" not in (APP / "AppModel.swift").read_text()
+    root = library.split("struct LibraryView: View {", 1)[1].split("\n}\n", 1)[0]
+    assert "shuffle" not in root.lower()
+    # D-120: "Shuffle your library" lives only on an empty Up next.
+    assert library.count("model.shuffleLibrary()") == 1
+    nothing = library.split("private struct NothingNext: View {", 1)[1]
+    assert "model.shuffleLibrary()" in nothing.split("\n}\n", 1)[0]
 
 
 def test_every_album_grid_uses_the_library_layout():

@@ -31,8 +31,11 @@ def test_one_chip_design_and_one_secondary_button():
     ] == []
     assert found(".buttonStyle(.bordered)") == []
     assert found("ChipStyle(selected: false)") == []
-    search = sources()["SearchViews.swift"]
-    assert "ChipStyle(selected: option == kind)" in search
+    # D-120 grouped Search's results, so its kind chips went; the Library's
+    # album categories and Rewind's rankings are the chips now.
+    app = sources()
+    assert "ChipStyle(selected: selected)" in app["LibraryViews.swift"]
+    assert "ChipStyle(selected: ranking == kind)" in app["HomeView.swift"]
 
 
 def test_favourites_are_a_star_and_colours_are_brand_roles():
@@ -143,7 +146,7 @@ def test_fixed_sizes_follow_dynamic_type():
 ROOT_TITLES = {
     '"Home"',
     '"Search"',
-    '"Your library"',
+    '"Library"',  # D-120 screen 29
     '"Downloads"',
     '"Account"',  # the account sheet's root
     '"PigMusic"',  # sign-in
@@ -185,11 +188,17 @@ def test_collection_rows_share_one_component_thumb_and_radius():
     assert re.findall(r"cornerRadius: (?:6|10|12)\)", "".join(app.values())) == []
     for name in (
         "SearchViews.swift",
-        "LibraryViews.swift",
         "CatalogueViews.swift",
         "DownloadsView.swift",
     ):
         assert "CollectionRow(" in app[name], name
+    # D-120: the Library shows artists and albums as cards, and the Playlists
+    # tab gives each playlist its cover mosaic, which grows with the text.
+    playlists = app["LibraryViews.swift"].split("struct PlaylistsView", 1)[1]
+    playlists = playlists.split("\n}\n", 1)[0]
+    assert "@ScaledMetric(relativeTo: .body) private var cover" in playlists
+    assert "CoverMosaicView(" in playlists
+    assert ".frame(width: cover, height: cover)" in playlists
     # #228: the Server page's albums use the Downloads pages' shared label,
     # which draws them with CollectionRow.
     assert "TransferGroupLabel(" in app["PersonalActionsViews.swift"]
