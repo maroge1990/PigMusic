@@ -460,7 +460,9 @@ private func eventually(_ condition: @Sendable () async -> Bool) async throws {
         output.captured.prefix(2 * length), [("a", 0..<length), ("a", 0..<length)],
         length: length) == nil)
     // Now Playing moves to the new listening of the same song.
-    try await waitUntil { session.snapshot.occurrenceID != items[0].id }
+    try await waitUntil {
+      session.snapshot.index == 0 && session.snapshot.occurrenceID != items[0].id
+    }
     #expect(session.snapshot.index == 0)
     #expect(await sources.busy == 0)
     #expect(await sources.peak <= 2)
@@ -625,7 +627,9 @@ private func eventually(_ condition: @Sendable () async -> Bool) async throws {
       output.consume()
       try await Task.sleep(for: .milliseconds(1))
     }
-    try await waitUntil { session.snapshot.occurrenceID != items[0].id }
+    try await waitUntil {
+      session.snapshot.index == 0 && session.snapshot.occurrenceID != items[0].id
+    }
     #expect(session.snapshot.index == 0)
     #expect((queue.items[0].id == session.snapshot.occurrenceID) == (caller == .iPhone))
     let stops = output.stops
@@ -753,7 +757,9 @@ private func eventually(_ condition: @Sendable () async -> Bool) async throws {
       }
     }
     try await play(to: length + 2048)
-    try await waitUntil { session.snapshot.occurrenceID != items[0].id }
+    try await waitUntil {
+      session.snapshot.index == 0 && session.snapshot.occurrenceID != items[0].id
+    }
     let listening = session.snapshot.occurrenceID
     var resumed: [UUID?] = []
     session.onUpdate = { if $0.state == .preparing { resumed.append($0.occurrenceID) } }
@@ -795,7 +801,9 @@ private func eventually(_ condition: @Sendable () async -> Bool) async throws {
       output.consume()
       try await Task.sleep(for: .milliseconds(1))
     }
-    try await waitUntil { session.snapshot.occurrenceID != items[0].id }
+    try await waitUntil {
+      session.snapshot.index == 0 && session.snapshot.occurrenceID != items[0].id
+    }
     let listening = session.snapshot.occurrenceID
     #expect(session.snapshot.index == 0)
     // Its cross-fade into "b" has begun: removing "b" is too late.
@@ -842,7 +850,8 @@ private func eventually(_ condition: @Sendable () async -> Bool) async throws {
     let length = Int(rate)
     #expect(output.stops == stops + 1)
     #expect(
-      firstBreak(output.captured.dropFirst(mark), [("x", 0..<length), ("c", 0..<length)], length: length)
+      firstBreak(
+        output.captured.dropFirst(mark), [("x", 0..<length), ("c", 0..<length)], length: length)
         == nil)
     #expect(session.snapshot.index == 3 && session.snapshot.occurrenceID == items[2].id)
     await session.stopAndWait()

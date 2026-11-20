@@ -383,7 +383,9 @@ public enum PlaybackSeek {
       if let from = list[...heard.marker.index].lastIndex(where: { identity.root($0.id) == root }),
         from + 1 < heard.marker.index
       {
-        for entry in list[(from + 1)..<heard.marker.index] { played.insert(identity.root(entry.id)) }
+        for entry in list[(from + 1)..<heard.marker.index] {
+          played.insert(identity.root(entry.id))
+        }
       }
     }
     guard
