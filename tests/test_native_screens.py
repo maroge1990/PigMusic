@@ -257,3 +257,21 @@ def test_a_memory_warning_lets_go_of_page_answers():
     assert "catalogueMemory.clear()" in warning
     assert "coverSwatches = [:]" in warning
     assert 'DiagnosticsLog.shared.record("lifecycle"' in warning
+
+
+def test_paused_marks_follow_resumes_and_the_request_list():
+    """Codex round 1 on batch K: an Add answer on its way when Resume went
+    through marked the song Paused again, and a Resume elsewhere (or one
+    whose answer was lost) left the mark. The Add is timed before it goes,
+    and the Downloads list reconciles the marks."""
+    model = (APP / "AppModel.swift").read_text()
+    flush = model.split("func flushRequests() async {", 1)[1].split("\n  }\n", 1)[0]
+    assert flush.index("let asked = requestedSongs.asking()") < flush.index(
+        "report = try await RequestOutbox.send("
+    )
+    assert "pausedOnServer(report.pausedRequests, asked: asked)" in flush
+    views = (APP / "PersonalActionsViews.swift").read_text()
+    load = views.split("private func load(reset: Bool) async {", 1)[1]
+    load = load.split("\n  }\n", 1)[0]
+    assert "model.requestedSongs.reconcile(" in load
+    assert "complete: offset == 0 && page.nextOffset == nil)" in load

@@ -1329,6 +1329,9 @@ enum PlayOrigin: Hashable {
         titles[track.id] = track.title
       }
       let report: RequestOutbox.Report
+      // Before the Add goes: a Resume after this can't be undone by its
+      // answer (Codex round 1 on batch K).
+      let asked = requestedSongs.asking()
       do {
         report = try await RequestOutbox.send(
           store: store, isCurrent: { [account] in account.isCurrent(stamp) }
@@ -1343,7 +1346,7 @@ enum PlayOrigin: Hashable {
       requestedSongs.refused(report.skipped + report.refused)
       // Paused before, so left paused (#264): marked paused, never excluded.
       // Under the requests the server named, which Resume clears (#276).
-      requestedSongs.pausedOnServer(report.pausedRequests)
+      requestedSongs.pausedOnServer(report.pausedRequests, asked: asked)
       if !report.requested.isEmpty || !report.skipped.isEmpty || !report.refused.isEmpty
         || !report.paused.isEmpty
       {

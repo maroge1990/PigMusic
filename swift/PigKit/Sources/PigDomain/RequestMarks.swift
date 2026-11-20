@@ -25,22 +25,64 @@ public struct RequestMarks: Sendable, Equatable {
   /// another request, so the request ID is what identifies a paused mark.
   /// An empty set: the server didn't name them (an older server).
   private var pausedSongs: [String: Set<String>] = [:]
+  /// A local clock, to order an Add's answer against a Resume (Codex round
+  /// 1 on batch K), and when each request's last Resume here went through.
+  private var clock = 0
+  private var resumedAt: [String: Int] = [:]
+  /// Taken before an Add is sent: its answer is placed by when it started.
+  public mutating func asking() -> Int {
+    clock += 1
+    return clock
+  }
   /// The server left these songs paused, as the person had them (#264), each
-  /// under the server requests named (track ID to request IDs).
-  public mutating func pausedOnServer(_ requests: [String: [String]]) {
+  /// under the server requests named (track ID to request IDs), answering an
+  /// Add taken at `asked`. A request whose Resume went through after that
+  /// Add started is not marked again: the server can only have answered
+  /// "paused" before the Resume (a pause after it is the request list's to
+  /// show, `reconcile`), so the song is being added (Codex round 1 on batch
+  /// K). A Resume that went through before the Add started can't be undone by
+  /// its answer: that pause is a new one.
+  public mutating func pausedOnServer(_ requests: [String: [String]], asked: Int) {
     for (id, requestIds) in requests where waiting.remove(id) != nil {
-      paused.insert(id)
-      pausedSongs[id, default: []].formUnion(requestIds)
+      let current = requestIds.filter { resumedAt[$0].map { $0 < asked } ?? true }
+      guard current.isEmpty, !requestIds.isEmpty else {
+        paused.insert(id)
+        pausedSongs[id, default: []].formUnion(current)
+        continue
+      }
+      sent.insert(id)
     }
   }
   /// The person resumed this server request (Codex round 1 on batch D,
   /// #276): only the songs left paused under it lose their paused mark;
   /// other songs' marks stay, whatever their names. A mark the server didn't
-  /// name a request for goes on any Resume rather than stay stuck.
+  /// name a request for goes on any Resume rather than stay stuck. An Add
+  /// answer already on its way can't mark it again.
   public mutating func resumed(request id: String) {
+    clock += 1
+    resumedAt[id] = clock
     for (song, requestIds) in pausedSongs where requestIds.isEmpty || requestIds.contains(id) {
       paused.remove(song)
       pausedSongs[song] = nil
+    }
+  }
+  /// The server's request list (Codex round 1 on batch K): `statuses` holds
+  /// the status of each request it lists, by request ID; `complete` says it
+  /// lists every one of this person's requests. A paused mark whose
+  /// requests are none of them paused there (resumed on another device, a
+  /// Resume whose answer was lost, finished, cancelled, or gone from a
+  /// complete list) is cleared. One whose request isn't on a partial list,
+  /// or an older server's mark with no request, is left as it is.
+  public mutating func reconcile(statuses: [String: String], complete: Bool) {
+    for (song, requestIds) in pausedSongs where !requestIds.isEmpty {
+      let stillPaused = requestIds.contains { request in
+        guard let status = statuses[request] else { return !complete }
+        return status == "paused"
+      }
+      if !stillPaused {
+        paused.remove(song)
+        pausedSongs[song] = nil
+      }
     }
   }
   public mutating func queued(_ id: String) { waiting.insert(id) }

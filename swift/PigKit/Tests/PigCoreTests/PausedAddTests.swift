@@ -38,7 +38,8 @@ struct PausedAddTests {
   @Test func aPausedSongIsMarkedPausedUntilTheRequestsChange() {
     var marks = RequestMarks()
     marks.queued("song")
-    marks.pausedOnServer(["song": ["request"]])
+    let asked = marks.asking()
+    marks.pausedOnServer(["song": ["request"]], asked: asked)
     #expect(marks.paused == ["song"])
     #expect(marks.contains("song"))
     marks.requestsChanged()
@@ -51,7 +52,8 @@ struct PausedAddTests {
     var marks = RequestMarks()
     for id in ["one", "two", "sent"] { marks.queued(id) }
     marks.sent(["sent"])
-    marks.pausedOnServer(["one": ["request-one"], "two": ["request-two"]])
+    let asked = marks.asking()
+    marks.pausedOnServer(["one": ["request-one"], "two": ["request-two"]], asked: asked)
     marks.resumed(request: "request-one")
     #expect(marks.paused == ["two"])
     #expect(!marks.contains("one"))
@@ -65,7 +67,8 @@ struct PausedAddTests {
   @Test func resumingARequestClearsTheOtherEditionsSongPausedUnderIt() {
     var marks = RequestMarks()
     marks.queued("hits-song")
-    marks.pausedOnServer(["hits-song": ["studio-request"]])
+    let asked = marks.asking()
+    marks.pausedOnServer(["hits-song": ["studio-request"]], asked: asked)
     marks.resumed(request: "studio-request")
     #expect(!marks.contains("hits-song"))
   }
@@ -76,7 +79,8 @@ struct PausedAddTests {
     var marks = RequestMarks()
     marks.queued("first")
     marks.queued("second")
-    marks.pausedOnServer(["first": ["request-a"], "second": ["request-b"]])
+    let asked = marks.asking()
+    marks.pausedOnServer(["first": ["request-a"], "second": ["request-b"]], asked: asked)
     marks.resumed(request: "request-a")
     #expect(!marks.contains("first"))
     #expect(marks.paused == ["second"])
@@ -90,7 +94,8 @@ struct PausedAddTests {
   @Test func aMarkWithoutARequestGoesOnAnyResume() {
     var marks = RequestMarks()
     marks.queued("old")
-    marks.pausedOnServer(["old": []])
+    let asked = marks.asking()
+    marks.pausedOnServer(["old": []], asked: asked)
     marks.resumed(request: "anything")
     #expect(!marks.contains("old"))
   }
@@ -103,5 +108,52 @@ struct PausedAddTests {
     let older = try decode(
       #"{"created":0,"existing":0,"skipped":0,"downloads_enabled":true}"#)
     #expect(older.pausedIds.isEmpty)
+  }
+
+  /// Codex round 1 on batch K: Resume goes through while an Add's answer
+  /// is on its way; the late "paused" can't mark the song again. The song
+  /// is being added, so it stays marked as asked for.
+  @Test func aDelayedAddAnswerCantUndoAResume() {
+    var marks = RequestMarks()
+    marks.queued("song")
+    let asked = marks.asking()
+    marks.resumed(request: "r1")
+    marks.pausedOnServer(["song": ["r1"]], asked: asked)
+    #expect(marks.paused.isEmpty)
+    #expect(marks.contains("song"))
+    // An Add sent after the Resume and answered "paused" is a new pause.
+    marks.queued("again")
+    let later = marks.asking()
+    marks.pausedOnServer(["again": ["r1"]], asked: later)
+    #expect(marks.paused == ["again"])
+  }
+
+  /// Codex round 1 on batch K: resumed on another device, or by a Resume
+  /// whose answer was lost: the request list says it isn't paused, and the
+  /// mark goes. Still paused there, it stays.
+  @Test func theRequestListClearsMarksResumedElsewhere() {
+    var marks = RequestMarks()
+    for id in ["elsewhere", "still", "unlisted"] { marks.queued(id) }
+    let asked = marks.asking()
+    marks.pausedOnServer(
+      ["elsewhere": ["r1"], "still": ["r2"], "unlisted": ["r3"]], asked: asked)
+    // One page of a longer list: an unlisted request is not known.
+    marks.reconcile(statuses: ["r1": "waiting_for_sources", "r2": "paused"], complete: false)
+    #expect(marks.paused == ["still", "unlisted"])
+    // The whole list: a request not on it is gone.
+    marks.reconcile(statuses: ["r2": "paused"], complete: true)
+    #expect(marks.paused == ["still"])
+    marks.reconcile(statuses: ["r2": "completed"], complete: true)
+    #expect(marks.paused.isEmpty)
+  }
+
+  /// An older server's mark names no request: the list can't place it.
+  @Test func theRequestListLeavesAMarkWithoutARequest() {
+    var marks = RequestMarks()
+    marks.queued("old")
+    let asked = marks.asking()
+    marks.pausedOnServer(["old": []], asked: asked)
+    marks.reconcile(statuses: [:], complete: true)
+    #expect(marks.paused == ["old"])
   }
 }
