@@ -108,7 +108,10 @@ def queue_rows(store):
 def test_a_locked_database_at_the_start_of_a_request_answers_busy_unconfirmed(
     place, monkeypatch
 ):
-    with fault(place.store, monkeypatch, "BEGIN IMMEDIATE", LOCKED):
+    # Every transaction meets the lock while the block lasts: with one raise
+    # only, a background worker's transaction could take it and let the
+    # request through (#294).
+    with fault(place.store, monkeypatch, "BEGIN IMMEDIATE", LOCKED, times=10**6):
         answer = place.client.post("/api/v1/requests", json={"tracks": [track(1)]})
     assert (answer.status_code, answer.json()) == (503, UNCONFIRMED)
     assert "retry-after" not in answer.headers

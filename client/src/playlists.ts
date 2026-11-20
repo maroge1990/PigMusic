@@ -18,24 +18,95 @@ export async function loadPlaylists(): Promise<Playlist[]> {
   ).playlists.filter((p) => !p.id.startsWith("pig-favourites:"));
 }
 
-/** Makes a playlist. A request with no answer at all (the connection
- * dropped) may have been saved, so it fails like a 504 (#275): unconfirmed,
- * and open views read again, with new reads, to show whether it was. */
-export async function createPlaylist(name: string) {
+/** A proxy's answer that says nothing of whether the server saved the
+ * create: a 502, a 504, or a 503 that isn't the server's own (no code). */
+const gatewayAnswer = (e: ApiError) =>
+  e.status === 502 || e.status === 504 || (e.status === 503 && !e.body.code);
+
+/** Makes a playlist. `key` names this one create attempt (#288): every New
+ * playlist submission has its own, and only that attempt's Try again sends
+ * it again, so the server answers a retry with the playlist the attempt
+ * made, if it made one, and never gives an earlier attempt's playlist to a
+ * new one (Codex). A request with no answer at all (the connection dropped)
+ * or a gateway's answer may have been saved, so it fails like a 504 (#275):
+ * unconfirmed, and open views read again, with new reads, to show whether
+ * it was. */
+export async function createPlaylist(
+  name: string,
+  key: string = crypto.randomUUID(),
+) {
   try {
     return await api<Playlist>("/v1/playlists", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, operation_id: key }),
     });
   } catch (e) {
-    // An answer, or a refusal before sending (no session): as it was.
-    if (e instanceof ApiError) throw e;
+    // An answer (or a refusal before sending: no session), as it was.
+    if (e instanceof ApiError && !gatewayAnswer(e) && e.kind !== "unconfirmed")
+      throw e;
     forgetReads();
     window.dispatchEvent(new Event("music-library-changed"));
     throw new ApiError(UNCONFIRMED_MESSAGE, "unconfirmed", {}, "unconfirmed");
   }
 }
+
+/** One New playlist submission: its name and key, and the session it was
+ * made in (#288). Its create, Try again and the songs added after belong to
+ * that session only (Codex). */
+export type CreateAttempt = {
+  name: string;
+  key: string;
+  session: string | null;
+  generation: number;
+};
+
+/** A new attempt to make `name`, in the session signed in now. */
+export function newAttempt(name: string): CreateAttempt {
+  return {
+    name,
+    key: crypto.randomUUID(),
+    session: expectedSession(),
+    generation: currentSession(),
+  };
+}
+
+/** The attempt's session ended: whatever comes of it is not shown. */
+export class AttemptEnded extends Error {
+  constructor() {
+    super("Signed out");
+  }
+}
+
+/** Whether the attempt's session is still the one signed in. */
+export const attemptLive = (attempt: CreateAttempt) =>
+  !!attempt.session &&
+  attempt.generation === currentSession() &&
+  expectedSession() === attempt.session;
+
+/** Runs `start` for the attempt: refused (`AttemptEnded`) unless its session
+ * is still signed in, with the writes it starts bound to that session, and
+ * its answer, whatever it is, dropped as `AttemptEnded` if the session ended
+ * while it was on its way. */
+export async function forAttempt<T>(
+  attempt: CreateAttempt,
+  start: () => Promise<T>,
+): Promise<T> {
+  if (!attemptLive(attempt)) throw new AttemptEnded();
+  let result: T;
+  try {
+    result = await withSession(attempt.session, start);
+  } catch (e) {
+    if (!attemptLive(attempt)) throw new AttemptEnded();
+    throw e;
+  }
+  if (!attemptLive(attempt)) throw new AttemptEnded();
+  return result;
+}
+
+/** Makes the attempt's playlist, under its session only. */
+export const createAttempt = (attempt: CreateAttempt) =>
+  forAttempt(attempt, () => createPlaylist(attempt.name, attempt.key));
 
 type Sent = { title?: string; artist?: string };
 type Read = { revision: number; name?: string };

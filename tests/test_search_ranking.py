@@ -276,3 +276,60 @@ def test_home_mixes_are_found_by_their_title(tmp_path, monkeypatch):
         assert seen == [member]
         other = client.get("/api/v1/search/results", params={"q": "coldplay"}).json()
         assert other["mixes"] == []
+
+
+def test_a_ranked_artist_carries_its_verified_catalogue_id(tmp_path, monkeypatch):
+    """#289: the web knows a ranked artist as the catalogue artist by its
+    MusicBrainz id. A verified link is read from the store, a namesake or an
+    unresolved artist gets none, and the search asks no provider."""
+    import httpx
+
+    from server.library import identifier, normalise
+    from server.routes import discover
+
+    app, member, token = library(tmp_path, monkeypatch)
+    coldplay = "cc197bad-dc9c-440d-a5b5-d52ba2e14234"
+    store = app.state.store
+    store.write_document(
+        "library-artist:" + identifier("artist", normalise("Coldplay")),
+        {"id": coldplay, "name": "Coldplay"},
+    )
+    # A link recorded for another name (a namesake's, or a renamed artist's)
+    # is not this artist's.
+    store.write_document(
+        "library-artist:" + identifier("artist", normalise("Yellowcard")),
+        {"id": "e7a7c5e2-8b5b-4b2c-9c3a-1f2d3e4f5a6b", "name": "Coldplay"},
+    )
+    asked = []
+
+    async def resolve_artist(*args, **kwargs):
+        asked.append(args)
+        raise AssertionError("search must not resolve an artist")
+
+    def outbound(self, request):
+        asked.append(str(request.url))
+        raise AssertionError("search must not reach a provider")
+
+    monkeypatch.setattr(discover, "resolve_artist", resolve_artist)
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", outbound)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", outbound)
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token},
+    ) as client:
+        found = client.get("/api/v1/search/results", params={"q": "coldplay"})
+        assert found.status_code == 200, found.text
+        value = found.json()
+        assert value["top"][0]["kind"] == "artist"
+        top = next(a for a in value["artists"] if a["id"] == value["top"][0]["id"])
+        assert top["name"] == "Coldplay"
+        assert top["musicbrainz_artist_id"] == coldplay
+
+        yellow = client.get("/api/v1/search/results", params={"q": "yellow"}).json()
+        ids = {a["name"]: a["musicbrainz_artist_id"] for a in yellow["artists"]}
+        assert ids["Yellowcard"] is None
+        beatles = client.get("/api/v1/search/results", params={"q": "beatles"}).json()
+        assert beatles["artists"][0]["name"] == "The Beatles"
+        assert beatles["artists"][0]["musicbrainz_artist_id"] is None
+    assert asked == []

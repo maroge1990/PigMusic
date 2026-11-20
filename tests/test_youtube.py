@@ -666,3 +666,189 @@ def test_a_head_of_unknown_size_never_says_the_file_is_empty(tmp_path):
         assert reply.headers["content-type"] == "audio/mp4"
 
     asyncio.run(scenario())
+
+
+class Recorder:
+    def __init__(self):
+        self.events = []
+
+    def record(self, metric, label, outcome, ms=None, detail=None, at=None):
+        self.events.append((metric, label, outcome, detail))
+
+
+def test_a_no_match_records_what_each_source_found_and_why(tmp_path):
+    """#282: YouTube answered no match for 41 of 52 lookups and nothing said
+    why. Each source's no match keeps the query, the number of results and
+    the first few with the reason each was not the song; never who asked."""
+    rejected = [
+        {**ON_YOUTUBE, "video_id": "a" * 11, "title": "Other Song"},
+        {**ON_YOUTUBE, "video_id": "b" * 11, "album": "Live at Leeds"},
+        {**ON_YOUTUBE, "video_id": "c" * 11, "duration": None},
+        {**ON_YOUTUBE, "video_id": "d" * 11, "duration": 260},
+        {**ON_YOUTUBE, "video_id": "e" * 11, "channel": "Somebody Else"},
+    ]
+    youtube = FakeYouTube(rejected)
+    saavn = [{"channel": "Artist", "title": "Song", "album": "Album", "duration": ""}]
+    resolver = resolver_with(youtube, lambda *_: saavn, tmp_path)
+    resolver.performance = Recorder()
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            with pytest.raises(ValueError, match="No source has"):
+                await resolver.stream(client, SONG, "member")
+
+    asyncio.run(scenario())
+    misses = {e[1]: e[3] for e in resolver.performance.events if e[2] == "no match"}
+    assert set(misses) == {"jiosaavn", "youtube"}
+    found = json.loads(misses["youtube"])
+    assert found["query"] == "Artist Song" and found["seconds"] == 200
+    assert found["results"] == 5
+    # Every result is counted by reason, the near misses below the first few too.
+    assert found["reasons"] == {
+        "title": 1,
+        "version": 1,
+        "no length": 1,
+        "length": 1,
+        "artist": 1,
+    }
+    assert [(r["title"], r["seconds"], r["why"]) for r in found["top"]] == [
+        ("Other Song", 201, "title"),
+        ("Song", 201, "version"),
+        ("Song", None, "no length"),
+    ]
+    assert json.loads(misses["jiosaavn"])["top"][0]["why"] == "no length"
+    assert "member" not in misses["youtube"] + misses["jiosaavn"]
+
+
+def test_a_no_match_detail_is_whole_json_however_long_the_names(tmp_path):
+    import sqlite3
+
+    from server.performance import DETAIL_CHARS, Performance
+    from server.remote import no_match_detail
+
+    long = {**ON_YOUTUBE, "title": "Ş" * 500, "channel": "A" * 500, "album": "B" * 500}
+    text = no_match_detail({**SONG, "title": "T" * 500}, "Q" * 500, [long] * 10)
+    assert len(text) <= DETAIL_CHARS
+    value = json.loads(text)
+    assert value["results"] == 10 and len(value["top"]) == 3
+    counters = Performance(tmp_path)
+    counters.record("remote-source", "youtube", "no match", 1, text, at=time.time())
+    counters.flush()
+    with sqlite3.connect(counters.path) as conn:
+        (stored,) = conn.execute("SELECT detail FROM events").fetchone()
+    assert json.loads(stored) == value
+
+
+def test_a_malformed_title_never_holds_back_the_counters(tmp_path):
+    """Codex round 1 (high): a YouTube title with a lone surrogate made the
+    miss unwritable, so every flush failed and an unrelated tap was never
+    saved. Its detail is storable JSON, and both events are written."""
+    import sqlite3
+
+    from server.performance import DETAIL_CHARS, Performance
+    from server.remote import no_match_detail
+
+    youtube = FakeYouTube([{**ON_YOUTUBE, "title": "Bad \udcff title"}])
+    resolver = resolver_with(youtube, lambda *_: [], tmp_path)
+    resolver.performance = Performance(tmp_path)
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            with pytest.raises(ValueError, match="No source has"):
+                await resolver.stream(client, SONG, "member")
+
+    asyncio.run(scenario())
+    resolver.performance.record("tap", "Prepared mix", "played", 80)
+    resolver.performance.flush()
+    with sqlite3.connect(resolver.performance.path) as conn:
+        rows = conn.execute("SELECT label,outcome,detail FROM events").fetchall()
+    details = {label: detail for label, outcome, detail in rows}
+    assert details.keys() == {"jiosaavn", "youtube", "Prepared mix"}
+    assert json.loads(details["youtube"])["top"][0]["title"] == "Bad ? title"
+    # Whole JSON within the limit even when escaping lengthens the query and
+    # the requested length is absurd.
+    text = no_match_detail(
+        {**SONG, "duration": 1e300},
+        "\x01" * 500,
+        [{**ON_YOUTUBE, "title": "\x02" * 500}],
+    )
+    assert len(text) <= DETAIL_CHARS and json.loads(text)["seconds"] is None
+
+
+def test_a_detail_that_cannot_be_made_never_changes_the_answer(tmp_path, monkeypatch):
+    """Codex round 1 (medium): an oversized length on a rejected result
+    raised while the miss was described, turning a no match (404, kept 30
+    minutes) into a failure (503, kept 2 minutes). Diagnostics are best
+    effort: whatever they meet, the answer and its memory are the same."""
+    from server import remote
+
+    rejected = {**ON_YOUTUBE, "title": "Other Song", "duration": 10**400}
+
+    def outcome(resolver):
+        async def scenario():
+            async with httpx.AsyncClient() as client:
+                with pytest.raises(ValueError, match="No source has"):
+                    await resolver.stream(client, SONG, "member")
+
+        asyncio.run(scenario())
+        until, kind, _ = resolver.misses[resolver.miss_key(SONG)]
+        assert kind is ValueError
+        assert until - time.monotonic() > remote.FAILURE_SECONDS
+        return [e for e in resolver.performance.events if e[1] == "youtube"]
+
+    resolver = resolver_with(FakeYouTube([rejected]), lambda *_: [], tmp_path)
+    resolver.performance = Recorder()
+    (event,) = outcome(resolver)
+    assert json.loads(event[3])["top"][0]["seconds"] is None
+
+    def broken(*args):
+        raise RuntimeError("the detail builder broke")
+
+    monkeypatch.setattr(remote, "no_match_detail", broken)
+    resolver = resolver_with(FakeYouTube([rejected]), lambda *_: [], tmp_path)
+    resolver.performance = Recorder()
+    (event,) = outcome(resolver)
+    assert event[3] == remote.UNRECORDED
+
+    class Failing:
+        def record(self, *args, **kwargs):
+            raise RuntimeError("the counters broke")
+
+    resolver = resolver_with(FakeYouTube([rejected]), lambda *_: [], tmp_path)
+    resolver.performance = Failing()
+    resolver.performance.events = []
+    outcome(resolver)
+
+
+def test_the_reason_given_agrees_with_the_song_rule():
+    """`why` explains `acceptable`; it must never call a rejected result
+    matched, or a matched one rejected."""
+    from server.remote import acceptable, why
+
+    tracks = [
+        SONG,
+        {**SONG, "album": "Live at Leeds"},
+        {**SONG, "duration": None},
+        {**SONG, "explicit_edition": True},
+        {**SONG, "isrcs": ["GBAAA0000001"]},
+        {**SONG, "title": "Song (Remastered 2011)"},
+        {**SONG, "title": "Song (Slowed)"},
+    ]
+    candidates = [
+        ON_YOUTUBE,
+        {**ON_YOUTUBE, "album": "Other Album"},
+        {**ON_YOUTUBE, "album": "Live at Leeds"},
+        {**ON_YOUTUBE, "title": "Song (Remix)"},
+        {**ON_YOUTUBE, "title": "Song (Slowed)"},
+        {**ON_YOUTUBE, "title": "Song - 2011 Remaster"},
+        {**ON_YOUTUBE, "channel": "Artist, Guest"},
+        {**ON_YOUTUBE, "channel": "Other"},
+        {**ON_YOUTUBE, "duration": 230},
+        {**ON_YOUTUBE, "duration": None},
+        {**ON_YOUTUBE, "isrc": "GBAAA0000002"},
+        {**ON_YOUTUBE, "isrc": "GBAAA0000001", "album": "Other Album"},
+    ]
+    for track in tracks:
+        for c in candidates:
+            reason = why(track, c)
+            assert (reason == "matched") == acceptable(track, c), (track, c, reason)

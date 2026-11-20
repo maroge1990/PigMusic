@@ -832,6 +832,7 @@ class UserLibrary:
         server (D-61): songs, albums, artists and playlists, each marked in
         the library or not, never split into lists by where they live."""
         from . import search_rank
+        from .artist_identity import cached_identities
         from .playlists import Playlists
 
         # Top results point into these lists, so each holds at least its best.
@@ -939,14 +940,26 @@ class UserLibrary:
                 value["server_state"] = "household_available"
             return {**value, "in_library": r["in_library"]}
 
+        # The web knows a ranked artist as the catalogue artist by its
+        # MusicBrainz id (#272, #289): only an identity already verified for
+        # this library artist and its name, read from the store, never asked
+        # for here; a namesake or an unresolved artist stays without one.
+        shown = [r["item"] for r in ranked["artist"][:limit]]
+        identities = cached_identities(self.store, shown) if shown else {}
+
+        def artist(r):
+            identity = identities.get(r["item"]["id"])
+            return {
+                **r["item"],
+                "musicbrainz_artist_id": identity["id"] if identity else None,
+                "in_library": r["in_library"],
+            }
+
         return {
             "top": search_rank.top(ranked),
             "songs": [song(r) for r in ranked["song"][:limit]],
             "albums": [album(r) for r in ranked["album"][:limit]],
-            "artists": [
-                {**r["item"], "in_library": r["in_library"]}
-                for r in ranked["artist"][:limit]
-            ],
+            "artists": [artist(r) for r in ranked["artist"][:limit]],
             "playlists": [r["item"] for r in ranked["playlist"][:limit]],
         }
 
