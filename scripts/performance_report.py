@@ -5,6 +5,10 @@ Copy it off the server first and read the copy, never the live file:
 
     .venv/bin/python -m scripts.performance_report performance.sqlite3
     .venv/bin/python -m scripts.performance_report copy.sqlite3 --since 2026-11-14 --json
+    .venv/bin/python -m scripts.performance_report copy.sqlite3 --no-match
+
+`--no-match` breaks each instant source's "no match" lookups down by why
+its nearest result was not the song (#282), with the newest examples.
 
 Library artists with a photo are measured by the server (Admin, System); this
 script reports them only when given `--artists WITH,TOTAL`.
@@ -14,10 +18,13 @@ import argparse
 import json
 import sqlite3
 import sys
+import time
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from server.performance import report
+from server.performance import RETENTION_SECONDS, report
+from server.remote import REASONS
 
 
 def epoch(text):
@@ -112,6 +119,91 @@ def lines(result):
         )
 
 
+def no_matches(conn, since=None, until=None):
+    """Each source's "no match" lookups (#282): by the reason its nearest
+    result failed the song rule (the one that got furthest through it), by
+    how many lookups had any result fail for each reason, and the events, newest
+    first. Events from before the detail was kept count as "unrecorded"."""
+    until = time.time() if until is None else until
+    since = until - RETENTION_SECONDS if since is None else since
+    rows = conn.execute(
+        "SELECT at,label,detail FROM events WHERE metric='remote-source' "
+        "AND outcome='no match' AND at>=? AND at<? ORDER BY at DESC",
+        (since, until),
+    ).fetchall()
+    sources = {}
+    for at, label, detail in rows:
+        entry = sources.setdefault(
+            label, {"count": 0, "nearest": Counter(), "any": Counter(), "events": []}
+        )
+        entry["count"] += 1
+        try:
+            value = json.loads(detail) if detail else None
+        except ValueError:
+            value = None
+        if not isinstance(value, dict):
+            entry["nearest"]["unrecorded"] += 1
+            continue
+        top = [r for r in value.get("top") or [] if isinstance(r, dict)]
+        if "error" in value:
+            nearest = "error " + str(value["error"])
+        elif value.get("remembered"):
+            nearest = "remembered miss"
+        elif not value.get("results"):
+            nearest = "no results"
+        else:
+            every = value.get("reasons")
+            every = (
+                set(every)
+                if isinstance(every, dict)
+                else {r.get("why") for r in top if r.get("why")}
+            )
+            known = [reason for reason in every if reason in REASONS]
+            nearest = max(known, key=REASONS.index) if known else "unrecorded"
+            entry["any"].update(every)
+        entry["nearest"][nearest] += 1
+        entry["events"].append({"at": at, "nearest": nearest, **value})
+    return {
+        name: {**entry, "nearest": dict(entry["nearest"]), "any": dict(entry["any"])}
+        for name, entry in sorted(sources.items())
+    }
+
+
+def by_count(counts):
+    return ", ".join(
+        f"{reason} {count}"
+        for reason, count in sorted(counts.items(), key=lambda r: (-r[1], r[0]))
+    )
+
+
+def length(seconds):
+    if not isinstance(seconds, (int, float)):
+        return "no length"
+    return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
+
+
+def no_match_lines(found, examples=20):
+    if not found:
+        yield "No instant source answered no match in this period."
+    for source, entry in found.items():
+        yield f"{source}: {entry['count']} no match"
+        yield "  nearest result failed on: " + by_count(entry["nearest"])
+        if entry["any"]:
+            yield "  lookups with a result that failed on: " + by_count(entry["any"])
+        for event in entry["events"][:examples]:
+            when = datetime.fromtimestamp(event["at"]).isoformat(timespec="minutes")
+            yield (
+                f"  {when} {event.get('query', '')!r} ({length(event.get('seconds'))})"
+                f": {event.get('results', 0)} results, nearest {event['nearest']}"
+            )
+            for result in event.get("top") or []:
+                yield (
+                    f"    {result.get('artist')} - {result.get('title')} "
+                    f"[{result.get('album')}] ({length(result.get('seconds'))})"
+                    f": {result.get('why')}"
+                )
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("database", type=Path, help="a copy of performance.sqlite3")
@@ -121,6 +213,14 @@ def main(argv=None):
     parser.add_argument("--until", type=epoch, help="ISO date or time (default: now)")
     parser.add_argument("--artists", help="WITH,TOTAL library artists with a photo")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--no-match",
+        action="store_true",
+        help="each instant source's no-match lookups by reason, with examples",
+    )
+    parser.add_argument(
+        "--examples", type=int, default=20, help="examples per source (--no-match)"
+    )
     args = parser.parse_args(argv)
     if not args.database.is_file():
         parser.error(f"{args.database} does not exist")
@@ -131,8 +231,17 @@ def main(argv=None):
     # Read-only: a copy is never changed, and the live file must not be used.
     uri = args.database.resolve().as_uri() + "?mode=ro"
     with sqlite3.connect(uri, uri=True) as conn:
-        result = report(conn, args.since, args.until, artists)
-    if args.json:
+        if args.no_match:
+            found = no_matches(conn, args.since, args.until)
+        else:
+            result = report(conn, args.since, args.until, artists)
+    if args.no_match:
+        if args.json:
+            json.dump(found, sys.stdout, indent=2, ensure_ascii=False)
+            print()
+        else:
+            print("\n".join(no_match_lines(found, args.examples)))
+    elif args.json:
         json.dump(result, sys.stdout, indent=2)
         print()
     else:

@@ -3499,6 +3499,13 @@
             "minLength": 1,
             "title": "Name",
             "type": "string"
+          },
+          "operation_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "nullable": true,
+            "title": "Operation Id",
+            "type": "string"
           }
         },
         "required": [

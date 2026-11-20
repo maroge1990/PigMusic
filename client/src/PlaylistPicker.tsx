@@ -1,7 +1,14 @@
 import { useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { Ref } from "react";
 import { ListPlus, Plus, X } from "lucide-react";
-import { ReportedFailure, createPlaylist, loadPlaylists } from "./playlists";
+import {
+  AttemptEnded,
+  ReportedFailure,
+  createAttempt,
+  forAttempt,
+  loadPlaylists,
+  newAttempt,
+} from "./playlists";
 import { EmptyLine, InlineError } from "./EmptyState";
 import { focusMenuItem, menuKeys } from "./menuKeys";
 import { isUnconfirmed } from "./api";
@@ -192,19 +199,49 @@ export function PlaylistPicker({
               setError("");
               const mine = opening.current;
               const open = () => opening.current === mine;
+              // This submission's own key, and the session it belongs to:
+              // only its Try again reuses them (#288), and whatever comes of
+              // it after that session ended is dropped unseen (Codex).
+              const attempt = newAttempt(name);
+              /** The notice's Try again: this same attempt (name, key and
+               * songs), sent again, then the songs added to what it made. */
+              const unconfirmed = (e: Error): number =>
+                notifyError(
+                  e.message,
+                  (): Promise<unknown> =>
+                    createAttempt(attempt)
+                      .then((p) => forAttempt(attempt, () => add(p.id)))
+                      .then(() => notify("Playlist created and songs added"))
+                      .catch((again): void => {
+                        if (again instanceof AttemptEnded) return;
+                        if (again instanceof ReportedFailure) return;
+                        if (isUnconfirmed(again)) {
+                          unconfirmed(again);
+                          return;
+                        }
+                        notifyError(again.message, undefined, "new-playlist");
+                      }),
+                  "new-playlist",
+                );
               const playlist = made.current
                 ? Promise.resolve(made.current)
-                : createPlaylist(name).then((p) => {
+                : createAttempt(attempt).then((p) => {
                     if (open()) made.current = p.id;
                     return p.id;
                   });
+              let ended = false;
               void playlist
-                .then((id) => add(id))
+                .then((id) => forAttempt(attempt, () => add(id)))
                 .then(() => {
                   if (open()) dialog.current?.close();
                   notify("Playlist created and songs added");
                 })
                 .catch((e) => {
+                  // The session it was made in ended: nothing is shown.
+                  if (e instanceof AttemptEnded) {
+                    ended = true;
+                    return;
+                  }
                   // Already said in the notice area, with its Try again
                   // into the playlist just made.
                   if (e instanceof ReportedFailure) {
@@ -216,11 +253,12 @@ export function PlaylistPicker({
                     return;
                   }
                   // The playlist may have been made (#275): no second
-                  // Create from here; the notice says to check first.
+                  // Create from here; the notice says to check first, and
+                  // its Try again sends this attempt again (#288).
                   if (open()) dialog.current?.close();
-                  notifyError(e.message, undefined, "new-playlist");
+                  unconfirmed(e);
                 })
-                .finally(() => open() && setBusy(false));
+                .finally(() => !ended && open() && setBusy(false));
             }}
           >
             <label>

@@ -6,7 +6,9 @@ waits on the main database's locks, never tells clients that library data
 changed, and a rollback to an older release needs no schema step. They are
 written in batches off the event loop, and only after something happened:
 an idle server does no counting work. Nothing personal is kept: no person,
-no song title, only the kind of event, its source and its time.
+only the kind of event, its source and its time. A remote source's "no
+match" keeps what its search found (#282): the song searched for and the
+first few results, never who asked.
 """
 
 import asyncio
@@ -26,6 +28,11 @@ FLUSH_SECONDS = 30
 # The oldest are dropped first if writing falls this far behind.
 PENDING_LIMIT = 5000
 PRUNE_SECONDS = 3600
+# An event's detail is cut to this many characters.
+DETAIL_CHARS = 1000
+# A duration beyond this (a year) is kept as this: SQLite's integers end at
+# 2**63.
+LONGEST_MS = 365 * 86400 * 1000
 
 # The targets in #191.
 TARGETS = {
@@ -69,14 +76,22 @@ class Performance:
         self.task = None
 
     def record(self, metric, label, outcome, ms=None, detail=None, at=None):
-        event = (
-            time.time() if at is None else at,
-            metric,
-            str(label),
-            str(outcome),
-            None if ms is None else max(0, int(round(ms))),
-            None if detail is None else str(detail)[:200],
-        )
+        """Never raises: counting must not change what was counted. An event
+        it cannot make storable is dropped and counted in `dropped`."""
+        try:
+            event = (
+                float(time.time() if at is None else at),
+                storable(metric),
+                storable(label),
+                storable(outcome),
+                None if ms is None else min(max(0, int(round(ms))), LONGEST_MS),
+                None if detail is None else storable(detail)[:DETAIL_CHARS],
+            )
+        except Exception:
+            with self.lock:
+                self.dropped += 1
+            log.warning("A performance event could not be stored; dropped")
+            return
         with self.lock:
             first = not self.pending
             self.pending.append(event)
@@ -129,6 +144,16 @@ class Performance:
         prune = self.pruned_at is None or now - self.pruned_at >= PRUNE_SECONDS
         if not events and not prune:
             return 0
+        # One row SQLite cannot take must never hold back the rest of the
+        # batch, nor come back with every later one: it is dropped here.
+        unwritable = [e for e in events if not writable(e)]
+        if unwritable:
+            events = [e for e in events if writable(e)]
+            with self.lock:
+                self.dropped += len(unwritable)
+            log.warning(
+                "%d performance events could not be written; dropped", len(unwritable)
+            )
         try:
             with closing(connect(self.path)) as conn, conn:
                 conn.executemany("INSERT INTO events VALUES (?,?,?,?,?,?)", events)
@@ -152,6 +177,24 @@ class Performance:
         self.flush()
         with closing(connect(self.path)) as conn:
             return report(conn, since, until, artists)
+
+
+def storable(value):
+    """Text SQLite can store: lone surrogates become "?"."""
+    return str(value).encode("utf-8", "replace").decode("utf-8")
+
+
+def writable(event):
+    """Whether SQLite can store this row as it is."""
+    try:
+        at, metric, label, outcome, ms, detail = event
+        float(at)
+        for text in (metric, label, outcome, detail):
+            if text is not None:
+                text.encode("utf-8")
+        return ms is None or (isinstance(ms, int) and abs(ms) <= LONGEST_MS)
+    except Exception:
+        return False
 
 
 def percentile(values, share):

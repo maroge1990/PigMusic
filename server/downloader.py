@@ -101,9 +101,16 @@ def duration(value):
 
 
 def matches(target, candidate):
+    return mismatch(target, candidate) is None
+
+
+def mismatch(target, candidate):
+    """The first check a candidate fails as the same recording ("ids",
+    "album", "artist", "title", "version", "no length", "length"), or None
+    when it is the recording (`matches`)."""
     for key in ("musicbrainz_recording_id", "musicbrainz_release_id"):
         if target.get(key) and candidate.get(key) and target[key] != candidate[key]:
-            return False
+            return "ids"
 
     def isrcs(value):
         raw = value.get("isrcs") or value.get("isrc") or []
@@ -117,7 +124,7 @@ def matches(target, candidate):
         and candidate_isrcs
         and requested_isrcs.isdisjoint(candidate_isrcs)
     ):
-        return False
+        return "ids"
     strict = target.get("explicit_edition")
     if (
         strict
@@ -126,16 +133,16 @@ def matches(target, candidate):
         and candidate.get("album")
         and folded(target["album"]) != folded(candidate["album"])
     ):
-        return False
+        return "album"
     if strict:
         if folded(candidate.get("channel")) != folded(target["artist"]):
-            return False
+            return "artist"
         if folded(candidate.get("title")) != folded(target["title"]):
-            return False
-    elif primary_artist(candidate.get("channel")) != primary_artist(
-        target["artist"]
-    ) or title_key(candidate.get("title")) != title_key(target["title"]):
-        return False
+            return "title"
+    elif primary_artist(candidate.get("channel")) != primary_artist(target["artist"]):
+        return "artist"
+    elif title_key(candidate.get("title")) != title_key(target["title"]):
+        return "title"
     versions = VERSION_WORDS if strict else VERSION_WORDS - EDITION_WORDS
     expected_versions = (
         set(folded(target["title"] + " " + target["album"]).split())
@@ -150,13 +157,15 @@ def matches(target, candidate):
         & versions
     )
     if expected_versions != actual_versions:
-        return False
+        return "version"
     expected, actual = duration(target.get("duration")), duration(
         candidate.get("duration")
     )
-    return actual > 0 and (
-        not expected or abs(actual - expected) <= ACQUISITION_TOLERANCE
-    )
+    if not actual > 0:
+        return "no length"
+    if expected and not abs(actual - expected) <= ACQUISITION_TOLERANCE:
+        return "length"
+    return None
 
 
 def safe_name(value):

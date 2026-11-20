@@ -88,7 +88,7 @@ test("the Playlists tab shows Favourites first, then covers with count and lengt
   await dialog.getByRole("button", { name: "Create playlist" }).click();
   await expect(dialog).toBeHidden();
   expect(created.map((body) => JSON.parse(body))).toEqual([
-    { name: "Sunday morning" },
+    { name: "Sunday morning", operation_id: expect.any(String) },
   ]);
 });
 
@@ -459,6 +459,123 @@ test("a new playlist whose answer is lost shows the refreshed list", async ({
   expect(creates).toBe(1);
   await create.click();
   await expect(dialog.getByLabel("Playlist name")).toHaveValue("Road trip");
+});
+
+// #288: a proxy answered 502 after the server saved the create. It was an
+// ordinary busy error, so Create stayed ready and a second click made a
+// second playlist. Now it is unconfirmed, and creating the name again goes
+// under the same key, which the server answers with the playlist it made.
+test("a new playlist answered 502 after saving is never made twice", async ({
+  page,
+}) => {
+  const made = new Map<string, { id: string; name: string }>();
+  const keys: string[] = [];
+  let failNext = true;
+  await mockApi(page, {
+    answers: {
+      "/v1/playlists": (route) => {
+        if (route.request().method() !== "POST")
+          return route.fulfill({
+            json: {
+              playlists: [...made.values()].map((p) => ({
+                ...p,
+                track_count: 0,
+              })),
+            },
+          });
+        const { name, operation_id } = route.request().postDataJSON();
+        keys.push(operation_id);
+        const playlist = made.get(operation_id) ?? {
+          id: "p" + (made.size + 1),
+          name,
+        };
+        made.set(operation_id, playlist);
+        if (failNext) {
+          failNext = false;
+          return route.fulfill({
+            status: 502,
+            contentType: "text/html",
+            body: "<html><body>502 Bad Gateway</body></html>",
+          });
+        }
+        return route.fulfill({
+          json: { ...playlist, revision: 0, entries: [] },
+        });
+      },
+      "/v1/playlists/p1": (route) =>
+        route.fulfill({
+          json: { id: "p1", name: "Road trip", revision: 0, entries: [] },
+        }),
+    },
+  });
+  await page.goto("/#/library/playlists");
+  const create = page.getByRole("button", { name: "New playlist" });
+  await create.click();
+  const dialog = page.getByRole("dialog", { name: "New playlist" });
+  await dialog.getByLabel("Playlist name").fill("Road trip");
+  await dialog.getByRole("button", { name: "Create playlist" }).click();
+  await expect(page.locator(".notice-area")).toContainText(
+    "may or may not have been saved",
+  );
+  await expect(dialog).toBeHidden();
+  // The notice's Try again sends that same attempt: the playlist it made
+  // comes back, and nothing new is made.
+  await page
+    .locator(".notice-area")
+    .getByRole("button", { name: "Try again" })
+    .click();
+  await expect(page.locator(".notice-area")).toContainText("Playlist created");
+  await expect(
+    page.locator(".album-card", { hasText: "Road trip" }),
+  ).toHaveCount(1);
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/);
+  expect(keys[1]).toBe(keys[0]);
+  expect(made.size).toBe(1);
+  // A fresh New playlist of the same name is a new attempt (Codex round 1).
+  await create.click();
+  await dialog.getByLabel("Playlist name").fill("Road trip");
+  await dialog.getByRole("button", { name: "Create playlist" }).click();
+  await expect(dialog).toBeHidden();
+  expect(keys[2]).not.toBe(keys[0]);
+  expect(made.size).toBe(2);
+});
+
+// Codex round 1 (#288): keys were kept per name, so a fresh New playlist
+// with the name of an unconfirmed one got that earlier playlist back.
+test("a fresh new playlist after an unconfirmed one of that name is its own", async ({
+  page,
+}) => {
+  const keys: string[] = [];
+  await mockApi(page, {
+    answers: {
+      "/v1/playlists": (route) => {
+        if (route.request().method() !== "POST")
+          return route.fulfill({ json: { playlists: [] } });
+        keys.push(route.request().postDataJSON().operation_id);
+        return keys.length === 1
+          ? route.fulfill({
+              status: 504,
+              contentType: "text/html",
+              body: "<html><body>504 Gateway Time-out</body></html>",
+            })
+          : route.fulfill({
+              json: { id: "p2", name: "Road trip", revision: 0, entries: [] },
+            });
+      },
+    },
+  });
+  await page.goto("/#/library/playlists");
+  const create = page.getByRole("button", { name: "New playlist" });
+  const dialog = page.getByRole("dialog", { name: "New playlist" });
+  for (const _ of [1, 2]) {
+    await create.click();
+    await dialog.getByLabel("Playlist name").fill("Road trip");
+    await dialog.getByRole("button", { name: "Create playlist" }).click();
+    await expect(dialog).toBeHidden();
+  }
+  expect(keys).toHaveLength(2);
+  expect(keys[1]).not.toBe(keys[0]);
 });
 
 // Codex, batch F (#275): the read after a lost create joined a list read
