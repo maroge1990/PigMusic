@@ -241,6 +241,7 @@ export function LibraryCollections({
         <>
           <PlaylistGrid
             playlists={playlists}
+            library={library.revision}
             favouriteList={favouriteList}
             createPlaylist={createPlaylist}
           />

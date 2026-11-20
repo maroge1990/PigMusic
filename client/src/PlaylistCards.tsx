@@ -73,12 +73,15 @@ export function FavouritesCover() {
 
 /** Each playlist's covers and length, read from its own page. Only the
  * playlists tab asks; the list itself carries counts only. */
-function usePlaylistFacts(playlists: PlaylistSummary[]) {
+function usePlaylistFacts(playlists: PlaylistSummary[], library?: string) {
   // Facts are kept with the playlist version they were read for and shown
   // only for that version: an edit moves the revision even when the count
   // stays, and a failed read leaves a plain card, not the old facts (Codex).
+  // A card's covers and length come from the library songs its entries
+  // match, so a library change reads them again too (#274); the facts
+  // already shown stay until that read lands.
   const [stored, setStored] = useState<
-    Record<string, { version: string; facts: PlaylistFacts }>
+    Record<string, { version: string; library?: string; facts: PlaylistFacts }>
   >({});
   const known = useRef(stored);
   known.current = stored;
@@ -86,23 +89,39 @@ function usePlaylistFacts(playlists: PlaylistSummary[]) {
     const controller = new AbortController();
     for (const p of playlists) {
       const version = versionOf(p);
-      if (known.current[p.id]?.version === version) continue;
+      const kept = known.current[p.id];
+      if (kept?.version === version && kept.library === library) continue;
+      const forget = () =>
+        setStored((old) => {
+          const { [p.id]: _, ...rest } = old;
+          return rest;
+        });
       void api<Playlist>("/v1/playlists/" + p.id, {
         signal: controller.signal,
       })
         .then((detail) => {
-          if (!controller.signal.aborted)
-            setStored((old) => ({
-              ...old,
-              [p.id]: { version, facts: playlistFacts(detail) },
-            }));
+          if (controller.signal.aborted) return;
+          // Only an answer for the version the list names is shown; the
+          // next refresh of the list reads it again.
+          if (
+            (p.revision !== undefined && detail.revision !== p.revision) ||
+            (p.track_count !== undefined &&
+              detail.entries.length !== p.track_count)
+          )
+            return forget();
+          setStored((old) => ({
+            ...old,
+            [p.id]: { version, library, facts: playlistFacts(detail) },
+          }));
         })
         // A card without its covers still opens its playlist; the next
         // refresh of the list reads it again.
-        .catch(() => {});
+        .catch(() => {
+          if (!controller.signal.aborted) forget();
+        });
     }
     return () => controller.abort();
-  }, [playlists]);
+  }, [playlists, library]);
   const facts: Record<string, PlaylistFacts> = {};
   for (const p of playlists)
     if (stored[p.id]?.version === versionOf(p))
@@ -115,10 +134,13 @@ const versionOf = (p: PlaylistSummary) =>
 /** The Playlists tab: Favourites first, then every playlist, then New playlist. */
 export function PlaylistGrid({
   playlists,
+  library,
   favouriteList,
   createPlaylist,
 }: {
   playlists: PlaylistSummary[];
+  /** The library's revision: the songs playlist entries match. */
+  library?: string;
   favouriteList: Playlist | null;
   createPlaylist: (name: string) => Promise<void>;
 }) {
@@ -126,7 +148,7 @@ export function PlaylistGrid({
     () => playlists.filter((p) => !p.id.startsWith("pig-favourites:")),
     [playlists],
   );
-  const facts = usePlaylistFacts(own);
+  const facts = usePlaylistFacts(own, library);
   const favourites = favouriteList ? playlistFacts(favouriteList) : null;
   return (
     <div className="personal-grid playlist-grid">

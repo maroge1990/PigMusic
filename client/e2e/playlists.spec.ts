@@ -240,6 +240,102 @@ test("a playlist card never shows an older version's length", async ({
   await expect(card).toContainText("4 songs · 4 min");
 });
 
+// Codex, batch E web part A (#274): a card's covers and length come from
+// the library songs its entries match, which can change while the
+// playlist's own revision stays the same.
+test("a playlist card follows a library change that keeps the playlist's revision", async ({
+  page,
+}) => {
+  let library = "lib-1";
+  const rematched = {
+    ...kitchen,
+    entries: kitchen.entries.map((e) => ({
+      ...e,
+      saved_track: { ...e, duration: 60 },
+    })),
+  };
+  await mockApi(page, {
+    answers: {
+      "/v1/library": (route) =>
+        route.fulfill({
+          json: {
+            artists: [],
+            albums: [],
+            playlist_count: 1,
+            revision: library,
+            stats: {
+              tracks: 0,
+              artists: 0,
+              albums: 0,
+              compilations: 0,
+              soundtracks: 0,
+              musicals: 0,
+            },
+            snapshot: {
+              source: "mock",
+              captured_at: "2026-10-15T00:00:00Z",
+              read_failures: [],
+            },
+          },
+        }),
+      "/v1/playlists": (route) =>
+        route.fulfill({
+          json: {
+            playlists: [
+              { id: "p2", name: "Kitchen disco", track_count: 4, revision: 1 },
+            ],
+          },
+        }),
+      "/v1/playlists/p2": (route) =>
+        route.fulfill({ json: library === "lib-1" ? kitchen : rematched }),
+    },
+  });
+  await page.goto("/#/library/playlists");
+  const card = page.locator(".playlist-grid .album-card", {
+    hasText: "Kitchen disco",
+  });
+  await expect(card).toContainText("4 songs · 1 hr 32 min");
+  library = "lib-2";
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("music-library-changed")),
+  );
+  await expect(card).toContainText("4 songs · 4 min");
+});
+
+// #274: a playlist's own page answering for another version than the list
+// names (an edit between the two reads) is not shown on the card.
+test("a playlist card ignores a page read for another version", async ({
+  page,
+}) => {
+  await mockApi(page, {
+    answers: {
+      "/v1/playlists": (route) =>
+        route.fulfill({
+          json: {
+            playlists: [
+              { id: "p2", name: "Kitchen disco", track_count: 4, revision: 1 },
+            ],
+          },
+        }),
+      "/v1/playlists/p2": (route) =>
+        route.fulfill({
+          json: {
+            ...kitchen,
+            revision: 2,
+            entries: kitchen.entries.map((e) => ({ ...e, duration: 60 })),
+          },
+        }),
+    },
+  });
+  await page.goto("/#/library/playlists");
+  const card = page.locator(".playlist-grid .album-card", {
+    hasText: "Kitchen disco",
+  });
+  await expect(card.locator("p")).toHaveText("4 songs");
+  await page.waitForTimeout(300);
+  await expect(card.locator("p")).toHaveText("4 songs");
+});
+
 // Codex round 2: a refused New playlist keeps the dialog, the name and
 // says why.
 test("a refused new playlist keeps the dialog and its name", async ({
