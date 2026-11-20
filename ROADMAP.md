@@ -5,52 +5,50 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 21 Nov 2026, early morning (Melbourne). The session stopped at a usage limit.*
+*Overwritten at the end of every session. 21 Nov 2026, morning (Melbourne).*
 
 - **Live:** release `playlists-20261121-v1` (server `4bdf4a3`): batch F web findings, #268, search artist ids (#289),
-  no-match diagnostics (#282, read them after a few days with `scripts/performance_report.py --no-match`), no duplicate
-  playlists (#288). All through Codex per D-59/D-71.
-- **Batch G (iPhone and Watch), branch `feature/batch-g` (27 commits, `199e1b9`), NOT on main:** device-round fixes
-  #284–#287, #290–#293, #124 (Shazam), #283, and the Watch wake-up rule and counters (#219, D-124, D-126). Two Codex
-  rounds and a final confirmation: no high; mediums are #300. Both apps compile and PigKit tests pass on GitHub; the
-  **tap-through run 44740297439 failed one test**, the new
-  `DemoLibraryTests.testASwipeRemovesASongFromUpNextWithUndo` (line 485: "unable to perform Swipe left"), so the
-  swipe-to-remove in the player (#287) is unproven: find out whether the test's row lookup or the List's swipe is at
-  fault before merging. Then: merge to main, push, then
-  `git push origin <commit>:refs/heads/testflight-YYYYMMDD-bN` (Xcode Cloud), delete that branch once the build arrives.
-  New sentence for Mark to OK: "Couldn't create <name>. Try again."
-- **Built, in Codex round 1, none compiled on Apple platforms yet, each to be its own TestFlight build after G:**
-  - **Batch J, Watch complication (D-125):** branch `batch-j-complication` / `feature/batch-j` (compile run started).
-    Codex round 1 output saved in `.localdata/handover-20261121/`. Mark may need to enable App Groups on the
-    `.watchkitapp` identifier and register `…watchkitapp.complication` in the developer account (steps in the #219
-    thread to be posted). Words to OK: "N waiting", the gallery description.
-  - **Batch K, older iPhone findings:** branch `batch-k` (#259–#261, #276, #277, #280, #281 with a server field
-    `added_at`, #253). Codex round 1 was running.
-  - **Batch L, playback gap (#279):** branch `batch-l-279`. Codex round 1 was running. Tests run only on macOS CI.
-- **Parked with the design on the issue:** #266 Undo for Remove from playlist (`batch-h-266-parked`; next: removal by
-  entry key without a revision) and #270 saved listens across tabs (`batch-270-minimal-parked`).
-- **Device round on build 2002 done 20 Nov;** #219's finding: the iPhone half works, the Watch takes songs only when
-  its app runs. **YouTube stays** (D-121).
-- **Waiting on Mark, one at a time:** #267 (what Play does on a catalogue card), #242 (queue limit numbers), the song
-  matching questions in #282 once live data is in, the wording above.
+  no-match diagnostics (#282; read after a few days with `scripts/performance_report.py --no-match`), no duplicate
+  playlists (#288).
+- **main `966f5f4`:** batch G merged (device-round fixes #284–#287, #290–#293, Shazam #124, #283, Watch wake-up rule and
+  counters #219/D-124/D-126). Two Codex rounds and a confirmation (mediums: #300); compiled and tap-through tested.
+  **TestFlight:** Xcode Cloud build started from branch `testflight-20261121-b1` on 21 Nov; delete the branch once the
+  build (2003 or later) is on TestFlight. Mark then re-checks only the changed items. New sentence for him to OK:
+  "Couldn't create <name>. Try again."
+- **Reviewed and waiting their turn, each its own TestFlight build after G (branches are cut from the old
+  `feature/batch-g`; merge main into each first):**
+  - **Batch J, Watch complication (D-125):** `batch-j-complication` (pushed as `feature/batch-j`). Codex: two rounds and
+    a confirmation, "no high finding blocks TestFlight"; mediums #305, #301. Compiled on GitHub up to `514e8a8`; the
+    last two commits are not compiled yet. Whether the iPhone's push wakes the Watch app depends on the watchOS version:
+    this build is the test (see #219). Mark may need to enable App Groups on the `.watchkitapp` identifier and register
+    `au.com.pig.music.watchkitapp.complication` first. Words to OK: "N waiting" and the gallery description.
+  - **Batch K, older iPhone findings:** `batch-k2` (#259, #260, #276, #277, #280, #281 with server field `added_at` and
+    Add `outcomes`/`paused_ids`, #253). Codex: approved on the last confirmation. **Never compiled**: push as
+    `feature/batch-k`. Has a server half, so a server release goes with it. #261 was withdrawn (kept on `batch-k`).
+  - **Batch L, playback gap (#279):** `batch-l-279` (pushed as `feature/batch-l`). Codex: confirmed, mediums #303 and
+    #306. Compiles and passes the PigKit suite on GitHub's Mac; its tap-through run was in progress.
+- **Parked with the next design on the issue:** #266 (`batch-h-266-parked`), #270 (`batch-270-minimal-parked`), #261
+  (`batch-k`).
+- **Waiting on Mark, one at a time:** the wording above; #267 (what Play does on a catalogue card); #242 (queue limit
+  numbers); the matching questions in #282 once live data is in; ShazamKit ticked for the app's identifier.
 - **Decisions:** D-121 to D-126. Next: D-127.
-- **Lessons:** the full PigKit suite does not build on Linux (builders use a scratch package of the pure sources);
-  never chain verify and release in one background command (10-minute cut-off); `tests/test_native_*` now run on
-  GitHub once batch G lands (five fail on main until then).
+- **Lessons:** the full PigKit suite does not build on Linux (builders use a scratch package of the pure sources, or
+  a stub build for PigPlayback); the Linux Swift compiler is newer than Xcode's and accepts code Xcode rejects, so only
+  GitHub's Mac settles "does it compile"; never chain verify and release in one background command (10-minute cut-off);
+  Codex outputs of this session are in `.localdata/handover-20261121/`.
 
 ## Now
 
-1. **Batch G to TestFlight** (see above), then Mark re-checks only the changed items.
-2. **Batches J, K, L:** read each Codex round 1, fix, round 2 and confirmation, compile on GitHub, one TestFlight
-   build each (J first: it is what makes Watch delivery work).
+1. **Batch G on TestFlight:** confirm the build arrived, delete `testflight-20261121-b1`, Mark's re-check.
+2. **Batches J, K, L to TestFlight in that order** (merge main in, compile, tap-through, build; K also a server release).
 3. **Read the no-match diagnostics** (#282) after a few days; bring Mark the matching questions.
 4. **Retirement, 28 Nov** (#201): remove what batches 4, 6 and 8 replaced once #191's pass marks are met.
 5. **Live checks that close with use:** #272, #130, #142, #185, #188, #144/#145, #16/#17/#20/#22/#23/#54/#63 (#95).
 
 ## Next
 
-#266 and #270 (new designs on the issues); findings #294–#300, #282's rule changes, #242 once Mark has chosen the
-numbers; #267 once designed. Then #226, #230 (mostly covered by batch G), #231, #225.
+#266, #270 and #261 from their new designs; findings #295–#306; #282's rule changes; #242 once Mark has chosen the
+numbers; #267 once designed. Then #226, #231, #225.
 
 ## Later
 
