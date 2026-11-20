@@ -22,15 +22,8 @@ from starlette.responses import Response, StreamingResponse
 from .request_timing import add_phase, phase
 from .library import normalise
 from .providers.process import run_checked
-from .downloader import EDITION_WORDS, VERSION_WORDS, duration, folded, matches
-from .matching import (
-    ACQUISITION_TOLERANCE,
-    album_title,
-    flavour,
-    primary_artist,
-    recording_kind,
-    title_key,
-)
+from .downloader import duration, matches, mismatch
+from .matching import album_title, flavour, recording_kind
 from .performance import DETAIL_CHARS
 from .providers.contracts import ProviderError
 from .vendor.jiosaavn import search_jiosaavn
@@ -117,34 +110,7 @@ def acceptable(track, c):
     lead artist, title, live/remix/demo words in title and album, length within
     5 s, agreeing IDs); a song is the same on any edition (PRODUCT), so the
     album must agree only for an edition chosen explicitly."""
-    return bool(
-        matches(track, c)
-        # The album names the same kind of recording ("The Remixes",
-        # "Demos", "Live at Leeds" are those recordings even when the
-        # song title says nothing) as the request.
-        and flavour(c.get("album")) == recording_kind(track)
-        and altered(c.get("title"), c.get("album"))
-        == altered(track.get("title"), track.get("album"))
-        and (
-            # Only a plain studio song with a known length may come
-            # from another release. A live, demo, remix, session or
-            # altered recording is one performance (another concert
-            # is another recording), so it must be the requested
-            # album or carry one of its ISRCs; so must a song with no
-            # known length or an edition chosen explicitly.
-            (
-                not track.get("explicit_edition")
-                and track.get("duration")
-                and not recording_kind(track)
-                and not altered(track.get("title"), track.get("album"))
-            )
-            or normalise(c.get("album", "")) == normalise(track["album"])
-            or bool(
-                track.get("isrcs") and c.get("isrc") and c["isrc"] in track["isrcs"]
-            )
-        )
-        and (not track.get("isrcs") or not c.get("isrc") or c["isrc"] in track["isrcs"])
-    )
+    return rejection(track, c) is None
 
 
 # Why a search result was not the requested song, in the order the song rule
@@ -159,6 +125,7 @@ REASONS = (
     "album kind",
     "altered",
     "album",
+    "isrc",
     "matched",
 )
 # A no-match event's detail: the query, how many results came back and the
@@ -166,55 +133,45 @@ REASONS = (
 DETAIL_RESULTS = 3
 
 
-def why(track, c):
-    """The first part of `acceptable` a search result fails, as one of
-    REASONS ("matched" when it passes). Diagnostics only: `acceptable`
-    decides, and a test keeps the two in step."""
-    if not matches(track, c):
-        for key in ("musicbrainz_recording_id", "musicbrainz_release_id"):
-            if track.get(key) and c.get(key) and track[key] != c[key]:
-                return "ids"
-
-        def codes(value):
-            raw = value.get("isrcs") or value.get("isrc") or []
-            raw = [raw] if isinstance(raw, str) else raw
-            return {str(code).strip().upper() for code in raw if code}
-
-        if codes(track) and codes(c) and codes(track).isdisjoint(codes(c)):
-            return "ids"
-        strict = track.get("explicit_edition")
-        if strict:
-            if folded(c.get("channel")) != folded(track["artist"]):
-                return "artist"
-            if folded(c.get("title")) != folded(track["title"]):
-                return "title"
-        else:
-            if primary_artist(c.get("channel")) != primary_artist(track["artist"]):
-                return "artist"
-            if title_key(c.get("title")) != title_key(track["title"]):
-                return "title"
-        versions = VERSION_WORDS if strict else VERSION_WORDS - EDITION_WORDS
-        wanted = set(folded(track["title"] + " " + track["album"]).split()) | (
-            set() if strict else set(recording_kind(track))
-        )
-        named = folded(c.get("title", "") + " " + c.get("album", "")).split()
-        if wanted & versions != set(named) & versions:
-            return "version"
-        if not duration(c.get("duration")):
-            return "no length"
-        expected, actual = duration(track.get("duration")), duration(c.get("duration"))
-        if expected and abs(actual - expected) > ACQUISITION_TOLERANCE:
-            return "length"
-        return "album"  # An explicit edition's other album (Monochrome).
+def rejection(track, c):
+    """The song rule's checks in order: the first one a search result fails
+    (one of REASONS), or None when it is the song (`acceptable`)."""
+    failed = mismatch(track, c)
+    if failed:
+        return failed
+    # The album names the same kind of recording ("The Remixes", "Demos",
+    # "Live at Leeds" are those recordings even when the song title says
+    # nothing) as the request.
     if flavour(c.get("album")) != recording_kind(track):
         return "album kind"
     if altered(c.get("title"), c.get("album")) != altered(
         track.get("title"), track.get("album")
     ):
         return "altered"
-    # Only the album is left: a live, altered or unknown-length song, or an
-    # explicit edition, must be the requested album (or carry its ISRC).
-    return "matched" if acceptable(track, c) else "album"
+    # Only a plain studio song with a known length may come from another
+    # release. A live, demo, remix, session or altered recording is one
+    # performance (another concert is another recording), so it must be the
+    # requested album or carry one of its ISRCs; so must a song with no known
+    # length or an edition chosen explicitly.
+    if not (
+        (
+            not track.get("explicit_edition")
+            and track.get("duration")
+            and not recording_kind(track)
+            and not altered(track.get("title"), track.get("album"))
+        )
+        or normalise(c.get("album", "")) == normalise(track["album"])
+        or bool(track.get("isrcs") and c.get("isrc") and c["isrc"] in track["isrcs"])
+    ):
+        return "album"
+    if not (not track.get("isrcs") or not c.get("isrc") or c["isrc"] in track["isrcs"]):
+        return "isrc"
+    return None
+
+
+def why(track, c):
+    """`rejection` for diagnostics: "matched" for the song."""
+    return rejection(track, c) or "matched"
 
 
 def no_match_detail(track, query, results):
