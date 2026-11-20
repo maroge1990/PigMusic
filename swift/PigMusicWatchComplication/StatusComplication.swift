@@ -31,8 +31,10 @@ struct StatusEntry: TimelineEntry {
 /// for a reload when that changes; the timeline also asks again every half
 /// hour in case a reload was held back.
 struct StatusProvider: TimelineProvider {
+  /// For the face gallery: everything there ("Ready to play").
   static let sample = WatchComplicationState(
-    kind: .ready, title: "Ready to play", waiting: 0, updated: Date(timeIntervalSince1970: 0))
+    status: WatchLibraryStatus(songs: [], stored: [:], usedBytes: 0, limitBytes: 0),
+    at: Date(timeIntervalSince1970: 0))
   static func load() -> WatchComplicationState? {
     guard
       let folder = FileManager.default.containerURL(

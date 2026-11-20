@@ -9,6 +9,7 @@ import PigDomain
 import PigPlayback
 import UIKit
 import WatchKit
+import WidgetKit
 
 @MainActor @Observable final class WatchModel {
   var manifest = CompanionManifest(context: CompanionContext(revision: 0, account: nil), songs: [])
@@ -86,6 +87,43 @@ import WatchKit
   }
   /// On the Watch and verified: plays with no iPhone or network.
   func isReady(_ song: CompanionSong) -> Bool { song.isReady(in: receipt) }
+  /// The watch-face complication's status (D-125): written to the App Group
+  /// when what it shows changes, and redrawn as `WatchComplicationReload`
+  /// allows, so a burst of arriving songs doesn't redraw it per song.
+  @ObservationIgnored private var complicationReload = WatchComplicationReload()
+  @ObservationIgnored private var complicationWritten: WatchComplicationState?
+  @ObservationIgnored private var complicationRedraw: Task<Void, Never>?
+  private static let complicationFile = FileManager.default.containerURL(
+    forSecurityApplicationGroupIdentifier: WatchComplicationState.appGroup
+  )?.appendingPathComponent(WatchComplicationState.fileName)
+  func updateComplication(now: Date = Date()) {
+    let state = WatchComplicationState(status: status, at: now)
+    if !state.shows(sameAs: complicationWritten), let file = Self.complicationFile {
+      do {
+        try state.encoded().write(to: file, options: .atomic)
+        complicationWritten = state
+      } catch {
+        DiagnosticsLog.shared.record(
+          "link", "complication status not saved: \(error.localizedDescription)")
+      }
+    }
+    switch complicationReload.changed(to: state, now: now) {
+    case .none: break
+    case .now:
+      complicationRedraw?.cancel()
+      complicationRedraw = nil
+      WidgetCenter.shared.reloadTimelines(ofKind: WatchComplicationState.widgetKind)
+    case .later(let date):
+      // One deferred redraw at a time; it draws whatever is current then.
+      guard complicationRedraw == nil else { return }
+      complicationRedraw = Task { [weak self] in
+        try? await Task.sleep(for: .seconds(max(1, date.timeIntervalSinceNow)))
+        guard !Task.isCancelled else { return }
+        self?.complicationRedraw = nil
+        self?.updateComplication()
+      }
+    }
+  }
   var playback = QueuePlaybackSnapshot()
   /// What the iPhone plays, for the home's iPhone row (D-104). Kept across
   /// launches: the phone sends it only when the song or play/pause changes.
@@ -531,6 +569,7 @@ import WatchKit
           + ", manifest applied=\(next.manifestApplied)")
     }
     receipt = next
+    updateComplication()
     restoreCheckpoint()
     await flushListens()
     await flushRequests()
@@ -539,6 +578,7 @@ import WatchKit
     guard let archive else { return }
     let receipt = await archive.receipt()
     self.receipt = receipt
+    updateComplication()
     do {
       try link?.publishReceipt(
         CompanionAcknowledgement(receipt: receipt, manifest: await archive.snapshot()))
