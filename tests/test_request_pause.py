@@ -455,6 +455,43 @@ def test_an_add_says_what_happened_to_each_song_in_order(tmp_path):
     assert result["paused"] == 1 and result["paused_ids"] == [key]
 
 
+def test_a_song_gone_from_the_library_since_it_was_matched_is_asked_for(
+    tmp_path, monkeypatch
+):
+    """Codex round 2 on batch K: the person's Add matches songs to the
+    household library first, then submits. A library refresh in between
+    that loses the copy left the song neither added nor queued, answered
+    `in_library` (and counted skipped before that). It is asked for."""
+    store, owner, member = fixture(tmp_path)
+    users = store.user_libraries
+    household = {
+        **song("Song 0"),
+        "artist": "Artist",
+        "album_artist": "Artist",
+        "album": "Album",
+        "duration": 100,
+    }
+    from server.matching import Match
+
+    real = store.index.match
+    calls = []
+
+    def changing(track):
+        calls.append(track["title"])
+        # The refresh: the household copy is gone by the second look.
+        return real(track) if len(calls) == 1 else Match("absent")
+
+    monkeypatch.setattr(store.index, "match", changing)
+    result = users.request(member, [household])
+    assert len(calls) == 2
+    assert result["outcomes"] == ["created"]
+    with store.connect() as conn:
+        assert conn.execute("SELECT count(*) FROM queue").fetchone()[0] == 1
+        assert not conn.execute(
+            "SELECT 1 FROM library_members WHERE user_id=?", (member,)
+        ).fetchone()
+
+
 def test_an_add_left_paused_names_the_paused_request(tmp_path, monkeypatch):
     """#276: the iPhone clears a song's Paused mark when the request it was
     left paused under resumes, so the answer names that request: here one

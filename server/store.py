@@ -1867,9 +1867,17 @@ class Store:
                                 existing += 1
                                 outcomes.append("added")
                                 continue
-                    skipped += 1
-                    outcomes.append("in_library")
-                    continue
+                        else:
+                            # The library changed since the song was matched
+                            # (Codex round 2 on batch K): no household copy
+                            # now, so it is asked for as any missing song,
+                            # never dropped nor reported as in the library.
+                            # (An ignored insert above means it is theirs.)
+                            track = {**track, "status": "missing"}
+                    if track["status"] == "downloaded":
+                        skipped += 1
+                        outcomes.append("in_library")
+                        continue
                 payload = {
                     k: v
                     for k, v in track.items()
