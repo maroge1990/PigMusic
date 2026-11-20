@@ -1,3 +1,5 @@
+import Foundation
+import PigDomain
 import Testing
 
 @testable import PigPlayback
@@ -103,5 +105,28 @@ import Testing
     #expect(decide(version: 6, last: 5, old: ["a", "b"], new: ["a"]) == .refetch)
     // A stale edit is ignored even when it would be too late.
     #expect(decide(version: 1, last: 2, old: ["a", "b"], new: ["z"]) == .stale)
+  }
+
+  @Test func everyIdAnEntryHasGoneByNamesIt() {
+    var identity = OccurrenceIdentity()
+    let first = UUID()
+    let second = UUID()
+    let third = UUID()
+    identity.record(second, as: first)
+    // A third listening, recorded against the second's id.
+    identity.record(third, as: second)
+    #expect(identity.root(third) == first && identity.root(second) == first)
+    #expect(identity.root(first) == first)
+    let track = Track(id: "a", title: "a", artist: "Fixture")
+    let watch = PlaybackOccurrence(track: track, id: first)
+    let phone = PlaybackOccurrence(track: track, id: third)
+    #expect(identity.key(watch) == identity.key(phone))
+    // A fresh copy of the song is the same entry but another song to fetch.
+    var fresh = track
+    fresh.duration = 2
+    #expect(identity.key(PlaybackOccurrence(track: fresh, id: first)) != identity.key(watch))
+    var other = OccurrenceIdentity()
+    other.merge(identity)
+    #expect(other.root(third) == first)
   }
 }

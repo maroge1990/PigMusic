@@ -1,3 +1,35 @@
+import Foundation
+import PigDomain
+
+/// Which queue entry an occurrence id stands for (#279). Each listening of
+/// a repeated song gets a fresh id; the iPhone's queue takes it (its
+/// PlayerController renews the entry from each snapshot) while the Watch's
+/// keeps the first. Every id an entry has gone by names the same entry, so
+/// an edit from either is recognised. Ids map to the entry's first id.
+public struct OccurrenceIdentity: Sendable, Equatable {
+  private var roots: [UUID: UUID] = [:]
+  public init() {}
+  /// The entry's first id.
+  func root(_ id: UUID) -> UUID { roots[id] ?? id }
+  /// `id` is a later listening of the entry `entry` names.
+  mutating func record(_ id: UUID, as entry: UUID) {
+    let root = root(entry)
+    if id != root { roots[id] = root }
+  }
+  mutating func merge(_ other: OccurrenceIdentity) {
+    roots.merge(other.roots) { mine, _ in mine }
+  }
+  /// What an edit compares: the entry, and its song (a fresh copy of a song
+  /// keeps its entry but is another file to fetch).
+  struct Key: Equatable {
+    let entry: UUID
+    let track: Track
+  }
+  func key(_ occurrence: PlaybackOccurrence) -> Key {
+    Key(entry: root(occurrence.id), track: occurrence.track)
+  }
+}
+
 /// What a playing queue stream did with an edit to the songs after the
 /// current one (#279): took it while the current song plays on, or found
 /// it too late (the next song is already joining the audio, or the songs up

@@ -39,6 +39,9 @@ public actor QueuePCMStream {
   private var repeatMode: PlaybackRepeat
   /// The last edit taken; an older one arriving late is ignored.
   private var editVersion: Int?
+  /// Every id each queue entry has gone by, so an edit naming an entry by
+  /// its first id or a later listening's matches it.
+  private var identity = OccurrenceIdentity()
   /// Raised whenever the upcoming fetch is replaced or dropped, so a
   /// replaced fetch's outcome is never read as its song's failure.
   private var fetchVersion = 0
@@ -171,13 +174,17 @@ public actor QueuePCMStream {
   /// source has arrived and is being joined to the audio stays only if it is
   /// still next where it stood; otherwise this is too late and the owner
   /// restarts. Has no suspension point, so it is atomic on the actor.
+  /// `identity`: ids the owner has seen its entries go by (merged in).
   public func replaceUpcoming(
-    _ newItems: [PlaybackOccurrence], repeatMode newMode: PlaybackRepeat, version: Int
+    _ newItems: [PlaybackOccurrence], repeatMode newMode: PlaybackRepeat, version: Int,
+    identity known: OccurrenceIdentity = OccurrenceIdentity()
   ) -> UpcomingEdit {
     guard !closed, !failed, sourceFailure == nil else { return .tooLate }
     if transitionReady, incoming == nil { return .tooLate }
+    identity.merge(known)
     let decision = UpcomingEditRule.decide(
-      version: version, lastVersion: editVersion, old: items, new: newItems, current: index,
+      version: version, lastVersion: editVersion, old: items.map { identity.key($0) },
+      new: newItems.map { identity.key($0) }, current: index,
       oldMode: repeatMode, newMode: newMode, prepared: incoming?.index, fetching: upcomingIndex,
       fetchIntact: passedOver == 0 && !fetchFailed, betweenSongs: betweenSongs)
     switch decision {
@@ -275,6 +282,7 @@ public actor QueuePCMStream {
     let incoming = items[nextIndex]
     let repeated = cycle > 0 || nextIndex <= index
     let next = repeated ? PlaybackOccurrence(track: incoming.track) : incoming
+    if repeated { identity.record(next.id, as: incoming.id) }
     upcomingOccurrence = next
     let mode = TransitionPlanner.mode(
       crossfade: crossfade && repeatMode != .one,
@@ -447,11 +455,7 @@ public actor QueuePCMStream {
         mixed += count
         return emit(outgoing)
       }
-      guard let following = incoming else { throw AudioPipelineFailure.stalled }
-      let followingIndex = following.index
-      // A repeated listening's own id becomes its queue entry's, as the apps
-      // and the session record it, so later edits match (Codex round 1 on batch L).
-      items[followingIndex] = following.occurrence
+      guard let followingIndex = incoming?.index else { throw AudioPipelineFailure.stalled }
       incoming = nil
       let old = lease
       lease = incomingLease

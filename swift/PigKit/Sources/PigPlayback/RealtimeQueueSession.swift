@@ -183,6 +183,10 @@ public enum PlaybackSeek {
   /// it, so a marker is mapped to `items` through its entry's id (#279).
   private var streamItems: [PlaybackOccurrence] = []
   private var streamVersion = 0
+  /// Every id each queue entry has gone by: its first, and each repeated
+  /// listening's (learnt from the markers). The iPhone's queue names an
+  /// entry by its latest listening, the Watch's by its first; both match.
+  private var identity = OccurrenceIdentity()
   /// The live stream took an edit: if it had reached its end, the pump asks
   /// it again, so songs added while the last one drains follow it (#279).
   private var streamResumed = false
@@ -223,6 +227,7 @@ public enum PlaybackSeek {
     acquire: @escaping QueuePCMStream.Acquire, release: @escaping QueuePCMStream.Release
   ) {
     self.items = items
+    identity = OccurrenceIdentity()
     self.acquire = acquire
     self.release = release
     self.crossfade = crossfade
@@ -294,7 +299,7 @@ public enum PlaybackSeek {
   }
   public func updateUpcoming(_ updated: [PlaybackOccurrence]) {
     guard updated.indices.contains(snapshot.index), items.indices.contains(snapshot.index),
-      updated[snapshot.index].id == items[snapshot.index].id
+      identity.root(updated[snapshot.index].id) == identity.root(items[snapshot.index].id)
     else { return }
     items = updated
     upcomingVersion += 1
@@ -319,9 +324,11 @@ public enum PlaybackSeek {
     let version = upcomingVersion
     let items = items
     let repeatMode = repeatMode
+    let identity = identity
     Task { [weak self] in
       guard let self, generation == stamp, upcomingVersion == version else { return }
-      let result = await stream.replaceUpcoming(items, repeatMode: repeatMode, version: version)
+      let result = await stream.replaceUpcoming(
+        items, repeatMode: repeatMode, version: version, identity: identity)
       guard generation == stamp else { return }
       if result == .applied {
         if version > streamVersion {
@@ -352,8 +359,7 @@ public enum PlaybackSeek {
     }
     let following = heard.list.indices.contains(heard.marker.index + 1)
       ? heard.list[(heard.marker.index + 1)...] : []
-    let next = following.lazy.compactMap { entry in self.items.firstIndex { $0.id == entry.id } }
-      .first
+    let next = following.lazy.compactMap { entry in self.position(of: entry.id) }.first
     if let next {
       restart(index: next, seconds: 0, autoplay: snapshot.wantsPlayback)
     } else if repeatMode == .all, !items.isEmpty {
@@ -430,6 +436,7 @@ public enum PlaybackSeek {
     timeline = []
     snapshot = QueuePlaybackSnapshot()
     items = []
+    identity = OccurrenceIdentity()
     acquire = nil
     release = nil
     publish()
@@ -463,7 +470,9 @@ public enum PlaybackSeek {
     peakScheduledFrames = 0
     timeline = []
     // Restarting the same song (a seek) keeps what is known of its length.
-    let known = snapshot.occurrenceID == items[index].id && snapshot.duration > 0
+    let known =
+      snapshot.occurrenceID.map { identity.root($0) } == identity.root(items[index].id)
+      && snapshot.duration > 0
     let estimate = known && snapshot.durationIsEstimate
     let duration = known ? snapshot.duration : items[index].track.duration ?? 0
     snapshot = QueuePlaybackSnapshot(
@@ -655,36 +664,36 @@ public enum PlaybackSeek {
     let list: [PlaybackOccurrence]
     let index: Int?
   }
+  /// Where the entry `id` names is in `items`, by any id it has gone by.
+  private func position(of id: UUID, near guess: Int? = nil) -> Int? {
+    let root = identity.root(id)
+    if let guess, items.indices.contains(guess), identity.root(items[guess].id) == root {
+      return guess
+    }
+    return items.firstIndex { identity.root($0.id) == root }
+  }
   @discardableResult private func refreshPosition() -> Heard? {
     guard ready else { return nil }
-    let position = output.positionFrames
+    let frames = output.positionFrames
     let list = streamItems.isEmpty ? items : streamItems
-    guard let current = timeline.lastIndex(where: { $0.switchFrame <= position }),
+    guard let current = timeline.lastIndex(where: { $0.switchFrame <= frames }),
       list.indices.contains(timeline[current].index)
     else { return nil }
     if current > 0 { timeline.removeFirst(current) }
     let marker = timeline[0]
     let entry = list[marker.index]
-    let found =
-      items.indices.contains(marker.index) && items[marker.index].id == entry.id
-      ? marker.index : items.firstIndex { $0.id == entry.id }
+    let occurrence = marker.occurrenceID ?? entry.id
+    // A repeated listening's id names the entry it plays.
+    identity.record(occurrence, as: entry.id)
+    let found = position(of: entry.id, near: marker.index)
     let heard = Heard(marker: marker, list: list, index: found)
     // Removed by an edit the stream has not answered yet: shown as it was.
     guard let index = found else { return heard }
-    let occurrence = marker.occurrenceID ?? entry.id
-    if occurrence != entry.id {
-      // A repeated listening has its own id, which the apps give its queue
-      // entry when it is shown; the session's lists take it too, so their
-      // next edit is recognised (Codex round 1 on batch L).
-      let renewed = PlaybackOccurrence(track: entry.track, id: occurrence)
-      items[index] = renewed
-      if !streamItems.isEmpty { streamItems[marker.index] = renewed }
-    }
     snapshot.index = index
     snapshot.occurrenceID = occurrence
     snapshot.duration = Double(marker.durationFrames) / rate
     snapshot.durationIsEstimate = marker.durationIsEstimate
-    snapshot.elapsed = min(snapshot.duration, max(0, Double(position - marker.originFrame) / rate))
+    snapshot.elapsed = min(snapshot.duration, max(0, Double(frames - marker.originFrame) / rate))
     return heard
   }
   private func publish() { onUpdate?(snapshot) }
