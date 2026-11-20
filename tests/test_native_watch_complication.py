@@ -95,7 +95,22 @@ def test_the_iphone_wakes_the_watch_app_through_the_budget():
     # Saved, so a background launch keeps the clock.
     assert phone.count("Self.complicationPushesKey") == 2
     # One place sends it, on the iPhone only, and only with the complication on the face.
-    sources = "".join(path.read_text() for path in (ROOT / "swift").rglob("*.swift"))
+    # Only the source folders: a runner's build folder holds checkouts named
+    # like "GRDB.swift" that are directories.
+    folders = [
+        "PigMusic",
+        "PigMusicWatch",
+        "PigMusicWatchComplication",
+        "PigMusicShare",
+        "Shared",
+        "PigKit/Sources",
+    ]
+    sources = "".join(
+        path.read_text()
+        for folder in folders
+        for path in (ROOT / "swift" / folder).rglob("*.swift")
+        if path.is_file()
+    )
     assert sources.count("transferCurrentComplicationUserInfo(") == 1
     push = link.split("    func pushComplication(_ data: Data) -> Bool {", 1)[1]
     push = push.split("\n    }\n", 1)[0]
