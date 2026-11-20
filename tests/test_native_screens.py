@@ -130,3 +130,30 @@ def test_the_account_sheet_takes_a_new_appearance_at_once():
     assert ".pigAppearance(model.preferences)" in account
     root = app[app.index("struct RootView") : app.index("struct LibraryShell")]
     assert ".pigAppearance(model.preferences)" in root
+
+
+def test_up_next_swipes_to_remove_in_the_player_with_no_edit():
+    """#287: Up next had an Edit link to a Queue page with an Edit button.
+    The player's own Up next is now the list: a song swipes to Remove at
+    once with Undo (the menu's own path), Move earlier and Move later stay
+    in its menu, and there is no Edit and no separate page."""
+    app = {p.name: p.read_text() for p in APP.glob("*.swift")}
+    library = app["LibraryViews.swift"]
+    player = library.split("struct NowPlayingView: View {", 1)[1]
+    player = player.split("\n}\n", 1)[0]
+    assert 'NavigationLink("Edit")' not in player
+    assert "QueueEditorView" not in "".join(app.values())
+    assert [n for n, t in app.items() if "EditButton()" in t] == ["PlaylistViews.swift"]
+    # One list owns the scrolling; no ScrollView holds a nested list.
+    body = player.split("var body: some View {", 1)[1].split("\n  }\n", 1)[0]
+    assert "List {" in body and "ScrollView" not in body
+    rows = player.split("private func upNextRows(", 1)[1].split("\n  }\n", 1)[0]
+    assert "UpNextRow(model: model, item: item)" in rows
+    swipe = rows.split(".swipeActions {", 1)[1]
+    assert 'Button("Remove", systemImage: "xmark", role: .destructive)' in swipe
+    assert "model.removeFromUpNextLater(item)" in swipe
+    for words in ('Text("Up next")', "similarTitle", "NothingNext(model: model"):
+        assert words in player, words
+    menu = library.split("private struct UpNextRow: View {", 1)[1]
+    for item in (".moveEarlier", ".moveLater", ".removeFromUpNext"):
+        assert item in menu.split("\n}\n", 1)[0], item

@@ -451,8 +451,9 @@ final class DemoLibraryTests: XCTestCase {
     expect(app.buttons["Dark"])
   }
 
-  /// D-120 (#251): with nothing after the playing song, the queue says
-  /// Nothing next and offers Shuffle your library.
+  /// D-120 (#251): with nothing after the playing song, the player's Up
+  /// next says Nothing next and offers Shuffle your library. #287: Up next
+  /// has no Edit and no separate Queue page.
   func testAnEmptyQueueSaysNothingNext() {
     continueAfterFailure = false
     app.launchArguments = ["--demo", "--demo-play", "--demo-play-one", "--show-player"]
@@ -460,12 +461,36 @@ final class DemoLibraryTests: XCTestCase {
     expect(app.staticTexts["Now playing"], timeout: 30)
     expect(app.staticTexts["Nothing next"])
     expect(app.buttons["Shuffle your library"])
-    let edit = app.buttons["Edit"]
-    for _ in 0..<4 where !(edit.exists && edit.isHittable) { app.swipeUp() }
-    edit.tap()
-    expect(app.navigationBars["Queue"])
-    expect(app.staticTexts["Nothing next"])
-    expect(app.buttons["Shuffle your library"])
+    XCTAssertFalse(app.buttons["Edit"].exists, app.debugDescription)
+  }
+
+  /// #287: a song in the player's Up next swipes to Remove, at once, and
+  /// Undo puts it back.
+  func testASwipeRemovesASongFromUpNextWithUndo() {
+    continueAfterFailure = false
+    app.launchArguments = ["--demo", "--demo-play", "--show-player"]
+    app.launch()
+    expect(app.staticTexts["Now playing"], timeout: 30)
+    expect(app.staticTexts["Up next"])
+    XCTAssertFalse(app.buttons["Edit"].exists, app.debugDescription)
+    // The last of Up next's song rows ("Play <song> by <artist>").
+    let rows = app.buttons.matching(
+      NSPredicate(format: "label BEGINSWITH 'Play ' AND label CONTAINS ' by '"))
+    for _ in 0..<4 where !(rows.count > 0 && rows.element(boundBy: rows.count - 1).isHittable) {
+      app.swipeUp()
+    }
+    XCTAssertGreaterThan(rows.count, 0, app.debugDescription)
+    let label = rows.element(boundBy: rows.count - 1).label
+    let row = app.buttons[label]
+    row.swipeLeft()
+    let remove = app.buttons["Remove"]
+    expect(remove)
+    remove.tap()
+    XCTAssertTrue(row.waitForNonExistence(timeout: 5), app.debugDescription)
+    let undo = app.buttons["Undo"]
+    expect(undo)
+    undo.tap()
+    expect(app.buttons[label])
   }
 
   func testSearchFindsALibrarySong() {

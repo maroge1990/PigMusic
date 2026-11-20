@@ -244,8 +244,9 @@ def test_collection_rows_share_one_component_thumb_and_radius():
     assert "DeviceGroupsSection(" in app["WatchDownloadsView.swift"]
     shared = app["DownloadsView.swift"].split("struct DeviceGroupsSection", 1)[1]
     assert "CollectionRow(" in shared.split("\n}\n", 1)[0]
-    editor = app["LibraryViews.swift"].split("struct QueueEditorView", 1)[1]
-    assert "UpNextRow(model: model, item: item)" in editor.split("\n}\n", 1)[0]
+    # #287: Up next is listed once, in the player, with the one row.
+    player = app["LibraryViews.swift"].split("struct NowPlayingView", 1)[1]
+    assert "UpNextRow(model: model, item: item)" in player.split("\n}\n", 1)[0]
     assert '"Remove", role: .destructive' not in app["LibraryViews.swift"]
 
 
