@@ -49,6 +49,9 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
     case refreshStopped
     /// A manifest listed songs the previous one didn't: the window reopens.
     case listed
+    /// The iPhone's complication push arrived (it handed songs to the link,
+    /// D-125); `active` whether the app was on screen. The window reopens.
+    case phonePush
   }
   public struct Event: Codable, Sendable, Equatable {
     public var at: Date
@@ -77,6 +80,9 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
   /// Saved optional, so a log saved before they existed still decodes.
   private var listedSeen: Set<String>?
   private var listedReopenings: Int?
+  /// PigMusic complications on watch faces, as WidgetKit last said; nil
+  /// until it has (D-125).
+  public private(set) var faceComplications: Int?
   /// Song ids listed since the app was last opened (Codex round 2 on batch G).
   public var seenSinceOpened: Set<String> { listedSeen ?? [] }
   /// Times new songs reopened the window since the app was last opened.
@@ -123,6 +129,19 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
     refreshStoppedAt = nil
     note(Event(at: date, kind: .listed))
     return true
+  }
+  /// The iPhone's complication push (D-125): it has just handed songs to
+  /// the link, the explicit sign the person sent songs. It reopens the
+  /// window whatever the listed-song memory or the reopening count say;
+  /// what bounds it is the iPhone's own push budget (#300).
+  public mutating func phonePushed(active: Bool, at date: Date = Date()) {
+    lastListed = date
+    refreshStoppedAt = nil
+    note(Event(at: date, kind: .phonePush, active: active))
+  }
+  /// WidgetKit's count of PigMusic complications on watch faces.
+  public mutating func complicationsOnFaces(_ count: Int) {
+    faceComplications = max(0, count)
   }
   public mutating func linkTask(pending: Bool, at date: Date = Date()) {
     note(Event(at: date, kind: .linkTask, pending: pending))
@@ -212,6 +231,10 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
         + "turned down by watchOS: \(count(.refreshRefused, now: now)).",
       waitingLine(now: now),
       "Songs received: \(received); songs accepted: \(accepted) (\(away) while the app was not open).",
+      "Woken by the iPhone's complication push: \(count(.phonePush, now: now)) times "
+        + "(\(count(.phonePush, now: now) { $0.active == false }) while the app was not open).",
+      "PigMusic complication on an Apple Watch face: "
+        + (faceComplications.map { $0 > 0 ? "yes" : "no" } ?? "not known yet") + ".",
     ]
     let gaps = recent(now: now).compactMap { $0.kind == .accepted ? $0.gap : nil }
     if !gaps.isEmpty {

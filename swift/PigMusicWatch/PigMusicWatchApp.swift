@@ -43,17 +43,6 @@ import WatchKit
   }
 }
 
-extension WatchLibraryStatus.Headline {
-  var symbol: String {
-    switch self {
-    case .ready: "checkmark.circle.fill"
-    case .storageFull, .couldntSave: "exclamationmark.circle"
-    case .iPhoneAway: "iphone.slash"
-    case .arriving: "clock"
-    }
-  }
-}
-
 /// Before a run: how much music will play with no iPhone or network, or
 /// what is keeping songs from the Watch (#252).
 private struct WatchReadiness: View {

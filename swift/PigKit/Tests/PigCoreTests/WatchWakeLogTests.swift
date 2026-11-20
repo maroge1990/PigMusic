@@ -269,6 +269,51 @@ struct WatchWakeLogTests {
     #expect(log.seenSinceOpened.count == WatchWakeLog.listedCapacity)
   }
 
+  /// #300 item 2: three full-size lists fill the listed-song memory, and a
+  /// later first send couldn't restart wake-ups; the iPhone's complication
+  /// push (D-125) says new songs were sent whatever the memory holds.
+  @Test func theIPhonesPushReopensWhateverTheMemorySays() {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    let many = (0..<WatchWakeLog.listedCapacity).map { "id\($0)" }
+    log.songsListed(many, previous: [], at: at(0))
+    #expect(log.refreshPlan(now: at(3), waiting: 5) == .none)
+    #expect(log.refreshStoppedAt == at(3))
+    // A first send of new songs: the memory is full, the list reopens nothing.
+    #expect(log.songsListed(many + ["new"], previous: many, at: at(4)) == false)
+    #expect(log.refreshPlan(now: at(4), waiting: 6) == .none)
+    // The iPhone's push reopens it, in the background too.
+    let reopenings = log.reopenings
+    log.phonePushed(active: false, at: at(4, minutes: 1))
+    #expect(log.refreshStoppedAt == nil)
+    #expect(log.refreshPlan(now: at(4, minutes: 1), waiting: 6) == .at(at(4, minutes: 31)))
+    #expect(log.count(.phonePush, now: at(5)) == 1)
+    // Uncounted against the reopenings, and still the 2-hour limit from there.
+    log.phonePushed(active: true, at: at(7))
+    #expect(log.reopenings == reopenings)
+    #expect(log.refreshPlan(now: at(9, minutes: 1), waiting: 6) == .none)
+    let summary = log.summary(now: at(10))
+    #expect(
+      summary.contains("Woken by the iPhone's complication push: 2 times (1 while the app was not open)."))
+  }
+
+  @Test func saysWhetherAComplicationIsOnAWatchFace() throws {
+    var log = WatchWakeLog()
+    #expect(log.summary(now: at(1)).contains("PigMusic complication on an Apple Watch face: not known yet."))
+    log.complicationsOnFaces(0)
+    #expect(log.summary(now: at(1)).contains("PigMusic complication on an Apple Watch face: no."))
+    log.complicationsOnFaces(2)
+    #expect(log.summary(now: at(1)).contains("PigMusic complication on an Apple Watch face: yes."))
+    let saved = try JSONDecoder().decode(WatchWakeLog.self, from: JSONEncoder().encode(log))
+    #expect(saved.faceComplications == 2)
+    // A log saved before it existed still decodes.
+    var old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(log)) as! [String: Any]
+    old.removeValue(forKey: "faceComplications")
+    let decoded = try JSONDecoder().decode(
+      WatchWakeLog.self, from: JSONSerialization.data(withJSONObject: old))
+    #expect(decoded.faceComplications == nil)
+  }
+
   @Test func reSendingTheSameSongsAfterAStopDoesntReopen() {
     var log = WatchWakeLog()
     log.opened(at: at(0))
