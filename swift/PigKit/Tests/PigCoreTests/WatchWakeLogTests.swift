@@ -72,7 +72,8 @@ struct WatchWakeLogTests {
         "Woken in the background: 3 times in the last 7 days (2 by the iPhone link, 1 by a scheduled refresh)."))
     #expect(text.contains("iPhone link wakes with something waiting: 1 of 2."))
     #expect(text.contains("App started: 1 times (1 in the background); opened by you: 0 times."))
-    #expect(text.contains("Scheduled refreshes asked for: 1; none pending."))
+    #expect(text.contains("Scheduled refreshes asked for: 1; ran: 1; turned down by watchOS: 0."))
+    #expect(text.contains("Scheduled refresh still waiting: none."))
     #expect(text.contains("Songs received: 1; songs accepted: 1 (1 while the app was not open)."))
     #expect(text.contains("Received to accepted: median 2 min 0 s, longest 2 min 0 s."))
     #expect(text.contains("woken: scheduled refresh"))
@@ -100,6 +101,84 @@ struct WatchWakeLogTests {
     counted.linkTask(pending: true, at: at(0))
     #expect(counted.count(.linkTask, now: at(24 * 6)) == 1)
     #expect(counted.count(.linkTask, now: at(24 * 7 + 1)) == 0)
+  }
+
+  /// Codex round 1 on batch G: a request watchOS accepted but never ran
+  /// must not read as refreshes working.
+  @Test func summaryShowsAskedAgainstRanAndHowLongOneHasWaited() {
+    var log = WatchWakeLog()
+    log.refreshAsked(for: at(0, minutes: 30), at: at(0))
+    let text = log.summary(now: at(3, minutes: 30))
+    #expect(text.contains("Scheduled refreshes asked for: 1; ran: 0; turned down by watchOS: 0."))
+    #expect(
+      text.contains(
+        "Scheduled refresh still waiting: one, asked 3 h 30 min ago, for "
+          + at(0, minutes: 30).formatted(.iso8601) + " (3 h 0 min overdue)."))
+    #expect(
+      text.contains(
+        "No scheduled refresh has run: watchOS may give no background time to an app "
+          + "without a watch-face complication."))
+    log.refreshRan(at: at(3, minutes: 40))
+    let after = log.summary(now: at(4))
+    #expect(after.contains("ran: 1"))
+    #expect(!after.contains("No scheduled refresh has run"))
+  }
+
+  /// Codex round 1 on batch G: after three quiet hours a song taken in the
+  /// background re-armed the refresh chain with no opening of the app.
+  @Test func anExpiredWindowStaysStoppedUntilTheAppIsOpened() throws {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    #expect(log.refreshPlan(now: at(0), waiting: 3) == .at(at(0, minutes: 30)))
+    // Nothing asked during the quiet hours; a song arrives at 3 h.
+    log.accepted(receivedAt: at(3), active: false, at: at(3))
+    #expect(log.refreshStoppedAt == at(3))
+    #expect(log.refreshPlan(now: at(3), waiting: 2) == .none)
+    // Saved and reloaded, still stopped; more background songs don't lift it.
+    var saved = try JSONDecoder().decode(WatchWakeLog.self, from: JSONEncoder().encode(log))
+    saved.accepted(receivedAt: at(3, minutes: 5), active: false, at: at(3, minutes: 5))
+    #expect(saved.refreshPlan(now: at(3, minutes: 5), waiting: 1) == .none)
+    #expect(saved.summary(now: at(4)).contains("Scheduled refreshes stopped at "))
+    // Opening the app clears it.
+    saved.opened(at: at(5))
+    #expect(saved.refreshStoppedAt == nil)
+    #expect(saved.refreshPlan(now: at(5), waiting: 1) == .at(at(5, minutes: 30)))
+    // So does leaving it, which counts as having been seen.
+    var left = log
+    left.sawPerson(at: at(6))
+    #expect(left.refreshPlan(now: at(6), waiting: 1) == .at(at(6, minutes: 30)))
+  }
+
+  @Test func theStopIsRecordedWhenThePlanIsAskedLate() {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    #expect(log.refreshPlan(now: at(2, minutes: 1), waiting: 1) == .none)
+    #expect(log.refreshStoppedAt == at(2, minutes: 1))
+    // The window can't come back by itself, even with the clock set back.
+    #expect(log.refreshPlan(now: at(1), waiting: 1) == .none)
+  }
+
+  @Test func aCopyTheWatchAlreadyHadIsNotProgress() {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    log.accepted(receivedAt: at(1), active: false, newSong: true, at: at(1))
+    #expect(log.lastAccepted == at(1))
+    // A repeated transfer at 2 h 30 doesn't move the window on.
+    log.accepted(
+      receivedAt: at(2, minutes: 30), active: false, newSong: false, at: at(2, minutes: 30))
+    #expect(log.lastAccepted == at(1))
+    #expect(log.refreshPlan(now: at(2, minutes: 30), waiting: 1) == .at(at(3)))
+    #expect(log.refreshPlan(now: at(3), waiting: 1) == .none)
+    #expect(log.events.last(where: { $0.kind == .accepted })?.newSong == false)
+  }
+
+  @Test func aSongTakenWhileOpenNeverStopsIt() {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    // On screen for three hours: the person is there, so no stop is judged.
+    log.accepted(receivedAt: at(3), active: true, at: at(3))
+    #expect(log.refreshStoppedAt == nil)
+    #expect(log.refreshPlan(now: at(3), waiting: 1) == .at(at(3, minutes: 30)))
   }
 
   @Test func survivesBeingSaved() throws {

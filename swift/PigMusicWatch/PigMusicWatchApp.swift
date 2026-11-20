@@ -31,6 +31,7 @@ import WatchKit
             // Removals waiting for their Undo are sent before the Watch sleeps.
             model.undo.sendAll()
             // Songs still on their way: watchOS wakes the app to take them (#219).
+            model.closed()
             model.planRefresh()
           }
           if phase == .active { Task { await model.reload() } }

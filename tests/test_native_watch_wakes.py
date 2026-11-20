@@ -36,7 +36,9 @@ def test_the_watch_counts_its_wakes_and_sends_them_with_its_log():
     assert "model.opened()" in app
     assert "self.onReceived?(envelope)" in link
     assert "$0.received()" in model
-    assert "$0.accepted(receivedAt: receivedAt, active: active)" in model
+    assert (
+        "$0.accepted(receivedAt: receivedAt, active: active, newSong: newSong)" in model
+    )
     # Saved, so a background launch adds to the same record.
     assert model.count('"watch.wake-log"') == 2
     # The summary goes above the log the iPhone puts in its export.
@@ -66,7 +68,11 @@ def test_the_watch_schedules_refreshes_only_through_the_plan():
     # One place asks watchOS, and only for the time the plan gives.
     assert sources.count("scheduleBackgroundRefresh(") == 1
     plan = body(model, "  func planRefresh(now: Date = Date()) {")
-    assert "WatchRefreshPlan.next(" in plan and "waiting: status.waiting" in plan
+    # The saved log judges the window, so its stop holds until the app is
+    # opened (Codex round 1 on batch G).
+    assert "WatchRefreshPlan.next(" not in plan
+    assert "plan = $0.refreshPlan(now: now, waiting: waiting)" in plan
+    assert "let waiting = status.waiting" in plan
     assert "WatchRefreshPlan.request(plan, pending: wakeLog.pendingRefresh" in plan
     assert plan.index("WatchRefreshPlan.request(") < plan.index(
         "scheduleBackgroundRefresh("
@@ -82,7 +88,9 @@ def test_the_watch_schedules_refreshes_only_through_the_plan():
         .endswith("planRefresh()")
     )
     background = app.split("if phase == .background {", 1)[1].split("}", 1)[0]
-    assert "model.planRefresh()" in background
+    assert "model.closed()\n            model.planRefresh()" in background
+    # Only a copy the Watch didn't have moves the window on.
+    assert "let newSong = receipt?.ready[ticket.songId] != ticket.checksum" in model
 
 
 def test_a_background_wake_gives_kept_files_a_pass_after_their_manifest():

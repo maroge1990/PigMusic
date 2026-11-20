@@ -90,6 +90,14 @@ struct WatchRefreshPlanTests {
     #expect(plan == .none)
   }
 
+  @Test func aStoppedWindowAsksForNothing() {
+    let plan = WatchRefreshPlan.next(
+      now: at(0, minutes: 10), waiting: 3, lastAccepted: at(0), lastOpened: at(0), stopped: true)
+    #expect(plan == .none)
+    #expect(WatchRefreshPlan.windowOpen(now: at(1), lastAccepted: nil, lastOpened: at(0)))
+    #expect(!WatchRefreshPlan.windowOpen(now: at(2), lastAccepted: nil, lastOpened: at(0)))
+  }
+
   @Test func oneRefreshPendingAtATime() {
     let plan = WatchRefreshPlan.at(at(0, minutes: 30))
     // Nothing pending: ask.

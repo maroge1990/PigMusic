@@ -69,6 +69,8 @@ import WatchKit
   }
   /// The person opened the app.
   func opened() { noteWake { $0.opened() } }
+  /// The person left the app: the refresh window counts from here.
+  func closed() { noteWake { $0.sawPerson() } }
   /// The library's songs, without those being removed.
   var songs: [CompanionSong] { manifest.songs.filter { !removing.contains($0.id) } }
   /// Whether the iPhone is in reach; nil when the link can't tell (demo, not activated).
@@ -136,9 +138,15 @@ import WatchKit
   /// app is opened, D-113), with one refresh pending at a time.
   func planRefresh(now: Date = Date()) {
     guard link != nil else { return }
-    let plan = WatchRefreshPlan.next(
-      now: now, waiting: status.waiting, lastAccepted: wakeLog.lastAccepted,
-      lastOpened: wakeLog.lastOpened)
+    let waiting = status.waiting
+    let active = appActive
+    var plan = WatchRefreshPlan.none
+    noteWake {
+      // On screen, the person is here: no stop is judged against them.
+      if active { $0.sawPerson(at: now) }
+      // Records the stop once the window has run out; it holds until the app is opened.
+      plan = $0.refreshPlan(now: now, waiting: waiting)
+    }
     guard let date = WatchRefreshPlan.request(plan, pending: wakeLog.pendingRefresh, now: now)
     else { return }
     noteWake { $0.refreshAsked(for: date, at: now) }
@@ -611,9 +619,11 @@ import WatchKit
           // The envelope beside it was written when the file reached the inbox.
           let receivedAt = try? file.deletingPathExtension().appendingPathExtension("json")
             .resourceValues(forKeys: [.creationDateKey]).creationDate
+          // A copy the Watch already had is no progress (Codex round 1 on batch G).
+          let newSong = receipt?.ready[ticket.songId] != ticket.checksum
           try await archive.accept(file, ticket: ticket)
           let active = appActive
-          noteWake { $0.accepted(receivedAt: receivedAt, active: active) }
+          noteWake { $0.accepted(receivedAt: receivedAt, active: active, newSong: newSong) }
         }
         DiagnosticsLog.shared.record("sync", "audio accepted for revision \(ticket.context.revision)")
       } else {
