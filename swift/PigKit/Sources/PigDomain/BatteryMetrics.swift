@@ -24,6 +24,11 @@ public struct BatteryMetrics: Codable, Sendable, Equatable {
   public var cellularDown: Double?
   public var cellularUp: Double?
   public var diskWrites: Double?
+  /// Bytes of memory at the day's peak, and on average while suspended
+  /// (#253): iOS ends a suspended app with a larger footprint first when it
+  /// needs memory, so these say whether the app's footprint is the cause.
+  public var peakMemory: Double?
+  public var suspendedMemory: Double?
   /// Times iOS ended the app in the background, by reason; reasons with none
   /// are left out.
   public var backgroundExits: [String: Int] = [:]
@@ -57,6 +62,7 @@ public struct BatteryMetrics: Codable, Sendable, Equatable {
       "Wi-Fi: \(size(wifiDown)) downloaded, \(size(wifiUp)) uploaded",
       "Mobile data: \(size(cellularDown)) downloaded, \(size(cellularUp)) uploaded",
       "Written to storage: \(size(diskWrites))",
+      "Memory: \(size(peakMemory)) at its peak, \(size(suspendedMemory)) on average while suspended",
     ]
     if backgroundExits.isEmpty {
       lines.append("Ended by iOS in the background: never")

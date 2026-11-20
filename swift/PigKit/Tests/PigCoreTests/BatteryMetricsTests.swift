@@ -22,5 +22,25 @@ struct BatteryMetricsTests {
     #expect(text.contains("Wi-Fi: 120.0 MB downloaded, not reported uploaded"))
     #expect(text.contains("Mobile data: not reported downloaded"))
     #expect(text.contains("Ended by iOS in the background: watchdog 1"))
+    #expect(text.contains("Memory: not reported at its peak"))
+  }
+
+  /// #253: iOS ended the app nine times in a day for memory pressure while
+  /// suspended; the export says how much memory the app held, at its peak
+  /// and while suspended, so the next report shows whether it is the cause.
+  @Test func memoryFiguresAreInTheExport() throws {
+    let start = Date(timeIntervalSince1970: 1_800_000_000)
+    var metrics = BatteryMetrics(
+      from: start, to: start.addingTimeInterval(86400), appVersion: "0.2.0 (1040)")
+    metrics.peakMemory = 412_000_000
+    metrics.suspendedMemory = 96_500_000
+    metrics.backgroundExits = ["memory pressure": 9]
+    #expect(
+      metrics.text().contains("Memory: 412.0 MB at its peak, 96.5 MB on average while suspended"))
+    // Kept reports from before the figures still read.
+    let older = try JSONDecoder().decode(
+      BatteryMetrics.self,
+      from: Data(#"{"from":0,"to":86400,"appVersion":"1","backgroundExits":{}}"#.utf8))
+    #expect(older.peakMemory == nil && older.suspendedMemory == nil)
   }
 }

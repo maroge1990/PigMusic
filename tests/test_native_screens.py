@@ -239,3 +239,21 @@ def test_a_playlists_own_add_belongs_to_the_account_that_chose_it():
     stamp = page.index("let stamp = model.currentGeneration")
     guard = page.index("guard model.isCurrent(stamp) else { return }")
     assert stamp < page.index("Task {") < guard < page.index("await addMissing()")
+
+
+def test_a_memory_warning_lets_go_of_page_answers():
+    """#253: iOS ended the app nine times in a day for memory pressure. The
+    page answers kept in memory (up to 400, any size) never went; a memory
+    warning now lets go of them and the cover colours, and says so in the
+    diagnostics log. The day's memory figures go in the export."""
+    app = (APP / "PigMusicApp.swift").read_text()
+    assert "UIApplication.didReceiveMemoryWarningNotification" in app
+    assert "{ _ in model.receivedMemoryWarning() }" in app
+    assert "metrics.peakMemory = bytes(payload.memoryMetrics?.peakMemoryUsage)" in app
+    assert "averageSuspendedMemory.averageMeasurement" in app
+    model = (APP / "AppModel.swift").read_text()
+    warning = model.split("func receivedMemoryWarning() {", 1)[1]
+    warning = warning.split("\n  }\n", 1)[0]
+    assert "catalogueMemory.clear()" in warning
+    assert "coverSwatches = [:]" in warning
+    assert 'DiagnosticsLog.shared.record("lifecycle"' in warning

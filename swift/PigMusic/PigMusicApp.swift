@@ -1,3 +1,4 @@
+import Combine
 import MetricKit
 import PigBrand
 import PigDomain
@@ -36,6 +37,10 @@ import UIKit
           // Songs shared from the Shazam app while PigMusic was away (D-70).
           if value == .active { Task { await model.receiveShazamShares() } }
         }
+        // iOS is short of memory: let go of what pages can read again (#253).
+        .onReceive(
+          NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)
+        ) { _ in model.receivedMemoryWarning() }
     }
     // Watch copies the server was still preparing when the app left (#219).
     .backgroundTask(.appRefresh(WatchPhoneController.refreshIdentifier)) {
@@ -539,6 +544,9 @@ final class BatteryReports: NSObject, MXMetricManagerSubscriber, @unchecked Send
     metrics.cellularDown = bytes(network?.cumulativeCellularDownload)
     metrics.cellularUp = bytes(network?.cumulativeCellularUpload)
     metrics.diskWrites = bytes(payload.diskIOMetrics?.cumulativeLogicalWrites)
+    // What iOS weighs when it ends suspended apps for memory (#253).
+    metrics.peakMemory = bytes(payload.memoryMetrics?.peakMemoryUsage)
+    metrics.suspendedMemory = bytes(payload.memoryMetrics?.averageSuspendedMemory.averageMeasurement)
     if let exits = payload.applicationExitMetrics?.backgroundExitData {
       let counts = [
         ("normal", exits.cumulativeNormalAppExitCount),

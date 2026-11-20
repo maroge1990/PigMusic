@@ -1525,6 +1525,16 @@ enum PlayOrigin: Hashable {
     try? await store?.removeCached("catalogue-etag:" + key)
     try? await store?.removeCached("catalogue:" + key)
   }
+  /// iOS is short of memory (#253): the page answers kept in memory (up to
+  /// `CatalogueMemory.limit`, each as large as an album or a search) and
+  /// the cover colours go. Pages read them again from this device; decoded
+  /// artwork is an `NSCache`, which iOS empties itself.
+  func receivedMemoryWarning() {
+    let answers = catalogueMemory.count
+    catalogueMemory.clear()
+    coverSwatches = [:]
+    DiagnosticsLog.shared.record("lifecycle", "memory warning: let go of \(answers) page answers")
+  }
   /// The last catalogue answer for a key, so a revisited page draws at once.
   /// Pages still refresh it through `cachedCatalogue`.
   func peekCatalogue<T: Sendable>(key: String, as type: T.Type = T.self) -> T? {
