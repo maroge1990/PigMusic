@@ -326,3 +326,55 @@ def test_an_unchanged_library_answers_changes_without_the_lifecycle_lock(tmp_pat
     changed = sync.changes(owner, first["revision"])
     assert changed["revision"] != first["revision"]
     assert changed["deletes"]["tracks"] == ["1"]
+
+
+def test_native_albums_say_when_their_newest_song_was_added(tmp_path, monkeypatch):
+    """#281: the iPhone sorts Albums by Recently added (D-120 screen 30)
+    from the same added_at the web's summary has: the newest song's join.
+    A song removed and added again moves the album up; a server upgraded
+    from one without added_at sends it as an ordinary update."""
+    from pydantic import create_model
+
+    from server import native_sync
+    from server.api_models import AlbumDTO
+
+    store, owner, member = fixture(tmp_path)
+    with store.connect() as conn:
+        conn.execute("UPDATE library_members SET added_at=1790000000")
+    store.user_libraries.cache.clear()
+    fields = {
+        name: (field.annotation, field)
+        for name, field in AlbumDTO.model_fields.items()
+        if name != "added_at"
+    }
+    old = create_model("AlbumDTO", __config__=AlbumDTO.model_config, **fields)
+    monkeypatch.setitem(native_sync.MODELS, "albums", old)
+    before = NativeSync(store).page(owner, "albums")
+    assert "added_at" not in before["items"][0]
+    monkeypatch.undo()
+    sync = NativeSync(Store(tmp_path))
+    album = sync.page(owner, "albums")["items"][0]
+    assert album["added_at"] == "2026-09-21T14:13:20Z"
+    summary = store.user_libraries.summary(owner)["albums"][0]
+    assert summary["added_at"] == album["added_at"]
+    changed = sync.changes(owner, before["revision"])
+    assert [a["added_at"] for a in changed["upserts"]["albums"]] == [
+        "2026-09-21T14:13:20Z"
+    ]
+    # Removed and added again between two reads: the same songs, joined later.
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE library_members SET added_at=1790000600 "
+            "WHERE user_id=? AND track_id='1'",
+            (owner,),
+        )
+        conn.execute(
+            "UPDATE membership_versions SET revision=revision+1 WHERE user_id=?",
+            (owner,),
+        )
+    again = sync.changes(owner, changed["revision"])
+    assert [a["added_at"] for a in again["upserts"]["albums"]] == [
+        "2026-09-21T14:23:20Z"
+    ]
+    # The member has no songs, so no albums.
+    assert sync.page(member, "albums")["items"] == []

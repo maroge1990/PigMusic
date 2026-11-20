@@ -97,6 +97,11 @@
       },
       "AlbumDTO": {
         "properties": {
+          "added_at": {
+            "nullable": true,
+            "title": "Added At",
+            "type": "string"
+          },
           "artist": {
             "title": "Artist",
             "type": "string"
@@ -201,6 +206,11 @@
       },
       "AlbumDetail": {
         "properties": {
+          "added_at": {
+            "nullable": true,
+            "title": "Added At",
+            "type": "string"
+          },
           "artist": {
             "title": "Artist",
             "type": "string"
@@ -1935,6 +1945,11 @@
       },
       "FoundAlbum": {
         "properties": {
+          "added_at": {
+            "nullable": true,
+            "title": "Added At",
+            "type": "string"
+          },
           "artist": {
             "title": "Artist",
             "type": "string"

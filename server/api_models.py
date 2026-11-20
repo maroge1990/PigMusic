@@ -54,6 +54,9 @@ class AlbumDTO(BaseModel):
     codecs: list[str] = Field(default_factory=list)
     compilation: bool = False
     server_state: ServerState = "in_library"
+    # When its newest song joined this person's library (UTC ISO 8601), for
+    # "Recently added" (D-120, #281); none for an album of requested songs.
+    added_at: str | None = None
 
 
 class ArtistDTO(BaseModel):
