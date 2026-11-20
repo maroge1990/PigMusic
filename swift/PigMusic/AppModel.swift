@@ -1224,6 +1224,12 @@ enum PlayOrigin: Hashable {
       // Any favourite the server refused, tapped now or long ago, goes back.
       let refused = try await EditOutbox.settleRefusedFavourites(store: store)
       if account.isCurrent(stamp), !refused.isEmpty { favouritesRefused(refused) }
+      // A new playlist the server refused leaves with its songs, said once
+      // (Codex round 2 on batch G).
+      let dropped = try await EditOutbox.settleRefusedCreates(store: store)
+      if account.isCurrent(stamp) {
+        for name in dropped { notify("Couldn't create \(name). Try again.") }
+      }
       if let pending = try await EditOutbox.pending(
         store: store, isCurrent: { [account] in account.isCurrent(stamp) })
       {
@@ -2176,9 +2182,12 @@ enum PlayOrigin: Hashable {
   /// edit outbox as the Playlists tab's New playlist and Add to playlist do.
   /// Only for the account that asked.
   func createPlaylist(named name: String, adding request: NewPlaylistRequest) async {
-    guard account.isCurrent(request.generation),
-      !NewPlaylistEdits.make(name: name, songs: []).isEmpty
-    else { return }
+    guard account.isCurrent(request.generation) else { return }
+    // The server's rule, before anything is queued (Codex round 2 on batch G).
+    guard PlaylistName.accepted(name) != nil else {
+      notify(PlaylistName.refusal)
+      return
+    }
     let read = await request.songs()
     guard account.isCurrent(request.generation) else { return }
     // A collection whose songs couldn't be read makes no empty playlist.
@@ -2188,8 +2197,10 @@ enum PlayOrigin: Hashable {
     }
     do {
       // The playlist and its songs enter the outbox together or not at all.
-      _ = try await saveEditsOutcome(NewPlaylistEdits.make(name: name, songs: songs))
-      confirmations += 1
+      // Queued (offline) is a success; a refused create has already said so
+      // once, as the outbox let it go with its songs (flushEdits).
+      let outcome = try await saveEditsOutcome(NewPlaylistEdits.make(name: name, songs: songs))
+      if outcome != .refused { confirmations += 1 }
     } catch is CancellationError {} catch { notify(error) }
   }
   /// D-103: a success tap, no text; a failure says why.

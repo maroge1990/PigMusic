@@ -125,6 +125,22 @@ def test_add_to_playlist_offers_a_new_playlist_first():
     assert "saveEdit(" not in create
     group = app["AppModel.swift"].split("func saveEditsOutcome(", 1)[1]
     assert "store.enqueueMutations(mutations)" in group.split("\n  }\n", 1)[0]
+    # Codex round 2 on batch G: the name is checked with the server's rule
+    # before anything is queued, on both New playlist paths; a refused create
+    # gets no success tap; the outbox lets a refused create go with its songs
+    # and says so once.
+    assert create.index("PlaylistName.accepted(name) != nil") < create.index(
+        "request.songs()"
+    )
+    assert "notify(PlaylistName.refusal)" in create
+    assert "if outcome != .refused { confirmations += 1 }" in create
+    tools = app["PlaylistViews.swift"].split("private func create() async {", 1)[1]
+    tools = tools.split("\n  }\n", 1)[0]
+    assert "guard let value = PlaylistName.accepted(name) else {" in tools
+    flush = app["AppModel.swift"].split("func flushEdits()", 1)[1]
+    flush = flush.split("\n  }\n", 1)[0]
+    assert "EditOutbox.settleRefusedCreates(store: store)" in flush
+    assert 'notify("Couldn\'t create \\(name). Try again.")' in flush
 
 
 def test_searching_uses_the_shared_status_line():

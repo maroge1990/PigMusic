@@ -82,6 +82,19 @@ import PigStore
     }
   }
 
+  /// New playlists the server refused for good (#285; Codex round 2 on batch
+  /// G): each leaves the outbox with every edit that depends on it, its
+  /// dependents first, so nothing waits behind a playlist that will never
+  /// exist and Changes not sent yet lists no orphaned songs. The names of
+  /// the playlists that left, for one notice each.
+  public static func settleRefusedCreates(store: LibraryStore) async throws -> [String] {
+    let groups = NewPlaylistGroup.refused(try await store.pendingMutations())
+    for group in groups {
+      for item in group { try await store.acknowledgeMutation(item.id) }
+    }
+    return groups.compactMap { $0.last?.mutation.name }
+  }
+
   /// Try again (D-120): a refused edit that can be sent again waits once
   /// more. The outbox as it now stands, or nil when the account ended
   /// meanwhile: nothing read here may be shown for another account (Codex
@@ -116,17 +129,13 @@ import PigStore
         return (.alreadyGone, pending)
       }
       if item.withdrawn { return (.unknown, pending) }
-      let result: DiscardResult
-      if item.maybeSent {
-        var withdrawn = item
-        withdrawn.state = "withdrawn"
-        withdrawn.message = nil
-        try await store.updateMutation(withdrawn)
-        result = .unknown
-      } else {
-        try await store.acknowledgeMutation(id)
-        result = .discarded
+      // A new playlist's create goes with the edits that depend on it, each
+      // the same way, dependents first (Codex round 2 on batch G).
+      for dependent in NewPlaylistGroup.dependents(of: item, in: pending)
+      where !dependent.withdrawn {
+        try await discardOne(dependent, store: store)
       }
+      let result = try await discardOne(item, store: store)
       guard isCurrent() else { return nil }
       let after = try await store.pendingMutations()
       return isCurrent() ? (result, after) : nil
@@ -134,6 +143,21 @@ import PigStore
       let pending = (try? await store.pendingMutations()) ?? []
       return isCurrent() ? (.failed, pending) : nil
     }
+  }
+
+  /// One edit discarded: taken out when never sent, else withdrawn.
+  @discardableResult private static func discardOne(
+    _ item: PendingMutation, store: LibraryStore
+  ) async throws -> DiscardResult {
+    if item.maybeSent {
+      var withdrawn = item
+      withdrawn.state = "withdrawn"
+      withdrawn.message = nil
+      try await store.updateMutation(withdrawn)
+      return .unknown
+    }
+    try await store.acknowledgeMutation(item.id)
+    return .discarded
   }
 
   /// Remove from this list: forgets a withdrawn edit on this iPhone only;

@@ -81,7 +81,11 @@ struct PlaylistToolsView: View {
   private func create() async {
     loading = true
     defer { loading = false }
-    let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    // The server's rule, before it is queued (Codex round 2 on batch G).
+    guard let value = PlaylistName.accepted(name) else {
+      message = .error(PlaylistName.refusal)
+      return
+    }
     do {
       let confirmed = try await model.saveEdit(OfflineMutation(action: "create", name: value))
       name = ""
