@@ -359,3 +359,97 @@ private final class FakeSession: ShazamListeningSession, @unchecked Sendable {
     #expect(!session.asked)
   }
 }
+
+// #124, build 2002: the screen still stayed on "Listening…". Every step the
+// listening limit doesn't cover now has a bound too, and every ending
+// leaves the screen.
+
+/// A step that never returns, not even when cancelled.
+@MainActor private final class Stuck {
+  private var waiting: [CheckedContinuation<Void, Never>] = []
+  func forever() async { await withCheckedContinuation { waiting.append($0) } }
+}
+
+private let yellow = ShazamSong(
+  shazamId: "1", appleId: 11, title: "Yellow", artist: "Coldplay")
+
+@MainActor @Test func theOuterDeadlineFiresWhenIdentifyNeverReturns() async {
+  let stuck = Stuck()
+  let started = ContinuousClock.now
+  let end = await ShazamListening.bounded(.milliseconds(200)) {
+    () async -> Result<ShazamSong, ShazamFailure> in
+    await stuck.forever()
+    return .success(yellow)
+  }
+  #expect(end == .timedOut)
+  #expect(ContinuousClock.now - started < ShazamListening.limit)
+  // It shows the timed-out state with Try again, never "Listening…".
+  #expect(ShazamScreen.after(end, screenClosed: false) == .failed(.timedOut))
+  // The whole of identify gets the listening limit and a margin.
+  #expect(ShazamListening.outerLimit == ShazamListening.limit + .seconds(10))
+}
+
+@MainActor @Test func aBoundedStepReturnsItsAnswerOrItsCallersCancel() async {
+  let quick = await ShazamListening.bounded(.seconds(5)) { 7 }
+  #expect(quick == .finished(7))
+  let stuck = Stuck()
+  let task = Task { @MainActor in
+    await ShazamListening.bounded(.seconds(60)) { () async -> Int in
+      await stuck.forever()
+      return 1
+    }
+  }
+  try? await Task.sleep(for: .milliseconds(50))
+  task.cancel()
+  #expect(await task.value == .cancelled)
+}
+
+@MainActor @Test func aMatchWhoseLookupNeverReturnsIsShownWithinTheLimit() async {
+  let stuck = Stuck()
+  let probe = Probe()
+  let started = ContinuousClock.now
+  let song = await ShazamListening.detailed(
+    yellow, limit: .milliseconds(200), log: probe.log
+  ) {
+    await stuck.forever()
+    return ShazamSong(
+      shazamId: "1", appleId: 11, title: "Yellow", artist: "Coldplay", album: "Parachutes")
+  }
+  #expect(song == yellow)
+  #expect(ContinuousClock.now - started < ShazamListening.limit)
+  #expect(probe.lines.contains { $0.hasPrefix("song details took longer") })
+  // A lookup in time adds the album.
+  let detailed = await ShazamListening.detailed(yellow, log: probe.log) {
+    ShazamSong(
+      shazamId: "1", appleId: 11, title: "Yellow", artist: "Coldplay", album: "Parachutes")
+  }
+  #expect(detailed.album == "Parachutes")
+}
+
+@Test func aCancelledAttemptOnAShownScreenNeverLeavesItListening() {
+  // Cancelled by something other than the screen (an older screen closing,
+  // the outer deadline): "Stopped listening." with Try again.
+  #expect(ShazamScreen.after(.finished(.failure(.cancelled)), screenClosed: false) == .failed(.cancelled))
+  #expect(ShazamScreen.after(.cancelled, screenClosed: false) == .failed(.cancelled))
+  #expect(ShazamScreen.after(.finished(.success(yellow)), screenClosed: false) == .found(yellow))
+  #expect(ShazamScreen.after(.finished(.failure(.noMatch)), screenClosed: false) == .failed(.noMatch))
+  // The screen closing (or starting another try) stays silent.
+  #expect(ShazamScreen.after(.finished(.failure(.cancelled)), screenClosed: true) == nil)
+  #expect(ShazamScreen.after(.finished(.success(yellow)), screenClosed: true) == nil)
+}
+
+@Test func aClosingScreenEndsOnlyItsOwnAttempt() {
+  var attempts = ShazamAttempts()
+  let old = UUID()
+  let new = UUID()
+  _ = attempts.begin(owner: old)
+  #expect(attempts.belongs(to: old))
+  // Done, then a quick reopen: the new screen starts before the old one's
+  // onDisappear runs, which must not end the new attempt.
+  let current = attempts.begin(owner: new)
+  #expect(!attempts.belongs(to: old))
+  #expect(attempts.belongs(to: new))
+  #expect(attempts.isCurrent(current))
+  attempts.cancel()
+  #expect(!attempts.belongs(to: new))
+}

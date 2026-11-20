@@ -134,12 +134,15 @@
     /// Listens once, for at most `ShazamListening.limit`. The microphone
     /// permission is asked on the first try. `playbackHolds`: PigMusic's own
     /// audio session is active (playing or paused), asked when listening
-    /// ends, so the session stays PigMusic's (#124).
+    /// ends, so the session stays PigMusic's (#124). `owner`: the listening
+    /// screen, which ends only its own attempt (`cancel(owner:)`).
     public func identify(
+      owner: UUID? = nil,
       playbackHolds: @escaping @MainActor @Sendable () -> Bool = { false }
     ) async -> Result<ShazamSong, ShazamFailure> {
+      DiagnosticsLog.shared.record("shazam", "identify started")
       session?.cancel()
-      let attempt = attempts.begin()
+      let attempt = attempts.begin(owner: owner)
       let log: @MainActor @Sendable (String) -> Void = { line in
         DiagnosticsLog.shared.record("shazam", line)
       }
@@ -193,19 +196,30 @@
           return .failure(.noMatch)
         }
         log("match")
-        let song = await Self.detailedSong(item, found: Date())
+        // The match is shown first: the album and length are waited for
+        // only briefly, and saving to the Shazam library runs on its own
+        // (#124: either may never return).
+        let found = Date()
+        let song = await ShazamListening.detailed(
+          ShazamListener.song(item, found: found), log: log
+        ) {
+          await ShazamListener.detailedSong(item, found: found)
+        }
         guard !Task.isCancelled, attempts.isCurrent(attempt) else { return .failure(.cancelled) }
         identified = ShazamInbox.merge([song] + identified)
         // Only songs with a Shazam id can be saved.
         if item.shazamID != nil {
-          do {
-            try await SHLibrary.default.addItems([item])
-            saveFailed = false
-          } catch {
-            log("saving to the Shazam library failed: \(ShazamListening.describe(error))")
-            saveFailed = true
+          saveFailed = false
+          Task { @MainActor in
+            do {
+              try await SHLibrary.default.addItems([item])
+            } catch {
+              log("saving to the Shazam library failed: \(ShazamListening.describe(error))")
+              self.saveFailed = true
+            }
           }
         }
+        log("showing the match")
         return .success(song)
       case .noMatch:
         log("no match")
@@ -221,6 +235,13 @@
       attempts.cancel()
       session?.cancel()
       session = nil
+    }
+
+    /// Ends the running attempt only when `owner`'s screen started it: a
+    /// screen closing after a new one opened leaves the new attempt (#124).
+    public func cancel(owner: UUID) {
+      guard attempts.belongs(to: owner) else { return }
+      cancel()
     }
 
     /// The "Shazamed" list: this session's songs, the shared ones and the
