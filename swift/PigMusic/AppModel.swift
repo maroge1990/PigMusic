@@ -1045,13 +1045,18 @@ enum PlayOrigin: Hashable {
     else { return }
     try? await store?.cache(confirmed, key: key)
   }
-  /// A song's favourite state from this iPhone alone, a waiting edit or the
-  /// cached answer, without asking the server (#229): read for each song whose
-  /// ⋯ menu could open, so the menu shows its favourite item at once.
+  /// A song's favourite state from this iPhone alone, a waiting edit, the
+  /// library's Favourites playlist (#284) or the cached answer, without asking
+  /// the server (#229): read for each song whose ⋯ menu could open, so the
+  /// menu shows its favourite item at once.
   func peekFavourite(_ track: Track) async {
     guard favourites[track.id] == nil else { return }
     if let value = EditOutbox.favourite(track.id, in: pendingEdits) {
       favourites.change(track.id, value)
+      return
+    }
+    if let listed = FavouriteStates.listed(track, in: playlists) {
+      favourites.answer(track.id, listed, since: favourites.revision(track.id))
       return
     }
     let stamp = account.generation
@@ -1066,13 +1071,13 @@ enum PlayOrigin: Hashable {
   /// Flips a song's favourite at once (#212) and saves it through the edit
   /// outbox; a refused save puts the old state back. The new state, and
   /// whether the server confirmed it (false when it waits on this phone);
-  /// nil while the state is unknown.
-  @discardableResult func tapFavourite(_ track: Track) async throws -> (
-    value: Bool, confirmed: Bool
-  )? {
+  /// nil while the state is unknown, unless `orFavourite` makes it one (#284).
+  @discardableResult func tapFavourite(
+    _ track: Track, orFavourite: Bool = false
+  ) async throws -> (value: Bool, confirmed: Bool)? {
     let stamp = account.generation
     let store = self.store
-    guard let tap = favourites.tap(track.id) else { return nil }
+    guard let tap = favourites.tap(track.id, orFavourite: orFavourite) else { return nil }
     let mutation = OfflineMutation(action: "favourite", track: track, favourite: tap.value)
     do {
       let outcome = try await saveEditOutcome(mutation)

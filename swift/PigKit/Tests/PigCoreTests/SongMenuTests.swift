@@ -93,10 +93,12 @@ struct SongMenuTests {
     #expect(!sections.joined().contains(.addToQueue))
   }
 
-  @Test func anUnknownFavouriteOffersToLoadIt() {
+  /// #284: the menu never asks the person to load the favourite state; an
+  /// unknown one is plain "Favourite".
+  @Test func anUnknownFavouriteIsPlainFavourite() {
     let sections = SongMenu.sections(
       for: song("in_library"), looked: true, requested: false, favourite: nil, playing: false)
-    #expect(sections.first == [.loadFavourite, .addToPlaylist])
+    #expect(sections.first == [.favouriteUnknown, .addToPlaylist])
   }
 
   /// #211: until the library has been looked at, neither Add to library nor

@@ -52,16 +52,39 @@ public struct FavouriteStates: Sendable {
   public func canTap(_ id: String) -> Bool { values[id] != nil }
   /// A person's tap, shown at once (#212): flips the state before anything
   /// is saved and returns the change to save, or nil while it is unknown.
-  public mutating func tap(_ id: String) -> FavouriteTap? {
-    guard let current = values[id] else { return nil }
-    change(id, !current)
-    return FavouriteTap(id: id, value: !current, revision: revision(id))
+  /// With `orFavourite`, a song whose state isn't known becomes a favourite:
+  /// the song menu's plain "Favourite" (#284).
+  public mutating func tap(_ id: String, orFavourite: Bool = false) -> FavouriteTap? {
+    let current = values[id]
+    guard current != nil || orFavourite else { return nil }
+    let value = !(current ?? false)
+    change(id, value)
+    return FavouriteTap(id: id, value: value, previous: current, revision: revision(id))
   }
-  /// The save of `tap` was refused: its old state comes back, unless a newer
-  /// tap, change or clear has come since.
+  /// The save of `tap` was refused: its old state comes back, unknown again
+  /// when it was unknown, unless a newer tap, change or clear has come since.
   public mutating func refused(_ tap: FavouriteTap) {
     guard revision(tap.id) == tap.revision else { return }
-    change(tap.id, !tap.value)
+    if let previous = tap.previous {
+      change(tap.id, previous)
+    } else {
+      invalidate(tap.id)
+      values[tap.id] = nil
+    }
+  }
+  /// Whether the Favourites playlist this iPhone's library holds lists the
+  /// song (#284), by the server's own test (`favourite`, `same_song`): the
+  /// same artist, title, album and album artist, no conflicting release or
+  /// recording id, lengths within 5 s. Nil while the library holds no
+  /// Favourites playlist with its songs: the state isn't known here.
+  public static func listed(_ track: Track, in playlists: [Playlist]) -> Bool? {
+    guard let entries = playlists.first(where: { $0.favourites == true })?.entries else {
+      return nil
+    }
+    // The server's test has no kind of recording beyond the album's words.
+    var song = track
+    song.recordingKind = nil
+    return entries.contains { SongIdentity.sameEdition($0.entryTrack, song) }
   }
   /// A refused save settled (#212): the newest tap still waiting, or none,
   /// and then the state is unknown until the server is read again.
@@ -86,6 +109,8 @@ public struct FavouriteStates: Sendable {
 public struct FavouriteTap: Sendable, Equatable {
   public let id: String
   public let value: Bool
+  /// The state before the tap; nil when it wasn't known.
+  public let previous: Bool?
   fileprivate let revision: Int
 }
 

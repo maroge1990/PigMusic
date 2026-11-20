@@ -1,3 +1,4 @@
+import Foundation
 import PigDomain
 import Testing
 
@@ -158,4 +159,48 @@ private actor ReadLatch {
   #expect(FavouriteStates.symbol(favourite: false) == "star")
   #expect(FavouriteStates.action(favourite: true) == "Remove from favourites")
   #expect(FavouriteStates.action(favourite: false) == "Add to favourites")
+}
+
+/// #284: the library this iPhone holds answers a song's favourite state, so
+/// the song menu never offers to load it: listed in the Favourites playlist
+/// (by the server's same-song test) or not; unknown only while the library
+/// holds no Favourites playlist with its songs.
+@Test func theLibrarysFavouritesPlaylistAnswersTheState() throws {
+  let json = #"""
+    [{"id":"mine","name":"Road trip","revision":1,"entries":[]},
+     {"id":"pig-favourites:me","name":"Favourites","revision":3,"favourites":true,
+      "entries":[{"entry_id":"f:0","title":"Open Road","artist":"The Orchard",
+        "album":"Sunrise","position":0,"duration":181,"saved_id":"two"}]}]
+    """#
+  let playlists = try LibraryCodec.decoder().decode([Playlist].self, from: Data(json.utf8))
+  var two = Track(id: "two", title: "Open Road", artist: "The Orchard", album: "Sunrise")
+  two.duration = 183
+  two.recordingKind = ["studio"]
+  #expect(FavouriteStates.listed(two, in: playlists) == true)
+  let one = Track(id: "one", title: "First Light", artist: "The Orchard", album: "Sunrise")
+  #expect(FavouriteStates.listed(one, in: playlists) == false)
+  // The same song on another album isn't the favourite the server checks.
+  let other = Track(id: "two-b", title: "Open Road", artist: "The Orchard", album: "Elsewhere")
+  #expect(FavouriteStates.listed(other, in: playlists) == false)
+  // No Favourites playlist, or one without its songs: not known here.
+  #expect(FavouriteStates.listed(two, in: [playlists[0]]) == nil)
+  var bare = playlists[1]
+  bare.entries = nil
+  #expect(FavouriteStates.listed(two, in: [bare]) == nil)
+}
+
+/// #284: plain "Favourite" on a song whose state is unknown makes it a
+/// favourite at once; a refused save makes it unknown again.
+@Test func favouriteOnAnUnknownSongMakesItOneAndARefusalUndoesIt() throws {
+  var states = FavouriteStates()
+  #expect(states.tap("song") == nil)  // The player's star still needs a known state.
+  let tapped = states.tap("song", orFavourite: true)
+  let tap = try #require(tapped)
+  #expect(tap.value == true && tap.previous == nil)
+  #expect(states["song"] == true)
+  states.refused(tap)
+  #expect(states["song"] == nil)
+  // A known state toggles as before, whatever `orFavourite` says.
+  states.answer("song", true, since: states.revision("song"))
+  #expect(states.tap("song", orFavourite: true)?.value == false)
 }

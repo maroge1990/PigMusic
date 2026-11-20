@@ -85,9 +85,10 @@ struct SongActionsMenu: View {
       ) {
         Task { await changeFavourite(track) }
       }
-    case .loadFavourite:
-      Button("Load favourite status", systemImage: "star") {
-        Task { await model.loadFavourite(track) }
+    case .favouriteUnknown:
+      // Not known on this iPhone (#284): never a load; it makes a favourite.
+      Button("Favourite", systemImage: "star") {
+        Task { await changeFavourite(track, orFavourite: true) }
       }
     case .addToLibrary:
       Button("Add to library", systemImage: "plus") {
@@ -125,8 +126,10 @@ struct SongActionsMenu: View {
       }
     }
   }
-  private func changeFavourite(_ track: Track) async {
-    do { try await model.tapFavourite(track) } catch is CancellationError {} catch {
+  private func changeFavourite(_ track: Track, orFavourite: Bool = false) async {
+    do {
+      try await model.tapFavourite(track, orFavourite: orFavourite)
+    } catch is CancellationError {} catch {
       model.notify(error)
     }
   }
@@ -386,9 +389,9 @@ extension SongPageItem {
 
 /// Looks up what a song's ⋯ menu needs before it can open (#229): the
 /// library's own copy (#211), again after each sync, off the main thread in
-/// the library store, and the favourite state this iPhone already holds. The
-/// server is never asked for every row's favourite; the menu offers to load
-/// one it doesn't know.
+/// the library store, and the favourite state this iPhone already holds (its
+/// library's Favourites playlist, #284). The server is never asked for every
+/// row's favourite, and the menu never offers to load one.
 struct SongActionsLookup<Content: View>: View {
   let model: AppModel
   let track: Track

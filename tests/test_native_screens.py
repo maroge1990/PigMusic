@@ -51,3 +51,18 @@ def test_every_album_grid_uses_the_library_layout():
     assert popular.index("LazyVGrid(columns: cardColumns") < popular.index(
         "CollectionCard("
     )
+
+
+def test_the_song_menu_never_asks_to_load_the_favourite_state():
+    """#284: the menu offered "Load favourite status" for any song whose
+    state wasn't cached. The library's Favourites playlist answers it; an
+    unknown state is plain "Favourite", which makes the song one."""
+    app = {p.name: p.read_text() for p in APP.glob("*.swift")}
+    assert [n for n, t in app.items() if "Load favourite" in t] == []
+    model = app["AppModel.swift"]
+    peek = model.split("func peekFavourite(", 1)[1].split("\n  }\n", 1)[0]
+    assert "FavouriteStates.listed(track, in: playlists)" in peek
+    menu = app["PersonalActionsViews.swift"]
+    unknown = menu.split("case .favouriteUnknown:", 1)[1].split("case .", 1)[0]
+    assert 'Button("Favourite", systemImage: "star")' in unknown
+    assert "orFavourite: true" in unknown

@@ -306,7 +306,7 @@ final class DemoLibraryTests: XCTestCase {
     let favourite = app.buttons.matching(
       NSPredicate(
         format: "label IN %@",
-        ["Add to favourites", "Remove from favourites", "Load favourite status"])
+        ["Add to favourites", "Remove from favourites", "Favourite"])
     ).firstMatch
     XCTAssertTrue(favourite.exists, app.debugDescription)
     XCTAssertFalse(app.buttons["Play next"].exists)
