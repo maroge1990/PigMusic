@@ -163,6 +163,91 @@ test("an unconfirmed new playlist from the picker is not offered again", async (
   expect(creates).toBe(1);
 });
 
+// Codex, batch F (#275): a create whose answer was lost (the connection
+// dropped after the server saved it) left Create ready for a second copy.
+test("a new playlist from the picker whose answer is lost is not offered again", async ({
+  page,
+}) => {
+  let creates = 0;
+  await mockApi(page, {
+    answers: {
+      "/v1/favourites": (route) =>
+        route.fulfill({ json: { favourited: false } }),
+      "/v1/playlists": (route) => {
+        if (route.request().method() !== "POST")
+          return route.fulfill({ json: { playlists: [] } });
+        creates++;
+        return route.abort("connectionreset");
+      },
+    },
+  });
+  await page.goto(`/#/library/album/${album.id}`);
+  await page.getByRole("button", { name: "More options for 360" }).click();
+  await page.getByRole("menuitem", { name: "Add to playlist" }).click();
+  await page.getByRole("menuitem", { name: "New playlist" }).click();
+  const dialog = page.locator(".new-playlist-dialog");
+  await dialog.getByLabel("Playlist name").fill("Road trip");
+  await dialog.getByRole("button", { name: "Create playlist" }).click();
+  await expect(page.locator(".notice-area")).toContainText(
+    "may or may not have been saved",
+  );
+  await expect(dialog).toBeHidden();
+  expect(creates).toBe(1);
+});
+
+// Codex, batch F (#275): the playlist was made but adding the song failed;
+// Create stayed the retry, and a second click made a second playlist.
+test("a made playlist whose add fails retries the add, never the create", async ({
+  page,
+}) => {
+  let creates = 0;
+  const adds: string[] = [];
+  await mockApi(page, {
+    answers: {
+      "/v1/favourites": (route) =>
+        route.fulfill({ json: { favourited: false } }),
+      "/v1/playlists": (route) => {
+        if (route.request().method() !== "POST")
+          return route.fulfill({ json: { playlists: [] } });
+        creates++;
+        return route.fulfill({
+          status: 201,
+          json: { id: "p1", name: "Road trip" },
+        });
+      },
+      "/v1/playlists/p1": (route) =>
+        route.fulfill({
+          json: { id: "p1", name: "Road trip", revision: 1, entries: [] },
+        }),
+      "/v1/playlists/p1/songs": (route) => {
+        adds.push(route.request().url());
+        // Refused once (the playlist moved), then added.
+        return adds.length === 1
+          ? route.fulfill({
+              status: 409,
+              json: { code: "revision_conflict", detail: "Try again." },
+            })
+          : route.fulfill({ json: { revision: 2 } });
+      },
+    },
+  });
+  await page.goto(`/#/library/album/${album.id}`);
+  await page.getByRole("button", { name: "More options for 360" }).click();
+  await page.getByRole("menuitem", { name: "Add to playlist" }).click();
+  await page.getByRole("menuitem", { name: "New playlist" }).click();
+  const dialog = page.locator(".new-playlist-dialog");
+  await dialog.getByLabel("Playlist name").fill("Road trip");
+  await dialog.getByRole("button", { name: "Create playlist" }).click();
+  await expect.poll(() => adds.length).toBe(1);
+  await expect(dialog).toBeHidden();
+  await page
+    .locator(".notice-area")
+    .getByRole("button", { name: "Try again" })
+    .click();
+  await expect.poll(() => adds.length).toBe(2);
+  expect(creates).toBe(1);
+});
+
 test("a song tapped in search plays alone; on an album it plays on", async ({
   page,
 }) => {

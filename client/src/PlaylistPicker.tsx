@@ -39,6 +39,9 @@ export function PlaylistPicker({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
+  // The playlist this dialog already made: a failed add retries into it,
+  // never a second create (#275).
+  const made = useRef<string | null>(null);
   const [position, setPosition] = useState<{
     left: number;
     top?: number;
@@ -163,6 +166,7 @@ export function PlaylistPicker({
           className="new-playlist-dialog"
           onClose={() => {
             setCreating(false);
+            made.current = null;
             returnFocus();
           }}
         >
@@ -181,13 +185,20 @@ export function PlaylistPicker({
               if (!name) return;
               setBusy(true);
               setError("");
-              void createPlaylist(name)
-                .then((p) => add(p.id))
+              const playlist = made.current
+                ? Promise.resolve(made.current)
+                : createPlaylist(name).then((p) => (made.current = p.id));
+              void playlist
+                .then((id) => add(id))
                 .then(() => {
                   dialog.current?.close();
                   notify("Playlist created and songs added");
                 })
                 .catch((e) => {
+                  // Already said in the notice area, with its Try again
+                  // into the playlist just made.
+                  if (e instanceof ReportedFailure)
+                    return dialog.current?.close();
                   if (!isUnconfirmed(e)) return setError(e.message);
                   // The playlist may have been made (#275): no second
                   // Create from here; the notice says to check first.

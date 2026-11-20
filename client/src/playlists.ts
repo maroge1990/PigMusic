@@ -1,4 +1,4 @@
-import { ApiError, api, currentSession } from "./api";
+import { ApiError, UNCONFIRMED_MESSAGE, api, currentSession } from "./api";
 import { notifyError, notifyWarning } from "./notices";
 import { batches } from "./limits";
 import { expectedSession, withSession } from "./sessionId";
@@ -12,12 +12,22 @@ export async function loadPlaylists(): Promise<Playlist[]> {
   ).playlists.filter((p) => !p.id.startsWith("pig-favourites:"));
 }
 
-export function createPlaylist(name: string) {
-  return api<Playlist>("/v1/playlists", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
+/** Makes a playlist. A request with no answer at all (the connection
+ * dropped) may have been saved, so it fails like a 504 (#275): unconfirmed,
+ * and open views read again to show whether it was. */
+export async function createPlaylist(name: string) {
+  try {
+    return await api<Playlist>("/v1/playlists", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+  } catch (e) {
+    // An answer, or a refusal before sending (no session): as it was.
+    if (e instanceof ApiError) throw e;
+    window.dispatchEvent(new Event("music-library-changed"));
+    throw new ApiError(UNCONFIRMED_MESSAGE, "unconfirmed", {}, "unconfirmed");
+  }
 }
 
 type Sent = { title?: string; artist?: string };

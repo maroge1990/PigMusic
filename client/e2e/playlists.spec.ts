@@ -414,3 +414,49 @@ test("an unconfirmed new playlist shows the refreshed list and keeps the name", 
   await create.click();
   await expect(dialog.getByLabel("Playlist name")).toHaveValue("Road trip");
 });
+
+// Codex, batch F (#275): the connection dropped after the server saved the
+// create; the dialog kept Create ready for a second copy.
+test("a new playlist whose answer is lost shows the refreshed list", async ({
+  page,
+}) => {
+  let creates = 0;
+  let saved = false;
+  await mockApi(page, {
+    answers: {
+      "/v1/playlists": (route) => {
+        if (route.request().method() !== "POST")
+          return route.fulfill({
+            json: {
+              playlists: saved
+                ? [{ id: "p1", name: "Road trip", track_count: 0 }]
+                : [],
+            },
+          });
+        creates++;
+        saved = true;
+        return route.abort("connectionreset");
+      },
+      "/v1/playlists/p1": (route) =>
+        route.fulfill({
+          json: { id: "p1", name: "Road trip", revision: 1, entries: [] },
+        }),
+    },
+  });
+  await page.goto("/#/library/playlists");
+  const create = page.getByRole("button", { name: "New playlist" });
+  await create.click();
+  const dialog = page.getByRole("dialog", { name: "New playlist" });
+  await dialog.getByLabel("Playlist name").fill("Road trip");
+  await dialog.getByRole("button", { name: "Create playlist" }).click();
+  await expect(page.locator(".notice-area")).toContainText(
+    "may or may not have been saved",
+  );
+  await expect(dialog).toBeHidden();
+  await expect(
+    page.locator(".album-card", { hasText: "Road trip" }),
+  ).toBeVisible();
+  expect(creates).toBe(1);
+  await create.click();
+  await expect(dialog.getByLabel("Playlist name")).toHaveValue("Road trip");
+});
