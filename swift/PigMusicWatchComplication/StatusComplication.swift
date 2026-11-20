@@ -29,7 +29,8 @@ struct StatusEntry: TimelineEntry {
 
 /// Reads what the Watch app wrote to the App Group. The app asks WidgetKit
 /// for a reload when that changes; the timeline also asks again every half
-/// hour in case a reload was held back.
+/// hour in case a reload was held back. A status that goes stale ("Can't
+/// reach your iPhone") gives way to the neutral "PigMusic" when it expires.
 struct StatusProvider: TimelineProvider {
   /// For the face gallery: everything there ("Ready to play").
   static let sample = WatchComplicationState(
@@ -48,14 +49,17 @@ struct StatusProvider: TimelineProvider {
     StatusEntry(date: Date(), state: Self.sample)
   }
   func getSnapshot(in context: Context, completion: @escaping (StatusEntry) -> Void) {
-    completion(StatusEntry(date: Date(), state: Self.load() ?? Self.sample))
+    let now = Date()
+    completion(StatusEntry(date: now, state: Self.load()?.shown(at: now) ?? Self.sample))
   }
   func getTimeline(in context: Context, completion: @escaping (Timeline<StatusEntry>) -> Void) {
     let now = Date()
-    completion(
-      Timeline(
-        entries: [StatusEntry(date: now, state: Self.load())],
-        policy: .after(now.addingTimeInterval(30 * 60))))
+    let state = Self.load()
+    var entries = [StatusEntry(date: now, state: state?.shown(at: now))]
+    if let expires = state?.expires, expires > now, state?.shown(at: now) != nil {
+      entries.append(StatusEntry(date: expires, state: nil))
+    }
+    completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(30 * 60))))
   }
 }
 

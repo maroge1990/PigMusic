@@ -166,3 +166,22 @@ def test_both_exports_say_whether_the_watch_is_being_woken():
     assert "checkComplications()" in body(model, "  func opened() {")
     send = body(model, "  func sendDiagnostics() {")
     assert send.index("checkComplications()") < send.index("wakeLog.summary()")
+
+
+def test_reachability_both_ways_redraws_and_a_stale_status_expires():
+    """Codex round 1 on batch J: losing the iPhone left the complication's
+    old status; and "Can't reach your iPhone" outlived the iPhone's return."""
+    link = LINK.read_text()
+    change = link.split("  nonisolated func sessionReachabilityDidChange(", 1)[1]
+    change = change.split("\n  }\n", 1)[0]
+    # Called on both transitions, before the reachable-only hook.
+    assert "self.onReachability?()\n      if reachable {" in change
+    model = MODEL.read_text()
+    hook = "link?.onReachability = { [weak self] in self?.updateComplication() }"
+    assert hook in model
+    widget = WIDGET.read_text()
+    timeline = widget.split("  func getTimeline(", 1)[1].split("\n  }\n", 1)[0]
+    assert "StatusEntry(date: now, state: state?.shown(at: now))" in timeline
+    assert "entries.append(StatusEntry(date: expires, state: nil))" in timeline
+    snapshot = widget.split("  func getSnapshot(", 1)[1].split("\n  }\n", 1)[0]
+    assert "Self.load()?.shown(at: now)" in snapshot

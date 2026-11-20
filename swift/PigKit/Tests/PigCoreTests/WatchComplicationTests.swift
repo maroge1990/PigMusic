@@ -79,6 +79,28 @@ struct WatchComplicationTests {
     #expect(WatchLibraryStatus.Headline.couldntSave(2).symbol == "exclamationmark.circle")
   }
 
+  /// Codex round 1 on batch J: "Can't reach your iPhone" stayed on the face
+  /// for hours after the iPhone came back. It now gives way to the neutral
+  /// "PigMusic"; statuses that only change when the app runs stay.
+  @Test func onlyTheReachabilityStatusExpires() {
+    let away = WatchComplicationState(
+      kind: .iPhoneAway, title: "Can't reach your iPhone", waiting: 3, updated: start)
+    #expect(away.expires == at(minutes: 30))
+    #expect(away.shown(at: at(minutes: 29)) == away)
+    #expect(away.shown(at: at(minutes: 30)) == nil)
+    #expect(away.shown(at: at(minutes: 600)) == nil)
+    // Worked out ahead of a clock since set back: not judged, not shown.
+    #expect(away.shown(at: at(minutes: -10)) == nil)
+    #expect(away.shown(at: at(minutes: -4)) == away)
+    // The others are as true hours later as when written.
+    for kind in [WatchComplicationState.Kind.ready, .arriving, .storageFull, .couldntSave] {
+      let state = WatchComplicationState(kind: kind, title: "t", waiting: 1, updated: start)
+      #expect(state.expires == nil)
+      #expect(state.shown(at: at(minutes: 3 * 24 * 60)) == state)
+      #expect(state.shown(at: at(minutes: -600)) == state)
+    }
+  }
+
   @Test func survivesTheAppGroupFile() throws {
     let saved = state(.arriving, waiting: 4, title: "Arriving from iPhone")
     #expect(WatchComplicationState.decode(try saved.encoded()) == saved)

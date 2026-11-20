@@ -23,6 +23,8 @@ import WatchConnectivity
   @ObservationIgnored var onMessage: (@MainActor (Data) async -> Void)?
   @ObservationIgnored var onRequest: (@MainActor (Data) async -> Data)?
   @ObservationIgnored var onActivated: (@MainActor () async -> Void)?
+  /// The iPhone came into or went out of reach (`reachable` already set).
+  @ObservationIgnored var onReachability: (@MainActor () -> Void)?
   @ObservationIgnored nonisolated let inbox: URL
   @ObservationIgnored private let session: WCSession?
   init(inbox: URL) throws {
@@ -259,6 +261,8 @@ import WatchConnectivity
       defer { self.deliveries.end() }
       self.reachable = reachable
       DiagnosticsLog.shared.record("link", "reachable=\(reachable)")
+      // Both ways: the Watch's complication says when the iPhone is out of reach.
+      self.onReachability?()
       if reachable { await self.onActivated?() }
     }
   }

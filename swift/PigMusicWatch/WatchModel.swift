@@ -395,6 +395,8 @@ import WidgetKit
         self?.receivedThisRun += 1
         self?.noteWake { $0.received() }
       }
+      // Out of reach or back: the complication's status follows (Codex round 1 on batch J).
+      link?.onReachability = { [weak self] in self?.updateComplication() }
       link?.onActivated = { [weak self] in
         // After an unexpected end, the phone gets the log without being asked.
         if let self, DiagnosticsLog.shared.previousRunEndedUnexpectedly, !self.sentCrashNotice {

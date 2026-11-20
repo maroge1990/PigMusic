@@ -74,6 +74,26 @@ public struct WatchComplicationState: Codable, Equatable, Sendable {
   public var badge: String? {
     kind != .ready && waiting > 0 ? "\(waiting)" : nil
   }
+  /// How long "Can't reach your iPhone" is shown after it was worked out.
+  public static let reachabilityAge: TimeInterval = 30 * 60
+  /// When this status stops being shown, falling back to the neutral
+  /// "PigMusic" (Codex round 1 on batch J); nil while it holds until the app
+  /// writes another. Only "Can't reach your iPhone" goes stale on its own:
+  /// the iPhone can come back while the Watch app is suspended and nobody
+  /// rewrites it. Every other status changes only when songs arrive, leave
+  /// or are turned away, and the app runs, and rewrites it, for each of
+  /// those; "3 waiting" stays true whether or not the iPhone is in reach.
+  public var expires: Date? {
+    kind == .iPhoneAway ? updated.addingTimeInterval(Self.reachabilityAge) : nil
+  }
+  /// This status if it may still be shown at `now`, else nil (neutral). One
+  /// that expires and was worked out more than the clock slack ahead of
+  /// `now` (a clock since set back) can't be judged, and isn't shown.
+  public func shown(at now: Date) -> WatchComplicationState? {
+    guard let expires else { return self }
+    if updated.timeIntervalSince(now) > WatchRefreshPlan.clockSlack { return nil }
+    return now < expires ? self : nil
+  }
   /// What changes what the complication shows (not the time it was worked out).
   public func shows(sameAs other: WatchComplicationState?) -> Bool {
     guard let other else { return false }
