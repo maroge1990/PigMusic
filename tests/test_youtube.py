@@ -666,3 +666,108 @@ def test_a_head_of_unknown_size_never_says_the_file_is_empty(tmp_path):
         assert reply.headers["content-type"] == "audio/mp4"
 
     asyncio.run(scenario())
+
+
+class Recorder:
+    def __init__(self):
+        self.events = []
+
+    def record(self, metric, label, outcome, ms=None, detail=None, at=None):
+        self.events.append((metric, label, outcome, detail))
+
+
+def test_a_no_match_records_what_each_source_found_and_why(tmp_path):
+    """#282: YouTube answered no match for 41 of 52 lookups and nothing said
+    why. Each source's no match keeps the query, the number of results and
+    the first few with the reason each was not the song; never who asked."""
+    rejected = [
+        {**ON_YOUTUBE, "video_id": "a" * 11, "title": "Other Song"},
+        {**ON_YOUTUBE, "video_id": "b" * 11, "album": "Live at Leeds"},
+        {**ON_YOUTUBE, "video_id": "c" * 11, "duration": None},
+        {**ON_YOUTUBE, "video_id": "d" * 11, "duration": 260},
+        {**ON_YOUTUBE, "video_id": "e" * 11, "channel": "Somebody Else"},
+    ]
+    youtube = FakeYouTube(rejected)
+    saavn = [{"channel": "Artist", "title": "Song", "album": "Album", "duration": ""}]
+    resolver = resolver_with(youtube, lambda *_: saavn, tmp_path)
+    resolver.performance = Recorder()
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            with pytest.raises(ValueError, match="No source has"):
+                await resolver.stream(client, SONG, "member")
+
+    asyncio.run(scenario())
+    misses = {e[1]: e[3] for e in resolver.performance.events if e[2] == "no match"}
+    assert set(misses) == {"jiosaavn", "youtube"}
+    found = json.loads(misses["youtube"])
+    assert found["query"] == "Artist Song" and found["seconds"] == 200
+    assert found["results"] == 5
+    # Every result is counted by reason, the near misses below the first few too.
+    assert found["reasons"] == {
+        "title": 1,
+        "version": 1,
+        "no length": 1,
+        "length": 1,
+        "artist": 1,
+    }
+    assert [(r["title"], r["seconds"], r["why"]) for r in found["top"]] == [
+        ("Other Song", 201, "title"),
+        ("Song", 201, "version"),
+        ("Song", None, "no length"),
+    ]
+    assert json.loads(misses["jiosaavn"])["top"][0]["why"] == "no length"
+    assert "member" not in misses["youtube"] + misses["jiosaavn"]
+
+
+def test_a_no_match_detail_is_whole_json_however_long_the_names(tmp_path):
+    import sqlite3
+
+    from server.performance import DETAIL_CHARS, Performance
+    from server.remote import no_match_detail
+
+    long = {**ON_YOUTUBE, "title": "Ş" * 500, "channel": "A" * 500, "album": "B" * 500}
+    text = no_match_detail({**SONG, "title": "T" * 500}, "Q" * 500, [long] * 10)
+    assert len(text) <= DETAIL_CHARS
+    value = json.loads(text)
+    assert value["results"] == 10 and len(value["top"]) == 3
+    counters = Performance(tmp_path)
+    counters.record("remote-source", "youtube", "no match", 1, text, at=time.time())
+    counters.flush()
+    with sqlite3.connect(counters.path) as conn:
+        (stored,) = conn.execute("SELECT detail FROM events").fetchone()
+    assert json.loads(stored) == value
+
+
+def test_the_reason_given_agrees_with_the_song_rule():
+    """`why` explains `acceptable`; it must never call a rejected result
+    matched, or a matched one rejected."""
+    from server.remote import acceptable, why
+
+    tracks = [
+        SONG,
+        {**SONG, "album": "Live at Leeds"},
+        {**SONG, "duration": None},
+        {**SONG, "explicit_edition": True},
+        {**SONG, "isrcs": ["GBAAA0000001"]},
+        {**SONG, "title": "Song (Remastered 2011)"},
+        {**SONG, "title": "Song (Slowed)"},
+    ]
+    candidates = [
+        ON_YOUTUBE,
+        {**ON_YOUTUBE, "album": "Other Album"},
+        {**ON_YOUTUBE, "album": "Live at Leeds"},
+        {**ON_YOUTUBE, "title": "Song (Remix)"},
+        {**ON_YOUTUBE, "title": "Song (Slowed)"},
+        {**ON_YOUTUBE, "title": "Song - 2011 Remaster"},
+        {**ON_YOUTUBE, "channel": "Artist, Guest"},
+        {**ON_YOUTUBE, "channel": "Other"},
+        {**ON_YOUTUBE, "duration": 230},
+        {**ON_YOUTUBE, "duration": None},
+        {**ON_YOUTUBE, "isrc": "GBAAA0000002"},
+        {**ON_YOUTUBE, "isrc": "GBAAA0000001", "album": "Other Album"},
+    ]
+    for track in tracks:
+        for c in candidates:
+            reason = why(track, c)
+            assert (reason == "matched") == acceptable(track, c), (track, c, reason)

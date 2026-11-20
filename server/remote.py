@@ -12,7 +12,7 @@ import secrets
 import shutil
 import threading
 import time
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -22,11 +22,19 @@ from starlette.responses import Response, StreamingResponse
 from .request_timing import add_phase, phase
 from .library import normalise
 from .providers.process import run_checked
-from .downloader import matches
-from .matching import album_title, flavour, recording_kind
+from .downloader import EDITION_WORDS, VERSION_WORDS, duration, folded, matches
+from .matching import (
+    ACQUISITION_TOLERANCE,
+    album_title,
+    flavour,
+    primary_artist,
+    recording_kind,
+    title_key,
+)
+from .performance import DETAIL_CHARS
 from .providers.contracts import ProviderError
 from .vendor.jiosaavn import search_jiosaavn
-from .youtube import YouTubeStream
+from .youtube import YouTubeStream, search_query
 
 log = logging.getLogger("pig_music.remote")
 
@@ -137,6 +145,137 @@ def acceptable(track, c):
         )
         and (not track.get("isrcs") or not c.get("isrc") or c["isrc"] in track["isrcs"])
     )
+
+
+# Why a search result was not the requested song, in the order the song rule
+# checks; a later reason means the result came closer (#282).
+REASONS = (
+    "ids",
+    "artist",
+    "title",
+    "version",
+    "no length",
+    "length",
+    "album kind",
+    "altered",
+    "album",
+    "matched",
+)
+# A no-match event's detail: the query, how many results came back and the
+# first few, cut to a size the events table keeps whole.
+DETAIL_RESULTS = 3
+
+
+def why(track, c):
+    """The first part of `acceptable` a search result fails, as one of
+    REASONS ("matched" when it passes). Diagnostics only: `acceptable`
+    decides, and a test keeps the two in step."""
+    if not matches(track, c):
+        for key in ("musicbrainz_recording_id", "musicbrainz_release_id"):
+            if track.get(key) and c.get(key) and track[key] != c[key]:
+                return "ids"
+
+        def codes(value):
+            raw = value.get("isrcs") or value.get("isrc") or []
+            raw = [raw] if isinstance(raw, str) else raw
+            return {str(code).strip().upper() for code in raw if code}
+
+        if codes(track) and codes(c) and codes(track).isdisjoint(codes(c)):
+            return "ids"
+        strict = track.get("explicit_edition")
+        if strict:
+            if folded(c.get("channel")) != folded(track["artist"]):
+                return "artist"
+            if folded(c.get("title")) != folded(track["title"]):
+                return "title"
+        else:
+            if primary_artist(c.get("channel")) != primary_artist(track["artist"]):
+                return "artist"
+            if title_key(c.get("title")) != title_key(track["title"]):
+                return "title"
+        versions = VERSION_WORDS if strict else VERSION_WORDS - EDITION_WORDS
+        wanted = set(folded(track["title"] + " " + track["album"]).split()) | (
+            set() if strict else set(recording_kind(track))
+        )
+        named = folded(c.get("title", "") + " " + c.get("album", "")).split()
+        if wanted & versions != set(named) & versions:
+            return "version"
+        if not duration(c.get("duration")):
+            return "no length"
+        expected, actual = duration(track.get("duration")), duration(c.get("duration"))
+        if expected and abs(actual - expected) > ACQUISITION_TOLERANCE:
+            return "length"
+        return "album"  # An explicit edition's other album (Monochrome).
+    if flavour(c.get("album")) != recording_kind(track):
+        return "album kind"
+    if altered(c.get("title"), c.get("album")) != altered(
+        track.get("title"), track.get("album")
+    ):
+        return "altered"
+    # Only the album is left: a live, altered or unknown-length song, or an
+    # explicit edition, must be the requested album (or carry its ISRC).
+    return "matched" if acceptable(track, c) else "album"
+
+
+def no_match_detail(track, query, results):
+    """What a source's search gave for a song it had no match for, for the
+    performance event (#282): the query, the number of results and the first
+    few with the reason each was not the song. Song names only, never who
+    asked; JSON, always whole within DETAIL_CHARS."""
+
+    def cut(text, size):
+        text = str(text or "")
+        return text if len(text) <= size else text[: size - 1] + "…"
+
+    def seconds(value):
+        found = duration(value)
+        return round(found) if found else None
+
+    def reason(c):
+        try:
+            return why(track, c)
+        except Exception:  # Diagnostics never stop a lookup.
+            return "unknown"
+
+    reasons = [reason(c) for c in results]
+    shown = [
+        {
+            "title": cut(c.get("title"), 60),
+            "artist": cut(c.get("channel") or c.get("artist"), 40),
+            "album": cut(c.get("album"), 40),
+            "seconds": seconds(c.get("duration")),
+            "why": why,
+        }
+        for c, why in zip(results[:DETAIL_RESULTS], reasons)
+    ]
+    value = {
+        "query": cut(query, 120),
+        "seconds": seconds(track.get("duration")),
+        "results": len(results),
+        # Every result's reason, counted: a near miss below the first few.
+        "reasons": dict(Counter(reasons)),
+        "top": shown,
+    }
+    text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    while len(text) > DETAIL_CHARS and value["top"]:
+        value["top"].pop()
+        text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return text
+
+
+class NoMatch(ValueError):
+    """A source searched and had no match; `detail` says what it found."""
+
+    def __init__(self, message, detail=None):
+        super().__init__(message)
+        self.detail = detail
+
+
+def missed(exc):
+    """The detail for a "no match" step: what the search found, or, when a
+    source counted as no match without searching to the end, why."""
+    detail = getattr(exc, "detail", None)
+    return detail or json.dumps({"error": type(exc).__name__})
 
 
 class Resolving:
@@ -375,11 +514,13 @@ class RemoteAudio:
         # Where the time went, for the server log: playback waits for all of it.
         steps = []
 
-        def step(name, outcome, since):
+        def step(name, outcome, since, detail=None):
             seconds = time.monotonic() - since
             steps.append(f"{name} {outcome} {seconds:.1f} s")
             if self.performance is not None:
-                self.performance.record("remote-source", name, outcome, seconds * 1000)
+                self.performance.record(
+                    "remote-source", name, outcome, seconds * 1000, detail
+                )
             # The same steps in Server-Timing: "zvu4no-found", "jiosaavn-miss".
             outcome = {
                 "no match": "miss",
@@ -410,7 +551,7 @@ class RemoteAudio:
             step("jiosaavn", "found", began)
             self.timing(track, "jiosaavn", began, steps)
             return {"url": url, "source": "jiosaavn"}
-        step("jiosaavn", "no match", began)
+        step("jiosaavn", "no match", began, missed(failure))
         # Only a song every source said it does not have is a miss (404,
         # remembered long); a timeout, a provider error or a failed transfer
         # leaves it uncertain (503, remembered briefly).
@@ -421,8 +562,8 @@ class RemoteAudio:
             except ProviderError:  # Refused, down or answering oddly.
                 step("youtube", "failed", began)
                 uncertain = True
-            except ValueError:
-                step("youtube", "no match", began)
+            except ValueError as exc:
+                step("youtube", "no match", began, missed(exc))
             except (TimeoutError, httpx.HTTPError, OSError):
                 step("youtube", "too slow", began)
                 uncertain = True
@@ -764,7 +905,10 @@ class RemoteAudio:
             songs = await self.youtube.songs(track, speculative)
             found = [c for c in songs if acceptable(track, c)]
             if not found:
-                raise ValueError("YouTube has no match for this song.")
+                raise NoMatch(
+                    "YouTube has no match for this song.",
+                    no_match_detail(track, search_query(track), songs),
+                )
             wanted = album_title(track.get("album") or "", track.get("artist"))
             # The same album first, then a fixed order: the same song picks
             # the same video every time.
@@ -845,13 +989,15 @@ class RemoteAudio:
                 self.cache[key] = (cached[0], cached[1], self.clock())
                 return cached[1]
         if self.unmatched.get(key, 0) > time.monotonic():
-            raise ValueError("JioSaavn has no match for this song.")
+            raise NoMatch(
+                "JioSaavn has no match for this song.",
+                json.dumps({"remembered": True}),
+            )
         async with slots:
+            query = search_query(track)
             try:
                 results = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        self.search, track["artist"] + " " + track["title"], 40
-                    ),
+                    asyncio.to_thread(self.search, query, 40),
                     timeout=5,
                 )
             except RuntimeError as exc:
@@ -870,8 +1016,9 @@ class RemoteAudio:
                     self.unmatched = {
                         k: v for k, v in self.unmatched.items() if v > now
                     }
-                raise ValueError(
-                    "No remote recording matched this song. Downloading remains available."
+                raise NoMatch(
+                    "No remote recording matched this song. Downloading remains available.",
+                    no_match_detail(track, query, results),
                 )
             # Several copies of the recording: the same album first (without
             # " - Single" and edition words), then a matching ISRC, then a

@@ -6,7 +6,9 @@ waits on the main database's locks, never tells clients that library data
 changed, and a rollback to an older release needs no schema step. They are
 written in batches off the event loop, and only after something happened:
 an idle server does no counting work. Nothing personal is kept: no person,
-no song title, only the kind of event, its source and its time.
+only the kind of event, its source and its time. A remote source's "no
+match" keeps what its search found (#282): the song searched for and the
+first few results, never who asked.
 """
 
 import asyncio
@@ -26,6 +28,8 @@ FLUSH_SECONDS = 30
 # The oldest are dropped first if writing falls this far behind.
 PENDING_LIMIT = 5000
 PRUNE_SECONDS = 3600
+# An event's detail is cut to this many characters.
+DETAIL_CHARS = 1000
 
 # The targets in #191.
 TARGETS = {
@@ -75,7 +79,7 @@ class Performance:
             str(label),
             str(outcome),
             None if ms is None else max(0, int(round(ms))),
-            None if detail is None else str(detail)[:200],
+            None if detail is None else str(detail)[:DETAIL_CHARS],
         )
         with self.lock:
             first = not self.pending
