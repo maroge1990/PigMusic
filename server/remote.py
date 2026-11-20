@@ -174,65 +174,101 @@ def why(track, c):
     return rejection(track, c) or "matched"
 
 
+# What a no match records when its detail could not be made (#282).
+UNRECORDED = '{"unrecorded":true}'
+# A length beyond this is no length (seconds; a day).
+LONGEST = 86400
+
+
+def text_of(value):
+    """Any value as text SQLite can store: lone surrogates and other
+    unencodable characters become "?"."""
+    text = str(value if value is not None else "")
+    return text.encode("utf-8", "replace").decode("utf-8")
+
+
 def no_match_detail(track, query, results):
     """What a source's search gave for a song it had no match for, for the
-    performance event (#282): the query, the number of results and the first
-    few with the reason each was not the song. Song names only, never who
-    asked; JSON, always whole within DETAIL_CHARS."""
+    performance event (#282): the query, the number of results, every
+    result's reason counted and the first few. Song names only, never who
+    asked; JSON, always whole within DETAIL_CHARS. Best effort: anything it
+    cannot read becomes null or UNRECORDED, never an error."""
+    try:
 
-    def cut(text, size):
-        text = str(text or "")
-        return text if len(text) <= size else text[: size - 1] + "…"
+        def cut(value, size):
+            value = text_of(value)
+            return value if len(value) <= size else value[: size - 1] + "…"
 
-    def seconds(value):
-        found = duration(value)
-        return round(found) if found else None
+        def seconds(value):
+            try:
+                found = duration(value)
+                return round(found) if 0 < found <= LONGEST else None
+            except Exception:
+                return None
 
-    def reason(c):
-        try:
-            return why(track, c)
-        except Exception:  # Diagnostics never stop a lookup.
-            return "unknown"
+        def reason(c):
+            try:
+                return why(track, c)
+            except Exception:
+                return "unknown"
 
-    reasons = [reason(c) for c in results]
-    shown = [
-        {
-            "title": cut(c.get("title"), 60),
-            "artist": cut(c.get("channel") or c.get("artist"), 40),
-            "album": cut(c.get("album"), 40),
-            "seconds": seconds(c.get("duration")),
-            "why": why,
+        reasons = [reason(c) for c in results]
+        value = {
+            "query": cut(query, 120),
+            "seconds": seconds(track.get("duration")),
+            "results": len(results),
+            # Every result's reason, counted: a near miss below the first few.
+            "reasons": dict(Counter(reasons)),
+            "top": [
+                {
+                    "title": cut(c.get("title"), 60),
+                    "artist": cut(c.get("channel") or c.get("artist"), 40),
+                    "album": cut(c.get("album"), 40),
+                    "seconds": seconds(c.get("duration")),
+                    "why": why,
+                }
+                for c, why in zip(results[:DETAIL_RESULTS], reasons)
+            ],
         }
-        for c, why in zip(results[:DETAIL_RESULTS], reasons)
-    ]
-    value = {
-        "query": cut(query, 120),
-        "seconds": seconds(track.get("duration")),
-        "results": len(results),
-        # Every result's reason, counted: a near miss below the first few.
-        "reasons": dict(Counter(reasons)),
-        "top": shown,
-    }
-    text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-    while len(text) > DETAIL_CHARS and value["top"]:
-        value["top"].pop()
-        text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-    return text
+
+        def encoded():
+            return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+        text = encoded()
+        while len(text) > DETAIL_CHARS and value["top"]:
+            value["top"].pop()
+            text = encoded()
+        if len(text) > DETAIL_CHARS:
+            value["query"] = cut(query, 40)
+            text = encoded()
+        return text if len(text) <= DETAIL_CHARS else UNRECORDED
+    except Exception:
+        return UNRECORDED
 
 
 class NoMatch(ValueError):
-    """A source searched and had no match; `detail` says what it found."""
+    """A source searched and had no match. It keeps what the search found;
+    the detail is made later, by `missed`, so making it can never change
+    what the lookup answers."""
 
-    def __init__(self, message, detail=None):
+    def __init__(self, message, track=None, query=None, results=None, detail=None):
         super().__init__(message)
+        self.searched = (track, query, results) if results is not None else None
         self.detail = detail
 
 
 def missed(exc):
     """The detail for a "no match" step: what the search found, or, when a
-    source counted as no match without searching to the end, why."""
-    detail = getattr(exc, "detail", None)
-    return detail or json.dumps({"error": type(exc).__name__})
+    source counted as no match without searching to the end, why. Never
+    raises."""
+    try:
+        if getattr(exc, "detail", None):
+            return text_of(exc.detail)[:DETAIL_CHARS]
+        if getattr(exc, "searched", None):
+            return no_match_detail(*exc.searched)
+        return json.dumps({"error": type(exc).__name__})
+    except Exception:
+        return UNRECORDED
 
 
 class Resolving:
@@ -475,9 +511,12 @@ class RemoteAudio:
             seconds = time.monotonic() - since
             steps.append(f"{name} {outcome} {seconds:.1f} s")
             if self.performance is not None:
-                self.performance.record(
-                    "remote-source", name, outcome, seconds * 1000, detail
-                )
+                try:
+                    self.performance.record(
+                        "remote-source", name, outcome, seconds * 1000, detail
+                    )
+                except Exception:  # Counting never changes a lookup.
+                    log.exception("Recording a remote source step failed")
             # The same steps in Server-Timing: "zvu4no-found", "jiosaavn-miss".
             outcome = {
                 "no match": "miss",
@@ -864,7 +903,9 @@ class RemoteAudio:
             if not found:
                 raise NoMatch(
                     "YouTube has no match for this song.",
-                    no_match_detail(track, search_query(track), songs),
+                    track,
+                    search_query(track),
+                    songs,
                 )
             wanted = album_title(track.get("album") or "", track.get("artist"))
             # The same album first, then a fixed order: the same song picks
@@ -948,7 +989,7 @@ class RemoteAudio:
         if self.unmatched.get(key, 0) > time.monotonic():
             raise NoMatch(
                 "JioSaavn has no match for this song.",
-                json.dumps({"remembered": True}),
+                detail=json.dumps({"remembered": True}),
             )
         async with slots:
             query = search_query(track)
@@ -975,7 +1016,9 @@ class RemoteAudio:
                     }
                 raise NoMatch(
                     "No remote recording matched this song. Downloading remains available.",
-                    no_match_detail(track, query, results),
+                    track,
+                    query,
+                    results,
                 )
             # Several copies of the recording: the same album first (without
             # " - Single" and edition words), then a matching ISRC, then a
