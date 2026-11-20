@@ -460,3 +460,53 @@ test("a new playlist whose answer is lost shows the refreshed list", async ({
   await create.click();
   await expect(dialog.getByLabel("Playlist name")).toHaveValue("Road trip");
 });
+
+// Codex, batch F (#275): the read after a lost create joined a list read
+// already on its way from before the create, so the saved playlist
+// didn't show.
+test("the list read after a lost create is a new read", async ({ page }) => {
+  let saved = false;
+  let holdReads = false;
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  await mockApi(page, {
+    answers: {
+      "/v1/playlists": async (route) => {
+        if (route.request().method() === "POST") {
+          saved = true;
+          return route.abort("connectionreset");
+        }
+        const playlists = saved
+          ? [{ id: "p1", name: "Road trip", track_count: 0 }]
+          : [];
+        if (holdReads && !saved) await held;
+        return route.fulfill({ json: { playlists } });
+      },
+      "/v1/playlists/p1": (route) =>
+        route.fulfill({
+          json: { id: "p1", name: "Road trip", revision: 1, entries: [] },
+        }),
+    },
+  });
+  await page.goto("/#/library/playlists");
+  const create = page.getByRole("button", { name: "New playlist" });
+  await expect(create).toBeVisible();
+  // A list read from before the create is still on its way.
+  holdReads = true;
+  const before = page.waitForRequest(
+    (r) => r.url().endsWith("/api/v1/playlists") && r.method() === "GET",
+  );
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("music-library-changed")),
+  );
+  await before;
+  await create.click();
+  const dialog = page.getByRole("dialog", { name: "New playlist" });
+  await dialog.getByLabel("Playlist name").fill("Road trip");
+  await dialog.getByRole("button", { name: "Create playlist" }).click();
+  await expect(dialog).toBeHidden();
+  release();
+  await expect(
+    page.locator(".album-card", { hasText: "Road trip" }),
+  ).toBeVisible();
+});

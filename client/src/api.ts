@@ -135,6 +135,13 @@ export async function apiFetch(
   return (await read).clone();
 }
 
+/** A write whose answer was lost may have been saved: reads started before
+ * it are not joined again, so the next read shows whether it was (#275). */
+export function forgetReads() {
+  reads.clear();
+  libraryRead = undefined;
+}
+
 /** POSTs that only read: starting playback or checking library membership
  * must not throw away pre-cached pages. */
 function readOnlyPost(path: string, options?: RequestInit) {
