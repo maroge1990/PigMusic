@@ -76,18 +76,11 @@ public struct FavouriteStates: Sendable {
     }
   }
   /// Whether the Favourites playlist this iPhone's library holds lists the
-  /// song (#284), by the server's own test (`favourite`, `same_song`): the
-  /// same artist, title, album and album artist, no conflicting release or
-  /// recording id, lengths within 5 s. Nil while the library holds no
-  /// Favourites playlist with its songs: the state isn't known here.
+  /// song (#284), by the server's own test (FavouriteMatch). Nil while the
+  /// library holds no Favourites playlist with its songs: the state isn't
+  /// known here.
   public static func listed(_ track: Track, in playlists: [Playlist]) -> Bool? {
-    guard let entries = playlists.first(where: { $0.favourites == true })?.entries else {
-      return nil
-    }
-    // The server's test has no kind of recording beyond the album's words.
-    var song = track
-    song.recordingKind = nil
-    return entries.contains { SongIdentity.sameEdition($0.entryTrack, song) }
+    FavouriteMatch.Index(playlists)?.contains(track)
   }
   /// A song's star or menu is shown: later syncs keep its state current.
   public mutating func follow(_ track: Track) { followed[track.id] = track }
@@ -98,9 +91,10 @@ public struct FavouriteStates: Sendable {
   /// started before the sync no longer counts. Nothing changes while the
   /// library holds no Favourites playlist with its songs.
   public mutating func synced(_ playlists: [Playlist], editWaiting: (String) -> Bool) {
+    // Indexed once per sync: every song shown is looked up in it.
+    guard let index = FavouriteMatch.Index(playlists) else { return }
     for (id, track) in followed where !editWaiting(id) {
-      guard let listed = Self.listed(track, in: playlists) else { return }
-      change(id, listed)
+      change(id, index.contains(track))
     }
   }
   /// A refused save settled (#212): the newest tap still waiting, or none,

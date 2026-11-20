@@ -1,0 +1,149 @@
+{
+  "about": "Pairs of songs and whether the server's favourite test (server/matching.py same_song) takes them for the same song. tests/test_favourite_matching.py checks them against the server; swift/PigKit/Tests/PigCoreTests/FavouriteMatchTests.swift against the iPhone's FavouriteMatch.",
+  "pairs": [
+    {
+      "note": "identical",
+      "same": true,
+      "left": {"id": "a", "title": "Open Road", "artist": "The Orchard", "album": "Sunrise"},
+      "right": {"id": "b", "title": "Open Road", "artist": "The Orchard", "album": "Sunrise"}
+    },
+    {
+      "note": "case and punctuation are not words",
+      "same": true,
+      "left": {"id": "a", "title": "Don't Stop!", "artist": "AC/DC", "album": "Live, Loud"},
+      "right": {"id": "b", "title": "don t stop", "artist": "ac dc", "album": "LIVE LOUD"}
+    },
+    {
+      "note": "Codex: an underscore is part of a word, so Track_A is not Track A",
+      "same": false,
+      "left": {"id": "a", "title": "Track_A", "artist": "Artist", "album": "Album"},
+      "right": {"id": "b", "title": "Track A", "artist": "Artist", "album": "Album"}
+    },
+    {
+      "note": "Codex: case folding makes Maße and Masse one word",
+      "same": true,
+      "left": {"id": "a", "title": "Maße", "artist": "Artist", "album": "Album"},
+      "right": {"id": "b", "title": "MASSE", "artist": "Artist", "album": "Album"}
+    },
+    {
+      "note": "accents are kept: Café is not Cafe",
+      "same": false,
+      "left": {"id": "a", "title": "Café", "artist": "Artist", "album": "Album"},
+      "right": {"id": "b", "title": "Cafe", "artist": "Artist", "album": "Album"}
+    },
+    {
+      "note": "a composed and a decomposed accent are one (NFKC)",
+      "same": true,
+      "left": {"id": "a", "title": "Café", "artist": "Artist", "album": "Album"},
+      "right": {"id": "b", "title": "Café", "artist": "Artist", "album": "Album"}
+    },
+    {
+      "note": "compatibility forms fold (NFKC): a ligature and full-width letters",
+      "same": true,
+      "left": {"id": "a", "title": "ﬁre", "artist": "ＡＢＣ", "album": "Album"},
+      "right": {"id": "b", "title": "Fire", "artist": "abc", "album": "Album"}
+    },
+    {
+      "note": "Greek final sigma folds like sigma",
+      "same": true,
+      "left": {"id": "a", "title": "ΟΔΟΣ", "artist": "Artist", "album": "Album"},
+      "right": {"id": "b", "title": "οδος", "artist": "Artist", "album": "Album"}
+    },
+    {
+      "note": "CJK titles are words of their own",
+      "same": true,
+      "left": {"id": "a", "title": "夜に駆ける", "artist": "YOASOBI", "album": "THE BOOK"},
+      "right": {"id": "b", "title": "夜に駆ける", "artist": "yoasobi", "album": "The Book"}
+    },
+    {
+      "note": "different CJK titles",
+      "same": false,
+      "left": {"id": "a", "title": "夜に駆ける", "artist": "YOASOBI", "album": "THE BOOK"},
+      "right": {"id": "b", "title": "群青", "artist": "YOASOBI", "album": "THE BOOK"}
+    },
+    {
+      "note": "an empty album artist is the artist",
+      "same": true,
+      "left": {"id": "a", "title": "Song", "artist": "Artist", "album": "Album", "album_artist": ""},
+      "right": {"id": "b", "title": "Song", "artist": "Artist", "album": "Album", "album_artist": "Artist"}
+    },
+    {
+      "note": "a missing album artist is the artist",
+      "same": true,
+      "left": {"id": "a", "title": "Song", "artist": "Artist", "album": "Album"},
+      "right": {"id": "b", "title": "Song", "artist": "Artist", "album": "Album", "album_artist": "artist"}
+    },
+    {
+      "note": "another album artist is another context",
+      "same": false,
+      "left": {"id": "a", "title": "Song", "artist": "Artist", "album": "Hits", "album_artist": "Various Artists"},
+      "right": {"id": "b", "title": "Song", "artist": "Artist", "album": "Hits"}
+    },
+    {
+      "note": "feat. in the title is part of it for the favourite test",
+      "same": false,
+      "left": {"id": "a", "title": "Song (feat. Guest)", "artist": "Artist", "album": "Album"},
+      "right": {"id": "b", "title": "Song", "artist": "Artist", "album": "Album"}
+    },
+    {
+      "note": "feat. and ft. are different words",
+      "same": false,
+      "left": {"id": "a", "title": "Song", "artist": "Artist feat. Guest", "album": "Album"},
+      "right": {"id": "b", "title": "Song", "artist": "Artist ft. Guest", "album": "Album"}
+    },
+    {
+      "note": "the same song on another album is not the favourite",
+      "same": false,
+      "left": {"id": "a", "title": "Song", "artist": "Artist", "album": "Album"},
+      "right": {"id": "b", "title": "Song", "artist": "Artist", "album": "Album (Deluxe)"}
+    },
+    {
+      "note": "lengths within 5 s",
+      "same": true,
+      "left": {"id": "a", "title": "Song", "artist": "Artist", "album": "Album", "duration": 200},
+      "right": {"id": "b", "title": "Song", "artist": "Artist", "album": "Album", "duration": 205}
+    },
+    {
+      "note": "lengths more than 5 s apart",
+      "same": false,
+      "left": {"id": "a", "title": "Song", "artist": "Artist", "album": "Album", "duration": 200},
+      "right": {"id": "b", "title": "Song", "artist": "Artist", "album": "Album", "duration": 205.5}
+    },
+    {
+      "note": "a length of 0 is no length",
+      "same": true,
+      "left": {"id": "a", "title": "Song", "artist": "Artist", "album": "Album", "duration": 0},
+      "right": {"id": "b", "title": "Song", "artist": "Artist", "album": "Album", "duration": 300}
+    },
+    {
+      "note": "conflicting recording ids",
+      "same": false,
+      "left": {"id": "a", "title": "Song", "artist": "Artist", "album": "Album", "musicbrainz_recording_id": "11111111-1111-1111-1111-111111111111"},
+      "right": {"id": "b", "title": "Song", "artist": "Artist", "album": "Album", "musicbrainz_recording_id": "22222222-2222-2222-2222-222222222222"}
+    },
+    {
+      "note": "a release id on one side only",
+      "same": true,
+      "left": {"id": "a", "title": "Song", "artist": "Artist", "album": "Album", "musicbrainz_release_id": "33333333-3333-3333-3333-333333333333"},
+      "right": {"id": "b", "title": "Song", "artist": "Artist", "album": "Album"}
+    },
+    {
+      "note": "a live album is still the same context when the words match",
+      "same": true,
+      "left": {"id": "a", "title": "Song", "artist": "Artist", "album": "Live at Leeds"},
+      "right": {"id": "b", "title": "Song", "artist": "Artist", "album": "live at leeds"}
+    },
+    {
+      "note": "a combining mark that doesn't compose splits a word, on both sides alike",
+      "same": true,
+      "left": {"id": "a", "title": "İstanbul", "artist": "Artist", "album": "Album"},
+      "right": {"id": "b", "title": "i̇stanbul", "artist": "Artist", "album": "Album"}
+    },
+    {
+      "note": "digits and letters of other scripts are words",
+      "same": false,
+      "left": {"id": "a", "title": "Song ٣", "artist": "Artist", "album": "Album"},
+      "right": {"id": "b", "title": "Song", "artist": "Artist", "album": "Album"}
+    }
+  ]
+}
