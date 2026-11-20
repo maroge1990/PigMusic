@@ -138,6 +138,9 @@ class QualityPreference(BaseModel):
 
 class PlaylistName(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+    # A UUID kept for every try of one create: a try after one whose answer
+    # was lost returns the playlist that one made (#288).
+    operation_id: str | None = Field(default=None, min_length=36, max_length=36)
 
 
 class PlaylistEdit(BaseModel):
@@ -500,7 +503,11 @@ def personal_router(store, artist_jobs, recovery, mixes=None):
     @router.post("/playlists", response_model=PlaylistDTO)
     async def create(body: PlaylistName, request: Request):
         return playlist_dto(
-            await run(Playlists(store, identity(request)).create, body.name)
+            await run(
+                Playlists(store, identity(request)).create,
+                body.name,
+                body.operation_id,
+            )
         )
 
     @router.get(

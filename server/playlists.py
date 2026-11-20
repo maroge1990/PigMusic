@@ -193,10 +193,20 @@ class Playlists:
         return self.store.migration()
 
     @coordinated
-    def create(self, name):
+    def create(self, name, operation_id=None):
+        """Makes a playlist. With `operation_id` (a UUID the client keeps for
+        every try of one create), a try after one whose answer was lost
+        returns the playlist that one made instead of a second (#288). The
+        key is kept in the playlist's own payload, so it lasts as long as the
+        playlist and only ever matches this person's."""
         name = name.strip()
         if not name or len(name) > 100:
             raise ValueError("Choose a playlist name up to 100 characters.")
+        if operation_id is not None:
+            try:
+                operation_id = str(uuid.UUID(operation_id))
+            except ValueError:
+                raise ValueError("A create identifier must be a UUID.")
         identity = str(uuid.uuid4())
         payload = {
             "id": identity,
@@ -205,15 +215,29 @@ class Playlists:
             "imported_at": datetime.now(timezone.utc).isoformat(),
             "source": "pig-music",
         }
+        if operation_id:
+            payload["create_operation_id"] = operation_id
+        clause, params = self.clause()
         with self.store.connect() as conn:
-            conn.execute(
-                "INSERT INTO playlists(id,payload,owner_id) VALUES (?,?,?)",
-                (identity, json.dumps(payload), self.owner()),
-            )
-            if self.owner():
-                from .user_library import bump
+            conn.execute("BEGIN IMMEDIATE")
+            if operation_id:
+                made = conn.execute(
+                    "SELECT id FROM playlists WHERE"
+                    " json_extract(payload,'$.create_operation_id')=?" + clause,
+                    (operation_id, *params),
+                ).fetchone()
+                if made:
+                    # Made by an earlier try: answered as if made now.
+                    identity, payload = made[0], None
+            if payload is not None:
+                conn.execute(
+                    "INSERT INTO playlists(id,payload,owner_id) VALUES (?,?,?)",
+                    (identity, json.dumps(payload), self.owner()),
+                )
+                if self.owner():
+                    from .user_library import bump
 
-                bump(conn, self.owner())
+                    bump(conn, self.owner())
         return self.detail(identity)
 
     def membership(self, track):
