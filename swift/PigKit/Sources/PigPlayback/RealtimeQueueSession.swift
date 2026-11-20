@@ -672,6 +672,14 @@ public enum PlaybackSeek {
     // Removed by an edit the stream has not answered yet: shown as it was.
     guard let index = found else { return heard }
     let occurrence = marker.occurrenceID ?? entry.id
+    if occurrence != entry.id {
+      // A repeated listening has its own id, which the apps give its queue
+      // entry when it is shown; the session's lists take it too, so their
+      // next edit is recognised (Codex round 1 on batch L).
+      let renewed = PlaybackOccurrence(track: entry.track, id: occurrence)
+      items[index] = renewed
+      if !streamItems.isEmpty { streamItems[marker.index] = renewed }
+    }
     snapshot.index = index
     snapshot.occurrenceID = occurrence
     snapshot.duration = Double(marker.durationFrames) / rate

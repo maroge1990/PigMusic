@@ -447,7 +447,11 @@ public actor QueuePCMStream {
         mixed += count
         return emit(outgoing)
       }
-      guard let followingIndex = incoming?.index else { throw AudioPipelineFailure.stalled }
+      guard let following = incoming else { throw AudioPipelineFailure.stalled }
+      let followingIndex = following.index
+      // A repeated listening's own id becomes its queue entry's, as the apps
+      // and the session record it, so later edits match (Codex round 1 on batch L).
+      items[followingIndex] = following.occurrence
       incoming = nil
       let old = lease
       lease = incomingLease

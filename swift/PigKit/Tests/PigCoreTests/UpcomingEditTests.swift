@@ -582,6 +582,54 @@ private func eventually(_ condition: @Sendable () async -> Bool) async throws {
     #expect(await sources.active.isEmpty)
   }
 
+  enum Repeated: String, CaseIterable, Sendable { case one, allWrapped }
+  /// After a song repeats, the iPhone's queue holds the new listening's id
+  /// (PlayerController.accept renews it from each snapshot). An edit made
+  /// from that queue still reaches the engine, with no stop (Codex round 1
+  /// on batch L: it was dropped, so a removed song still played).
+  @Test(arguments: Repeated.allCases) @MainActor
+  func editsAfterASongRepeatsStillReachTheEngine(_ repeated: Repeated) async throws {
+    let root = try editRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let rate = 48000.0
+    let (session, output, sources, items) = try start(["a", "b", "c"], rate: rate, root: root)
+    // The phone's queue, kept as PlayerController.accept keeps it.
+    var queue = PlaybackQueue()
+    queue.replace(items.map(\.track))
+    for (index, item) in items.enumerated() { queue.renewOccurrence(at: index, id: item.id) }
+    session.onUpdate = { snapshot in
+      queue.select(index: snapshot.index)
+      if let id = snapshot.occurrenceID { queue.renewOccurrence(at: snapshot.index, id: id) }
+    }
+    try await waitUntil { session.snapshot.state == .playing }
+    session.setRepeatMode(repeated == .one ? .one : .all)
+    // Play until "a" is heard again, as a new listening.
+    let deadline = ContinuousClock.now + .seconds(20)
+    while !(session.snapshot.index == 0 && session.snapshot.occurrenceID != items[0].id
+      && session.snapshot.elapsed > 0.05)
+    {
+      guard ContinuousClock.now < deadline else { throw AudioPipelineFailure.stalled }
+      output.consume()
+      try await Task.sleep(for: .milliseconds(1))
+    }
+    #expect(queue.items[0].id == session.snapshot.occurrenceID)
+    let stops = output.stops
+    let mark = output.captured.count
+    queue.removeUpcoming(items[1].id)
+    session.updateUpcoming(queue.items)
+    session.setRepeatMode(.off)
+    try await playToEnd(session, output)
+    #expect(output.stops == stops)
+    // The rest of "a", then "c": "b" is never heard again.
+    let heard = output.captured.dropFirst(mark).map { decodeRamp($0, frames: Int(rate)).code }
+    var songs: [Int] = []
+    for code in heard where songs.last != code { songs.append(code) }
+    #expect(songs == [1, 3])
+    #expect(await sources.busy == 0)
+    await session.stopAndWait()
+    #expect(await sources.active.isEmpty)
+  }
+
   /// The same, with nothing after the removed song: the queue ends there.
   @Test @MainActor func removingTheLastSongAlreadyHeardEndsTheQueue() async throws {
     let root = try editRoot()
