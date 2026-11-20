@@ -99,3 +99,15 @@ def test_add_to_playlist_offers_a_new_playlist_first():
     assert ".modifier(NewPlaylistPrompt(model: model))" in player.split("\n  }\n", 1)[0]
     model = app["AppModel.swift"].split("func createPlaylist(named", 1)[1]
     assert "NewPlaylistEdits.make(name: name, songs: songs)" in model
+
+
+def test_searching_uses_the_shared_status_line():
+    """#290: the brief "Searching…" was a labelled ProgressView, whose words
+    are set in the body size, larger than the status lines beside it ("No
+    matches", errors). It is now a spinner beside the shared StatusText."""
+    search = (APP / "SearchViews.swift").read_text()
+    assert 'ProgressView("Searching' not in search
+    loading = search[search.index("if search.loading {") :]
+    loading = loading[: loading.index("} else if let error = search.error")]
+    assert 'StatusText("Searching…")' in loading
+    assert "ProgressView()" in loading

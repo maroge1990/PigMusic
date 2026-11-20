@@ -402,7 +402,13 @@ private struct FoundResultsView: View {
       Section {
         if groups.isEmpty {
           if search.loading {
-            ProgressView("Searching…")
+            // The shared status line, as "No matches" below; a labelled
+            // ProgressView set its words in the larger body size (#290).
+            HStack(spacing: 8) {
+              ProgressView()
+              StatusText("Searching…")
+            }
+            .accessibilityElement(children: .combine)
           } else if let error = search.error {
             StatusText(error, kind: .error)
           } else {
