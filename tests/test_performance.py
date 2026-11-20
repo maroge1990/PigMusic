@@ -231,6 +231,87 @@ def test_report_script_prints_the_targets_from_a_copy(tmp_path, capsys):
     assert '"played_share": 0.5' in capsys.readouterr().out
 
 
+def test_one_unwritable_event_never_holds_back_the_rest(tmp_path):
+    """Codex round 1 (high): a row SQLite cannot store (a lone surrogate, an
+    integer past 2**63) failed the whole batch, which was put back and
+    failed every later flush with it. It is made storable when recorded,
+    and a row that still cannot be written is dropped and counted."""
+    counters = Performance(tmp_path)
+    now = time.time()
+    counters.record("artwork", "cover", "served", None, "bad \udcff item", at=now)
+    counters.record("tap", "none", "played", 10**30, at=now)
+    with counters.lock:  # Past record(): the flush's own guard.
+        counters.pending.append((now, "tap", "x\udcff", "played", None, None))
+        counters.pending.append((now, "tap", "big", "played", 2**70, None))
+    counters.record("tap", "Prepared mix", "played", 80, at=now)
+    assert counters.flush(now) == 3
+    rows = events(counters.path)
+    assert ("artwork", "cover", "served", None, "bad ? item") in rows
+    assert ("tap", "Prepared mix", "played", 80, None) in rows
+    assert counters.dropped == 2 and counters.pending == []
+    counters.record("tap", "Prepared mix", "played", 90, at=now)
+    assert counters.flush(now + 1) == 1
+
+
+def test_report_script_breaks_no_matches_down_by_reason(tmp_path, capsys):
+    """#282: `--no-match` says why each source's nearest result was not the
+    song, from the detail a no match keeps, with the newest examples."""
+    import json
+
+    from scripts.performance_report import main
+    from server.remote import no_match_detail
+
+    song = {"artist": "Artist", "title": "Song", "album": "Album", "duration": 200}
+
+    def result(**changes):
+        return {
+            "channel": "Artist",
+            "title": "Song",
+            "album": "Album",
+            "duration": 201,
+            **changes,
+        }
+
+    counters = Performance(tmp_path)
+    now = time.time()
+    lookups = [
+        # The nearest is the result that got furthest through the rule.
+        [result(title="Other"), result(duration=260)],
+        [result(duration=None), result(channel="Other")],
+        [result(duration=262)],
+        [],
+    ]
+    for at, results in enumerate(lookups):
+        detail = no_match_detail(song, "Artist Song", results)
+        counters.record(
+            "remote-source", "youtube", "no match", 900, detail, now - 60 + at
+        )
+    counters.record("remote-source", "youtube", "no match", 900, at=now - 90)
+    counters.record(
+        "remote-source", "jiosaavn", "no match", 5000, '{"error":"TimeoutError"}'
+    )
+    counters.record("remote-source", "youtube", "found", 700, at=now - 60)
+    counters.flush(now)
+    main([str(counters.path), "--no-match"])
+    text = capsys.readouterr().out
+    assert "youtube: 5 no match" in text
+    assert (
+        "nearest result failed on: length 2, no length 1, no results 1, unrecorded 1"
+        in text
+    )
+    assert (
+        "lookups with a result that failed on: length 2, artist 1, no length 1, title 1"
+        in text
+    )
+    assert "jiosaavn: 1 no match" in text and "error TimeoutError 1" in text
+    assert "'Artist Song' (3:20): 2 results, nearest length" in text
+    assert "    Artist - Song [Album] (4:20): length" in text
+    main([str(counters.path), "--no-match", "--json"])
+    found = json.loads(capsys.readouterr().out)
+    assert found["youtube"]["nearest"]["length"] == 2
+    assert found["youtube"]["events"][0]["results"] == 0  # Newest first.
+
+
 def test_an_unexpected_download_error_counts_as_a_failure(tmp_path):
     """Codex round 1 (#191): a request marked failed by an unexpected error
     was left out of the completion count."""

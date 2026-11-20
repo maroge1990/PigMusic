@@ -12,7 +12,7 @@ import secrets
 import shutil
 import threading
 import time
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -22,11 +22,12 @@ from starlette.responses import Response, StreamingResponse
 from .request_timing import add_phase, phase
 from .library import normalise
 from .providers.process import run_checked
-from .downloader import matches
+from .downloader import duration, matches, mismatch
 from .matching import album_title, flavour, recording_kind
+from .performance import DETAIL_CHARS
 from .providers.contracts import ProviderError
 from .vendor.jiosaavn import search_jiosaavn
-from .youtube import YouTubeStream
+from .youtube import YouTubeStream, search_query
 
 log = logging.getLogger("pig_music.remote")
 
@@ -109,34 +110,165 @@ def acceptable(track, c):
     lead artist, title, live/remix/demo words in title and album, length within
     5 s, agreeing IDs); a song is the same on any edition (PRODUCT), so the
     album must agree only for an edition chosen explicitly."""
-    return bool(
-        matches(track, c)
-        # The album names the same kind of recording ("The Remixes",
-        # "Demos", "Live at Leeds" are those recordings even when the
-        # song title says nothing) as the request.
-        and flavour(c.get("album")) == recording_kind(track)
-        and altered(c.get("title"), c.get("album"))
-        == altered(track.get("title"), track.get("album"))
-        and (
-            # Only a plain studio song with a known length may come
-            # from another release. A live, demo, remix, session or
-            # altered recording is one performance (another concert
-            # is another recording), so it must be the requested
-            # album or carry one of its ISRCs; so must a song with no
-            # known length or an edition chosen explicitly.
-            (
-                not track.get("explicit_edition")
-                and track.get("duration")
-                and not recording_kind(track)
-                and not altered(track.get("title"), track.get("album"))
-            )
-            or normalise(c.get("album", "")) == normalise(track["album"])
-            or bool(
-                track.get("isrcs") and c.get("isrc") and c["isrc"] in track["isrcs"]
-            )
+    return rejection(track, c) is None
+
+
+# Why a search result was not the requested song, in the order the song rule
+# checks; a later reason means the result came closer (#282).
+REASONS = (
+    "ids",
+    "artist",
+    "title",
+    "version",
+    "no length",
+    "length",
+    "album kind",
+    "altered",
+    "album",
+    "isrc",
+    "matched",
+)
+# A no-match event's detail: the query, how many results came back and the
+# first few, cut to a size the events table keeps whole.
+DETAIL_RESULTS = 3
+
+
+def rejection(track, c):
+    """The song rule's checks in order: the first one a search result fails
+    (one of REASONS), or None when it is the song (`acceptable`)."""
+    failed = mismatch(track, c)
+    if failed:
+        return failed
+    # The album names the same kind of recording ("The Remixes", "Demos",
+    # "Live at Leeds" are those recordings even when the song title says
+    # nothing) as the request.
+    if flavour(c.get("album")) != recording_kind(track):
+        return "album kind"
+    if altered(c.get("title"), c.get("album")) != altered(
+        track.get("title"), track.get("album")
+    ):
+        return "altered"
+    # Only a plain studio song with a known length may come from another
+    # release. A live, demo, remix, session or altered recording is one
+    # performance (another concert is another recording), so it must be the
+    # requested album or carry one of its ISRCs; so must a song with no known
+    # length or an edition chosen explicitly.
+    if not (
+        (
+            not track.get("explicit_edition")
+            and track.get("duration")
+            and not recording_kind(track)
+            and not altered(track.get("title"), track.get("album"))
         )
-        and (not track.get("isrcs") or not c.get("isrc") or c["isrc"] in track["isrcs"])
-    )
+        or normalise(c.get("album", "")) == normalise(track["album"])
+        or bool(track.get("isrcs") and c.get("isrc") and c["isrc"] in track["isrcs"])
+    ):
+        return "album"
+    if not (not track.get("isrcs") or not c.get("isrc") or c["isrc"] in track["isrcs"]):
+        return "isrc"
+    return None
+
+
+def why(track, c):
+    """`rejection` for diagnostics: "matched" for the song."""
+    return rejection(track, c) or "matched"
+
+
+# What a no match records when its detail could not be made (#282).
+UNRECORDED = '{"unrecorded":true}'
+# A length beyond this is no length (seconds; a day).
+LONGEST = 86400
+
+
+def text_of(value):
+    """Any value as text SQLite can store: lone surrogates and other
+    unencodable characters become "?"."""
+    text = str(value if value is not None else "")
+    return text.encode("utf-8", "replace").decode("utf-8")
+
+
+def no_match_detail(track, query, results):
+    """What a source's search gave for a song it had no match for, for the
+    performance event (#282): the query, the number of results, every
+    result's reason counted and the first few. Song names only, never who
+    asked; JSON, always whole within DETAIL_CHARS. Best effort: anything it
+    cannot read becomes null or UNRECORDED, never an error."""
+    try:
+
+        def cut(value, size):
+            value = text_of(value)
+            return value if len(value) <= size else value[: size - 1] + "…"
+
+        def seconds(value):
+            try:
+                found = duration(value)
+                return round(found) if 0 < found <= LONGEST else None
+            except Exception:
+                return None
+
+        def reason(c):
+            try:
+                return why(track, c)
+            except Exception:
+                return "unknown"
+
+        reasons = [reason(c) for c in results]
+        value = {
+            "query": cut(query, 120),
+            "seconds": seconds(track.get("duration")),
+            "results": len(results),
+            # Every result's reason, counted: a near miss below the first few.
+            "reasons": dict(Counter(reasons)),
+            "top": [
+                {
+                    "title": cut(c.get("title"), 60),
+                    "artist": cut(c.get("channel") or c.get("artist"), 40),
+                    "album": cut(c.get("album"), 40),
+                    "seconds": seconds(c.get("duration")),
+                    "why": why,
+                }
+                for c, why in zip(results[:DETAIL_RESULTS], reasons)
+            ],
+        }
+
+        def encoded():
+            return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+        text = encoded()
+        while len(text) > DETAIL_CHARS and value["top"]:
+            value["top"].pop()
+            text = encoded()
+        if len(text) > DETAIL_CHARS:
+            value["query"] = cut(query, 40)
+            text = encoded()
+        return text if len(text) <= DETAIL_CHARS else UNRECORDED
+    except Exception:
+        return UNRECORDED
+
+
+class NoMatch(ValueError):
+    """A source searched and had no match. It keeps what the search found;
+    the detail is made later, by `missed`, so making it can never change
+    what the lookup answers."""
+
+    def __init__(self, message, track=None, query=None, results=None, detail=None):
+        super().__init__(message)
+        self.searched = (track, query, results) if results is not None else None
+        self.detail = detail
+
+
+def missed(exc):
+    """The detail for a "no match" step: what the search found, or, when a
+    source counted as no match without searching to the end, why. Never
+    raises."""
+    try:
+        if getattr(exc, "detail", None):
+            return text_of(exc.detail)[:DETAIL_CHARS]
+        if getattr(exc, "searched", None):
+            return no_match_detail(*exc.searched)
+        return json.dumps({"error": type(exc).__name__})
+    except Exception:
+        return UNRECORDED
 
 
 class Resolving:
@@ -375,11 +507,16 @@ class RemoteAudio:
         # Where the time went, for the server log: playback waits for all of it.
         steps = []
 
-        def step(name, outcome, since):
+        def step(name, outcome, since, detail=None):
             seconds = time.monotonic() - since
             steps.append(f"{name} {outcome} {seconds:.1f} s")
             if self.performance is not None:
-                self.performance.record("remote-source", name, outcome, seconds * 1000)
+                try:
+                    self.performance.record(
+                        "remote-source", name, outcome, seconds * 1000, detail
+                    )
+                except Exception:  # Counting never changes a lookup.
+                    log.exception("Recording a remote source step failed")
             # The same steps in Server-Timing: "zvu4no-found", "jiosaavn-miss".
             outcome = {
                 "no match": "miss",
@@ -410,7 +547,7 @@ class RemoteAudio:
             step("jiosaavn", "found", began)
             self.timing(track, "jiosaavn", began, steps)
             return {"url": url, "source": "jiosaavn"}
-        step("jiosaavn", "no match", began)
+        step("jiosaavn", "no match", began, missed(failure))
         # Only a song every source said it does not have is a miss (404,
         # remembered long); a timeout, a provider error or a failed transfer
         # leaves it uncertain (503, remembered briefly).
@@ -421,8 +558,8 @@ class RemoteAudio:
             except ProviderError:  # Refused, down or answering oddly.
                 step("youtube", "failed", began)
                 uncertain = True
-            except ValueError:
-                step("youtube", "no match", began)
+            except ValueError as exc:
+                step("youtube", "no match", began, missed(exc))
             except (TimeoutError, httpx.HTTPError, OSError):
                 step("youtube", "too slow", began)
                 uncertain = True
@@ -764,7 +901,12 @@ class RemoteAudio:
             songs = await self.youtube.songs(track, speculative)
             found = [c for c in songs if acceptable(track, c)]
             if not found:
-                raise ValueError("YouTube has no match for this song.")
+                raise NoMatch(
+                    "YouTube has no match for this song.",
+                    track,
+                    search_query(track),
+                    songs,
+                )
             wanted = album_title(track.get("album") or "", track.get("artist"))
             # The same album first, then a fixed order: the same song picks
             # the same video every time.
@@ -845,13 +987,15 @@ class RemoteAudio:
                 self.cache[key] = (cached[0], cached[1], self.clock())
                 return cached[1]
         if self.unmatched.get(key, 0) > time.monotonic():
-            raise ValueError("JioSaavn has no match for this song.")
+            raise NoMatch(
+                "JioSaavn has no match for this song.",
+                detail=json.dumps({"remembered": True}),
+            )
         async with slots:
+            query = search_query(track)
             try:
                 results = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        self.search, track["artist"] + " " + track["title"], 40
-                    ),
+                    asyncio.to_thread(self.search, query, 40),
                     timeout=5,
                 )
             except RuntimeError as exc:
@@ -870,8 +1014,11 @@ class RemoteAudio:
                     self.unmatched = {
                         k: v for k, v in self.unmatched.items() if v > now
                     }
-                raise ValueError(
-                    "No remote recording matched this song. Downloading remains available."
+                raise NoMatch(
+                    "No remote recording matched this song. Downloading remains available.",
+                    track,
+                    query,
+                    results,
                 )
             # Several copies of the recording: the same album first (without
             # " - Single" and edition words), then a matching ISRC, then a

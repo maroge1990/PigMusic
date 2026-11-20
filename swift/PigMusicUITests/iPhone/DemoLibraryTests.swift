@@ -473,14 +473,21 @@ final class DemoLibraryTests: XCTestCase {
     expect(app.staticTexts["Now playing"], timeout: 30)
     expect(app.staticTexts["Up next"])
     XCTAssertFalse(app.buttons["Edit"].exists, app.debugDescription)
-    // The last of Up next's song rows ("Play <song> by <artist>").
+    // A song row of Up next that is on screen ("Play <song> by <artist>"):
+    // the list holds the whole queue and draws its rows as they scroll in,
+    // so the last row may exist without being on screen.
     let rows = app.buttons.matching(
       NSPredicate(format: "label BEGINSWITH 'Play ' AND label CONTAINS ' by '"))
-    for _ in 0..<4 where !(rows.count > 0 && rows.element(boundBy: rows.count - 1).isHittable) {
+    func onScreen() -> XCUIElement? {
+      (0..<min(rows.count, 12)).map { rows.element(boundBy: $0) }.first { $0.isHittable }
+    }
+    for _ in 0..<4 where onScreen() == nil {
       app.swipeUp()
     }
-    XCTAssertGreaterThan(rows.count, 0, app.debugDescription)
-    let label = rows.element(boundBy: rows.count - 1).label
+    guard let found = onScreen() else {
+      return XCTFail("No Up next row on screen\n" + app.debugDescription)
+    }
+    let label = found.label
     let row = app.buttons[label]
     row.swipeLeft()
     let remove = app.buttons["Remove"]

@@ -83,6 +83,12 @@ def version_key(value):
         return ()
 
 
+def search_query(track):
+    """What a song is searched for by name on an instant source (JioSaavn's
+    and YouTube's search alike)."""
+    return f"{track['artist']} {track['title']}"
+
+
 def pinned_version():
     from yt_dlp.version import __version__
 
@@ -231,7 +237,7 @@ class YouTube:
         slots = self.search_slots[speculative]
         await slots.acquire()
         idle = self.searchers[speculative]
-        query = f"{track['artist']} {track['title']}"
+        query = search_query(track)
 
         def search():
             searcher = idle.pop() if idle else GuardedSearch()

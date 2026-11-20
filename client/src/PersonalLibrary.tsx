@@ -8,7 +8,7 @@ import { Play, ArrowLeft, Plus } from "lucide-react";
 import { api, apiFetch, detailOr, writeFailure } from "./api";
 import { defer, isPending } from "./deferred";
 import { notify, offerUndo } from "./notices";
-import { createPlaylist } from "./playlists";
+import { createAttempt } from "./playlists";
 import { formatCount } from "./format";
 import { PageHeader } from "./PageHeader";
 import { PersonalQuality } from "./PersonalQuality";
@@ -646,8 +646,8 @@ export function PersonalLibrary({
           songs={songs}
           // A refusal reaches the dialog, which keeps the name and says why
           // (Codex round 2); only a created playlist closes it.
-          createPlaylist={async (name) => {
-            await createPlaylist(name);
+          createPlaylist={async (attempt) => {
+            await createAttempt(attempt);
             notify("Playlist created");
             void refresh().catch((e) => setError(e.message));
           }}

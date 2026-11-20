@@ -875,3 +875,86 @@ def test_a_validator_from_before_added_at_reads_the_library_again(
         current = response.headers["ETag"]
         again = client.get("/api/v1/library", headers={"If-None-Match": current})
         assert again.status_code == 304
+
+
+def test_a_retried_create_returns_the_playlist_the_first_try_made(
+    tmp_path, monkeypatch
+):
+    """#288: a create whose answer was lost (or came back as a gateway error)
+    and is tried again with the same key makes no second playlist."""
+    import threading
+    import uuid
+
+    app, owner, member, token, track = household(tmp_path, monkeypatch)
+    key = str(uuid.uuid4())
+    with TestClient(
+        app,
+        base_url="https://private.ts.net",
+        headers={"Authorization": "Bearer " + token},
+    ) as client:
+        first = client.post(
+            "/api/v1/playlists", json={"name": "Road trip", "operation_id": key}
+        )
+        again = client.post(
+            "/api/v1/playlists", json={"name": "Road trip", "operation_id": key}
+        )
+        assert first.status_code == again.status_code == 200
+        assert again.json() == first.json()
+        assert "operation_id" not in first.json()
+        assert "create_operation_id" not in first.json()
+        listed = client.get("/api/v1/playlists").json()["playlists"]
+        assert [p["name"] for p in listed] == ["Road trip"]
+        # Renamed on another device before the late try: still that one.
+        path = "/api/v1/playlists/" + first.json()["id"]
+        renamed = client.patch(path, json={"revision": 0, "name": "Drive"}).json()
+        late = client.post(
+            "/api/v1/playlists", json={"name": "Road trip", "operation_id": key}
+        ).json()
+        assert late["id"] == first.json()["id"] and late["name"] == "Drive"
+        assert len(client.get("/api/v1/playlists").json()["playlists"]) == 1
+        # A new key, or none (an older client), makes a new playlist as before.
+        other = client.post(
+            "/api/v1/playlists",
+            json={"name": "Road trip", "operation_id": str(uuid.uuid4())},
+        ).json()
+        plain = [
+            client.post("/api/v1/playlists", json={"name": "Road trip"}).json()
+            for _ in range(2)
+        ]
+        ids = {first.json()["id"], other["id"], *(p["id"] for p in plain)}
+        assert len(ids) == 4
+        assert len(client.get("/api/v1/playlists").json()["playlists"]) == 4
+        # Not a UUID: refused, nothing made.
+        bad = client.post(
+            "/api/v1/playlists", json={"name": "Road trip", "operation_id": "x" * 36}
+        )
+        assert bad.status_code == 400
+        assert len(client.get("/api/v1/playlists").json()["playlists"]) == 4
+        # Deleted since: the key has nothing to return, so a try makes one.
+        client.delete(path, params={"revision": renamed["revision"]})
+        remade = client.post(
+            "/api/v1/playlists", json={"name": "Road trip", "operation_id": key}
+        ).json()
+        assert remade["id"] != first.json()["id"]
+    # Keys are per person: the same key never returns the member's playlist.
+    mine = Playlists(app.state.store, owner).create("Owner's", key)
+    assert mine["id"] != remade["id"] and mine["name"] == "Owner's"
+    assert Playlists(app.state.store, owner).create("Again", key)["id"] == mine["id"]
+    assert len(Playlists(app.state.store, member).list()) == 4
+    # Two tries at once with one key: one playlist.
+    racing = str(uuid.uuid4())
+    made = []
+    start = threading.Barrier(4)
+
+    def attempt():
+        start.wait()
+        made.append(Playlists(app.state.store, member).create("Race", racing)["id"])
+
+    threads = [threading.Thread(target=attempt) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(set(made)) == 1
+    names = [p["name"] for p in Playlists(app.state.store, member).list()]
+    assert names.count("Race") == 1
