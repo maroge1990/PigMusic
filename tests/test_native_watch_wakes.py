@@ -83,3 +83,16 @@ def test_the_watch_schedules_refreshes_only_through_the_plan():
     )
     background = app.split("if phase == .background {", 1)[1].split("}", 1)[0]
     assert "model.planRefresh()" in background
+
+
+def test_a_background_wake_gives_kept_files_a_pass_after_their_manifest():
+    """A held song being looked at when its manifest landed was skipped by
+    the manifest's own pass, and the task ended without another."""
+    finish = body(LINK.read_text(), "  func finishBackgroundDelivery() async {")
+    assert "let finished = deliveries.finished" in finish
+    assert finish.index("let finished = deliveries.finished") < finish.index(
+        "await recoverInbox()"
+    )
+    assert "deliveries.isEmpty, deliveries.finished == finished" in finish
+    # The 20 s cap stays.
+    assert ".seconds(20)" in finish

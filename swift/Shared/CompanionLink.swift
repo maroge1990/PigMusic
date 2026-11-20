@@ -142,10 +142,16 @@ import WatchConnectivity
     let deadline = ContinuousClock.now + .seconds(20)
     while !Task.isCancelled, ContinuousClock.now < deadline {
       if session?.activationState == .activated, session?.hasContentPending != true {
+        let finished = deliveries.finished
         await recoverInbox()
         // Give already dispatched delegate callbacks a chance to finish their actor work.
         await Task.yield()
-        if session?.hasContentPending != true, deliveries.isEmpty { return }
+        // A delivery that finished during this pass (a manifest, say) may
+        // have let files kept in the inbox through while this pass held one
+        // of them: they get one more pass before the task ends (#219).
+        if session?.hasContentPending != true, deliveries.isEmpty, deliveries.finished == finished {
+          return
+        }
       }
       try? await Task.sleep(for: .milliseconds(100))
     }
@@ -359,7 +365,15 @@ private final class ReplyBox: @unchecked Sendable {
 private final class DeliveryCounter: @unchecked Sendable {
   private let lock = NSLock()
   private var count = 0
+  private var ended = 0
   func begin() { lock.withLock { count += 1 } }
-  func end() { lock.withLock { count -= 1 } }
+  func end() {
+    lock.withLock {
+      count -= 1
+      ended += 1
+    }
+  }
   var isEmpty: Bool { lock.withLock { count == 0 } }
+  /// Deliveries finished so far.
+  var finished: Int { lock.withLock { ended } }
 }
