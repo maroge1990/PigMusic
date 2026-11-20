@@ -298,6 +298,8 @@ private struct Offline: Error {}
       let edit = OfflineMutation(action: "favourite", track: song, favourite: value)
       try await store.enqueueMutation(edit)
       edits.append(edit)
+      // Its save ends once it waits in the outbox, as in the app.
+      if let tap { states.settled(tap) }
       // The app caches each tap as the star shows it.
       try await store.cache(value, key: EditOutbox.favouriteCacheKey(song.id))
     }

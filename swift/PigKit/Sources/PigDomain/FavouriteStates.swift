@@ -16,6 +16,9 @@ public struct FavouriteStates: Sendable {
   /// Songs whose star or menu has been shown, kept up to date by each sync
   /// of the library's Favourites playlist (Codex round 1 on batch G, #230).
   private var followed: [String: Track] = [:]
+  /// Taps whose save hasn't ended, by song (Codex round 2 on batch G): until
+  /// it has, no read or sync replaces the tap's state.
+  private var saving: [String: Int] = [:]
   public init() {}
   /// The one star design (#227): filled for a favourite, outlined for not,
   /// on the player's star and the song sheet's button alike.
@@ -37,7 +40,7 @@ public struct FavouriteStates: Sendable {
   @discardableResult public mutating func answer(_ id: String, _ value: Bool, since revision: Int)
     -> Bool
   {
-    guard self.revision(id) == revision else { return false }
+    guard self.revision(id) == revision, saving[id] == nil else { return false }
     values[id] = value
     waiting[id] = nil
     return true
@@ -62,7 +65,17 @@ public struct FavouriteStates: Sendable {
     guard current != nil || orFavourite else { return nil }
     let value = !(current ?? false)
     change(id, value)
+    saving[id, default: 0] += 1
     return FavouriteTap(id: id, value: value, previous: current, revision: revision(id))
+  }
+  /// Whether a tap on the song is still being saved: a read must not start
+  /// for it, and its answer won't count (Codex round 2 on batch G).
+  public func isSaving(_ id: String) -> Bool { saving[id] != nil }
+  /// The save of `tap` ended, however it ended. A tap from before a
+  /// sign-out counts for nothing after it.
+  public mutating func settled(_ tap: FavouriteTap) {
+    guard tap.revision >> 32 == epoch, let count = saving[tap.id] else { return }
+    saving[tap.id] = count > 1 ? count - 1 : nil
   }
   /// The save of `tap` was refused: its old state comes back, unknown again
   /// when it was unknown, unless a newer tap, change or clear has come since.
@@ -85,15 +98,15 @@ public struct FavouriteStates: Sendable {
   /// A song's star or menu is shown: later syncs keep its state current.
   public mutating func follow(_ track: Track) { followed[track.id] = track }
   /// The library synced (Codex round 1 on batch G, #230). Which state wins:
-  /// a favourite edit of the person's still waiting to be sent (`editWaiting`)
-  /// keeps their tap; otherwise the synced Favourites playlist sets every
+  /// a tap still being saved, or a favourite edit of the person's still
+  /// waiting to be sent (`editWaiting`), keeps their tap; otherwise the synced Favourites playlist sets every
   /// followed song's state, over an older read or cached answer, and a read
   /// started before the sync no longer counts. Nothing changes while the
   /// library holds no Favourites playlist with its songs.
   public mutating func synced(_ playlists: [Playlist], editWaiting: (String) -> Bool) {
     // Indexed once per sync: every song shown is looked up in it.
     guard let index = FavouriteMatch.Index(playlists) else { return }
-    for (id, track) in followed where !editWaiting(id) {
+    for (id, track) in followed where saving[id] == nil && !editWaiting(id) {
       change(id, index.contains(track))
     }
   }
@@ -113,6 +126,7 @@ public struct FavouriteStates: Sendable {
     revisions = [:]
     waiting = [:]
     followed = [:]
+    saving = [:]
     epoch += 1
   }
 }

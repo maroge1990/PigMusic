@@ -76,15 +76,17 @@ def test_a_sync_keeps_shown_favourite_states_current():
     waiting to be sent keeps its state."""
     model = (APP / "AppModel.swift").read_text()
     reload = model.split("private func loadCache(", 1)[1].split("\n  }\n", 1)[0]
-    synced = reload.split("favourites.synced(playlists) { id in", 1)[1]
-    synced = synced.split("\n    }\n", 1)[0]
-    assert "EditOutbox.favourite(id, in: pendingEdits) != nil" in synced
-    assert "favouriteSaves[id] != nil" in synced
+    assert "favourites.synced(playlists)" in reload
     for name in ("func peekFavourite(", "func loadFavourite("):
         body = model.split(name, 1)[1].split("\n  }\n", 1)[0]
         assert "favourites.follow(track)" in body, name
+    # Codex round 2 on batch G: FavouriteStates holds a tap as saving until
+    # its save ends; the player's star starts no read for it meanwhile.
     tap = model.split("func tapFavourite(", 1)[1].split("\n  }\n", 1)[0]
-    assert "favouriteSaves[track.id, default: 0] += 1" in tap
+    assert "defer { favourites.settled(tap) }" in tap
+    load = model.split("func loadFavourite(", 1)[1].split("\n  }\n", 1)[0]
+    guard = load.index("guard !favourites.isSaving(track.id) else { return }")
+    assert guard < load.index("readCatalogue(")
 
 
 def test_add_to_playlist_offers_a_new_playlist_first():

@@ -768,10 +768,9 @@ enum PlayOrigin: Hashable {
     self.artists = artists
     self.playlists = playlists
     // Stars and song menus follow the synced Favourites playlist, except a
-    // tap still being saved or waiting to be sent (Codex round 1 on batch G).
-    favourites.synced(playlists) { id in
-      EditOutbox.favourite(id, in: pendingEdits) != nil || favouriteSaves[id] != nil
-    }
+    // tap still being saved (FavouriteStates keeps those) or waiting to be
+    // sent (Codex rounds 1 and 2 on batch G).
+    favourites.synced(playlists) { id in EditOutbox.favourite(id, in: pendingEdits) != nil }
     songCount = count
     songSeconds = seconds
     albumCategoryCounts = categoryCounts
@@ -1034,6 +1033,9 @@ enum PlayOrigin: Hashable {
       favourites.change(track.id, value)
       return
     }
+    // A tap still on its way into the outbox is the newest state: no read
+    // starts for it (Codex round 2 on batch G).
+    guard !favourites.isSaving(track.id) else { return }
     // Until a read answers, the song waits for a retry (Codex on #212).
     favourites.wanted(track)
     // A change made while this reads wins over what the read finds.
@@ -1087,12 +1089,9 @@ enum PlayOrigin: Hashable {
     let stamp = account.generation
     let store = self.store
     guard let tap = favourites.tap(track.id, orFavourite: orFavourite) else { return nil }
-    // Until its edit is in the outbox, a sync mustn't undo the tap.
-    favouriteSaves[track.id, default: 0] += 1
-    defer {
-      favouriteSaves[track.id, default: 1] -= 1
-      if favouriteSaves[track.id] == 0 { favouriteSaves[track.id] = nil }
-    }
+    // Until its save ends, no read or sync undoes the tap (Codex round 2 on
+    // batch G): FavouriteStates holds it as saving.
+    defer { favourites.settled(tap) }
     let mutation = OfflineMutation(action: "favourite", track: track, favourite: tap.value)
     do {
       let outcome = try await saveEditOutcome(mutation)
@@ -1111,9 +1110,6 @@ enum PlayOrigin: Hashable {
       throw error
     }
   }
-  /// Favourite taps still being saved, by song: a sync keeps their state
-  /// (Codex round 1 on batch G).
-  @ObservationIgnored private var favouriteSaves: [String: Int] = [:]
   /// Rises when the server refuses a favourite: the star says it wasn't saved.
   var favouriteRefusals = 0
   /// Shows each refused favourite's song as it is now (Codex round 2 and

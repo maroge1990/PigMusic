@@ -199,6 +199,7 @@ private actor ReadLatch {
   #expect(tap.value == true && tap.previous == nil)
   #expect(states["song"] == true)
   states.refused(tap)
+  states.settled(tap)  // Its save has ended, refused.
   #expect(states["song"] == nil)
   // A known state toggles as before, whatever `orFavourite` says.
   states.answer("song", true, since: states.revision("song"))
@@ -233,7 +234,8 @@ private func favourites(_ titles: [String]) throws -> [Playlist] {
   // A read of road starts before the sync.
   let before = states.revision(road.id)
   // Another device favourites road; the person taps light here, not sent yet.
-  _ = states.tap(light.id)
+  let tapped = states.tap(light.id)
+  if let tapped { states.settled(tapped) }  // Saved into the outbox.
   states.synced(try favourites(["Open Road"]), editWaiting: { $0 == light.id })
   #expect(states[road.id] == true)  // The synced playlist, over the cached false.
   #expect(states[light.id] == true)  // The waiting tap is kept.
@@ -251,4 +253,49 @@ private func favourites(_ titles: [String]) throws -> [Playlist] {
   states.clear()
   states.synced(try favourites(["Open Road"]), editWaiting: { _ in false })
   #expect(states[road.id] == nil)
+}
+
+/// Codex round 2 on batch G: a menu tap flipped the star, and while its
+/// edit was still on its way into the outbox (so no queued edit showed yet)
+/// the player's star opened and read the server. The read started after the
+/// tap, so its revision matched, and the server's old state undid the tap.
+/// While a tap is being saved no read's answer counts and no sync replaces
+/// it; once its save has ended, both do again.
+@Test func aReadOrSyncDuringATapsSaveNeverUndoesTheTap() throws {
+  var states = FavouriteStates()
+  let road = Track(id: "road", title: "Open Road", artist: "The Orchard", album: "Sunrise")
+  states.follow(road)
+  states.answer(road.id, false, since: states.revision(road.id))
+  let tapped = states.tap(road.id)
+  let tap = try #require(tapped)
+  #expect(states.isSaving(road.id))
+  // The star opens now and reads: it starts after the tap.
+  let read = states.revision(road.id)
+  let stale = states.answer(road.id, false, since: read)
+  #expect(!stale)
+  #expect(states[road.id] == true)
+  // A sync from before the save reached the server doesn't undo it either.
+  states.synced(try favourites([]), editWaiting: { _ in false })
+  #expect(states[road.id] == true)
+  // Two taps: the first ending leaves the second still saving.
+  let again = states.tap(road.id)
+  let second = try #require(again)
+  states.settled(tap)
+  #expect(states.isSaving(road.id) && states[road.id] == false)
+  states.settled(second)
+  #expect(!states.isSaving(road.id))
+  // Saved: the next read and sync count again.
+  let fresh = states.answer(road.id, true, since: states.revision(road.id))
+  #expect(fresh && states[road.id] == true)
+  states.synced(try favourites([]), editWaiting: { _ in false })
+  #expect(states[road.id] == false)
+  // A tap from before a sign-out settles nothing after it.
+  let old = states.tap(road.id)
+  states.clear()
+  states.answer(road.id, true, since: states.revision(road.id))
+  let new = states.tap(road.id)
+  if let old { states.settled(old) }
+  #expect(states.isSaving(road.id))
+  if let new { states.settled(new) }
+  #expect(!states.isSaving(road.id))
 }
