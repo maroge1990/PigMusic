@@ -61,6 +61,15 @@ public struct AcquisitionResult: Codable, Sendable {
   /// Nothing new was asked for and a paused song stays paused (#264): the
   /// person is told where to resume it, never that it was left out.
   public var onlyPaused: Bool { created == 0 && paused > 0 }
+  /// Whether the server is getting every one of the `count` songs sent
+  /// together (#259): none left out, none left paused. Otherwise the answer
+  /// gives only totals and can't say which song was taken.
+  public func tookAll(_ count: Int) -> Bool {
+    skipped == 0 && paused == 0 && created + existing == count
+  }
+  /// One song sent alone: the server is getting it, new or already asked
+  /// for, not left out or left paused.
+  public var tookIt: Bool { created + existing > 0 }
   public static let pausedNotice = "Paused. Resume it in Downloads."
 }
 extension AcquisitionResult {

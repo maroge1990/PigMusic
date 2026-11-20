@@ -1446,12 +1446,13 @@ private struct ShazamInboxView: View {
           await model.isCurrent(stamp)
         }
       }
-      // Marked only when sent: an unmatched song stays missing.
-      requested.formUnion(songs.map(\.shazamId).filter { !outcome.unmatched.contains($0) })
+      // Marked only when the server took it (#259): an unmatched song, one
+      // left out or one left paused stays missing, so it can be added again.
+      requested.formUnion(outcome.taken)
       let result = AcquisitionResult(
         created: outcome.created, existing: outcome.existing, skipped: outcome.skipped,
-        downloadsEnabled: outcome.downloadsEnabled)
-      let matched = outcome.created + outcome.existing + outcome.skipped
+        paused: outcome.paused, downloadsEnabled: outcome.downloadsEnabled)
+      let matched = outcome.created + outcome.existing + outcome.skipped + outcome.paused
       let unmatched = outcome.unmatched.count
       message = .info(
         [
