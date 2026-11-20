@@ -36,9 +36,10 @@ def test_the_watch_counts_its_wakes_and_sends_them_with_its_log():
     assert "model.opened()" in app
     assert "self.onReceived?(envelope)" in link
     assert "$0.received()" in model
+    assert "let acceptance = try await archive.accept(file, ticket: ticket)" in model
     assert (
-        "$0.accepted(receivedAt: receivedAt, active: active, newSong: newSong, waiting: waiting)"
-        in model
+        "receivedAt: receivedAt, active: active, newSong: acceptance.newlyReady,\n"
+        "              waiting: acceptance.waitingBefore)" in model
     )
     # Saved, so a background launch adds to the same record.
     assert model.count('"watch.wake-log"') == 2
@@ -90,8 +91,13 @@ def test_the_watch_schedules_refreshes_only_through_the_plan():
     )
     background = app.split("if phase == .background {", 1)[1].split("}", 1)[0]
     assert "model.closed()\n            model.planRefresh()" in background
-    # Only a copy the Watch didn't have moves the window on.
-    assert "let newSong = receipt?.ready[ticket.songId] != ticket.checksum" in model
+    # Only a copy the Watch didn't have moves the window on, as the archive
+    # judges it in the write itself, never this model's receipt.
+    audio = model.split('} else if envelope.kind == "audio"', 1)[1].split(
+        "DiagnosticsLog.shared.record(", 1
+    )[0]
+    assert "receipt?" not in audio and "status." not in audio
+    assert "acceptance.newlyReady" in audio
 
 
 def test_a_background_wake_gives_kept_files_a_pass_after_their_manifest():

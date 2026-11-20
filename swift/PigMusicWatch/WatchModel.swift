@@ -624,13 +624,15 @@ import WatchKit
           // The envelope beside it was written when the file reached the inbox.
           let receivedAt = try? file.deletingPathExtension().appendingPathExtension("json")
             .resourceValues(forKeys: [.creationDateKey]).creationDate
-          // A copy the Watch already had is no progress (Codex round 1 on batch G).
-          let newSong = receipt?.ready[ticket.songId] != ticket.checksum
-          let waiting = status.waiting
-          try await archive.accept(file, ticket: ticket)
+          // Whether it is a new song, and how many waited before it, come from
+          // the archive's own write: this model's receipt may not be loaded
+          // yet (Codex round 2 on batch G).
+          let acceptance = try await archive.accept(file, ticket: ticket)
           let active = appActive
           noteWake {
-            $0.accepted(receivedAt: receivedAt, active: active, newSong: newSong, waiting: waiting)
+            $0.accepted(
+              receivedAt: receivedAt, active: active, newSong: acceptance.newlyReady,
+              waiting: acceptance.waitingBefore)
           }
         }
         DiagnosticsLog.shared.record("sync", "audio accepted for revision \(ticket.context.revision)")

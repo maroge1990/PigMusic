@@ -311,14 +311,22 @@ public actor CompanionArchive {
     return sizes
   }
   /// Called after the delegate synchronously takes ownership of the temporary file.
-  public func accept(_ file: URL, ticket: CompanionFile) throws {
+  /// Returns what storing it changed, judged here from the library as it was
+  /// just before the write (#219).
+  @discardableResult public func accept(_ file: URL, ticket: CompanionFile) throws
+    -> CompanionAcceptance
+  {
     guard arrival(of: ticket) == .accept, let song = committedSong(for: ticket)
     else { throw CompanionFailure.stale }
     guard Self.validChecksum(ticket.checksum),
       let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize,
       Int64(size) == song.bytes
     else { throw CompanionFailure.integrity }
-    let used = receipt().usedBytes
+    let before = receipt()
+    let used = before.usedBytes
+    let acceptance = CompanionAcceptance.judge(
+      listed: manifest.songs.map(\.id), removed: removed, ready: before.ready,
+      songId: ticket.songId, checksum: ticket.checksum)
     let exists = FileManager.default.fileExists(atPath: url(ticket.checksum).path)
     guard exists || used + song.bytes <= budgetBytes else { throw CompanionFailure.quota }
     let capacity = try VolumeSpace.available(at: directory)
@@ -345,6 +353,7 @@ public actor CompanionArchive {
     }
     arrivals[ticket.checksum] = now()
     saveArrivals()
+    return acceptance
   }
   private func saveArrivals() {
     try? JSONEncoder().encode(arrivals).write(
