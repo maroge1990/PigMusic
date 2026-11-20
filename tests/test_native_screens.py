@@ -111,3 +111,22 @@ def test_searching_uses_the_shared_status_line():
     loading = loading[: loading.index("} else if let error = search.error")]
     assert 'StatusText("Searching…")' in loading
     assert "ProgressView()" in loading
+
+
+def test_the_account_sheet_takes_a_new_appearance_at_once():
+    """#291: switching light or dark in Preferences changed the app behind
+    the Account sheet but not Preferences itself. The choice was applied
+    only on the root view, and SwiftUI applies a preferred colour scheme to
+    the nearest presentation; the Account sheet, where Preferences is
+    pushed, is a presentation of its own. The sheet now carries it too."""
+    app = (APP / "PigMusicApp.swift").read_text()
+    library = (APP / "LibraryViews.swift").read_text()
+    # Preferences lives in Account, which opens as a sheet.
+    assert "PreferencesView(model: model)" in library
+    shell = app[app.index("struct LibraryShell") :]
+    account = shell[shell.index(".sheet(isPresented: $showAccount)") :]
+    account = account[: account.index(".undoBarSheet(model)")]
+    assert "AccountView(model: model)" in account
+    assert ".pigAppearance(model.preferences)" in account
+    root = app[app.index("struct RootView") : app.index("struct LibraryShell")]
+    assert ".pigAppearance(model.preferences)" in root

@@ -104,10 +104,7 @@ struct RootView: View {
     Group {
       if model.person == nil { SignInView(model: model) } else { LibraryShell(model: model) }
     }
-    .preferredColorScheme(
-      model.preferences.appearance == "dark"
-        ? .dark : (model.preferences.appearance == "light" ? .light : nil)
-    )
+    .pigAppearance(model.preferences)
     .tint(PigBrand.accent(scheme))
     .scrollContentBackground(.hidden)
     .background { PigCanvasBackground() }
@@ -265,6 +262,9 @@ struct LibraryShell: View {
           AccountView(model: model).pigCanvas()
             .toolbar { Button("Done") { showAccount = false } }
         }
+        // Preferences is pushed in this sheet: its Appearance applies here
+        // at once, not only to the app behind it (#291).
+        .pigAppearance(model.preferences)
         .undoBarSheet(model)
       }
       #if DEBUG
@@ -406,6 +406,14 @@ private struct PigCanvas: ViewModifier {
 }
 extension View {
   func pigCanvas() -> some View { modifier(PigCanvas()) }
+  /// The person's Appearance choice (nil follows the system). It applies to
+  /// the nearest presentation only: a sheet, or the Undo overlay's own
+  /// window, keeps the scheme it opened with unless it carries this too (#291).
+  func pigAppearance(_ preferences: AccountPreferences) -> some View {
+    preferredColorScheme(
+      preferences.appearance == "dark"
+        ? .dark : (preferences.appearance == "light" ? .light : nil))
+  }
 }
 
 @MainActor final class PigMusicAppDelegate: NSObject, UIApplicationDelegate {
