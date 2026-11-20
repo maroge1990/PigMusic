@@ -310,6 +310,65 @@ test("a made playlist whose add fails retries the add, never the create", async 
   expect(creates).toBe(1);
 });
 
+// #288: a proxy answered 502 after the server made the playlist. The picker
+// showed a busy error with Create ready, and Create made a second one. Now
+// it is unconfirmed, and the same name from the picker again goes under the
+// same key: the server answers with the playlist it made, and the song goes
+// there.
+test("a new playlist from the picker answered 502 after saving is not made twice", async ({
+  page,
+}) => {
+  const keys: string[] = [];
+  const made = new Set<string>();
+  const adds: string[] = [];
+  await mockApi(page, {
+    answers: {
+      "/v1/favourites": (route) =>
+        route.fulfill({ json: { favourited: false } }),
+      "/v1/playlists": (route) => {
+        if (route.request().method() !== "POST")
+          return route.fulfill({ json: { playlists: [] } });
+        const key = route.request().postDataJSON().operation_id;
+        keys.push(key);
+        const first = !made.size;
+        made.add(key);
+        return first
+          ? route.fulfill({
+              status: 502,
+              contentType: "text/html",
+              body: "<html><body>502 Bad Gateway</body></html>",
+            })
+          : route.fulfill({ json: { id: "p" + made.size, name: "Road trip" } });
+      },
+      "/v1/playlists/p1": (route) =>
+        route.fulfill({
+          json: { id: "p1", name: "Road trip", revision: 1, entries: [] },
+        }),
+      "/v1/playlists/p1/songs": (route) => {
+        adds.push(route.request().url());
+        return route.fulfill({ json: { revision: 2 } });
+      },
+    },
+  });
+  await page.goto(`/#/library/album/${album.id}`);
+  const dialog = page.locator(".new-playlist-dialog");
+  for (const _ of [1, 2]) {
+    await page.getByRole("button", { name: "More options for 360" }).click();
+    await page.getByRole("menuitem", { name: "Add to playlist" }).click();
+    await page.getByRole("menuitem", { name: "New playlist" }).click();
+    await dialog.getByLabel("Playlist name").fill("Road trip");
+    await dialog.getByRole("button", { name: "Create playlist" }).click();
+    await expect(dialog).toBeHidden();
+  }
+  await expect(page.locator(".notice-area")).toContainText(
+    "may or may not have been saved",
+  );
+  await expect.poll(() => adds.length).toBe(1);
+  expect(keys).toHaveLength(2);
+  expect(keys[1]).toBe(keys[0]);
+  expect(made.size).toBe(1);
+});
+
 test("a song tapped in search plays alone; on an album it plays on", async ({
   page,
 }) => {
