@@ -204,3 +204,51 @@ private actor ReadLatch {
   states.answer("song", true, since: states.revision("song"))
   #expect(states.tap("song", orFavourite: true)?.value == false)
 }
+
+private func favourites(_ titles: [String]) throws -> [Playlist] {
+  let entries = titles.enumerated().map { index, title in
+    #"{"entry_id":"f:\#(index)","title":"\#(title)","artist":"The Orchard","album":"Sunrise","position":\#(index)}"#
+  }
+  let json =
+    #"[{"id":"fav","name":"Favourites","revision":1,"favourites":true,"entries":["#
+    + entries.joined(separator: ",") + "]}]"
+  return try LibraryCodec.decoder().decode([Playlist].self, from: Data(json.utf8))
+}
+
+/// Codex round 1 on batch G (#230): a song seen as not a favourite, then
+/// favourited on another device, showed Add to favourites after the next
+/// sync, because a known state was never looked at again. Each sync of the
+/// Favourites playlist now sets the state of every song shown, over an older
+/// read or cached answer; a favourite edit still waiting keeps the tap.
+@Test func aSyncedFavouritesPlaylistWinsOverAnOlderStateButNotAWaitingEdit() throws {
+  var states = FavouriteStates()
+  let road = Track(id: "road", title: "Open Road", artist: "The Orchard", album: "Sunrise")
+  let light = Track(id: "light", title: "First Light", artist: "The Orchard", album: "Sunrise")
+  let rain = Track(id: "rain", title: "After the Rain", artist: "The Orchard", album: "Sunrise")
+  // Seen: road from a cached read (false), light from the library (false).
+  states.follow(road)
+  states.answer(road.id, false, since: states.revision(road.id))
+  states.follow(light)
+  states.answer(light.id, false, since: states.revision(light.id))
+  // A read of road starts before the sync.
+  let before = states.revision(road.id)
+  // Another device favourites road; the person taps light here, not sent yet.
+  _ = states.tap(light.id)
+  states.synced(try favourites(["Open Road"]), editWaiting: { $0 == light.id })
+  #expect(states[road.id] == true)  // The synced playlist, over the cached false.
+  #expect(states[light.id] == true)  // The waiting tap is kept.
+  let late = states.answer(road.id, false, since: before)
+  #expect(!late)  // A read started before the sync loses.
+  #expect(states[road.id] == true)
+  // Unfavourited elsewhere: the next sync says so; songs never shown stay unknown.
+  states.synced(try favourites([]), editWaiting: { _ in false })
+  #expect(states[road.id] == false && states[light.id] == false)
+  #expect(states[rain.id] == nil)
+  // No Favourites playlist with its songs: nothing changes.
+  states.synced([], editWaiting: { _ in false })
+  #expect(states[road.id] == false)
+  // Sign-out forgets what was followed.
+  states.clear()
+  states.synced(try favourites(["Open Road"]), editWaiting: { _ in false })
+  #expect(states[road.id] == nil)
+}

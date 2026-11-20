@@ -13,6 +13,9 @@ public struct FavouriteStates: Sendable {
   /// Songs shown with an unknown state, waiting for a server read to answer;
   /// retried after each successful refresh (Codex on #212).
   private var waiting: [String: Track] = [:]
+  /// Songs whose star or menu has been shown, kept up to date by each sync
+  /// of the library's Favourites playlist (Codex round 1 on batch G, #230).
+  private var followed: [String: Track] = [:]
   public init() {}
   /// The one star design (#227): filled for a favourite, outlined for not,
   /// on the player's star and the song sheet's button alike.
@@ -86,6 +89,20 @@ public struct FavouriteStates: Sendable {
     song.recordingKind = nil
     return entries.contains { SongIdentity.sameEdition($0.entryTrack, song) }
   }
+  /// A song's star or menu is shown: later syncs keep its state current.
+  public mutating func follow(_ track: Track) { followed[track.id] = track }
+  /// The library synced (Codex round 1 on batch G, #230). Which state wins:
+  /// a favourite edit of the person's still waiting to be sent (`editWaiting`)
+  /// keeps their tap; otherwise the synced Favourites playlist sets every
+  /// followed song's state, over an older read or cached answer, and a read
+  /// started before the sync no longer counts. Nothing changes while the
+  /// library holds no Favourites playlist with its songs.
+  public mutating func synced(_ playlists: [Playlist], editWaiting: (String) -> Bool) {
+    for (id, track) in followed where !editWaiting(id) {
+      guard let listed = Self.listed(track, in: playlists) else { return }
+      change(id, listed)
+    }
+  }
   /// A refused save settled (#212): the newest tap still waiting, or none,
   /// and then the state is unknown until the server is read again.
   public mutating func refusal(_ refused: RefusedFavourite) {
@@ -101,6 +118,7 @@ public struct FavouriteStates: Sendable {
     values = [:]
     revisions = [:]
     waiting = [:]
+    followed = [:]
     epoch += 1
   }
 }

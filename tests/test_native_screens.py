@@ -68,6 +68,25 @@ def test_the_song_menu_never_asks_to_load_the_favourite_state():
     assert "orFavourite: true" in unknown
 
 
+def test_a_sync_keeps_shown_favourite_states_current():
+    """Codex round 1 on batch G (#230): a known state was never looked at
+    again, so a song favourited on another device kept "Add to favourites"
+    after the sync. Every song shown is followed, each library reload sets
+    them from the synced Favourites playlist, and a tap still being saved or
+    waiting to be sent keeps its state."""
+    model = (APP / "AppModel.swift").read_text()
+    reload = model.split("private func loadCache(", 1)[1].split("\n  }\n", 1)[0]
+    synced = reload.split("favourites.synced(playlists) { id in", 1)[1]
+    synced = synced.split("\n    }\n", 1)[0]
+    assert "EditOutbox.favourite(id, in: pendingEdits) != nil" in synced
+    assert "favouriteSaves[id] != nil" in synced
+    for name in ("func peekFavourite(", "func loadFavourite("):
+        body = model.split(name, 1)[1].split("\n  }\n", 1)[0]
+        assert "favourites.follow(track)" in body, name
+    tap = model.split("func tapFavourite(", 1)[1].split("\n  }\n", 1)[0]
+    assert "favouriteSaves[track.id, default: 0] += 1" in tap
+
+
 def test_add_to_playlist_offers_a_new_playlist_first():
     """#285: Add to playlist had no way to make a playlist. Song and
     collection menus (albums, artists, playlists, mixes) offer New playlist

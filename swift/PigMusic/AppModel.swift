@@ -767,6 +767,11 @@ enum PlayOrigin: Hashable {
     self.albums = albums
     self.artists = artists
     self.playlists = playlists
+    // Stars and song menus follow the synced Favourites playlist, except a
+    // tap still being saved or waiting to be sent (Codex round 1 on batch G).
+    favourites.synced(playlists) { id in
+      EditOutbox.favourite(id, in: pendingEdits) != nil || favouriteSaves[id] != nil
+    }
     songCount = count
     songSeconds = seconds
     albumCategoryCounts = categoryCounts
@@ -1021,6 +1026,8 @@ enum PlayOrigin: Hashable {
     // Every answer belongs to this account: a sign-out while reading drops it (#101).
     let stamp = account.generation
     let store = self.store
+    // Each sync keeps it current (Codex round 1 on batch G).
+    favourites.follow(track)
     if let value = EditOutbox.favourite(track.id, in: pendingEdits) {
       // The edit waiting on this phone is the newest state; a refused one
       // isn't (Codex on #212).
@@ -1050,6 +1057,8 @@ enum PlayOrigin: Hashable {
   /// the server (#229): read for each song whose ⋯ menu could open, so the
   /// menu shows its favourite item at once.
   func peekFavourite(_ track: Track) async {
+    // Each sync keeps it current, also once known (Codex round 1 on batch G).
+    favourites.follow(track)
     guard favourites[track.id] == nil else { return }
     if let value = EditOutbox.favourite(track.id, in: pendingEdits) {
       favourites.change(track.id, value)
@@ -1078,6 +1087,12 @@ enum PlayOrigin: Hashable {
     let stamp = account.generation
     let store = self.store
     guard let tap = favourites.tap(track.id, orFavourite: orFavourite) else { return nil }
+    // Until its edit is in the outbox, a sync mustn't undo the tap.
+    favouriteSaves[track.id, default: 0] += 1
+    defer {
+      favouriteSaves[track.id, default: 1] -= 1
+      if favouriteSaves[track.id] == 0 { favouriteSaves[track.id] = nil }
+    }
     let mutation = OfflineMutation(action: "favourite", track: track, favourite: tap.value)
     do {
       let outcome = try await saveEditOutcome(mutation)
@@ -1096,6 +1111,9 @@ enum PlayOrigin: Hashable {
       throw error
     }
   }
+  /// Favourite taps still being saved, by song: a sync keeps their state
+  /// (Codex round 1 on batch G).
+  @ObservationIgnored private var favouriteSaves: [String: Int] = [:]
   /// Rises when the server refuses a favourite: the star says it wasn't saved.
   var favouriteRefusals = 0
   /// Shows each refused favourite's song as it is now (Codex round 2 and
