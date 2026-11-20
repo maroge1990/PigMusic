@@ -197,6 +197,68 @@ test("a new playlist from the picker whose answer is lost is not offered again",
 
 // Codex, batch F (#275): the playlist was made but adding the song failed;
 // Create stayed the retry, and a second click made a second playlist.
+// Codex, batch F (#275): a create still on its way when the dialog closed
+// came back into the next opening, whose Create then added to it.
+test("a new playlist from a reopened picker is made, not the closed one's", async ({
+  page,
+}) => {
+  const names: string[] = [];
+  const adds: string[] = [];
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  await mockApi(page, {
+    answers: {
+      "/v1/favourites": (route) =>
+        route.fulfill({ json: { favourited: false } }),
+      "/v1/playlists": async (route) => {
+        if (route.request().method() !== "POST")
+          return route.fulfill({ json: { playlists: [] } });
+        const n = names.push(route.request().postDataJSON().name);
+        if (n === 1) await held;
+        return route.fulfill({
+          status: 201,
+          json: { id: "p" + n, name: names[n - 1] },
+        });
+      },
+      "/v1/playlists/p1": (route) =>
+        route.fulfill({
+          json: { id: "p1", name: "First", revision: 1, entries: [] },
+        }),
+      "/v1/playlists/p2": (route) =>
+        route.fulfill({
+          json: { id: "p2", name: "Second", revision: 1, entries: [] },
+        }),
+      "/v1/playlists/p1/songs": (route) => {
+        adds.push("p1");
+        return route.fulfill({ json: { revision: 2 } });
+      },
+      "/v1/playlists/p2/songs": (route) => {
+        adds.push("p2");
+        return route.fulfill({ json: { revision: 2 } });
+      },
+    },
+  });
+  await page.goto(`/#/library/album/${album.id}`);
+  const dialog = page.locator(".new-playlist-dialog");
+  async function create(name: string) {
+    await page.getByRole("button", { name: "More options for 360" }).click();
+    await page.getByRole("menuitem", { name: "Add to playlist" }).click();
+    await page.getByRole("menuitem", { name: "New playlist" }).click();
+    await dialog.getByLabel("Playlist name").fill(name);
+    await dialog.getByRole("button", { name: "Create playlist" }).click();
+  }
+  await create("First");
+  await expect.poll(() => names.length).toBe(1);
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await expect(dialog).toBeHidden();
+  release();
+  await expect.poll(() => adds).toEqual(["p1"]);
+  await create("Second");
+  await expect.poll(() => adds).toEqual(["p1", "p2"]);
+  expect(names).toEqual(["First", "Second"]);
+  await expect(dialog).toBeHidden();
+});
+
 test("a made playlist whose add fails retries the add, never the create", async ({
   page,
 }) => {
