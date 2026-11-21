@@ -71,15 +71,13 @@ def test_enrichment_caches_use_the_database_off_the_event_loop(tmp_path, monkeyp
                 )
                 assert await Logos(store, NoImages()).get(http, ARTIST) is None
                 assert await Fanart(store).get(http, ARTIST, "key") == {}
-        csv = "name\nSomeone Else\n"
-        async with client(lambda request: httpx.Response(200, text=csv)) as http:
+        async with client(lambda request: httpx.Response(404)) as http:
             portraits = Portraits(store, None, artwork, NoImages())
             (store.directory / "media-settings.json").write_text("{}")
             for _ in range(2):
                 assert await portraits.get(http, "Nobody", ARTIST) is None
 
     asyncio.run(run())
-    assert store.read_document("artistgrid-index")["names"] == ["Someone Else"]
     assert calls == [], calls
 
 

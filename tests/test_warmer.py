@@ -202,8 +202,6 @@ def warming_app(tmp_path, monkeypatch, artists=3, answer=None):
             return httpx.Response(
                 200, content=image.getvalue(), headers={"content-type": "image/jpeg"}
             )
-        if "artistgrid" in host:
-            return httpx.Response(200, text="name,slug\n")
         if "fanart" in host:
             # A portrait; no backdrop or logo, so those misses wait a day.
             thumb = "https://assets.fanart.tv/fanart/music/a/artistthumb/a.jpg"

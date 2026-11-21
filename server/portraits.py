@@ -2,10 +2,6 @@
 
 import asyncio
 from contextlib import nullcontext
-import csv
-import io
-import re
-import time
 from urllib.parse import urlsplit
 
 import httpx
@@ -13,7 +9,6 @@ from PIL import Image
 
 from .keyed_locks import KeyedLocks
 from .artwork import quoted
-from .catalogue import settled
 from .deezer_art import deezer_image
 from .library import identifier, normalise
 from .media import settings
@@ -31,42 +26,7 @@ class Portraits:
         self.store, self.catalogue, self.artwork = store, catalogue, artwork
         self.fanart = fanart or Fanart(store)
         self.locks = KeyedLocks()
-        self.index_lock = asyncio.Lock()
         self.slots = asyncio.Semaphore(3)
-
-    async def artistgrid(self, client, name):
-        async with self.index_lock:
-            index = await asyncio.to_thread(
-                self.store.read_document, "artistgrid-index"
-            )
-            if index.get("retry_after", 0) > time.time():
-                return None
-            if time.time() - index.get("time", 0) > 604800:
-                async with client.stream(
-                    "GET", "https://artists.artistgrid.cx/artists.csv", timeout=12
-                ) as response:
-                    response.raise_for_status()
-                    data = bytearray()
-                    async for chunk in response.aiter_bytes():
-                        data.extend(chunk)
-                        if len(data) > 2_000_000:
-                            raise ValueError("Portrait index too large")
-                names = [
-                    r["name"]
-                    for r in csv.DictReader(io.StringIO(data.decode("utf-8-sig")))
-                ]
-                index = {"time": time.time(), "names": names}
-                await settled(self.store.write_document, "artistgrid-index", index)
-        matches = [n for n in index["names"] if normalise(n) == normalise(name)]
-        slug = re.sub("[^a-z0-9]", "", name.lower())
-        # Reject punctuation collisions in the upstream filename scheme.
-        if (
-            len(matches) != 1
-            or sum(re.sub("[^a-z0-9]", "", n.lower()) == slug for n in index["names"])
-            != 1
-        ):
-            return None
-        return "https://assets.artistgrid.cx/jpg/" + slug + ".jpg"
 
     async def get(self, client, name, artist_id=None):
         config = settings(self.store)
@@ -81,7 +41,7 @@ class Portraits:
             "portrait-missing:"
             + key
             + ":deezer"
-            + (":fanart" if config.get("fanart_key") else ":grid")
+            + (":fanart" if config.get("fanart_key") else "")
         )
         if await self.artwork.waiting(missing):
             return None
@@ -129,18 +89,12 @@ class Portraits:
                         url = photos[0]["url"] if photos else None
                 except (httpx.HTTPError, ValueError, KeyError):
                     pass
-            source = "fanart"
-            try:
-                if not url:
-                    url = await self.artistgrid(client, name)
-                    source = "artistgrid"
-                if url:
-                    return await self.keep(client, url, target, source)
-            except failures:
-                if not url:
-                    await self.artwork.missing("artistgrid-index", 300)
-                await self.artwork.missing(missing, 300)
-                return None
+            if url:
+                try:
+                    return await self.keep(client, url, target, "fanart")
+                except failures:
+                    await self.artwork.missing(missing, 300)
+                    return None
             await self.artwork.missing(missing, 300 if unsure else 86400)
             return None
 
@@ -149,7 +103,7 @@ class Portraits:
         parts = urlsplit(url)
         if source != "deezer" and (
             parts.scheme != "https"
-            or parts.hostname not in {"assets.artistgrid.cx", "assets.fanart.tv"}
+            or parts.hostname != "assets.fanart.tv"
             or parts.username
             or parts.password
             or parts.port not in {None, 443}

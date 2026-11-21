@@ -306,13 +306,12 @@ def test_a_corrupt_deezer_image_falls_back_to_the_archive(tmp_path):
 
 
 def test_a_failed_deezer_photo_download_still_asks_the_other_sources(tmp_path):
-    """Codex round 1 (#194): a Deezer CDN failure goes on to ArtistGrid."""
+    """Codex round 1 (#194): a Deezer CDN failure goes on to Fanart."""
+    from server.media import save_settings
     from server.store import Store
 
-    (tmp_path / "media-settings.json").write_text(
-        json.dumps({"portraits": True}), encoding="utf-8"
-    )
     store = Store(tmp_path)
+    save_settings(store, True, False, "f" * 32)
     linked = {
         "artist/"
         + ARTIST: {
@@ -329,9 +328,10 @@ def test_a_failed_deezer_photo_download_still_asks_the_other_sources(tmp_path):
             return httpx.Response(200, json={"picture_xl": PHOTO})
         if request.url.host == "cdn-images.dzcdn.net":
             return httpx.Response(503)
-        if request.url.host == "artists.artistgrid.cx":
-            return httpx.Response(200, content=b"name\nNew Order\n")
-        if request.url.host == "assets.artistgrid.cx":
+        if request.url.host == "webservice.fanart.tv":
+            photo = {"url": "https://assets.fanart.tv/photo.jpg", "likes": "1"}
+            return httpx.Response(200, json={"artistthumb": [photo]})
+        if request.url.host == "assets.fanart.tv":
             return httpx.Response(200, content=image_bytes())
         return httpx.Response(404)
 
@@ -341,7 +341,7 @@ def test_a_failed_deezer_photo_download_still_asks_the_other_sources(tmp_path):
 
     found = run(get())
     assert found is not None and found.is_file()
-    assert asked[-1] == "assets.artistgrid.cx"
+    assert asked[-1] == "assets.fanart.tv"
 
 
 def test_an_exact_name_on_a_truncated_page_is_not_unique():
@@ -463,12 +463,11 @@ def test_a_silhouette_goes_on_to_the_next_source_and_is_not_counted_as_deezer(
 ):
     import time
 
+    from server.media import save_settings
     from server.store import Store
 
-    (tmp_path / "media-settings.json").write_text(
-        json.dumps({"portraits": True}), encoding="utf-8"
-    )
     store = Store(tmp_path)
+    save_settings(store, True, False, "f" * 32)
     linked = {
         "artist/"
         + ARTIST: {
@@ -481,7 +480,7 @@ def test_a_silhouette_goes_on_to_the_next_source_and_is_not_counted_as_deezer(
     portraits = Portraits(store, Catalogue(linked), artwork)
     counted = []
     artwork.counted = lambda kind, source: counted.append((kind, source))
-    grid = {"has": True}
+    fanart = {"has": True}
     asked = []
 
     def handle(request):
@@ -492,9 +491,11 @@ def test_a_silhouette_goes_on_to_the_next_source_and_is_not_counted_as_deezer(
             return httpx.Response(200, json={"data": [album(cover=NO_COVER)]})
         if request.url.host == "cdn-images.dzcdn.net":
             return httpx.Response(200, content=image_bytes())  # The silhouette.
-        if request.url.host == "artists.artistgrid.cx":
-            names = "name\nRadiohead\n" if grid["has"] else "name\n"
-            return httpx.Response(200, content=names.encode())
+        if request.url.host == "webservice.fanart.tv":
+            photo = {"url": "https://assets.fanart.tv/photo.jpg", "likes": "1"}
+            return httpx.Response(
+                200, json={"artistthumb": [photo] if fanart["has"] else []}
+            )
         return httpx.Response(200, content=image_bytes())
 
     async def ask(work):
@@ -506,12 +507,12 @@ def test_a_silhouette_goes_on_to_the_next_source_and_is_not_counted_as_deezer(
     assert found is not None and found.is_file()
     # The silhouette is never downloaded, and no image is put down to Deezer.
     assert "cdn-images.dzcdn.net" not in asked
-    assert counted == [("cover", "cover-art-archive"), ("photo", "artistgrid")]
+    assert counted == [("cover", "cover-art-archive"), ("photo", "fanart")]
     # No other source has a photo: an ordinary miss, asked again tomorrow.
     found.unlink()
-    grid["has"] = False
+    fanart["has"] = False
     with store.connect() as conn:
-        conn.execute("DELETE FROM documents WHERE name = 'artistgrid-index'")
+        conn.execute("DELETE FROM documents WHERE name LIKE 'fanart-metadata:%'")
     assert run(ask(lambda c: portraits.get(c, "Radiohead", ARTIST))) is None
     with store.connect() as conn:
         (payload,) = conn.execute(
@@ -605,3 +606,58 @@ def test_portraits_saved_before_the_silhouette_fix_are_fetched_again_when_asked_
     # Nothing of the old generation was deleted or rewritten.
     assert old.read_bytes() == before
     assert store.read_document(saved_answer) == {"file": old.name}
+
+
+def test_artistgrid_is_never_asked_and_its_saved_portraits_still_serve(tmp_path):
+    """#201: ArtistGrid supplied 0.4% of photos (under the 1% mark) and is
+    retired. A miss on Deezer, with no Fanart key, asks nothing else; a
+    portrait ArtistGrid supplied earlier, its source record and the old
+    index document stay and read as before."""
+    import time
+
+    from server.portraits import portrait_target
+    from server.store import Store
+
+    (tmp_path / "media-settings.json").write_text(
+        json.dumps({"portraits": True}), encoding="utf-8"
+    )
+    store = Store(tmp_path)
+    linked = {
+        "artist/"
+        + ARTIST: {
+            "name": "Radiohead",
+            "relations": [{"url": {"resource": "https://www.deezer.com/artist/399"}}],
+        }
+    }
+    artwork = Artwork(store, Catalogue(linked))
+    portraits = Portraits(store, Catalogue(linked), artwork)
+    store.write_document("artistgrid-index", {"time": 0, "names": ["Radiohead"]})
+    asked = []
+
+    def handle(request):
+        asked.append(request.url.host)
+        if request.url.host == "api.deezer.com":
+            return httpx.Response(200, json={"picture_xl": NO_PHOTO})
+        return httpx.Response(200, content=image_bytes())
+
+    async def get(name, artist_id):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+            return await portraits.get(client, name, artist_id)
+
+    assert run(get("Radiohead", ARTIST)) is None
+    assert asked and set(asked) == {"api.deezer.com"}
+    with store.connect() as conn:
+        (payload,) = conn.execute(
+            "SELECT payload FROM documents WHERE name LIKE 'portrait-missing:%'"
+        ).fetchone()
+    assert json.loads(payload)["retry_after"] > time.time() + 3600
+
+    # A portrait saved from ArtistGrid before its retirement.
+    other = "22222222-2222-4222-8222-222222222222"
+    saved = portrait_target(store, "Portishead", other)
+    artwork.save(image_bytes(), saved)
+    grid = "https://assets.artistgrid.cx/jpg/portishead.jpg"
+    run(artwork.sourced(saved, "artistgrid", grid))
+    asked.clear()
+    assert run(get("Portishead", other)) == saved and asked == []
+    assert artwork.source(saved)["source"] == "artistgrid"
