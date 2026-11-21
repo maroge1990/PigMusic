@@ -18,6 +18,7 @@ from .library import normalise
 from .downloader import duration, matches, mismatch
 from .matching import (
     DISTINCT,
+    FEATURE,
     album_title,
     flavour,
     lead_artist,
@@ -124,11 +125,19 @@ NOT_ORDINARY = re.compile(
     r"\b(tributes?|lullab(?:y|ies)|covers|made popular by|originally performed by|"
     r"8 ?bit)\b"
 )
-# An album naming another recording of its songs (Codex, D-130 review): the
-# title's version words (`DISTINCT`), the alterations (`ALTERED`), stripped
-# versions and re-recordings ("Fearless (Taylor's Version)"). Edition words
-# ("Remastered", "Deluxe", "Anniversary Edition") are not among them.
-RERECORDED = re.compile(r"\b(stripped|re ?record(?:ed|ing|ings)?|\w+ s version)\b")
+# Words naming another recording (Codex, D-130 review): the title's version
+# words (`DISTINCT`), the alterations (`ALTERED`), stripped versions and
+# re-recordings, in English ("Taylor's Version", "re-recorded") and as
+# "version of <artist>" in Spanish, French, Italian and Portuguese
+# ("Versión de Taylor"; never "Version de luxe"). Edition words
+# ("Remastered", "Deluxe", "Anniversary Edition", years) are not among them.
+RERECORDED = re.compile(
+    r"\b(stripped|re ?record(?:ed|ing|ings)?|\w+ s version|"
+    r"(?:versi(?:on|ón|one)|versão) d[eia] (?!luxe\b|lujo\b|lusso\b|luxo\b)\w+)\b"
+)
+# A title's qualifiers: anything in brackets, and a " - " suffix.
+BRACKETED = re.compile(r"[\(\[]([^\)\]]*)[\)\]]")
+DASHED = re.compile(r"\s[-–—]\s(.*)$")
 
 
 def ordinary(album):
@@ -140,13 +149,53 @@ def ordinary(album):
 
 def markers(*texts):
     """The other-recording words in these texts, one form each ("Demos" is
-    "demo", "Sped Up" is "sped", "re-recorded" is "re record")."""
+    "demo", "Sped Up" is "sped"; every re-recording is "re record")."""
     text = normalise(" ".join(t or "" for t in texts))
     found = {re.sub(r"(?<=x)es$|s$", "", m[0]) for m in DISTINCT.finditer(text)}
     found |= altered(text)
     for word in RERECORDED.findall(text):
-        found.add("re record" if word.startswith("re") else word)
+        found.add("stripped" if word == "stripped" else "re record")
     return frozenset(found)
+
+
+def recording_markers(title, album):
+    """The other-recording words a song's raw title and album carry: every
+    title qualifier ("Love Story (Taylor's Version - 2021)", "Everlong -
+    Piano Version"; featured artists aside), and the album's, less words of
+    the song's own name ("Piano Man" on "Piano Man" marks nothing; "Live
+    Forever" is a song, not a live recording)."""
+    text = title or ""
+    qualifiers = BRACKETED.findall(text)
+    core = BRACKETED.sub(" ", text)
+    dashed = DASHED.search(core)
+    if dashed:
+        qualifiers.append(dashed[1])
+        core = core[: dashed.start()]
+    qualifiers = [q for q in qualifiers if not FEATURE.match(q)]
+    return markers(*qualifiers) | (markers(album) - markers(core))
+
+
+def identities(value):
+    """A song's or result's identifiers: ISRCs (any case) and MusicBrainz
+    recording and release IDs."""
+    raw = value.get("isrcs") or value.get("isrc") or []
+    found = {
+        ("isrc", str(code).strip().upper())
+        for code in ([raw] if isinstance(raw, str) else raw)
+        if code
+    }
+    for key in ("musicbrainz_recording_id", "musicbrainz_release_id"):
+        if value.get(key):
+            found.add((key, value[key]))
+    return found
+
+
+def identified(track, c):
+    """Whether a marked recording (`recording_markers`) is proven the one
+    asked for: an ISRC or MusicBrainz ID in common, or no identifier on
+    either side to compare (equal markers are then all there is)."""
+    asked, offered = identities(track), identities(c)
+    return bool(asked & offered) or not (asked or offered)
 
 
 def without_the(artist):
@@ -164,6 +213,18 @@ def aliased(track, c):
     """A result credited to the artist only once a leading "The" is dropped:
     among one source's matches an exact credit is chosen first (Codex)."""
     return primary_artist(c.get("channel")) != primary_artist(track["artist"])
+
+
+def waived(track, c):
+    """D-130: a request with no known length takes the song from another
+    album when that album is ordinary and both sides name the same
+    other-recording words in their raw titles and albums (none, for the
+    usual chart song); a marked recording must also be `identified`."""
+    if not ordinary(c.get("album")):
+        return False
+    asked = recording_markers(track.get("title"), track.get("album"))
+    offered = recording_markers(c.get("title"), c.get("album"))
+    return asked == offered and (not asked or identified(track, c))
 
 
 def rejection(track, c):
@@ -192,8 +253,9 @@ def rejection(track, c):
         return "altered"
     # Only a plain studio song may come from another release: any release
     # when its length is known; when it is not (D-130), any ordinary album
-    # naming no other recording the request does not name itself. A
-    # live, demo, remix, session or altered recording is one performance
+    # whose title and album name the same other-recording words as the
+    # request's, proven by an identifier when either names any (`waived`).
+    # A live, demo, remix, session or altered recording is one performance
     # (another concert is another recording), so it must be the requested
     # album or carry one of its ISRCs; so must an edition chosen explicitly.
     if not (
@@ -201,12 +263,7 @@ def rejection(track, c):
             not track.get("explicit_edition")
             and not recording_kind(track)
             and not altered(track.get("title"), track.get("album"))
-            and (
-                track.get("duration")
-                or ordinary(c.get("album"))
-                and markers(c.get("album"))
-                <= markers(track.get("title"), track.get("album"))
-            )
+            and (track.get("duration") or waived(track, c))
         )
         or normalise(c.get("album", "")) == normalise(track["album"])
         or bool(track.get("isrcs") and c.get("isrc") and c["isrc"] in track["isrcs"])

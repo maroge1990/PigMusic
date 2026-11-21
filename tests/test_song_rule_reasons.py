@@ -276,15 +276,28 @@ def candidates(channel):
 def intended(track, c, old):
     """D-130's two changes, read from the pair alone, not from the new code:
     with no request length a plain request takes the song from an ordinary
-    album; a lead artist differing only by a leading "The" is the artist."""
+    album; a lead artist differing only by a leading "The" is the artist.
+    In this grid the only other-recording word a plain request and its
+    matching result can share is the "(Live)" in both titles: such a pair
+    needs an identifier in common, or none on either side."""
     if track.get("explicit_edition"):
         return False
     if old == "album":
+        asked = {("isrc", code) for code in track.get("isrcs") or []}
+        if track.get("musicbrainz_recording_id"):
+            asked.add(("rec", track["musicbrainz_recording_id"]))
+        offered = {("isrc", code.upper()) for code in c.get("isrcs") or []}
+        if c.get("isrc") and not c.get("isrcs"):
+            offered.add(("isrc", c["isrc"].upper()))
+        if c.get("musicbrainz_recording_id"):
+            offered.add(("rec", c["musicbrainz_recording_id"]))
+        proven = bool(asked & offered) or not (asked or offered)
         return (
             not track.get("duration")
             and not recording_kind(track)
             and not altered(track.get("title"), track.get("album"))
             and c["album"] in ORDINARY
+            and ("(Live)" not in track["title"] or proven)
         )
     return (
         old == "artist"
@@ -324,10 +337,10 @@ def test_downloads_decide_as_before_and_instant_listening_only_as_d130(channel):
 # "The Artist" changes every pair against "Artist feat. Guest" that reached
 # the artist check; most then fail a later check.
 EXPECTED = {
-    "Artist": (450, 330),
-    "Artist, Guest": (450, 330),
-    "Ärtist": (450, 330),
-    "The Artist": (88_128, 1_269),
+    "Artist": (360, 240),
+    "Artist, Guest": (360, 240),
+    "Ärtist": (360, 240),
+    "The Artist": (88_128, 1_179),
 }
 
 
@@ -590,6 +603,49 @@ STAYS_REFUSED = [
         ),
         "album",
     ),
+    # Codex, second D-130 review (#308): version evidence on one side only,
+    # or only in a title. Taylor's Version asked, the original offered.
+    (
+        request("Taylor Swift", "Love Story", "Fearless (Taylor's Version)"),
+        on_jiosaavn("Taylor Swift", "Love Story", "Fearless", 231),
+        "album",
+    ),
+    (
+        request("Taylor Swift", "Love Story (Taylor's Version)", "Fearless"),
+        on_youtube("Taylor Swift", "Love Story", "Love Songs", 231),
+        "title",
+    ),
+    # The original asked, Taylor's Version offered (Spanish label; a title
+    # whose year qualifier the title check strips).
+    (
+        request("Taylor Swift", "Love Story", "Fearless"),
+        on_jiosaavn("Taylor Swift", "Love Story", "Fearless (Versión de Taylor)", 235),
+        "album",
+    ),
+    (
+        request("Taylor Swift", "Love Story", "Fearless"),
+        on_youtube(
+            "Taylor Swift",
+            "Love Story (Taylor's Version - 2021)",
+            "Country Collection",
+            235,
+        ),
+        "album",
+    ),
+    # A piano version on an unrelated piano album, unproven: the request
+    # has an ISRC the result does not carry.
+    (
+        {
+            **request(
+                "Foo Fighters",
+                "Everlong (Piano Version)",
+                "Everlong (Piano Version) - Single",
+            ),
+            "isrcs": ["USRW30700001"],
+        },
+        on_jiosaavn("Foo Fighters", "Everlong (Piano Version)", "Piano Hits", 262),
+        "album",
+    ),
 ]
 
 
@@ -717,3 +773,68 @@ def test_albums_naming_another_recording_are_refused_without_a_length():
         assert why(EVERLONG, on_jiosaavn("Foo Fighters", "Everlong", edition, 250)) == (
             "matched"
         ), edition
+
+
+def test_a_marked_recording_needs_the_same_words_on_both_sides_and_proof():
+    """#308: the request's and the result's raw titles and albums must name
+    the same other-recording words; a marked recording must also share an
+    identifier, or neither side may have one."""
+    asked = request("Taylor Swift", "Love Story", "Fearless (Taylor's Version)")
+    spanish = on_jiosaavn(
+        "Taylor Swift", "Love Story", "Fearless (Versión de Taylor)", 235
+    )
+    # Every language's form is one re-recording; no identifiers either side.
+    assert why(asked, spanish) == "matched"
+    isrc = "USUG12100001"
+    # The request has an ISRC: the result must carry it.
+    assert why({**asked, "isrcs": [isrc]}, spanish) == "album"
+    assert why({**asked, "isrcs": [isrc]}, {**spanish, "isrc": isrc}) == "matched"
+    # The result has one the request cannot check: no proof either.
+    assert why(asked, {**spanish, "isrc": isrc}) == "album"
+    # A piano version proven by its ISRC plays from a piano album; with no
+    # identifier on either side the equal words are all there is.
+    piano = request("Foo Fighters", "Everlong (Piano Version)", "Everlong - Single")
+    hits = on_jiosaavn("Foo Fighters", "Everlong (Piano Version)", "Piano Hits", 262)
+    assert why(piano, hits) == "matched"
+    assert why({**piano, "isrcs": [isrc]}, {**hits, "isrc": isrc}) == "matched"
+    assert why({**piano, "isrcs": [isrc]}, hits) == "album"
+    # A piano title on the request only, or on the result only.
+    assert why(piano, on_jiosaavn("Foo Fighters", "Everlong", "Hits", 250)) == "title"
+    assert why(EVERLONG, hits) == "title"
+
+
+# Re-recordings named in other languages, with look-alikes that are not.
+RERECORDINGS = [
+    ("Fearless (Versión de Taylor)", "Versión de lujo"),
+    ("Fearless (Version de Taylor)", "Version de luxe"),
+    ("Fearless (Versione di Taylor)", "Versione deluxe"),
+    ("Fearless (Versão de Taylor)", "Versão de luxo"),
+    ("Fearless (Taylor's Version)", "Version Française"),
+]
+
+
+def test_re_recordings_in_other_languages_are_another_recording():
+    original = request("Taylor Swift", "Love Story", "Fearless")
+    for marked, plain in RERECORDINGS:
+        offered = on_jiosaavn("Taylor Swift", "Love Story", marked, 235)
+        assert why(original, offered) == "album", marked
+        lookalike = on_jiosaavn("Taylor Swift", "Love Story", plain, 235)
+        assert why(original, lookalike) == "matched", plain
+
+
+def test_a_song_named_with_a_version_word_is_not_another_recording():
+    """Words of the song's own name mark nothing: "Live Forever" is a song,
+    "Piano Man" an album named after it; edition and year tags stay plain."""
+    live_forever = request("Oasis", "Live Forever", "Definitely Maybe (Deluxe)")
+    best_of = on_jiosaavn("Oasis", "Live Forever", "Time Flies... 1994-2009", 277)
+    assert why(live_forever, best_of) == "matched"
+    piano_man = request("Billy Joel", "Piano Man", "The Essential Billy Joel")
+    assert why(piano_man, on_jiosaavn("Billy Joel", "Piano Man", "Piano Man", 339)) == (
+        "matched"
+    )
+    wonderwall = request("Oasis", "Wonderwall", "Wonderwall - Single")
+    remaster = on_youtube("Oasis", "Wonderwall - Remastered 2014", "Hits 1995", 258)
+    assert why(wonderwall, remaster) == "matched"
+    # A featured credit is no qualifier: "(feat. The Piano Guys)" marks nothing.
+    feat = on_jiosaavn("Foo Fighters", "Everlong (feat. The Piano Guys)", "Hits", 250)
+    assert why(EVERLONG, feat) == "matched"

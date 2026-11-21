@@ -944,6 +944,36 @@ def test_a_tap_on_a_chart_song_with_no_length_plays_from_another_album(
     asyncio.run(scenario())
 
 
+def test_a_re_recording_named_only_in_a_youtube_title_is_not_the_original(
+    tmp_path,
+):
+    """#308 (Codex): an original Fearless "Love Story" with no length played
+    YouTube's "Love Story (Taylor's Version - 2021)" from a compilation: the
+    title check strips the year-bearing qualifier and the album said
+    nothing. The title's qualifiers now count."""
+    original = {"artist": "Taylor Swift", "title": "Love Story", "album": "Fearless"}
+    youtube = FakeYouTube(
+        [
+            {
+                **ON_YOUTUBE,
+                "channel": "Taylor Swift",
+                "title": "Love Story (Taylor's Version - 2021)",
+                "album": "Country Collection",
+                "duration": 235,
+            }
+        ]
+    )
+    resolver = resolver_with(youtube, lambda *_: [], tmp_path)
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            with pytest.raises(ValueError, match="No source has"):
+                await resolver.stream(client, original, "member")
+
+    asyncio.run(scenario())
+    assert youtube.looked_up == []
+
+
 def test_a_tap_with_only_karaoke_and_tribute_results_is_still_no_match(tmp_path):
     """D-130 relaxes the album, never the artist or the version: karaoke,
     tribute and lullaby copies stay refused, and the no match says why."""
