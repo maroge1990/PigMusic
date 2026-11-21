@@ -30,6 +30,21 @@
             "title": "Existing",
             "type": "integer"
           },
+          "left_out": {
+            "default": 0,
+            "title": "Left Out",
+            "type": "integer"
+          },
+          "limit": {
+            "enum": [
+              "person_waiting",
+              "household_waiting",
+              "rate"
+            ],
+            "nullable": true,
+            "title": "Limit",
+            "type": "string"
+          },
           "outcomes": {
             "default": [],
             "items": {
@@ -39,7 +54,8 @@
                 "added",
                 "paused",
                 "excluded",
-                "in_library"
+                "in_library",
+                "over_limit"
               ],
               "type": "string"
             },
@@ -58,6 +74,11 @@
             },
             "title": "Paused Ids",
             "type": "array"
+          },
+          "retry_after": {
+            "nullable": true,
+            "title": "Retry After",
+            "type": "integer"
           },
           "skipped": {
             "title": "Skipped",
@@ -426,6 +447,11 @@
           },
           "in_library": {
             "title": "In Library",
+            "type": "integer"
+          },
+          "left_out": {
+            "default": 0,
+            "title": "Left Out",
             "type": "integer"
           },
           "missing": {

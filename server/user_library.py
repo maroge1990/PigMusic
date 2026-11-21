@@ -1575,6 +1575,8 @@ class UserLibrary:
                 ],
             )
             counts["requested"] = result["created"] + result["existing"]
+            # Past a queue limit (D-128): the person is told how many.
+            counts["left_out"] = result["left_out"]
         return identity, counts
 
     def request(self, user_id, tracks):
@@ -1592,9 +1594,10 @@ class UserLibrary:
                 track = {k: v for k, v in track.items() if k != "recording_kind"}
             result = self.store.index.match(track)
             prepared.append({**track, "status": result.status})
-        # The person asks for these now: a paused one resumes (#228).
+        # The person asks for these now: a paused one resumes (#228). Within
+        # the queue limits (D-128), the owner's too.
         return self.store.submit_catalogue(
-            prepared, user_id=user_id, resume_paused=True
+            prepared, user_id=user_id, resume_paused=True, limited=True
         )
 
     def history(self, user_id, events, session_id):

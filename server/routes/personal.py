@@ -686,11 +686,31 @@ def personal_router(store, artist_jobs, recovery, mixes=None):
 
     @router.post("/requests", response_model=AcquisitionResultDTO)
     async def request_tracks(body: Tracks, request: Request):
-        return await run(
+        result = await run(
             users.request,
             identity(request),
             [t.model_dump(exclude_none=True) for t in body.tracks],
         )
+        if result["left_out"] and result["left_out"] == len(result["outcomes"]):
+            # Every song was left out by a queue limit (D-128) and nothing
+            # was written: a busy answer, which every iPhone keeps to send
+            # again (an older one would drop a song answered 200 with
+            # nothing taken). The body still says what happened.
+            return JSONResponse(
+                {
+                    "detail": "Too many songs are waiting to be added. "
+                    "Try again later.",
+                    "code": "queue_limit",
+                    **AcquisitionResultDTO.model_validate(result).model_dump(),
+                },
+                status_code=429,
+                headers=(
+                    {"Retry-After": str(result["retry_after"])}
+                    if result["retry_after"]
+                    else {}
+                ),
+            )
+        return result
 
     @router.delete("/requests", response_model=ClearedRequestsDTO)
     async def clear_requests(request: Request):

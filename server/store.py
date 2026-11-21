@@ -1,5 +1,6 @@
 from .queue_states import CANCELLABLE, DONE, FINISHED, PAUSED, PENDING, RETRYABLE, sql
 from .lifecycle import TimedRLock, coordinated, step
+from .queue_limits import QueueLimits
 import itertools
 import json
 import hashlib
@@ -99,6 +100,8 @@ class Store:
         self.data_version = next(self.versions)
         # Holds over a second are logged with their holder (LOCK1).
         self.lifecycle_lock = TimedRLock("lifecycle_lock")
+        # What a person may queue (D-128); the rate is kept here, in memory.
+        self.queue_limits = QueueLimits()
         # Mix playback leases against mix cache cleanup only. Playback must not
         # wait for library work (syncs, scans, exports) under lifecycle_lock;
         # cleanup takes this after lifecycle_lock, never the other way round.
@@ -1773,7 +1776,7 @@ class Store:
 
     @coordinated
     def submit_catalogue(
-        self, tracks, preferred=None, user_id=None, resume_paused=False
+        self, tracks, preferred=None, user_id=None, resume_paused=False, limited=False
     ):
         """Queue catalogue songs. `resume_paused` only for a person asking
         for them now (#228): a song whose job another person paused resumes,
@@ -1781,7 +1784,11 @@ class Store:
         household library (removed since) is queued again (#211). Automatic
         paths (artist monitoring) leave both alone. A job the person paused
         themselves stays paused and is counted as `paused`: only Resume in
-        Downloads resumes it, so a stale page's Add can't (#264)."""
+        Downloads resumes it, so a stale page's Add can't (#264).
+        `limited`, for a person asking (D-128): a song that would make a new
+        job past one of the queue limits is left out (`over_limit`), counted
+        in the same transaction as the insert, so two requests at once can't
+        both take the last room."""
         settings = self.download_settings()
         if preferred and tracks:
             album_id = self.album_key(tracks[0])
@@ -1793,7 +1800,8 @@ class Store:
                         json.dumps({"profile": preferred}),
                     ),
                 )
-        created = existing = skipped = paused = 0
+        created = existing = skipped = paused = left_out = 0
+        room = None
         # The paused requests an Add left paused, by request ID, so the iPhone
         # clears a song's Paused mark when that request resumes (#276).
         paused_ids = []
@@ -1814,6 +1822,8 @@ class Store:
         taken_up = []
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if limited and user_id:
+                room = self.queue_limits.room(conn, user_id)
             # Read both legacy and edition-aware exclusions once per batch.
             exclusions = [
                 json.loads(r[0])
@@ -2021,6 +2031,11 @@ class Store:
                         joined = True
                     existing += 1
                     outcomes.append("existing")
+                elif room and not room.take():
+                    # A new job past a limit (D-128): left out, nothing
+                    # written; asking again later queues it.
+                    left_out += 1
+                    outcomes.append("over_limit")
                 elif prior:
                     conn.execute(
                         "UPDATE queue SET status='waiting_for_sources',payload=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -2043,12 +2058,19 @@ class Store:
                     HouseholdPolicy(self).membership_changed(conn, taken_up)
                 else:
                     HouseholdPolicy(self).reconcile_pending(conn)
+        limit = {"limit": None, "retry_after": None}
+        if room:
+            # Committed: the songs queued come out of the person's rate.
+            self.queue_limits.take(user_id, room.used)
+            limit = room.answer()
         return {
             "created": created,
             "existing": existing,
             "skipped": skipped,
             "paused": paused,
             "paused_ids": paused_ids,
+            "left_out": left_out,
+            **limit,
             "outcomes": outcomes,
             "downloads_enabled": settings["enabled"],
         }

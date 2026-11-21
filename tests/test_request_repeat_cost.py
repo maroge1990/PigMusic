@@ -142,6 +142,9 @@ def test_songs_the_household_has_are_taken_up_once_per_request(tmp_path, monkeyp
         "skipped": 0,
         "paused": 0,
         "paused_ids": [],
+        "left_out": 0,
+        "limit": None,
+        "retry_after": None,
         "outcomes": ["added"] * 30 + ["existing"],
         "downloads_enabled": False,
     }
@@ -300,8 +303,10 @@ def test_one_pass_leaves_the_queue_as_one_per_song_did(tmp_path, monkeypatch):
             "skipped": 0,
             "paused": 0,
             "paused_ids": [],
+            "left_out": 0,
             "outcomes": [],
         }
+        summed = list(expected)
         scopes = user_library.request_scope(tracks)
         with monkeypatch.context() as patch:
             position = iter(scopes)
@@ -310,9 +315,11 @@ def test_one_pass_leaves_the_queue_as_one_per_song_did(tmp_path, monkeypatch):
                 one = reference.submit_catalogue(
                     [track], user_id=their_bob, resume_paused=resume_paused
                 )
-                for name in expected:
+                for name in summed:
                     expected[name] += one[name]
                 expected["downloads_enabled"] = one["downloads_enabled"]
+                expected["limit"] = one["limit"]
+                expected["retry_after"] = one["retry_after"]
 
         assert result == expected
         assert result["created"] >= 4 and result["existing"] >= 12
