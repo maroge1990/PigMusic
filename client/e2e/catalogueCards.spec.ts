@@ -738,6 +738,26 @@ test("Add to playlist from the card adds the album's songs and says so", async (
   expect(listed).toEqual([["First song", "Second song"]]);
 });
 
+// Decided in Codex round 2: once a playlist is picked, the add goes ahead
+// even if the person leaves the card, and says so truly.
+test("Add to playlist picked, then the card left, still adds and says so", async ({
+  page,
+}) => {
+  const editions = gate();
+  const { listed } = await home(page, { editions: editions.shut });
+  await page.goto("/#/home");
+  await choose(page, "Add to playlist");
+  await page
+    .getByRole("menu", { name: "Add Album one to playlist" })
+    .getByRole("menuitem", { name: "Road trip" })
+    .click();
+  await page.evaluate(() => (location.hash = "#/library/albums"));
+  await expect(dots(page)).toHaveCount(0);
+  editions.open();
+  await expect.poll(() => listed).toEqual([["First song", "Second song"]]);
+  await expect(page.getByText("Added to playlist")).toBeVisible();
+});
+
 // Codex round 1: a playlist add dropped by a session change was announced.
 test("Add to playlist dropped by another sign-in is neither sent nor announced", async ({
   context,

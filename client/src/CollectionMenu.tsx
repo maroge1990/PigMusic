@@ -188,12 +188,14 @@ export function useCollectionMenu({
         ref={picker}
         title={title}
         add={async (id) => {
-          // A choice dropped (the card gone, the session ended or changed)
-          // says so, so the picker never reports it added (Codex round 1
-          // on #267).
+          // Once a playlist is picked, the add the person asked for goes
+          // ahead even if they leave the card (and its notice is true): the
+          // card can only be gone before the pick, when the picker goes
+          // with it. Only the session ending or changing stops it, and a
+          // stopped add says so, so the picker never reports it added
+          // (Codex rounds 1 and 2 on #267, by decision).
           let sent = false;
           await withCollection(songs, (list, session) => {
-            if (!alive.current) return;
             sent = true;
             return addToPlaylist(id, list.map(songBody), session);
           });
