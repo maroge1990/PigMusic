@@ -104,12 +104,13 @@ export function collectionMenu(
   return groups;
 }
 
-/** A collection menu's kinds of action (#267). Play, Shuffle and Play next
- * are one kind: a later one replaces an earlier one still reading its
- * songs, so only the last choice plays. Add to library and Download can't
- * be taken back once sent: while one is on its way, choosing it again does
- * nothing, so a double click acts once. */
-export type ActionSlot = "play" | "add" | "download";
+/** A collection menu's kinds of action (#267). Play and Shuffle replace the
+ * queue: a later one replaces an earlier one still reading its songs, so
+ * only the last choice plays (and playChoice.ts does the same across the
+ * app). Play next only adds, so it is its own kind; it, Add to library and
+ * Download can't be taken back once made: while one is on its way, choosing
+ * it again does nothing, so a double click acts once. */
+export type ActionSlot = "play" | "queue" | "add" | "download";
 export type Choice = { slot: ActionSlot; n: number; done: boolean };
 
 /** Records a new choice of this kind, or null when it is to be ignored. */

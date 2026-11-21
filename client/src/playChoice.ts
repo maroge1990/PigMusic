@@ -1,20 +1,30 @@
 /**
- * The newest playing choice, app-wide (Codex round 1 on #267). A menu or
- * button whose songs are still being read (a catalogue album's lookup, a
- * library album's read) plays only if nothing has been played or queued
- * since it was chosen, from any card, row, page or menu: a slow first
- * choice never replaces the queue a later one started.
+ * Which choice to replace the queue is the newest, app-wide (Codex rounds 1
+ * and 2 on #267).
+ *
+ * Replacing the queue (Play, Shuffle, a row tap, Start radio, Play library,
+ * a mix's or a card's Play) is one kind of choice. A choice whose songs are
+ * still being read registers at the gesture, before any read, and plays
+ * only if no replacing choice came after it, however the reads finish. A
+ * replacing play made at once (a row tap, a page's Play) counts from the
+ * moment it plays.
+ *
+ * Adding to the queue (Play next, Add to queue) is not a replacing choice:
+ * it never cancels a pending replacement and is never cancelled by one. It
+ * goes into whichever queue is playing when it is made (or, for a card,
+ * when its songs arrive); a replacement that lands later replaces that
+ * queue, the addition with it.
  */
 let latest = 0;
 
-/** A playing choice made now; answers whether it is still the newest. */
-export function choosePlay(): () => boolean {
+/** A replacing choice made now; answers whether it is still the newest. */
+export function chooseReplace(): () => boolean {
   const mine = ++latest;
   return () => latest === mine;
 }
 
-/** Something was played or queued: every choice still reading its songs
- * is out of date. The player calls this on every play and queue. */
-export function played() {
+/** The queue was replaced at once: every replacing choice still reading
+ * its songs is out of date. The player calls this on every replacing play. */
+export function replaced() {
   latest++;
 }

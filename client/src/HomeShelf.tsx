@@ -8,7 +8,7 @@ import {
 } from "react";
 import { Play } from "lucide-react";
 import { notifyError } from "./notices";
-import { choosePlay } from "./playChoice";
+import { chooseReplace } from "./playChoice";
 import { usePlayer } from "./Player";
 import { withCollection } from "./songActions";
 import type { Song } from "./songs";
@@ -89,7 +89,7 @@ export function CoverPlay({
         title={"Play " + title}
         onClick={() => {
           // Plays only if nothing has been played since (Codex, #267).
-          const newest = choosePlay();
+          const newest = chooseReplace();
           void withCollection(songs, (list) => {
             if (list.length && newest()) player.play(list, 0);
           }).catch((e) => {

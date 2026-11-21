@@ -1,15 +1,15 @@
 // Codex round 1 on #267: one newest playing choice for the whole app.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { choosePlay, played } from "../src/playChoice.ts";
+import { chooseReplace, replaced } from "../src/playChoice.ts";
 
-test("a playing choice gives way to a newer choice or anything played", () => {
-  const first = choosePlay();
-  const second = choosePlay();
+test("a replacing choice gives way to a newer one or a queue replaced at once", () => {
+  const first = chooseReplace();
+  const second = chooseReplace();
   assert.equal(first(), false);
   assert.equal(second(), true);
-  played();
+  replaced();
   assert.equal(second(), false);
-  const third = choosePlay();
+  const third = chooseReplace();
   assert.equal(third(), true);
 });

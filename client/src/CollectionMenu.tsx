@@ -22,7 +22,7 @@ import {
   type CollectionMenuItem,
 } from "./menus";
 import { notifyError } from "./notices";
-import { choosePlay } from "./playChoice";
+import { chooseReplace } from "./playChoice";
 import { usePlayer } from "./Player";
 import { AttemptEnded, addToPlaylist } from "./playlists";
 import { PlaylistPicker, type PlaylistPickerHandle } from "./PlaylistPicker";
@@ -130,9 +130,9 @@ export function useCollectionMenu({
     () => {
       const choice = latestChoice(latest.current, slot);
       if (!choice) return;
-      // A playing choice also gives way to anything played or queued since,
-      // from any card, row or page (Codex round 1 on #267).
-      const newest = slot === "play" ? choosePlay() : () => true;
+      // Play or Shuffle also gives way to any replacing choice made since,
+      // from any card, row, page or button (playChoice.ts).
+      const newest = slot === "play" ? chooseReplace() : () => true;
       const current = () =>
         alive.current && isLatest(latest.current, choice) && newest();
       const again = withSongs(slot, act);
@@ -154,7 +154,9 @@ export function useCollectionMenu({
       "play",
       (list) => list.length && player.play(shuffled(list), 0),
     ),
-    "play-next": withSongs("play", (list) => player.playNext(list)),
+    // Play next only adds: it neither cancels a pending Play nor is
+    // cancelled by one (playChoice.ts).
+    "play-next": withSongs("queue", (list) => player.playNext(list)),
     "add-to-library": withSongs("add", (list, session, again) =>
       addToLibrary(list, session, again),
     ),

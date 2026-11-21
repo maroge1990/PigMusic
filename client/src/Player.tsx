@@ -1,5 +1,5 @@
 import { api, apiFetch, currentSession } from "./api";
-import { played } from "./playChoice";
+import { replaced } from "./playChoice";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Play, Pause, LoaderCircle } from "lucide-react";
@@ -437,8 +437,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }
   function play(songs: Song[], index = 0, more?: MoreSongs) {
     if (!songs[index]) return;
-    // A choice still reading its songs no longer plays over this one.
-    played();
+    // A replacing choice still reading its songs no longer plays over this
+    // one (playChoice.ts).
+    replaced();
+    start(songs, index, more);
+  }
+  /** Starts a queue: a replacement's, or an addition's when nothing plays. */
+  function start(songs: Song[], index = 0, more?: MoreSongs) {
     resumeAt.current = 0;
     // The queue is its own copy: editing Up next never changes the page's
     // list it came from (Codex, #249).
@@ -466,18 +471,23 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       Math.max(0, index),
     );
   }
+  /** Whether a queue is playing now. Read from the queue itself, not the
+   * render's `song`: an addition whose songs arrived later (a card's Play
+   * next) holds an older render's functions (Codex round 2 on #267). */
+  const hasQueue = () => !!queue.current[cursor.current];
   function playNext(s: Song | Song[]) {
     const list = Array.isArray(s) ? s : [s];
     if (!list.length) return;
-    if (!song) return play(list);
-    played();
+    // An addition never cancels a replacement still on its way: with
+    // nothing playing it starts a queue of its own, which that replacement
+    // replaces when it lands.
+    if (!hasQueue()) return start(list);
     for (const next of [...list].reverse())
       insertNext(queue.current, cursor.current, next);
     setQueueVersion((v) => v + 1);
   }
   function addToQueue(s: Song) {
-    if (!song) return play([s]);
-    played();
+    if (!hasQueue()) return start([s]);
     queue.current.push(s);
     setQueueVersion((v) => v + 1);
   }

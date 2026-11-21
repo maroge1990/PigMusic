@@ -91,6 +91,8 @@ type Options = {
   failPopularity?: boolean;
   /** Held until the test opens it: the library album's read. */
   libraryAlbum?: Promise<void>;
+  /** Held until the test opens it: Start radio's first answer. */
+  radio?: Promise<void>;
   /** Titles the library lookup says are yours. */
   yours?: string[];
   /** The Add answer's outcome for each song sent (default created). */
@@ -317,7 +319,40 @@ async function home(target: Page | BrowserContext, options: Options = {}) {
         },
       });
   }
+  answers["/v1/home/mixes"] = (route) =>
+    route.fulfill({
+      json: {
+        mixes: [],
+        preparing: false,
+        radio: { title: "Pat's radio", ready: 2 },
+      },
+    });
+  answers["/v1/radio"] = async (route) => {
+    // Only the first answer (Start radio) waits; refills answer at once.
+    const after = new URL(route.request().url()).searchParams.get("after");
+    if (!after) await options.radio;
+    await route
+      .fulfill({
+        json: {
+          id: "radio-1",
+          title: "Pat's radio",
+          preparing: false,
+          tracks: [0, 1, 2].map((i) => ({
+            ...album.tracks[0],
+            id: `mix:radio-1:${i}`,
+            title: "Radio song " + i,
+            server_state: "not_in_library",
+          })),
+        },
+      })
+      .catch(() => {});
+  };
   await mockApi(target, { answers });
+  await target.route("**/api/v1/playback/*/url", (route) =>
+    route.fulfill({
+      json: { url: "/api/v1/playback/files/silence", expires_in: 60 },
+    }),
+  );
   await target.addInitScript(() => {
     HTMLMediaElement.prototype.play = () => Promise.resolve();
   });
@@ -829,4 +864,84 @@ test("a cancelled add shows on the card, and Add is offered again", async ({
   await expect(card(page).getByRole("img", { name: "Adding" })).toHaveCount(0);
   await dots(page).click();
   await expect(addItem(page)).toBeEnabled();
+});
+
+// Codex round 2: replacing choices count from the gesture, whichever read
+// finishes first; additions neither cancel nor are cancelled by them.
+const startRadio = (page: Page) =>
+  page.locator(".mix-card", { hasText: "Pat's radio" }).click();
+const albumSongs = ["First song", "Second song"];
+
+test("Start radio then an album's Play: the album plays, whichever answers first", async ({
+  page,
+}) => {
+  const radio = gate();
+  await home(page, { radio: radio.shut });
+  await page.goto("/#/home");
+  await startRadio(page);
+  await choose(page, "Play");
+  await expect.poll(() => queued(page)).toEqual(albumSongs);
+  const answered = page.waitForResponse("**/api/v1/radio");
+  radio.open();
+  await answered;
+  await page.waitForTimeout(800);
+  expect(await queued(page)).toEqual(albumSongs);
+});
+
+test("an album's Play then Start radio: the radio plays, whichever answers first", async ({
+  page,
+}) => {
+  const editions = gate();
+  await home(page, { editions: editions.shut });
+  await page.goto("/#/home");
+  await choose(page, "Play");
+  await startRadio(page);
+  await expect.poll(async () => (await queued(page))[0]).toBe("Radio song 0");
+  const read = page.waitForResponse("**/catalogue/releases/rel-studio");
+  editions.open();
+  await read;
+  await page.waitForTimeout(800);
+  const now = await queued(page);
+  expect(now[0]).toBe("Radio song 0");
+  expect(now).not.toContain("First song");
+});
+
+test("Play next while an album's Play is on its way goes into the queue playing; the Play still lands", async ({
+  page,
+}) => {
+  const editions = gate();
+  await home(page, { editions: editions.shut });
+  await page.goto("/#/home");
+  await playFromLibraryCard(page);
+  await expect.poll(() => queued(page)).toEqual(["Von dutch", "360"]);
+  await choose(page, "Play");
+  // Play next on the library card: added to what is playing now.
+  await page
+    .getByRole("button", { name: `More options for ${album.title}` })
+    .click();
+  await page
+    .getByRole("menu", { name: album.title })
+    .getByRole("menuitem", { name: "Play next" })
+    .click();
+  await expect
+    .poll(() => queued(page))
+    .toEqual(["Von dutch", "Von dutch", "360", "360"]);
+  // The album's Play then replaces that queue, the addition with it.
+  editions.open();
+  await expect.poll(() => queued(page)).toEqual(albumSongs);
+});
+
+test("Play next on its way when another Play lands goes into the new queue", async ({
+  page,
+}) => {
+  const editions = gate();
+  await home(page, { editions: editions.shut });
+  await page.goto("/#/home");
+  await choose(page, "Play next");
+  await playFromLibraryCard(page);
+  await expect.poll(() => queued(page)).toEqual(["Von dutch", "360"]);
+  editions.open();
+  await expect
+    .poll(() => queued(page))
+    .toEqual(["Von dutch", "First song", "Second song", "360"]);
 });
