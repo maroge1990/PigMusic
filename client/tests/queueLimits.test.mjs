@@ -55,7 +55,8 @@ test("a busy answer for songs all past a limit says which", async () => {
         left_out: 1,
         limit: "person_waiting",
         retry_after: null,
-        outcomes: ["over_limit"],
+        outcomes: ["excluded"],
+        over_limit: [0],
       },
       { status: 429 },
     );
@@ -83,7 +84,10 @@ test("an Add past a limit says what was added and what wasn't, and can send thos
         left_out: 2,
         limit: "rate",
         retry_after: 30,
-        outcomes: ["created", "over_limit", "over_limit"],
+        // As installed iPhones can read it: excluded, and the positions a
+        // limit left out.
+        outcomes: ["created", "excluded", "excluded"],
+        over_limit: [1, 2],
       });
     return Response.json({
       created: titles.length,
@@ -111,4 +115,54 @@ test("an Add past a limit says what was added and what wasn't, and can send thos
   ]);
   assert.equal(shown.at(-1).text, "Adding 3 songs to your library.");
   clearNotices();
+});
+
+test("a later batch that fails keeps the songs an earlier limit left out", async () => {
+  // Codex round 1: Try again sent only the failed batch, and the notice
+  // counted one song instead of two.
+  setSessionId("session-1");
+  const { MAX_SONGS_PER_REQUEST } = await import("../src/limits.ts");
+  const many = Array.from({ length: MAX_SONGS_PER_REQUEST + 1 }, (_, i) =>
+    song(i),
+  );
+  const sent = [];
+  globalThis.fetch = async (path, options) => {
+    const titles = JSON.parse(options.body).tracks.map((t) => t.title);
+    sent.push(titles);
+    if (sent.length === 1)
+      return Response.json({
+        created: titles.length - 1,
+        existing: 0,
+        skipped: 0,
+        left_out: 1,
+        over_limit: [0],
+        limit: "rate",
+        retry_after: 30,
+        outcomes: titles.map((_, i) => (i ? "created" : "excluded")),
+      });
+    if (sent.length === 2)
+      return Response.json({ detail: "No", code: "nope" }, { status: 400 });
+    return Response.json({ created: titles.length, existing: 0, skipped: 0 });
+  };
+  let shown = [];
+  const stop = subscribe((all) => (shown = all));
+  await addSongsToLibrary(many);
+  const error = shown.find((n) => n.kind === "error");
+  const max = MAX_SONGS_PER_REQUEST;
+  assert.equal(
+    error.text,
+    `Adding ${max - 1} songs to your library. Couldn't add the other 2 songs. Try again.`,
+  );
+  await runAction(error.id);
+  stop();
+  assert.deepEqual(sent[2], ["Song 0", `Song ${max}`]);
+  clearNotices();
+});
+
+test("a Retry a waiting limit refused says why", async () => {
+  const { retryLimitMessage } = await import("../src/queueLimits.ts");
+  assert.equal(
+    retryLimitMessage({ limit: "household_waiting" }),
+    "Couldn't try again yet: the server already has 10,000 songs waiting. Try again once some are added.",
+  );
 });

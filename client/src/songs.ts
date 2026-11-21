@@ -145,7 +145,7 @@ export type AddResult = {
   skipped: number;
   /** Songs you paused: Add leaves them paused (#264). */
   paused?: number;
-  /** One per song sent, in order; `over_limit` was left out (D-128). */
+  /** One per song sent, in order (a song a limit left out is `excluded`). */
   outcomes?: string[];
 } & LeftOut;
 /** An Add that met a song you paused: only Downloads resumes it (#264). */

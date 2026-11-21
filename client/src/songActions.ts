@@ -1,5 +1,5 @@
 import { ApiError, api, currentSession } from "./api";
-import { leftOutMessage, type LeftOut } from "./queueLimits";
+import { leftOutMessage, leftOutOf, type LeftOut } from "./queueLimits";
 import { batches } from "./limits";
 import { expectedSession, withSession } from "./sessionId";
 import { notify, notifyError, offerUndo } from "./notices";
@@ -98,18 +98,18 @@ export async function addSongsToLibrary(
         adding += result.created + result.existing;
         paused += result.paused || 0;
         if (result.left_out) {
-          leftOut = leftOut.concat(
-            parts[i].filter((_, j) => result.outcomes?.[j] === "over_limit"),
-          );
+          leftOut = leftOut.concat(leftOutOf(parts[i], result));
           limit = result;
         }
       } catch (e) {
-        const left = parts.slice(i).flat();
+        // Songs an earlier batch's limit left out go with the rest: Try
+        // again sends them all, and the count says them all (Codex).
+        const left = leftOut.concat(parts.slice(i).flat());
         if (adding) changed();
         if (e instanceof ApiError && e.code === "queue_limit") {
           // Every song of this batch was past a limit: the later ones
           // would be too. Try again sends all those left out.
-          return limited(adding, leftOut.concat(left), e.body as LeftOut);
+          return limited(adding, left, e.body as LeftOut);
         }
         notifyError(
           adding

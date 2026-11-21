@@ -101,7 +101,8 @@ test("an album Add past the rate says how many were left out", async ({
         left_out: 2,
         limit: "rate",
         retry_after: 90,
-        outcomes: ["created", "over_limit", "over_limit"],
+        outcomes: ["created", "excluded", "excluded"],
+        over_limit: [1, 2],
         downloads_enabled: true,
       },
     }),
@@ -124,7 +125,8 @@ test("an album Add with every song past the cap says so", async ({ page }) => {
         left_out: 3,
         limit: "person_waiting",
         retry_after: null,
-        outcomes: ["over_limit", "over_limit", "over_limit"],
+        outcomes: ["excluded", "excluded", "excluded"],
+        over_limit: [0, 1, 2],
         downloads_enabled: true,
       },
     }),
@@ -132,6 +134,75 @@ test("an album Add with every song past the cap says so", async ({ page }) => {
   await expect(
     page.getByText(
       "Couldn't add 3 songs: you already have 2,000 songs waiting. Try again once some are added.",
+    ),
+  ).toBeVisible();
+});
+
+test("a Retry in Downloads a waiting limit refused says why", async ({
+  page,
+}) => {
+  const item = {
+    id: "f1",
+    title: "Faint",
+    artist: "Linkin Park",
+    status: "failed",
+    request_progress: null,
+    error: "no_source",
+    source: null,
+    quality: null,
+  };
+  const groups = {
+    total: 1,
+    next_offset: null,
+    active: 0,
+    offset: 0,
+    downloads_enabled: true,
+    groups: [
+      {
+        id: "g-faint",
+        kind: "song",
+        title: "Faint",
+        artist: "Linkin Park",
+        release_id: null,
+        state: "failed",
+        songs: 1,
+        done: 0,
+        active: 0,
+        waiting: 0,
+        failed: 1,
+        progress: 0,
+        requested_at: "2026-10-01T00:00:00Z",
+        updated_at: "2026-10-01T00:00:00Z",
+        items: [item],
+      },
+    ],
+  };
+  await mockApi(page, {
+    answers: {
+      "/v1/requests/groups": (route) => route.fulfill({ json: groups }),
+      "/v1/requests/f1/retry": (route) =>
+        route.fulfill({
+          status: 429,
+          json: {
+            detail: "Too many songs are waiting to be added. Try again later.",
+            code: "queue_limit",
+            limit: "person_waiting",
+            retry_after: null,
+            left_out: 1,
+          },
+        }),
+      "/v1/requests": (route) =>
+        route.fulfill({ json: { items: [], next_offset: null, active: 0 } }),
+    },
+  });
+  await page.goto("/#/downloads");
+  await page
+    .getByRole("button", { name: /Try again/ })
+    .first()
+    .click();
+  await expect(
+    page.getByText(
+      "Couldn't try again yet: too many songs are already waiting for the people who asked for this. Try again once some are added.",
     ),
   ).toBeVisible();
 });

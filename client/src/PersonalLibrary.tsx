@@ -15,7 +15,7 @@ import { PersonalQuality } from "./PersonalQuality";
 import { SearchPage } from "./SearchPage";
 import { Cover } from "./Cover";
 import { fromTrack, PAUSED_NOTICE, songBody, type AddResult } from "./songs";
-import { leftOutMessage } from "./queueLimits";
+import { leftOutMessage, leftOutOf } from "./queueLimits";
 import { albumSummary, mergeAlbumTracks } from "./albumTracks";
 import { warmCovers, whenIdle } from "./prefetch";
 import { usePlayer } from "./Player";
@@ -278,11 +278,8 @@ export function PersonalLibrary({
       ].filter(Boolean);
       if (notices.length) notify(notices.join(" "));
       // A song left out stays missing, to be added again.
-      const ids = new Set(
-        wanted
-          .filter((_, i) => result.outcomes?.[i] !== "over_limit")
-          .map((s) => s.key),
-      );
+      const kept = new Set(leftOutOf(wanted, result));
+      const ids = new Set(wanted.filter((s) => !kept.has(s)).map((s) => s.key));
       setRelease(
         (old) =>
           old && {
