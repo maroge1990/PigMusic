@@ -29,13 +29,34 @@ public struct QueueSongFailure: Sendable, Equatable {
 public actor QueuePCMStream {
   public typealias Acquire = @Sendable (PlaybackOccurrence) async throws -> PreparedAudioSource
   public typealias Release = @Sendable (PreparedAudioSource) async -> Void
-  private let items: [PlaybackOccurrence]
+  /// Changed only by `replaceUpcoming`, and only after the playing song (#279).
+  private var items: [PlaybackOccurrence]
   private let acquire: Acquire
   private let release: Release
   private let format: AVAudioFormat
   private let rate: Double
   private let blockFrames: Int
-  private let repeatMode: PlaybackRepeat
+  private var repeatMode: PlaybackRepeat
+  /// The last edit taken; an older one arriving late is ignored.
+  private var editVersion: Int?
+  /// Every id each queue entry has gone by, so an edit naming an entry by
+  /// its first id or a later listening's matches it.
+  private var identity = OccurrenceIdentity()
+  /// Raised whenever the upcoming fetch is replaced or dropped, so a
+  /// replaced fetch's outcome is never read as its song's failure.
+  private var fetchVersion = 0
+  /// The upcoming fetch gave up on every song left (not yet read by `next()`).
+  private var fetchFailed = false
+  /// Releases of dropped fetches, in order. The next fetch starts after
+  /// them, so at most two sources are held and the repository is never busy.
+  private var reaping: Task<Void, Never>?
+  /// A finished song's source is being released; the next song is chosen
+  /// right after, from the list as it is then.
+  private var betweenSongs = false
+  /// `next()` has thrown: an edit can no longer reach the audio. After it
+  /// returned the end, an edit adding songs carries on: `next()` asked again
+  /// plays them straight after (#279, Codex round 1 on batch L).
+  private var failed = false
   private var cycle = 0
   private var upcomingOccurrence: PlaybackOccurrence?
   /// The queue position being prepared to follow; unavailable songs are passed over.
@@ -141,13 +162,45 @@ public actor QueuePCMStream {
   }
 
   private func following(_ position: Int) -> Int? {
-    if repeatMode == .one { return position }
-    if position + 1 < items.count { return position + 1 }
-    return repeatMode == .all ? 0 : nil
+    UpcomingEditRule.following(position, count: items.count, mode: repeatMode)
   }
   private func configureUpcoming() {
     passedOver = 0
     prepare(following(index))
+  }
+
+  /// Swaps the songs after the playing one while it plays on (#279). The
+  /// songs up to the one being decoded must be unchanged. A next song whose
+  /// source has arrived and is being joined to the audio stays only if it is
+  /// still next where it stood; otherwise this is too late and the owner
+  /// restarts. Has no suspension point, so it is atomic on the actor.
+  /// `identity`: ids the owner has seen its entries go by (merged in).
+  public func replaceUpcoming(
+    _ newItems: [PlaybackOccurrence], repeatMode newMode: PlaybackRepeat, version: Int,
+    identity known: OccurrenceIdentity = OccurrenceIdentity()
+  ) -> UpcomingEdit {
+    guard !closed, !failed, sourceFailure == nil else { return .tooLate }
+    if transitionReady, incoming == nil { return .tooLate }
+    identity.merge(known)
+    let decision = UpcomingEditRule.decide(
+      version: version, lastVersion: editVersion, old: items.map { identity.key($0) },
+      new: newItems.map { identity.key($0) }, current: index,
+      oldMode: repeatMode, newMode: newMode, prepared: incoming?.index, fetching: upcomingIndex,
+      fetchIntact: passedOver == 0 && !fetchFailed, betweenSongs: betweenSongs)
+    switch decision {
+    case .stale: return .applied
+    case .tooLate: return .tooLate
+    case .keep:
+      items = newItems
+      repeatMode = newMode
+      editVersion = version
+    case .refetch:
+      items = newItems
+      repeatMode = newMode
+      editVersion = version
+      configureUpcoming()
+    }
+    return .applied
   }
   /// Moves the upcoming choice past a song that couldn't be prepared (not on
   /// this device or the server). False once every other song has been tried.
@@ -160,29 +213,61 @@ public actor QueuePCMStream {
     return true
   }
   private func prepare(_ nextIndex: Int?) {
+    dropFetch()
     choose(nextIndex)
-    guard upcomingOccurrence != nil else {
-      upcoming = nil
-      return
+    guard upcomingOccurrence != nil else { return }
+    startFetch()
+  }
+  /// Cancels the upcoming fetch, if any, and releases whatever it still
+  /// brings. Whoever awaits it sees `fetchVersion` change and lets it go.
+  private func dropFetch() {
+    fetchVersion &+= 1
+    fetchFailed = false
+    guard let dropped = upcoming else { return }
+    upcoming = nil
+    dropped.cancel()
+    let previous = reaping
+    let release = release
+    reaping = Task {
+      await previous?.value
+      if let prepared = try? await dropped.value { await release(prepared.source) }
     }
-    upcoming = Task { try await self.acquireViable() }
+  }
+  private func startFetch() {
+    dropFetch()
+    let stamp = fetchVersion
+    // Starts once every dropped fetch has let its source go (#279).
+    let reaped = reaping
+    upcoming = Task {
+      await reaped?.value
+      return try await self.acquireViable(stamp)
+    }
   }
   /// The upcoming song's source. A failure moves straight on to the next
   /// viable song while the current one keeps playing, so the gap is never
   /// heard; only when none is left does the failure reach the transition.
-  private func acquireViable() async throws -> Upcoming {
+  /// A fetch an edit replaced (`stamp` no longer current) stops, never
+  /// passing over a song for it.
+  private func acquireViable(_ stamp: Int) async throws -> Upcoming {
     while true {
+      guard fetchVersion == stamp, !Task.isCancelled else { throw CancellationError() }
       guard let position = upcomingIndex, let occurrence = upcomingOccurrence else {
         throw AudioPipelineFailure.stalled
       }
       do {
         let source = try await acquire(occurrence)
+        // Replaced meanwhile: the source still goes back to whoever dropped
+        // this fetch (its reaper) or to close().
         return Upcoming(index: position, occurrence: occurrence, source: source)
       } catch {
         try Task.checkCancellation()
+        guard fetchVersion == stamp else { throw CancellationError() }
         let song = QueueSongFailure(
           index: position, occurrenceID: occurrence.id, cause: error.localizedDescription)
-        guard passOver() else { throw UpcomingFailure(song: song, error: error) }
+        guard passOver() else {
+          fetchFailed = true
+          throw UpcomingFailure(song: song, error: error)
+        }
         passedOverSongs.append(song)
       }
     }
@@ -197,6 +282,7 @@ public actor QueuePCMStream {
     let incoming = items[nextIndex]
     let repeated = cycle > 0 || nextIndex <= index
     let next = repeated ? PlaybackOccurrence(track: incoming.track) : incoming
+    if repeated { identity.record(next.id, as: incoming.id) }
     upcomingOccurrence = next
     let mode = TransitionPlanner.mode(
       crossfade: crossfade && repeatMode != .one,
@@ -210,6 +296,14 @@ public actor QueuePCMStream {
     guard !reading else { throw AudioSourceFailure.busy }
     reading = true
     defer { reading = false }
+    do {
+      return try await produce()
+    } catch {
+      failed = true
+      throw error
+    }
+  }
+  private func produce() async throws -> QueuePCMBlock? {
     while true {
       try Task.checkCancellation()
       guard !closed else { throw CancellationError() }
@@ -246,6 +340,9 @@ public actor QueuePCMStream {
       }
       if !transitionReady {
         guard let upcoming else { throw AudioPipelineFailure.stalled }
+        // An edit (#279) can replace this fetch while it is awaited: its
+        // outcome is then the edit's to release, and the new fetch is awaited.
+        let fetch = fetchVersion
         let prepared: Upcoming
         do {
           prepared = try await withTaskCancellationHandler {
@@ -256,16 +353,19 @@ public actor QueuePCMStream {
         } catch let failure as UpcomingFailure {
           // Every remaining song was tried while the current one played.
           try Task.checkCancellation()
+          if fetchVersion != fetch { continue }
           sourceFailure = failure.error
           sourceFailureSong = failure.song
           continue
         } catch {
           try Task.checkCancellation()
+          if fetchVersion != fetch { continue }
           sourceFailure = error
           continue
         }
         // close() also awaits this task; ownership remains here only while the stream is open.
         guard !closed else { throw CancellationError() }
+        if fetchVersion != fetch { continue }
         self.upcoming = nil
         let source = prepared.source
         incomingLease = source
@@ -278,14 +378,23 @@ public actor QueuePCMStream {
           self.upcoming = nil
           incomingLease = nil
           incoming = nil
+          // An edit while this is released only swaps the list (#279); the
+          // next song is then chosen afresh from it, below.
+          let edited = editVersion
+          betweenSongs = true
           await release(source)
+          betweenSongs = false
+          guard !closed else { throw CancellationError() }
           // It arrived but cannot be opened: as unplayable as one that never came.
           let song = QueueSongFailure(
             index: prepared.index, occurrenceID: prepared.occurrence.id,
             cause: error.localizedDescription)
-          if passOver() {
+          if editVersion != edited {
+            // Its position may hold another song now: start again from the playing one.
+            configureUpcoming()
+          } else if passOver() {
             passedOverSongs.append(song)
-            self.upcoming = Task { try await self.acquireViable() }
+            startFetch()
           } else {
             sourceFailure = error
             sourceFailureSong = song
@@ -363,7 +472,10 @@ public actor QueuePCMStream {
       overlap = 0
       mixed = 0
       // Release outgoing encoded storage before reserving the following source.
+      // An edit meanwhile only swaps the list (#279): the choice below uses it.
+      betweenSongs = true
       if let old { await release(old) }
+      betweenSongs = false
       guard !closed else { throw CancellationError() }
       configureUpcoming()
     }
@@ -397,6 +509,7 @@ public actor QueuePCMStream {
   public func close() async {
     guard !closed else { return }
     closed = true
+    fetchVersion &+= 1
     let pending = upcoming
     upcoming = nil
     pending?.cancel()
@@ -411,5 +524,7 @@ public actor QueuePCMStream {
       await release(incomingLease)
     }
     if let pending, let prepared = try? await pending.value { await release(prepared.source) }
+    // Fetches an edit dropped (#279) release their sources before this returns.
+    await reaping?.value
   }
 }

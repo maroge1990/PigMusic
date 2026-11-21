@@ -171,6 +171,31 @@ public enum PlaybackSeek {
   private var ready = false
   private var clock: Task<Void, Never>?
   private var sourceWaiting = false
+  /// The current generation's stream once built; edits go to it (#279).
+  private var liveStream: QueuePCMStream?
+  /// The current generation's pump is building its stream: an edit now is
+  /// handed to the stream as soon as it exists.
+  private var streamPending = false
+  /// Raised by every edit to the upcoming songs or the repeat mode.
+  private var upcomingVersion = 0
+  /// The queue as the live stream plays it: the list it was built with or
+  /// last took (`streamVersion`). The timeline's positions are positions in
+  /// it, so a marker is mapped to `items` through its entry's id (#279).
+  private var streamItems: [PlaybackOccurrence] = []
+  private var streamVersion = 0
+  /// Every id each queue entry has gone by: its first, and each repeated
+  /// listening's (learnt from the markers). The iPhone's queue names an
+  /// entry by its latest listening, the Watch's by its first; both match.
+  private var identity = OccurrenceIdentity()
+  /// The live stream took an edit: if it had reached its end, the pump asks
+  /// it again, so songs added while the last one drains follow it (#279).
+  private var streamResumed = false
+  /// Wakes the current generation's pump.
+  private var pumpWake: AsyncStream<Void>.Continuation?
+  /// Edits sent to a stream whose answer has not come back, by number. The
+  /// pump hears them before it ends the queue: one may add songs.
+  private var editsInFlight: [Int: Task<Void, Never>] = [:]
+  private var editNumber = 0
 
   /// `lookaheadSeconds` is how much decoded audio stays scheduled ahead of the
   /// speaker. The pump runs on the main actor, so live output needs enough to
@@ -206,6 +231,7 @@ public enum PlaybackSeek {
     acquire: @escaping QueuePCMStream.Acquire, release: @escaping QueuePCMStream.Release
   ) {
     self.items = items
+    identity = OccurrenceIdentity()
     self.acquire = acquire
     self.release = release
     self.crossfade = crossfade
@@ -266,19 +292,133 @@ public enum PlaybackSeek {
     }
     publish()
   }
-  /// Explicit queue edits invalidate prepared future audio while preserving the current position.
+  /// Queue edits and repeat changes reach the playing stream while the
+  /// current song plays on (#279); only when that is too late (the next song
+  /// is already joining the audio) does the song restart at its position.
   public func setRepeatMode(_ mode: PlaybackRepeat) {
     repeatMode = mode
     guard !items.isEmpty else { return }
-    refreshPosition()
-    restart(index: snapshot.index, seconds: snapshot.elapsed, autoplay: snapshot.wantsPlayback)
+    upcomingVersion += 1
+    editUpcoming(refreshing: true)
   }
   public func updateUpcoming(_ updated: [PlaybackOccurrence]) {
     guard updated.indices.contains(snapshot.index), items.indices.contains(snapshot.index),
-      updated[snapshot.index].id == items[snapshot.index].id
+      identity.root(updated[snapshot.index].id) == identity.root(items[snapshot.index].id)
     else { return }
     items = updated
-    restart(index: snapshot.index, seconds: snapshot.elapsed, autoplay: snapshot.wantsPlayback)
+    upcomingVersion += 1
+    editUpcoming(refreshing: false)
+  }
+  /// `refreshing`: what the restart without a stream did before (#279).
+  private func editUpcoming(refreshing: Bool) {
+    // The stream being built takes the edit once it exists.
+    if streamPending { return }
+    guard liveStream != nil else {
+      if refreshing { refreshPosition() }
+      restart(
+        index: snapshot.index, seconds: snapshot.elapsed, autoplay: snapshot.wantsPlayback,
+        resuming: true)
+      return
+    }
+    applyUpcoming()
+  }
+  /// Hands the latest edit to the live stream; a later edit supersedes it.
+  /// Too late, and nothing newer since: restart at the position heard now.
+  private func applyUpcoming() {
+    guard let stream = liveStream else { return }
+    let stamp = generation
+    let version = upcomingVersion
+    let items = items
+    let repeatMode = repeatMode
+    let identity = identity
+    let anchor = snapshot.index
+    editNumber += 1
+    let number = editNumber
+    editsInFlight[number] = Task { [weak self] in
+      guard let self else { return }
+      // Removed as its last step, so one still listed has not finished.
+      defer { editsInFlight[number] = nil }
+      guard generation == stamp, upcomingVersion == version else { return }
+      // The stream's answer has no suspension of its own; a closed stream
+      // answers at once, so this never waits on a stream that is gone.
+      let result = await stream.replaceUpcoming(
+        items, repeatMode: repeatMode, version: version, identity: identity)
+      guard generation == stamp else { return }
+      if result == .applied {
+        if version > streamVersion {
+          streamItems = items
+          streamVersion = version
+        }
+        if liveStream === stream {
+          streamResumed = true
+          pumpWake?.yield(())
+          return
+        }
+        // The queue ended while the stream answered: its audio is gone.
+      }
+      guard upcomingVersion == version else { return }
+      restartWhereHeard(anchor: anchor)
+    }
+  }
+  /// The fallback when an edit came too late: restarts the occurrence heard
+  /// now, found by identity in the edited queue, at its position. If the edit
+  /// removed it, the next song still queued starts from its beginning: its
+  /// place in the queue is not its position in the song (Codex round 1 on
+  /// batch L).
+  /// `anchor`: the song shown when the edit was made, in the edited queue.
+  /// Songs the edit queued before the one heard are not skipped (Codex
+  /// round 2 on batch L): see `LateEditRestart`.
+  private func restartWhereHeard(anchor: Int) {
+    guard let heard = refreshPosition() else {
+      restart(
+        index: snapshot.index, seconds: snapshot.elapsed, autoplay: snapshot.wantsPlayback,
+        resuming: true)
+      return
+    }
+    // The songs of the stream's order heard between the anchor and now.
+    var played = Set<UUID>()
+    if items.indices.contains(anchor) {
+      let root = identity.root(items[anchor].id)
+      let list = heard.list
+      if let from = list[...heard.marker.index].lastIndex(where: { identity.root($0.id) == root }),
+        from + 1 < heard.marker.index
+      {
+        for entry in list[(from + 1)..<heard.marker.index] {
+          played.insert(identity.root(entry.id))
+        }
+      }
+    }
+    guard
+      let point = LateEditRestart.point(
+        edited: items.map { identity.root($0.id) }, anchor: anchor, heard: heard.index,
+        played: played, repeatAll: repeatMode == .all)
+    else { return endWithoutRemovedSong() }
+    restart(
+      index: point.index, seconds: point.keepsPosition ? snapshot.elapsed : 0,
+      autoplay: snapshot.wantsPlayback, resuming: point.keepsPosition)
+  }
+  /// The song heard was removed and nothing follows it: the queue has ended.
+  private func endWithoutRemovedSong() {
+    generation += 1
+    pump?.cancel()
+    clock?.cancel()
+    clock = nil
+    output.stop()
+    ready = false
+    sourceWaiting = false
+    liveStream = nil
+    streamPending = false
+    streamItems = []
+    streamResumed = false
+    pumpWake = nil
+    pendingFrames = 0
+    timeline = []
+    let last = items.count - 1
+    let duration = items[last].track.duration ?? 0
+    snapshot = QueuePlaybackSnapshot(
+      state: .ended, index: last, occurrenceID: items[last].id, elapsed: duration,
+      duration: duration)
+    publish()
   }
   public func seek(_ seconds: Double) {
     guard !items.isEmpty, seconds.isFinite else { return }
@@ -287,7 +427,7 @@ public enum PlaybackSeek {
       index: snapshot.index,
       seconds: PlaybackSeek.target(
         seconds, duration: snapshot.duration, isEstimate: snapshot.durationIsEstimate),
-      autoplay: snapshot.wantsPlayback)
+      autoplay: snapshot.wantsPlayback, resuming: true)
   }
   public func next() {
     refreshPosition()
@@ -316,10 +456,16 @@ public enum PlaybackSeek {
     output.stop()
     ready = false
     sourceWaiting = false
+    liveStream = nil
+    streamPending = false
+    streamItems = []
+    streamResumed = false
+    pumpWake = nil
     pendingFrames = 0
     timeline = []
     snapshot = QueuePlaybackSnapshot()
     items = []
+    identity = OccurrenceIdentity()
     acquire = nil
     release = nil
     publish()
@@ -334,7 +480,11 @@ public enum PlaybackSeek {
     if generation == stamp { pump = nil }
   }
 
-  private func restart(index: Int, seconds: Double, autoplay: Bool) {
+  /// `resuming`: the song heard carries on (a seek, an output recovery, a
+  /// late edit's restart in place): its listening keeps its id, which the
+  /// apps count a listen and its history event by (#303). The next repeat
+  /// still gets a new one.
+  private func restart(index: Int, seconds: Double, autoplay: Bool, resuming: Bool = false) {
     generation += 1
     let stamp = generation
     let old = pump
@@ -344,23 +494,41 @@ public enum PlaybackSeek {
     output.stop()
     ready = false
     sourceWaiting = false
+    liveStream = nil
+    streamPending = false
+    streamItems = []
+    streamResumed = false
+    pumpWake = nil
     pendingFrames = 0
     peakScheduledFrames = 0
     timeline = []
     // Restarting the same song (a seek) keeps what is known of its length.
-    let known = snapshot.occurrenceID == items[index].id && snapshot.duration > 0
+    let known =
+      snapshot.occurrenceID.map { identity.root($0) } == identity.root(items[index].id)
+      && snapshot.duration > 0
     let estimate = known && snapshot.durationIsEstimate
     let duration = known ? snapshot.duration : items[index].track.duration ?? 0
+    // The listening heard, when it is this entry's (by any id it has had).
+    let entry = items[index]
+    let listening = snapshot.occurrenceID.flatMap {
+      resuming && identity.root($0) == identity.root(entry.id) ? $0 : nil
+    }
+    var playing = items
+    if let listening, listening != entry.id {
+      playing[index] = PlaybackOccurrence(track: entry.track, id: listening)
+    }
     snapshot = QueuePlaybackSnapshot(
-      state: .preparing, index: index, occurrenceID: items[index].id, elapsed: seconds,
+      state: .preparing, index: index, occurrenceID: listening ?? entry.id, elapsed: seconds,
       duration: estimate ? max(duration, seconds) : duration, durationIsEstimate: estimate,
       wantsPlayback: autoplay)
     publish()
-    let items = items
+    let items = playing
     let crossfade = crossfade
     let fade = fadeSeconds
     let repeatMode = repeatMode
+    let version = upcomingVersion
     guard let acquire, let release else { return }
+    streamPending = true
     // Old cleanup completes before a new source reservation can race the same preparer.
     pump = Task { [weak self] in
       await old?.value
@@ -375,6 +543,12 @@ public enum PlaybackSeek {
         stream = current
         try Task.checkCancellation()
         guard generation == stamp else { throw CancellationError() }
+        liveStream = current
+        streamPending = false
+        streamItems = items
+        streamVersion = version
+        // Edits made while it was built (during a seek, say) reach it now (#279).
+        if upcomingVersion != version { applyUpcoming() }
         try output.configure(sampleRate: rate, blockFrames: blockFrames)
         var exhausted = false
         var sourceFailure: Error?
@@ -385,6 +559,7 @@ public enum PlaybackSeek {
         // buffering the latest wake also covers completions during decoding.
         let (consumed, wake) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         defer { wake.finish() }
+        pumpWake = wake
         var completions = consumed.makeAsyncIterator()
         @MainActor func send(_ block: QueuePCMBlock) throws {
           timeline.append(contentsOf: block.markers)
@@ -405,9 +580,14 @@ public enum PlaybackSeek {
           heldFrames = 0
         }
         if snapshot.wantsPlayback { startClock(generation: stamp) }
-        while !exhausted || pendingFrames > 0 || !held.isEmpty {
+        while !exhausted || pendingFrames > 0 || !held.isEmpty || streamResumed
+          || !editsInFlight.isEmpty
+        {
           try Task.checkCancellation()
           guard generation == stamp else { throw CancellationError() }
+          // An edit added songs after the end the stream had reached: ask again.
+          if exhausted, sourceFailure == nil, streamResumed { exhausted = false }
+          streamResumed = false
           // Start after a short cushion, then build the full one while playing.
           let target = ready ? lookaheadFrames : startFrames
           while !exhausted && pendingFrames <= Int64(target) {
@@ -460,7 +640,18 @@ public enum PlaybackSeek {
             // startup cushion, before waiting for the speaker to consume it.
             if !exhausted { continue }
           }
-          if exhausted && pendingFrames == 0 && held.isEmpty { break }
+          // Not while an edit just resumed it: its wake is already waiting.
+          if exhausted && pendingFrames == 0 && held.isEmpty && !streamResumed {
+            // An edit still waiting for the stream's answer may add songs:
+            // hear it before ending (Codex round 2 on batch L).
+            if let edit = editsInFlight.values.first {
+              await edit.value
+              try Task.checkCancellation()
+              guard generation == stamp else { throw CancellationError() }
+              continue
+            }
+            break
+          }
           _ = await completions.next()
         }
         try Task.checkCancellation()
@@ -484,6 +675,12 @@ public enum PlaybackSeek {
       if generation == stamp {
         clock?.cancel()
         clock = nil
+        // Ended or failed: an edit from now on restarts, as before (#279).
+        liveStream = nil
+        streamPending = false
+        streamItems = []
+        streamResumed = false
+        pumpWake = nil
       }
       if let stream { await stream.close() }
     }
@@ -494,7 +691,9 @@ public enum PlaybackSeek {
     // A configuration change may already have reset the hardware timeline.
     // Use the last published position (captured immediately by pause), rather
     // than overwriting it with the stopped output's zero position.
-    restart(index: snapshot.index, seconds: snapshot.elapsed, autoplay: snapshot.wantsPlayback)
+    restart(
+      index: snapshot.index, seconds: snapshot.elapsed, autoplay: snapshot.wantsPlayback,
+      resuming: true)
   }
   private func startClock(generation stamp: Int) {
     clock?.cancel()
@@ -514,20 +713,44 @@ public enum PlaybackSeek {
       }
     }
   }
-  private func refreshPosition() {
-    guard ready else { return }
-    let position = output.positionFrames
-    guard let marker = timeline.last(where: { $0.switchFrame <= position }),
-      items.indices.contains(marker.index)
-    else { return }
-    if let current = timeline.lastIndex(where: { $0.switchFrame <= position }), current > 0 {
-      timeline.removeFirst(current)
+  /// What is heard now: its marker, the queue entry it plays (in the
+  /// stream's list) and that entry's place in `items` (nil once removed).
+  private struct Heard {
+    let marker: QueueAudioMarker
+    let list: [PlaybackOccurrence]
+    let index: Int?
+  }
+  /// Where the entry `id` names is in `items`, by any id it has gone by.
+  private func position(of id: UUID, near guess: Int? = nil) -> Int? {
+    let root = identity.root(id)
+    if let guess, items.indices.contains(guess), identity.root(items[guess].id) == root {
+      return guess
     }
-    snapshot.index = marker.index
-    snapshot.occurrenceID = marker.occurrenceID ?? items[marker.index].id
+    return items.firstIndex { identity.root($0.id) == root }
+  }
+  @discardableResult private func refreshPosition() -> Heard? {
+    guard ready else { return nil }
+    let frames = output.positionFrames
+    let list = streamItems.isEmpty ? items : streamItems
+    guard let current = timeline.lastIndex(where: { $0.switchFrame <= frames }),
+      list.indices.contains(timeline[current].index)
+    else { return nil }
+    if current > 0 { timeline.removeFirst(current) }
+    let marker = timeline[0]
+    let entry = list[marker.index]
+    let occurrence = marker.occurrenceID ?? entry.id
+    // A repeated listening's id names the entry it plays.
+    identity.record(occurrence, as: entry.id)
+    let found = position(of: entry.id, near: marker.index)
+    let heard = Heard(marker: marker, list: list, index: found)
+    // Removed by an edit the stream has not answered yet: shown as it was.
+    guard let index = found else { return heard }
+    snapshot.index = index
+    snapshot.occurrenceID = occurrence
     snapshot.duration = Double(marker.durationFrames) / rate
     snapshot.durationIsEstimate = marker.durationIsEstimate
-    snapshot.elapsed = min(snapshot.duration, max(0, Double(position - marker.originFrame) / rate))
+    snapshot.elapsed = min(snapshot.duration, max(0, Double(frames - marker.originFrame) / rate))
+    return heard
   }
   private func publish() { onUpdate?(snapshot) }
 }
