@@ -30,7 +30,9 @@ const {
   catalogueAlbumSongs,
   catalogueArtistSongs,
 } = await import("../src/catalogueActions.ts");
-const { withCollection } = await import("../src/songActions.ts");
+const { downloadSongs, withCollection } = await import(
+  "../src/songActions.ts"
+);
 const { clearSessionReads } = await import("../src/api.ts");
 const { clearNotices, subscribe } = await import("../src/notices.ts");
 
@@ -312,4 +314,27 @@ test("an artist card's songs are the page's popular songs, in order, yours marke
     "/api/v1/catalogue/artists/mb-e/popularity": { songs: [], albums: [] },
   });
   await assert.rejects(catalogueArtistSongs("mb-e"));
+});
+
+test("downloads still waiting when the session ends are not made", async () => {
+  clearSessionReads();
+  setSessionId("s1");
+  const clicked = [];
+  globalThis.document = {
+    createElement: () => ({
+      click() {
+        clicked.push(this.href);
+      },
+      remove() {},
+    }),
+    body: { append() {} },
+  };
+  const file = (n) => row("s" + n, "saved", { saved: { id: "f" + n } });
+  downloadSongs([file(1), file(2), file(3)]);
+  // The first goes at once; the session ends before the others.
+  await new Promise((r) => setTimeout(r, 50));
+  clearSessionReads();
+  await new Promise((r) => setTimeout(r, 800));
+  assert.deepEqual(clicked, ["/api/v1/tracks/f1/file"]);
+  delete globalThis.document;
 });
