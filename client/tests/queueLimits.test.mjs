@@ -25,23 +25,23 @@ const song = (i) => ({
   state: "missing",
 });
 
-test("each limit has its sentence", () => {
+test("every limit has the one sentence (D-131)", () => {
   assert.equal(leftOutMessage({ left_out: 0, limit: null }), "");
   assert.equal(
     leftOutMessage({ left_out: 3, limit: "person_waiting" }),
-    "Couldn't add 3 songs: you already have 2,000 songs waiting. Try again once some are added.",
+    "Couldn't add 3 songs: too many are waiting. Try again later.",
   );
   assert.equal(
     leftOutMessage({ left_out: 1, limit: "household_waiting" }),
-    "Couldn't add 1 song: the server already has 10,000 songs waiting. Try again once some are added.",
+    "Couldn't add 1 song: too many are waiting. Try again later.",
   );
   assert.equal(
     leftOutMessage({ left_out: 2, limit: "rate", retry_after: 61 }),
-    "Couldn't add 2 songs: that's over 1,000 songs in 10 minutes. Try again in 2 minutes.",
+    "Couldn't add 2 songs: too many are waiting. Try again later.",
   );
   assert.equal(
     leftOutMessage({ left_out: 2, limit: "rate", retry_after: 5 }),
-    "Couldn't add 2 songs: that's over 1,000 songs in 10 minutes. Try again in 1 minute.",
+    "Couldn't add 2 songs: too many are waiting. Try again later.",
   );
 });
 
@@ -50,7 +50,7 @@ test("a busy answer for songs all past a limit says which", async () => {
   globalThis.fetch = async () =>
     Response.json(
       {
-        detail: "Too many songs are waiting to be added. Try again later.",
+        detail: "Too many songs are waiting. Try again later.",
         code: "queue_limit",
         left_out: 1,
         limit: "person_waiting",
@@ -65,7 +65,7 @@ test("a busy answer for songs all past a limit says which", async () => {
     (error) =>
       error.code === "queue_limit" &&
       error.message ===
-        "Couldn't add 1 song: you already have 2,000 songs waiting. Try again once some are added.",
+        "Couldn't add 1 song: too many are waiting. Try again later.",
   );
 });
 
@@ -102,7 +102,7 @@ test("an Add past a limit says what was added and what wasn't, and can send thos
   const error = shown.find((n) => n.kind === "error");
   assert.equal(
     error.text,
-    "Adding 1 song to your library. Couldn't add 2 songs: that's over 1,000 songs in 10 minutes. Try again in 1 minute.",
+    "Adding 1 song to your library. Couldn't add 2 songs: too many are waiting. Try again later.",
   );
   assert.equal(error.action.label, "Try again");
   // Try again sends only the songs left out.
@@ -173,7 +173,7 @@ test("past a waiting limit the later batches are still sent", async () => {
     if (sent.length === 1)
       return Response.json(
         {
-          detail: "Too many songs are waiting to be added. Try again later.",
+          detail: "Too many songs are waiting. Try again later.",
           code: "queue_limit",
           limit: "household_waiting",
           left_out: titles.length,
@@ -200,15 +200,12 @@ test("past a waiting limit the later batches are still sent", async () => {
   const error = shown.find((n) => n.kind === "error");
   assert.equal(
     error.text,
-    `Adding 1 song to your library. Couldn't add ${max + 1} songs: the server already has 10,000 songs waiting. Try again once some are added.`,
+    `Adding 1 song to your library. Couldn't add ${max + 1} songs: too many are waiting. Try again later.`,
   );
   clearNotices();
 });
 
 test("a Retry a waiting limit refused says why", async () => {
-  const { retryLimitMessage } = await import("../src/queueLimits.ts");
-  assert.equal(
-    retryLimitMessage({ limit: "household_waiting" }),
-    "Couldn't try again yet: the server already has 10,000 songs waiting. Try again once some are added.",
-  );
+  const { RETRY_REFUSED } = await import("../src/queueLimits.ts");
+  assert.equal(RETRY_REFUSED, "Too many songs are waiting. Try again later.");
 });

@@ -305,7 +305,7 @@ test("Add from a card past a queue limit says so and leaves those songs to add a
   assert.equal(cardMark(now), null);
   assert.equal(
     shown.at(-1).text,
-    "Adding 1 song to your library. Couldn't add 1 song: that's over 1,000 songs in 10 minutes. Try again in 2 minutes.",
+    "Adding 1 song to your library. Couldn't add 1 song: too many are waiting. Try again later.",
   );
   clearNotices();
 });

@@ -198,12 +198,6 @@ public enum AppleImport {
     return (onServer, counted.count - onServer)
   }
 
-  /// Missing songs a queue limit left out of an import (D-128). Wording
-  /// awaiting the owner.
-  public static func leftOutNotice(_ count: Int) -> String {
-    "Couldn't add \(count) song\(count == 1 ? "" : "s") yet: too many are waiting on the server. "
-      + "Add them from the playlist later."
-  }
   /// The confirmation after adding.
   public static func summary(_ result: AppleImportResult) -> String {
     let counts = result.counts
@@ -223,7 +217,7 @@ public enum AppleImport {
     }
     if let leftOut = counts.leftOut, leftOut > 0 {
       // Past a queue limit (D-128): the playlist keeps them to add later.
-      lines.append(leftOutNotice(leftOut))
+      lines.append(AcquisitionResult.leftOutNotice(leftOut))
     }
     if result.capped {
       lines.append("Only the first \(limit) songs were added.")

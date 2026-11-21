@@ -91,7 +91,7 @@ private struct Offline: Error {}
     #expect(report.skipped.isEmpty && report.requested.isEmpty)
     #expect(await RequestOutbox.pending(store).map(\.id) == ["first", "second"])
     #expect(
-      report.notice(titles: [:]) == "2 songs waiting to be sent. PigMusic will try again later.")
+      report.notice(titles: [:]) == "2 songs will be added later.")
     // Once there is room both go, and nothing waits.
     let later = try await RequestOutbox.send(store: store, isCurrent: { true }) { _ in created }
     #expect(later.requested == ["first", "second"] && later.waiting == 0)

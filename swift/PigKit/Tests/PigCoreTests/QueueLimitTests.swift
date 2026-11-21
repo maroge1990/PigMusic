@@ -23,7 +23,7 @@ struct QueueLimitTests {
     #expect(result.songsTaken(4) == [true, false, true, false])
     #expect(
       result.sentence
-        == "Adding 2 songs to your library. 2 songs waiting to be sent. PigMusic will try again later."
+        == "Adding 2 songs to your library. 2 songs will be added later."
     )
   }
 
@@ -50,7 +50,7 @@ struct QueueLimitTests {
     let result = AcquisitionResult.limited(3, limit: "rate", retryAfter: 90)
     #expect(result.leftOut(of: [1, 2, 3]) == [1, 2, 3])
     #expect(result.outboxAnswer == .kept && result.retryAfter == 90)
-    #expect(result.sentence == "3 songs waiting to be sent. PigMusic will try again later.")
+    #expect(result.sentence == "3 songs will be added later.")
     #expect(result.menuNotice == result.sentence)
   }
 
@@ -77,7 +77,7 @@ struct QueueLimitTests {
     #expect(combined.leftOut == 1)
     #expect(
       AcquisitionResult.playlistNotice(added: 0, requested: [combined])
-        == "Adding 2 songs to your library. 1 song waiting to be sent. PigMusic will try again later."
+        == "Adding 2 songs to your library. 1 song will be added later."
     )
   }
 
@@ -88,22 +88,19 @@ struct QueueLimitTests {
       inLibrary: 0, household: 0, missing: 3, requested: 1, leftOut: 2)
     #expect(
       AppleImport.summary(AppleImportResult(playlist: playlist, counts: counts, capped: false))
-        == "Added to your playlists: 3 songs not on the server yet. Adding 1 song to your library; they join the playlist once added. Couldn't add 2 songs yet: too many are waiting on the server. Add them from the playlist later."
+        == "Added to your playlists: 3 songs not on the server yet. Adding 1 song to your library; they join the playlist once added. Couldn't add 2 songs: too many are waiting. Try again later."
     )
   }
 
   @Test func aRetryARefusedLimitSaysWhy() {
-    #expect(
-      AcquisitionResult.retryRefused("household_waiting")
-        == "Couldn't try again yet: the server already has 10,000 songs waiting. Try again once some are added."
-    )
-    #expect(AcquisitionResult.retryRefused("person_waiting").hasPrefix("Couldn't try again yet:"))
+    // One sentence for every limit (D-131).
+    #expect(AcquisitionResult.retryRefused == "Too many songs are waiting. Try again later.")
   }
 
   @Test func theOutboxNoticeSaysHowManyWait() {
     #expect(
       RequestNotice.text(refused: 0, reason: nil, excluded: nil, paused: false, waiting: 4)
-        == "4 songs waiting to be sent. PigMusic will try again later.")
+        == "4 songs will be added later.")
     #expect(RequestNotice.text(refused: 0, reason: nil, excluded: nil, paused: false) == nil)
   }
 }

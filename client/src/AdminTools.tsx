@@ -18,7 +18,7 @@ import {
   updateArtworkRevision,
   writeFailure,
 } from "./api";
-import { retryLimitMessage, type LeftOut } from "./queueLimits";
+import { RETRY_REFUSED } from "./queueLimits";
 import { formatCount, formatDuration } from "./format";
 import { PageHeader, SectionHeader } from "./PageHeader";
 import { Cover } from "./Cover";
@@ -686,7 +686,7 @@ export function AdminTools({ route }: { route: Route }) {
       // A Retry a waiting limit refused (D-128): the job stays as it was.
       setError(
         e instanceof ApiError && e.code === "queue_limit"
-          ? retryLimitMessage(e.body as LeftOut)
+          ? RETRY_REFUSED
           : (e as Error).message,
       );
     } finally {

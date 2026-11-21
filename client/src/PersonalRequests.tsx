@@ -2,7 +2,7 @@ import { notify } from "./notices";
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, CircleAlert, RotateCw } from "lucide-react";
 import { ApiError, api } from "./api";
-import { retryLimitMessage, type LeftOut } from "./queueLimits";
+import { RETRY_REFUSED } from "./queueLimits";
 import { Cover, catalogueCover } from "./Cover";
 import { DownloadLog } from "./DownloadLog";
 import { Empty, InlineError, Loading } from "./EmptyState";
@@ -190,7 +190,7 @@ export function PersonalRequests() {
     } catch (e) {
       // A waiting limit refused it (D-128): the song stays as it was.
       if (e instanceof ApiError && e.code === "queue_limit") {
-        setError(retryLimitMessage(e.body as LeftOut));
+        setError(RETRY_REFUSED);
         window.dispatchEvent(new Event("music-requests-changed"));
       } else setError((e as Error).message);
     } finally {

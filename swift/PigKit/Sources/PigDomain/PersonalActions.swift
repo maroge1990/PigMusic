@@ -117,17 +117,17 @@ public struct AcquisitionResult: Codable, Sendable {
     if created + existing > 0 { return .requested }
     return paused > 0 ? .paused : .skipped
   }
-  /// Songs kept to send again later (D-128). Wording awaiting the owner.
+  /// Songs a queue limit kept, sent again automatically (D-128, D-131).
   public static func waitingNotice(_ count: Int) -> String {
-    "\(count) song\(count == 1 ? "" : "s") waiting to be sent. PigMusic will try again later."
+    "\(count) song\(count == 1 ? "" : "s") will be added later."
   }
-  /// A Retry in Downloads a waiting limit refused (D-128): the job waits
-  /// for everyone who asked for it. The web's words; awaiting the owner.
-  public static func retryRefused(_ limit: String?) -> String {
-    limit == "household_waiting"
-      ? "Couldn't try again yet: the server already has 10,000 songs waiting. Try again once some are added."
-      : "Couldn't try again yet: too many songs are already waiting for the people who asked for this. Try again once some are added."
+  /// Songs a queue limit left out, not sent again by the app (D-131).
+  public static func leftOutNotice(_ count: Int) -> String {
+    "Couldn't add \(count) song\(count == 1 ? "" : "s"): too many are waiting. Try again later."
   }
+  /// A Retry in Downloads a waiting limit refused, whatever the limit
+  /// (D-128, D-131).
+  public static let retryRefused = "Too many songs are waiting. Try again later."
   /// Nothing new was asked for and a paused song stays paused (#264): the
   /// person is told where to resume it, never that it was left out.
   public var onlyPaused: Bool { created == 0 && paused > 0 }

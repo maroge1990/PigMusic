@@ -73,7 +73,7 @@ def full_answer(limit, left_out=1, retry_after=None, **result):
     """The 429 body for songs a queue limit left out: the code
     `queue_limit`, the limit, and for the rate when to try again."""
     answer = {
-        "detail": "Too many songs are waiting to be added. Try again later.",
+        "detail": "Too many songs are waiting. Try again later.",
         "code": "queue_limit",
         "limit": limit,
         "left_out": left_out,

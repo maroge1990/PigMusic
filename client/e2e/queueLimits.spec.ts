@@ -109,7 +109,7 @@ test("an album Add past the rate says how many were left out", async ({
     }),
   );
   await expect(page.locator(".notice-area")).toContainText(
-    "Adding 1 song to your library. Couldn't add 2 songs: that's over 1,000 songs in 10 minutes. Try again in 2 minutes.",
+    "Adding 1 song to your library. Couldn't add 2 songs: too many are waiting. Try again later.",
   );
 });
 
@@ -118,7 +118,7 @@ test("an album Add with every song past the cap says so", async ({ page }) => {
     route.fulfill({
       status: 429,
       json: {
-        detail: "Too many songs are waiting to be added. Try again later.",
+        detail: "Too many songs are waiting. Try again later.",
         code: "queue_limit",
         created: 0,
         existing: 0,
@@ -134,7 +134,7 @@ test("an album Add with every song past the cap says so", async ({ page }) => {
   );
   await expect(
     page.getByText(
-      "Couldn't add 3 songs: you already have 2,000 songs waiting. Try again once some are added.",
+      "Couldn't add 3 songs: too many are waiting. Try again later.",
     ),
   ).toBeVisible();
 });
@@ -185,7 +185,7 @@ test("a Retry in Downloads a waiting limit refused says why", async ({
         route.fulfill({
           status: 429,
           json: {
-            detail: "Too many songs are waiting to be added. Try again later.",
+            detail: "Too many songs are waiting. Try again later.",
             code: "queue_limit",
             limit: "person_waiting",
             retry_after: null,
@@ -202,8 +202,6 @@ test("a Retry in Downloads a waiting limit refused says why", async ({
     .first()
     .click();
   await expect(
-    page.getByText(
-      "Couldn't try again yet: too many songs are already waiting for the people who asked for this. Try again once some are added.",
-    ),
+    page.getByText("Too many songs are waiting. Try again later."),
   ).toBeVisible();
 });
