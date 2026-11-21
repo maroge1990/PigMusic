@@ -16,7 +16,7 @@ import httpx
 from .request_timing import add_phase
 from .library import normalise
 from .downloader import duration, matches, mismatch
-from .matching import album_title, flavour, recording_kind
+from .matching import album_title, flavour, primary_artist, recording_kind
 from .performance import DETAIL_CHARS
 from .providers.contracts import ProviderError
 from .vendor.jiosaavn import search_jiosaavn
@@ -109,9 +109,43 @@ REASONS = (
 DETAIL_RESULTS = 3
 
 
+# Album names that mark other people's recordings of a song (D-130): with no
+# known length an instant listen takes the song from any other album, but
+# not from these. Karaoke, instrumental, live, remix and cover albums are
+# refused earlier ("album kind", "version").
+NOT_ORDINARY = re.compile(
+    r"\b(tributes?|lullab(?:y|ies)|covers|made popular by|originally performed by|"
+    r"8[ -]?bit)\b",
+    re.I,
+)
+
+
+def ordinary(album):
+    """An album the song itself may be on (D-130): named, and not one of
+    NOT_ORDINARY. Compilations ("Summer Hits 2026") are ordinary."""
+    return bool(normalise(album or "")) and not NOT_ORDINARY.search(album or "")
+
+
+def without_the(artist):
+    """The lead artist for instant listening (D-130): a leading "The" as a
+    whole word does not count ("The Goo Goo Dolls" is "Goo Goo Dolls"; "The
+    The" is "The The", not "The"; "Theory of a Deadman" keeps its name)."""
+    name = primary_artist(artist)
+    return name[4:] if name.startswith("the ") and name != "the the" else name
+
+
 def rejection(track, c):
     """The song rule's checks in order: the first one a search result fails
-    (one of REASONS), or None when it is the song (`acceptable`)."""
+    (one of REASONS), or None when it is the song (`acceptable`). Instant
+    listening only: downloads keep `matches` (D-130)."""
+    if (
+        not track.get("explicit_edition")
+        and primary_artist(c.get("channel")) != primary_artist(track["artist"])
+        and without_the(c.get("channel")) == without_the(track["artist"])
+    ):
+        # The artist differs only by a leading "The" (D-130): the rest of
+        # the walk reads the result as by the requested artist.
+        c = {**c, "channel": track["artist"]}
     failed = mismatch(track, c)
     if failed:
         return failed
@@ -124,17 +158,17 @@ def rejection(track, c):
         track.get("title"), track.get("album")
     ):
         return "altered"
-    # Only a plain studio song with a known length may come from another
-    # release. A live, demo, remix, session or altered recording is one
-    # performance (another concert is another recording), so it must be the
-    # requested album or carry one of its ISRCs; so must a song with no known
-    # length or an edition chosen explicitly.
+    # Only a plain studio song may come from another release: any release
+    # when its length is known, any ordinary album when it is not (D-130). A
+    # live, demo, remix, session or altered recording is one performance
+    # (another concert is another recording), so it must be the requested
+    # album or carry one of its ISRCs; so must an edition chosen explicitly.
     if not (
         (
             not track.get("explicit_edition")
-            and track.get("duration")
             and not recording_kind(track)
             and not altered(track.get("title"), track.get("album"))
+            and (track.get("duration") or ordinary(c.get("album")))
         )
         or normalise(c.get("album", "")) == normalise(track["album"])
         or bool(track.get("isrcs") and c.get("isrc") and c["isrc"] in track["isrcs"])

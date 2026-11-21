@@ -902,3 +902,98 @@ def test_issuing_a_token_with_the_map_full_is_quick(tmp_path):
     slowest = asyncio.run(fill_and_time())
     assert len(resolver.streams) == remote.STREAMS
     assert slowest < 0.005, slowest
+
+
+def test_a_tap_on_a_chart_song_with_no_length_plays_from_another_album(
+    tmp_path, monkeypatch
+):
+    """D-130 (#282): live, "Foo Fighters - Everlong" (no known length) was
+    refused from The Colour And The Shape; it now plays from JioSaavn, which
+    still wins over YouTube (D-89)."""
+    from server.remote import RemoteAudio
+
+    async def probe(client, url):
+        return None
+
+    monkeypatch.setattr(RemoteAudio, "probe", staticmethod(probe))
+    everlong = {"artist": "Foo Fighters", "title": "Everlong", "album": "Greatest Hits"}
+    on_saavn = {
+        "channel": "Foo Fighters",
+        "title": "Everlong",
+        "album": "The Colour And The Shape",
+        "duration": "250",
+        "source_url": "https://aac.saavncdn.com/everlong_320.mp4",
+    }
+    youtube = FakeYouTube(
+        [
+            {
+                **ON_YOUTUBE,
+                "channel": "Foo Fighters",
+                "title": "Everlong",
+                "duration": 250,
+            }
+        ]
+    )
+    resolver = resolver_with(youtube, lambda *_: [on_saavn], tmp_path)
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            found = await resolver.stream(client, everlong, "member")
+            assert found == {"url": on_saavn["source_url"], "source": "jiosaavn"}
+
+    asyncio.run(scenario())
+
+
+def test_a_tap_with_only_karaoke_and_tribute_results_is_still_no_match(tmp_path):
+    """D-130 relaxes the album, never the artist or the version: karaoke,
+    tribute and lullaby copies stay refused, and the no match says why."""
+    everlong = {"artist": "Foo Fighters", "title": "Everlong", "album": "Greatest Hits"}
+    karaoke = [
+        {
+            "channel": "ZZang KARAOKE",
+            "title": "Everlong",
+            "album": "Everlong (Karaoke Version)",
+            "duration": "250",
+            "source_url": "https://aac.saavncdn.com/k_320.mp4",
+        },
+        {
+            "channel": "Foo Fighters",
+            "title": "Everlong",
+            "album": "Lullaby Versions of Foo Fighters",
+            "duration": "240",
+            "source_url": "https://aac.saavncdn.com/l_320.mp4",
+        },
+        {
+            "channel": "Foo Fighters",
+            "title": "Everlong",
+            "album": "The Karaoke Hits",
+            "duration": "250",
+            "source_url": "https://aac.saavncdn.com/h_320.mp4",
+        },
+    ]
+    youtube = FakeYouTube(
+        [
+            {**ON_YOUTUBE, "channel": "String Tribute Players", "title": "Everlong"},
+            {
+                **ON_YOUTUBE,
+                "channel": "Foo Fighters",
+                "title": "Everlong (Acoustic Version)",
+            },
+        ]
+    )
+    resolver = resolver_with(youtube, lambda *_: karaoke, tmp_path)
+    resolver.performance = Recorder()
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            with pytest.raises(ValueError, match="No source has"):
+                await resolver.stream(client, everlong, "member")
+
+    asyncio.run(scenario())
+    misses = {e[1]: e[3] for e in resolver.performance.events if e[2] == "no match"}
+    assert json.loads(misses["jiosaavn"])["reasons"] == {
+        "artist": 1,
+        "album": 1,  # The lullaby album: not ordinary.
+        "version": 1,  # "Karaoke" in the album.
+    }
+    assert json.loads(misses["youtube"])["reasons"] == {"artist": 1, "title": 1}

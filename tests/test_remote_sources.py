@@ -445,10 +445,13 @@ def test_jiosaavn_never_takes_a_sped_up_or_slowed_upload():
     # Among several copies an altered one is never the pick.
     copies = [saavn("Breathless (Slowed)", "a"), saavn("Summer Hits 2026", "s")]
     assert resolved(target, copies).endswith("/s.m4a")
-    # No requested length: only the requested album itself.
+    # No requested length: any ordinary album (D-130), never an altered one.
     unknown = {k: v for k, v in target.items() if k != "duration"}
-    with pytest.raises(ValueError):
-        resolved(unknown, [saavn("Summer Hits 2026", "s", duration=240)])
+    for album in ("Breathless (Slowed)", "Breathless (Sped Up)", "Nightcore Hits"):
+        with pytest.raises(ValueError):
+            resolved(unknown, [saavn(album, "x", duration=240)])
+    hits = saavn("Summer Hits 2026", "s", duration=240)
+    assert resolved(unknown, [hits]).endswith("/s.m4a")
     same = saavn("Breathless - Single", "b", duration=240)
     assert resolved(unknown, [same]).endswith("/b.m4a")
 
