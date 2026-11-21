@@ -27,6 +27,14 @@ queue has no index on its state (adding one is a schema change), so a count
 reads the unfinished rows' requester lists; at the household's 10,000 that
 costs a few milliseconds, less than the one existing query each song of a
 request already makes over the whole queue.
+
+Only what a person asks for is limited. Jobs the server makes on its own
+(quality replacements of every kind, the upgrade scan, the owner's library
+migration, an artist's discography) are exempt and queued as before, but
+they are still counted below: a replacement waits for every library member
+it is for, an artist job for the owner, a migration job for the household
+only. So a large quality change can leave a person at their limit for
+ordinary Adds until those jobs finish.
 """
 
 import collections
@@ -144,11 +152,8 @@ class QueueLimits:
                 return max(1, math.ceil(at + self.seconds - now))
         return 1
 
-    def room(self, conn, user_id, rated=True):
-        return Room(self, conn, user_id, rated)
-
-    def waiting(self, conn):
-        return Waiting(self, conn)
+    def room(self, conn, user_id):
+        return Room(self, conn, user_id)
 
     def full(self, conn, people, new_job):
         """For a Retry: the waiting limit that reviving a job (`new_job`) or
@@ -173,13 +178,10 @@ class Room:
     and a song of the rate; joining someone else's job costs no household
     slot."""
 
-    def __init__(self, limits, conn, user_id, rated=True):
+    def __init__(self, limits, conn, user_id):
         self.limits = limits
         self.conn = conn
         self.user_id = user_id
-        # A job's bulk submission (an artist's discography) keeps the
-        # waiting limits but not the rate: it is not songs added by hand.
-        self.rated = rated
         self.counted = False
         self.person = self.household = self.used = 0
         self.limit = None
@@ -188,7 +190,7 @@ class Room:
         household, person = self.conn.execute(WAITING_COUNT, (self.user_id,)).fetchone()
         self.person = self.limits.person - person
         self.household = self.limits.household - household
-        self.rate = self.limits.available(self.user_id) if self.rated else math.inf
+        self.rate = self.limits.available(self.user_id)
         self.counted = True
 
     def admit(self, new_job=True):
@@ -216,37 +218,3 @@ class Room:
                 self.limits.wait(self.user_id) if self.limit == RATE else None
             ),
         }
-
-
-class Waiting:
-    """Room for jobs the server makes on people's behalf (quality
-    replacements, an import of the owner's): the household's waiting limit
-    for a new job and each beneficiary's, never the rate (they are not
-    songs anyone added). Counted once per transaction, and once per person,
-    when first needed; each job admitted is counted at once. Jobs that don't
-    fit are not made: `deferred` says how many."""
-
-    def __init__(self, limits, conn):
-        self.limits = limits
-        self.conn = conn
-        self.household = None
-        self.people = {}
-        self.deferred = 0
-
-    def admit(self, people, new_job=True):
-        if self.household is None:
-            (count,) = self.conn.execute(
-                "SELECT count(*) FROM queue WHERE status IN " + sql(PENDING)
-            ).fetchone()
-            self.household = self.limits.household - count
-        for person in people:
-            if person not in self.people:
-                _, mine = self.conn.execute(WAITING_COUNT, (person,)).fetchone()
-                self.people[person] = self.limits.person - mine
-        if (new_job and self.household < 1) or any(self.people[p] < 1 for p in people):
-            self.deferred += 1
-            return False
-        self.household -= bool(new_job)
-        for person in people:
-            self.people[person] -= 1
-        return True

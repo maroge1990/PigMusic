@@ -113,18 +113,12 @@ class ArtistJobs:
             if starting:
                 state["baseline_pending"] = True
             if request and periodic:
-                state.update(
-                    status="queued",
-                    error=None,
-                    left_out=0,
-                    generation=uuid.uuid4().hex,
-                )
+                state.update(status="queued", error=None, generation=uuid.uuid4().hex)
             elif request:
                 state.update(
                     status="queued",
                     done=[],
                     created=0,
-                    left_out=0,
                     error=None,
                     baseline_pending=False,
                     generation=uuid.uuid4().hex,
@@ -175,20 +169,12 @@ class ArtistJobs:
             current = self.current(identity, generation)
             if current is None:
                 return False
-            # Within the waiting limits, not the rate (D-128). An album some
-            # of whose songs were left out is not done: the next run (a
-            # monitored artist's, or Add albums to library again) asks for
-            # it again, its queued songs answered as already asked for.
-            result = self.store.submit_catalogue(
-                tracks, user_id=self.owner(), capped=True
-            )
-            left_out = result["left_out"]
+            result = self.store.submit_catalogue(tracks, user_id=self.owner())
             self.progress(
                 identity,
                 generation,
                 created=current.get("created", 0) + result["created"],
-                left_out=current.get("left_out", 0) + left_out,
-                done=[*current.get("done", []), *([] if left_out else [group_id])],
+                done=[*current.get("done", []), group_id],
             )
             return True
 

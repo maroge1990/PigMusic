@@ -45,20 +45,6 @@ export const RETRY_WORDING: Record<QueueLimit, string> = {
   rate: "Couldn't try again yet. Try again in a few minutes.",
 };
 
-/** A quality choice whose replacements didn't all fit, or "". */
-export function qualityDeferredMessage(deferred = 0) {
-  return deferred
-    ? `${songs(deferred)} will change quality later: too many songs are waiting. Choose this quality again once some are added.`
-    : "";
-}
-
-/** The owner's import or an artist's albums: songs a waiting limit left out. */
-export function bulkLeftOutMessage(leftOut = 0, again: string) {
-  return leftOut
-    ? `${songs(leftOut)} left out: too many songs are waiting. ${again} once some are added.`
-    : "";
-}
-
 /** The sentence for songs a limit left out, or "" when none were. */
 export function leftOutMessage(result: LeftOut, count = result.left_out ?? 0) {
   if (!count) return "";

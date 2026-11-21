@@ -342,18 +342,12 @@ class Store:
         if previous["profile"] != settings["profile"]:
             with self.connect() as conn:
                 conn.execute("BEGIN IMMEDIATE")
-                # Within the waiting limits (D-128): a replacement that
-                # doesn't fit is looked at again by the next upgrade scan.
-                room = self.queue_limits.waiting(conn)
                 for row in conn.execute("SELECT payload FROM acquired").fetchall():
                     track = json.loads(row[0])
                     desired = self.quality_policy(track, conn=conn)
-                    deferred = room.deferred
-                    self._enqueue_quality(conn, track, desired, room=room)
+                    self._enqueue_quality(conn, track, desired)
                     self._save_quality_policy(
-                        conn,
-                        {**track, "quality_policy": desired},
-                        soon=room.deferred > deferred,
+                        conn, {**track, "quality_policy": desired}
                     )
         return self.download_settings()
 
@@ -1307,31 +1301,18 @@ class Store:
             )
         return result
 
-    def _save_quality_policy(self, conn, metadata, soon=False):
-        """`soon`: the replacement waits for room (D-128), so the next
-        upgrade scan looks at it again."""
+    def _save_quality_policy(self, conn, metadata):
         value = {
             **metadata.get("quality_policy", policy(self.download_settings())),
-            "next_check": (
-                0
-                if soon
-                else time.time()
-                + metadata.get("quality_policy", {}).get("recheck_hours", 24) * 3600
-            ),
+            "next_check": time.time()
+            + metadata.get("quality_policy", {}).get("recheck_hours", 24) * 3600,
         }
         conn.execute(
             "INSERT INTO documents VALUES (?,?) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",
             ("quality-policy:" + metadata["id"], json.dumps(value)),
         )
 
-    def _enqueue_quality(
-        self, conn, track, desired, automatic=False, active=None, room=None
-    ):
-        """Queues a replacement of `track` at the quality wanted. `room` (a
-        queue_limits.Waiting for the caller's transaction, D-128) admits it
-        only while the household and each library member it is for have a
-        waiting slot; one that doesn't fit is not made (`room.deferred`).
-        One that takes the place of a job it cancels costs nothing."""
+    def _enqueue_quality(self, conn, track, desired, automatic=False, active=None):
         active = (
             active
             if active is not None
@@ -1339,7 +1320,6 @@ class Store:
                 "SELECT id,payload FROM queue WHERE status IN " + sql(PENDING)
             ).fetchall()
         )
-        replacing = False
         for request_id, raw in active:
             payload = json.loads(raw)
             if payload.get("library_track_id") == track["id"]:
@@ -1349,7 +1329,6 @@ class Store:
                     "UPDATE queue SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=?",
                     (request_id,),
                 )
-                replacing = True
         preferred = desired["preferred"]
         current = actual_profile(track)
         if (
@@ -1380,22 +1359,19 @@ class Store:
                 if track.get(k)
             }
         )
-        members = [
-            r[0]
-            for r in conn.execute(
-                "SELECT user_id FROM library_members WHERE track_id=?",
-                (track["id"],),
-            )
-        ]
-        if room is not None and not replacing and not room.admit(members):
-            return False
         payload.update(
             library_track_id=track["id"],
             quality_profile=preferred,
             quality_policy=desired,
             upgrade_only=automatic or rank(preferred) > rank(current),
             exact_quality=True,
-            requested_by=members,
+            requested_by=[
+                r[0]
+                for r in conn.execute(
+                    "SELECT user_id FROM library_members WHERE track_id=?",
+                    (track["id"],),
+                )
+            ],
         )
         managed = conn.execute(
             "SELECT 1 FROM acquired WHERE id=?", (track["id"],)
@@ -1444,14 +1420,10 @@ class Store:
         created = 0
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            # Within the waiting limits (D-128): what doesn't fit is said
-            # (`deferred`) and looked at again by the next upgrade scan.
-            room = self.queue_limits.waiting(conn)
             for album in albums:
                 for track in album["tracks"]:
                     desired = self.quality_policy(track, conn=conn)
-                    deferred = room.deferred
-                    created += self._enqueue_quality(conn, track, desired, room=room)
+                    created += self._enqueue_quality(conn, track, desired)
                     conn.execute(
                         "INSERT INTO documents VALUES (?,?) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",
                         (
@@ -1459,19 +1431,14 @@ class Store:
                             json.dumps(
                                 {
                                     **desired,
-                                    "next_check": (
-                                        0
-                                        if room.deferred > deferred
-                                        else time.time()
-                                        + desired["recheck_hours"] * 3600
-                                    ),
+                                    "next_check": time.time()
+                                    + desired["recheck_hours"] * 3600,
                                 }
                             ),
                         ),
                     )
         return {
             "created": created,
-            "deferred": room.deferred,
             "preferred": preferred,
             "originals_retained_on_failure": True,
             "downloads_enabled": self.download_settings()["enabled"],
@@ -1506,22 +1473,14 @@ class Store:
             rows = conn.execute(
                 "SELECT name,payload FROM documents WHERE name >= 'quality-policy:' AND name < 'quality-policy;'"
             ).fetchall()
-            # Within the waiting limits (D-128): an upgrade that doesn't fit
-            # keeps its check due, so the next scan (hourly) tries again.
-            room = self.queue_limits.waiting(conn)
             for name, raw in rows:
                 desired = json.loads(raw)
                 if desired.get("next_check", 0) > time.time():
                     continue
                 track = tracks.get(name.split(":", 1)[1])
-                deferred = room.deferred
                 if track:
                     desired = {**desired, **self.quality_policy(track)}
-                    self._enqueue_quality(
-                        conn, track, desired, automatic=True, room=room
-                    )
-                if room.deferred > deferred:
-                    continue
+                    self._enqueue_quality(conn, track, desired, automatic=True)
                 desired["next_check"] = time.time() + desired["recheck_hours"] * 3600
                 conn.execute(
                     "UPDATE documents SET payload=? WHERE name=?",
@@ -1729,9 +1688,6 @@ class Store:
                     f"Resolve {len(conflicts)} version conflicts before importing."
                 )
             created = existing = skipped = 0
-            # The household's waiting limit (D-128): songs past it are left
-            # out (`left_out`); submitting again queues them as room allows.
-            room = self.queue_limits.waiting(conn)
             for track in tracks:
                 if decisions.get(track["id"]) == "skip":
                     skipped += 1
@@ -1782,8 +1738,6 @@ class Store:
 
                     HouseholdPolicy(self).reconcile_pending(conn)
                     existing += 1
-                elif not room.admit([]):
-                    continue
                 elif prior:
                     conn.execute(
                         "UPDATE queue SET status='waiting_for_sources', payload=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -1800,7 +1754,6 @@ class Store:
                 "created": created,
                 "existing": existing,
                 "skipped": skipped,
-                "left_out": room.deferred,
                 "downloads_enabled": settings["enabled"],
             }
 
@@ -1843,13 +1796,7 @@ class Store:
 
     @coordinated
     def submit_catalogue(
-        self,
-        tracks,
-        preferred=None,
-        user_id=None,
-        resume_paused=False,
-        limited=False,
-        capped=False,
+        self, tracks, preferred=None, user_id=None, resume_paused=False, limited=False
     ):
         """Queue catalogue songs. `resume_paused` only for a person asking
         for them now (#228): a song whose job another person paused resumes,
@@ -1861,9 +1808,7 @@ class Store:
         `limited`, for a person asking (D-128): a song that would make a new
         job past one of the queue limits is left out (`over_limit`), counted
         in the same transaction as the insert, so two requests at once can't
-        both take the last room. `capped`, for a job asking on a person's
-        behalf (an artist's discography): the waiting limits only, not the
-        rate."""
+        both take the last room."""
         settings = self.download_settings()
         if preferred and tracks:
             album_id = self.album_key(tracks[0])
@@ -1899,8 +1844,8 @@ class Store:
         taken_up = []
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            if (limited or capped) and user_id:
-                room = self.queue_limits.room(conn, user_id, rated=limited)
+            if limited and user_id:
+                room = self.queue_limits.room(conn, user_id)
             # Read both legacy and edition-aware exclusions once per batch.
             exclusions = [
                 json.loads(r[0])
@@ -2157,8 +2102,7 @@ class Store:
             # window now, and only now, so a request that rolled back took
             # nothing. The lifecycle lock (`coordinated`) is still held, so
             # the next request counts its room after this record.
-            if room.rated:
-                self.queue_limits.take(user_id, room.used)
+            self.queue_limits.take(user_id, room.used)
             limit = room.answer()
         return {
             "created": created,

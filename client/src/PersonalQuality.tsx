@@ -1,6 +1,5 @@
 import { InlineError } from "./EmptyState";
 import { notify, notifyError } from "./notices";
-import { qualityDeferredMessage } from "./queueLimits";
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import {
@@ -50,17 +49,9 @@ export function PersonalQuality({
         preferred: value || null,
       }),
     })
-      .then((saved) => {
+      .then(() => {
         setPreferred(value);
-        notify(
-          [
-            "Saved. Shared files keep the highest quality anyone wants.",
-            // Replacements past a waiting limit (D-128).
-            qualityDeferredMessage((saved as { deferred?: number }).deferred),
-          ]
-            .filter(Boolean)
-            .join(" "),
-        );
+        notify("Saved. Shared files keep the highest quality anyone wants.");
         window.dispatchEvent(new Event("music-library-changed"));
       })
       .catch((e) => notifyError(e.message))

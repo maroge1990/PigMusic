@@ -205,21 +205,6 @@ test("past a waiting limit the later batches are still sent", async () => {
   clearNotices();
 });
 
-test("a quality choice says how many replacements wait", async () => {
-  const { qualityDeferredMessage, bulkLeftOutMessage } = await import(
-    "../src/queueLimits.ts"
-  );
-  assert.equal(qualityDeferredMessage(0), "");
-  assert.equal(
-    qualityDeferredMessage(3),
-    "3 songs will change quality later: too many songs are waiting. Choose this quality again once some are added.",
-  );
-  assert.equal(
-    bulkLeftOutMessage(2, "Submit the import again"),
-    "2 songs left out: too many songs are waiting. Submit the import again once some are added.",
-  );
-});
-
 test("a Retry a waiting limit refused says why", async () => {
   const { retryLimitMessage } = await import("../src/queueLimits.ts");
   assert.equal(

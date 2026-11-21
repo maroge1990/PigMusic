@@ -309,10 +309,7 @@ extension NativeService {
     default: throw NativeFailure.unavailable("Quality preferences are unavailable.")
     }
   }
-  /// Returns how many replacements a waiting limit kept from being queued
-  /// (D-128); 0 from an older server.
-  @discardableResult
-  public func saveQuality(scope: String, id: String, preferred: String?) async throws -> Int {
+  public func saveQuality(scope: String, id: String, preferred: String?) async throws {
     guard let scope = Components.Schemas.QualityPreference.scopePayload(rawValue: scope) else {
       throw NativeFailure.unavailable("Choose a supported quality scope.")
     }
@@ -325,7 +322,7 @@ extension NativeService {
               Components.Schemas.QualityPreference.preferredPayload(rawValue: $0)
             }, scope: scope))))
     {
-    case .ok(let value): return (try? value.body.json.deferred) ?? 0
+    case .ok: return
     case .unauthorized: throw NativeFailure.authentication
     default: throw NativeFailure.unavailable("Quality preference was not confirmed.")
     }

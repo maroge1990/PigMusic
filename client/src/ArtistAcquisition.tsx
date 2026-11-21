@@ -1,6 +1,5 @@
 import { notify, notifyError } from "./notices";
 import { apiFetch, detailOr, isUnconfirmed, writeFailure } from "./api";
-import { bulkLeftOutMessage } from "./queueLimits";
 import { useEffect, useRef, useState } from "react";
 export function ArtistAcquisition({ id }: { id: string }) {
   const editing = useRef(false);
@@ -9,7 +8,6 @@ export function ArtistAcquisition({ id }: { id: string }) {
     monitor: boolean;
     status: string;
     created?: number;
-    left_out?: number;
     done?: string[];
     total?: number;
   }>({ kinds: ["album"], monitor: false, status: "idle" });
@@ -30,7 +28,6 @@ export function ArtistAcquisition({ id }: { id: string }) {
                     ...old,
                     status: d.status,
                     created: d.created,
-                    left_out: d.left_out,
                     done: d.done,
                     total: d.total,
                   }
@@ -147,11 +144,6 @@ export function ArtistAcquisition({ id }: { id: string }) {
         <p>
           {state.status} · {state.done?.length || 0} of {state.total || 0}{" "}
           albums · {state.created || 0} songs queued
-          {/* Past a waiting limit (D-128). */}
-          {state.left_out
-            ? " · " +
-              bulkLeftOutMessage(state.left_out, "Add albums to library again")
-            : ""}
         </p>
       )}
     </details>

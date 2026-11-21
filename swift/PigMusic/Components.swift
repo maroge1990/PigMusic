@@ -687,16 +687,11 @@ struct InlineQualityPicker: View {
     saving = true
     defer { saving = false }
     do {
-      let deferred = try await model.performPersonal {
+      try await model.performPersonal {
         try await $0.saveQuality(scope: scope, id: id, preferred: value == "inherit" ? nil : value)
       }
       settings = try? await model.readCatalogue { try await $0.quality() }
-      // Replacements past a waiting limit are said (D-128).
-      if let notice = QualityNotice.deferred(deferred) {
-        message = .info("Saved. " + notice)
-      } else {
-        message = .info("Saved")
-      }
+      message = .info("Saved")
     } catch { message = .error(error.userMessage) }
   }
 }
