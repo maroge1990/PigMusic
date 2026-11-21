@@ -31,6 +31,7 @@ def test_queue_requires_conflict_decisions_and_survives_restart(tmp_path):
         "created": 1,
         "existing": 0,
         "skipped": 1,
+        "left_out": 0,
         "downloads_enabled": False,
     }
     restarted = Store(tmp_path)

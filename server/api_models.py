@@ -654,6 +654,9 @@ class QualitySavedDTO(BaseModel):
     item_id: str
     preferred: str | None
     created: int
+    # Replacements a waiting limit kept from being queued (D-128): choosing
+    # the quality again queues them as room allows.
+    deferred: int = 0
 
 
 class RemovalItemDTO(BaseModel):
@@ -700,6 +703,9 @@ class ArtistAcquisitionDTO(BaseModel):
     total: int = 0
     done: list[str] = Field(default_factory=list)
     created: int = 0
+    # Songs a waiting limit left out this run (D-128): their albums are
+    # asked for again by the next run.
+    left_out: int = 0
     error: str | None = None
 
 

@@ -627,3 +627,185 @@ def test_a_partial_answer_fits_the_schema_installed_iphones_have(tmp_path, monke
         assert busy.status_code == 429
         assert conforms(busy.json(), OLD["APIError"])
         assert busy.json()["over_limit"] == [0]
+
+
+CURRENT = json.loads(
+    (Path(__file__).parents[1] / "api" / "openapi.v1.json").read_text()
+)["components"]["schemas"]
+
+
+def test_every_queue_limit_answer_fits_the_current_error_schema(tmp_path, monkeypatch):
+    """Codex round 2: a waiting limit's 429 sent retry_after null, which the
+    contract's integer doesn't allow. It is left out when no wait applies."""
+    place = Household(tmp_path, monkeypatch)
+    error = CURRENT["APIError"]
+    assert error["properties"]["retry_after"] == {"type": "integer"}
+    small(place.store, person=1, songs=1000)
+    member = place.clients[place.member]
+    with place.client:
+        member.post("/api/v1/requests", json={"tracks": [song(1)]})
+        waiting_add = member.post("/api/v1/requests", json={"tracks": [song(2)]})
+        place.set_status(job(place, 1), "failed")
+        member.post("/api/v1/requests", json={"tracks": [song(3)]})
+        waiting_retry = member.post(f"/api/v1/requests/{job(place, 1)}/retry")
+        admin_retry = place.client.post(f"/api/v1/admin/queue/{job(place, 1)}/retry")
+        small(place.store, person=100, songs=1, clock=Clock())
+        place.client.post("/api/v1/requests", json={"tracks": [song(4)]})
+        rate_add = place.client.post("/api/v1/requests", json={"tracks": [song(5)]})
+    for answer in (waiting_add, waiting_retry, admin_retry, rate_add):
+        assert answer.status_code == 429, answer.text
+        body = answer.json()
+        assert conforms(body, error), body
+        assert conforms(body, OLD["APIError"]), body
+    assert "retry_after" not in waiting_add.json()
+    assert "retry_after" not in waiting_retry.json()
+    assert "retry_after" not in admin_retry.json()
+    assert rate_add.json()["retry_after"] == 600
+
+
+# Replacements at another quality (Codex round 2): made for the library's
+# members, so within the household's and each member's waiting limit; not
+# rated (nobody added them).
+
+
+def quality_household(tmp_path, monkeypatch, count=3):
+    from test_personal_removal import household as removal_household
+
+    store, _, _, track, owner, member, _ = removal_household(tmp_path, monkeypatch)
+    tracks = [
+        {
+            **track,
+            "id": f"q{n}",
+            "title": f"Quality {n}",
+            "track_number": n,
+            "relative_path": f"q{n}.mp3",
+            "codec": "mp3",
+            "bitrate": 128,
+        }
+        for n in range(count)
+    ]
+    (store.directory / "library-snapshot.json").write_text(
+        json.dumps({"tracks": tracks})
+    )
+    store.refresh_library()
+    store.user_libraries.add(owner, [t["id"] for t in tracks])
+    # Taking them up may have queued upgrades already: start from none.
+    with store.connect() as conn:
+        conn.execute("DELETE FROM queue")
+    return store, owner, member
+
+
+def pending_quality(store):
+    with store.connect() as conn:
+        return conn.execute(
+            "SELECT count(*) FROM queue WHERE status='waiting_for_sources' "
+            "AND json_extract(payload,'$.library_track_id') IS NOT NULL"
+        ).fetchone()[0]
+
+
+def test_a_quality_change_queues_replacements_only_within_the_limits(
+    tmp_path, monkeypatch
+):
+    from server.household_policy import HouseholdPolicy
+
+    store, owner, _ = quality_household(tmp_path, monkeypatch)
+    small(store, person=2, household=100, songs=1)
+    policy = HouseholdPolicy(store)
+    saved = policy.set_quality(owner, "system", "*", "lossless")
+    assert (saved["created"], saved["deferred"]) == (2, 1)
+    assert pending_quality(store) == 2
+    # Not rated: nobody added these songs.
+    assert store.queue_limits.available(owner) == 1
+    # Choosing it again once there is room queues the rest, never one
+    # already queued twice.
+    store.queue_limits.person = 3
+    again = policy.set_quality(owner, "system", "*", "lossless")
+    assert (again["created"], again["deferred"]) == (1, 0)
+    assert pending_quality(store) == 3
+
+
+def test_the_owners_album_quality_keeps_the_household_ceiling(tmp_path, monkeypatch):
+    store, owner, _ = quality_household(tmp_path, monkeypatch)
+    small(store, person=100, household=1)
+    album = store.library["albums"][0]["id"]
+    override = store.quality_override("album", album, "lossless")
+    assert (override["created"], override["deferred"]) == (1, 2)
+    assert pending_quality(store) == 1
+
+
+def test_a_settings_change_and_the_upgrade_scan_keep_the_limits(tmp_path, monkeypatch):
+    store, owner, _ = quality_household(tmp_path, monkeypatch)
+    small(store, person=100, household=1)
+    with store.connect() as conn:
+        for n in range(3):
+            conn.execute(
+                "INSERT INTO documents VALUES (?,?)",
+                (
+                    f"quality-policy:q{n}",
+                    json.dumps(
+                        {
+                            **store.quality_policy(
+                                store.library["albums"][0]["tracks"][0]
+                            ),
+                            "preferred": "lossless",
+                            "recheck_hours": 24,
+                            "next_check": 0,
+                        }
+                    ),
+                ),
+            )
+    store.save_download_settings({"enabled": True, "sources": ["freemp3cloud"]})
+    store.schedule_upgrades()
+    assert pending_quality(store) <= 1
+    with store.connect() as conn:
+        due = conn.execute(
+            "SELECT count(*) FROM documents WHERE name >= 'quality-policy:' "
+            "AND name < 'quality-policy;' AND json_extract(payload,'$.next_check') <= ?",
+            (time.time(),),
+        ).fetchone()[0]
+    # The upgrades that didn't fit stay due, for the next scan.
+    assert due >= 2
+
+
+def test_the_owners_import_keeps_the_household_ceiling(tmp_path):
+    from test_library import apple_export
+    from test_library import track as library_track
+
+    (tmp_path / "library-snapshot.json").write_text(json.dumps({"tracks": []}))
+    store = Store(tmp_path)
+    small(store, household=2)
+    result = store.import_apple(
+        apple_export([library_track(id=f"i{n}", title=f"Import {n}") for n in range(3)])
+    )
+    store.update_selection(
+        [t["id"] for a in result["albums"] for t in a["tracks"]], True
+    )
+    first = store.submit_migration()
+    assert (first["created"], first["left_out"]) == (2, 1)
+    store.queue_limits.household = 3
+    again = store.submit_migration()
+    assert (again["created"], again["existing"], again["left_out"]) == (1, 2, 0)
+
+
+def test_an_artists_albums_keep_the_waiting_limits_and_wait_for_the_next_run(
+    tmp_path,
+):
+    from server.artist_jobs import ArtistJobs
+
+    store = Store(tmp_path)
+    small(store, person=2, songs=1)
+    jobs = ArtistJobs.__new__(ArtistJobs)
+    jobs.store = store
+    jobs.owner = lambda: "owner"
+    state = {"status": "running", "generation": "g", "done": [], "created": 0}
+    jobs.current = lambda identity, generation: state
+    jobs.progress = lambda identity, generation, **changes: state.update(changes)
+    import threading
+
+    jobs.lock = threading.RLock()
+    assert jobs.submit("a", "g", "album-1", [missing(n) for n in (1, 2)])
+    assert jobs.submit("a", "g", "album-2", [missing(n, 2) for n in (3, 4)])
+    # Not rated (a job, not songs added by hand); within the waiting cap.
+    assert (state["created"], state["left_out"]) == (2, 2)
+    # The album left out is not done: the next run asks for it again.
+    assert state["done"] == ["album-1"]

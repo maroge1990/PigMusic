@@ -114,6 +114,9 @@ class HouseholdPolicy:
     def membership_changed(self, conn, track_ids):
         ids = set(track_ids)
         context = self.context(conn)
+        # Within the waiting limits (D-128); an upgrade that doesn't fit is
+        # left to the upgrade scan, which looks at each song's quality again.
+        room = self.store.queue_limits.waiting(conn)
         for album in self.store.library["albums"]:
             for track in album["tracks"]:
                 if track["id"] in ids:
@@ -126,6 +129,7 @@ class HouseholdPolicy:
                         desired,
                         automatic=True,
                         active=context["active"].get(track["id"], []),
+                        room=room,
                     )
         self.reconcile_pending(conn)
         for identity in ids:
@@ -174,6 +178,11 @@ class HouseholdPolicy:
                     (user_id, scope, item_id, preferred),
                 )
             context = self.context(conn)
+            # Within the waiting limits (D-128), in the library's order: the
+            # replacements that don't fit are not queued; the answer says how
+            # many, and choosing the quality again queues them as room
+            # allows (one already queued at that quality isn't made twice).
+            room = self.store.queue_limits.waiting(conn)
             for track in tracks:
                 count = conn.execute(
                     "SELECT count(*) FROM library_members WHERE track_id=?",
@@ -186,6 +195,7 @@ class HouseholdPolicy:
                     desired,
                     automatic=count > 1,
                     active=context["active"].get(track["id"], []),
+                    room=room,
                 )
             self.reconcile_pending(conn)
         return {
@@ -193,6 +203,7 @@ class HouseholdPolicy:
             "item_id": item_id,
             "preferred": preferred,
             "created": created,
+            "deferred": room.deferred,
         }
 
     def quality(self, user_id):

@@ -659,6 +659,11 @@
             "title": "Kinds",
             "type": "array"
           },
+          "left_out": {
+            "default": 0,
+            "title": "Left Out",
+            "type": "integer"
+          },
           "monitor": {
             "title": "Monitor",
             "type": "boolean"
@@ -3723,6 +3728,11 @@
         "properties": {
           "created": {
             "title": "Created",
+            "type": "integer"
+          },
+          "deferred": {
+            "default": 0,
+            "title": "Deferred",
             "type": "integer"
           },
           "item_id": {
