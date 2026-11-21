@@ -1,4 +1,5 @@
-import { api, currentSession } from "./api";
+import { ApiError, api, currentSession } from "./api";
+import { leftOutMessage, type LeftOut } from "./queueLimits";
 import { batches } from "./limits";
 import { expectedSession, withSession } from "./sessionId";
 import { notify, notifyError, offerUndo } from "./notices";
@@ -81,6 +82,9 @@ export async function addSongsToLibrary(
   let paused = 0;
   async function send(rest: Song[], addedBefore: number): Promise<void> {
     let adding = addedBefore;
+    // Songs a queue limit left out (D-128), and the answer that named it.
+    let leftOut: Song[] = [];
+    let limit: LeftOut = {};
     const parts = batches(rest);
     for (let i = 0; i < parts.length; i++) {
       try {
@@ -93,9 +97,20 @@ export async function addSongsToLibrary(
         );
         adding += result.created + result.existing;
         paused += result.paused || 0;
+        if (result.left_out) {
+          leftOut = leftOut.concat(
+            parts[i].filter((_, j) => result.outcomes?.[j] === "over_limit"),
+          );
+          limit = result;
+        }
       } catch (e) {
         const left = parts.slice(i).flat();
         if (adding) changed();
+        if (e instanceof ApiError && e.code === "queue_limit") {
+          // Every song of this batch was past a limit: the later ones
+          // would be too. Try again sends all those left out.
+          return limited(adding, leftOut.concat(left), e.body as LeftOut);
+        }
         notifyError(
           adding
             ? `Adding ${count(adding)} to your library. Couldn't add the other ${count(left.length)}. Try again.`
@@ -105,6 +120,7 @@ export async function addSongsToLibrary(
         return;
       }
     }
+    if (leftOut.length) return limited(adding, leftOut, limit);
     notify(
       [
         adding && `Adding ${count(adding)} to your library.`,
@@ -114,6 +130,21 @@ export async function addSongsToLibrary(
         .join(" ") || "Nothing to add",
     );
     changed();
+  }
+  /** Some songs past a queue limit: what was added, and how many weren't,
+   * with Try again for those. */
+  function limited(adding: number, left: Song[], limit: LeftOut) {
+    if (adding) changed();
+    notifyError(
+      [
+        adding && `Adding ${count(adding)} to your library.`,
+        paused && PAUSED_NOTICE,
+        leftOutMessage(limit, left.length),
+      ]
+        .filter(Boolean)
+        .join(" "),
+      () => send(left, adding),
+    );
   }
   function changed() {
     window.dispatchEvent(new Event("music-library-changed"));

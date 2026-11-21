@@ -1,4 +1,5 @@
 import { api, apiFetch, cachedLibrary } from "./api";
+import type { LeftOut } from "./queueLimits";
 import { discoverUrl } from "./navigation";
 import type { Track } from "./types";
 
@@ -144,7 +145,9 @@ export type AddResult = {
   skipped: number;
   /** Songs you paused: Add leaves them paused (#264). */
   paused?: number;
-};
+  /** One per song sent, in order; `over_limit` was left out (D-128). */
+  outcomes?: string[];
+} & LeftOut;
 /** An Add that met a song you paused: only Downloads resumes it (#264). */
 export const PAUSED_NOTICE = "Paused. Resume it in Downloads.";
 

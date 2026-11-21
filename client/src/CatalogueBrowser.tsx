@@ -7,6 +7,7 @@ import {
 } from "./api";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { formatDate } from "./format";
+import { leftOutMessage } from "./queueLimits";
 import {
   ChevronLeft,
   ChevronRight,
@@ -150,6 +151,8 @@ function addedMessage(result: AddResult) {
   if (adding > 0) parts.push(`Adding ${songs(adding)} to your library.`);
   if (result.skipped > 0) parts.push(`Skipped ${songs(result.skipped)}.`);
   if (result.paused) parts.push(PAUSED_NOTICE);
+  // Past a queue limit (D-128).
+  if (result.left_out) parts.push(leftOutMessage(result));
   return parts.join(" ") || "Already in your library.";
 }
 export function CatalogueBrowser({

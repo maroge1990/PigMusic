@@ -1,4 +1,5 @@
 import { PUBLIC_WRITES } from "./publicWrites";
+import { leftOutMessage, type LeftOut } from "./queueLimits";
 import {
   SESSION_HEADER,
   SESSION_UNKNOWN,
@@ -259,7 +260,10 @@ export async function responseError(
     /* Keep a readable response for non-JSON failures. */
   }
   const kind = failureKind(response.status, details.code, write);
-  if (kind === "busy") message = accountErrors[code] || BUSY_MESSAGE;
+  // Every song an Add sent was past a queue limit (D-128): say which.
+  if (code === "queue_limit")
+    message = leftOutMessage(details as LeftOut) || BUSY_MESSAGE;
+  else if (kind === "busy") message = accountErrors[code] || BUSY_MESSAGE;
   else if (kind === "unconfirmed") message = UNCONFIRMED_MESSAGE;
   else if (kind === "server") {
     const id = details.request_id;
