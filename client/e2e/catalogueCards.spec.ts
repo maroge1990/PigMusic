@@ -437,18 +437,34 @@ test("an artist page's album cards have the collection menu", async ({
             ],
           },
         }),
+      "/v1/catalogue/groups/rg-x/editions": (route) =>
+        route.fulfill({ json: { total: 0, editions: [] } }),
     },
   });
   await page.goto(`/#/library/artist/${artist.id}`);
   await page
     .getByRole("button", { name: `Find more by ${artist.name}` })
     .click();
-  await page
-    .getByRole("button", { name: "More options for Catalogue album" })
-    .click();
+  const more = page.getByRole("button", {
+    name: "More options for Catalogue album",
+  });
+  await more.click();
   await expect(
     page.getByRole("menu", { name: "Catalogue album" }).getByRole("menuitem"),
   ).toHaveText(collectionWords);
+  await page.keyboard.press("Escape");
+  // Codex round 1: the ⋯ sits in the cover's corner, not across the card,
+  // and the cover beside it still opens the album.
+  const cardBox = (await page
+    .locator(".collection-card", { hasText: "Catalogue album" })
+    .boundingBox())!;
+  const dotsBox = (await more.boundingBox())!;
+  expect(dotsBox.width).toBeLessThan(60);
+  expect(dotsBox.x).toBeGreaterThan(cardBox.x + cardBox.width / 2);
+  await page.mouse.click(cardBox.x + 20, cardBox.y + 20);
+  await expect(
+    page.getByText("No editions of this album are available."),
+  ).toBeVisible();
 });
 
 test("an album lookup that fails without the server's words says Couldn't load", async ({
