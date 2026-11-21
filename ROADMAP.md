@@ -5,53 +5,57 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Current state
 
-*Overwritten at the end of every session. 21 Nov 2026, early afternoon (Melbourne).*
+*Overwritten at the end of every session. 21 Nov 2026, evening (Melbourne).*
 
-- **Live:** release `iphonefix-20261121-v1` (server `b768c80`): everything in `playlists-20261121-v1` plus the server
-  half of batch K (Add `outcomes` and `paused_ids`, albums' `added_at`, an Add whose copy has gone since it was matched
-  is queued). The no-match diagnostics (#282) are collecting: read them after a few days with
-  `scripts/performance_report.py --no-match`.
-- **main `432d919`** holds four iPhone and Watch batches, each through two Codex rounds and confirmations, compiled on
-  GitHub's macOS runner, and tap-through tested on the Mac on iOS 27.0 and watchOS 27.2 (25 iPhone, 7 Watch tests; the
-  PigKit suite passes there too):
-  - **G** device-round fixes #284–#287, #290–#293, Shazam #124, #283, Watch counters and wake-up rule (mediums: #300);
-  - **L** queue edits that do not interrupt the playing song #279 (left: #303, #306);
-  - **K** older iPhone findings #259, #260, #276, #277, #280, #281, #253 (approved; #261 withdrawn; left: #302, #304);
-  - **J** the Watch complication, D-125 (left: #305, #301).
-- **TestFlight (Xcode Cloud), four builds started 21 Nov, each adding to the last:** `testflight-20261121-b1` (G),
-  `-b2` (G+L), `-b3` (G+L+K), `-b4` (all four, with the complication). Their status cannot be read from here: ask Mark
-  which build numbers (2003 or later) arrived, then delete each branch. **b4 may fail to sign** (new identifier
-  `au.com.pig.music.watchkitapp.widget` and the app group on the Watch app): if so Mark enables App Groups on the
-  `.watchkitapp` identifier, registers the new identifier with App Groups, and b4 is pushed again as b5.
-- **Mark's device checks, as builds arrive:** the changed items from his 20 Nov round; listening for #279; the two-day
-  Watch delivery test with the complication on his active face (#219 has what the diagnostics should show; whether the
-  iPhone's push wakes the Watch app depends on the watchOS version); Shazam (#124: it should now end in a result or Try
-  again; the export shows where it stops).
-- **Decided 21 Nov:** the three wordings (D-127), queue limits (D-128, #242: ready to build), the full menu on
-  catalogue cards (D-129, #267: ready to build).
+- **Live:** release `limits-20261121-v1` (server `3ecb88e`). On top of `iphonefix-20261121-v1` it adds: the old-code
+  removal (#201: the instant-listening relay and ArtistGrid portraits; left: #307); the instant-listening match rule of
+  D-130 (#282; left: #310); the collection menu on catalogue album and artist cards (D-129, #267 closed; left: #311,
+  #309); and the limits on how much a person can queue (D-128, D-131, #242; left: #313, and #312 for downloads the
+  server queues by itself, which stay exempt). Every batch: two Codex rounds and confirmations, no high left.
+- **main `3ecb88e`** also holds the four native batches G, L, K, J (see the decisions D-121 to D-131) and the iPhone
+  half of the queue limits. Both apps build and the PigKit and tap-through tests pass on the Mac on iOS 27.0 and
+  watchOS 27.2.
+- **TestFlight:** builds 2003, 2004, 2005 arrived (G; G+L; G+L+K). Builds 2006, 2007, 2008 failed at signing for the
+  Watch complication only. What is left: on developer.apple.com, Identifiers, `au.com.pig.music.watchkitapp.widget`
+  ("PigMusic Watch complication"): App Groups, Configure, tick `group.au.com.pig.music`, Save. Mark has not confirmed
+  doing it. Then `git push origin main:refs/heads/testflight-YYYYMMDD-bN`; that build brings the complication AND the
+  iPhone half of the queue limits. No TestFlight build from main can sign until then.
+- **Reading Xcode Cloud and the identifiers (read-only):** a script on the Mac signs a token with the key that lives
+  there (`~/.pigmusic-testflight.env`); it was `/tmp/asc_read.py` this session and may need recreating: modes `builds`,
+  `issues <run>`, `logs <run>` (the export error is in `app-store-export-archive-logs/xcodebuild-export-archive.log`),
+  `ids`. Registering identifiers is Mark's to do on the website.
+- **Mark's device checks, still to come:** the changed items from his 20 Nov round; listening for #279; Shazam (#124:
+  export diagnostics straight after a try); the two-day Watch delivery test once the complication is on his active face
+  (#219 says what the export should show; whether the iPhone's push wakes the Watch depends on the watchOS version);
+  memory (#253) after a day or two of use.
+- **Retirement (#201), not done because the pass marks are not met (live counters 14–21 Nov):** Cover Art Archive
+  covers and the cover-warming machinery (CAA still supplies 44.5% of covers; 17.3% of covers asked for never shown,
+  mark 2%), and the fallback-profile ladder (mix downloads succeed 41.4%, mark 80%). Both figures deserve their own
+  look. `remote-cache` on the live server (200 MB, 27 files) is unused; delete by hand with Mark's go-ahead.
+- **Instant listening:** 102 of 144 taps played before D-130 (71%, target 90%). Read
+  `scripts/performance_report.py --no-match` again after a few days to see what still misses.
 - **Parked with the next design on the issue:** #266 (`batch-h-266-parked`), #270 (`batch-270-minimal-parked`), #261
   (`batch-k`).
-- **Waiting on Mark, one at a time:** #267 (what Play does on a catalogue card); #242 (queue limit numbers); the
-  matching questions in #282 once live data is in; ShazamKit ticked for the app's identifier.
-- **Decisions:** D-121 to D-129. Next: D-130.
-- **Lessons:** the Mac (`ssh mac`, Mark's wish on 21 Nov when he is its only user) runs the tap-through tests in ~15
-  minutes on the iOS his phone has; one run at a time, one folder per branch, and with its 8 GB a second booted
-  simulator makes a run look hung. GitHub's runner is on iOS 26.5 and often times out or reports an empty iPhone log.
-  The Linux Swift compiler is newer than Xcode's and accepts code Xcode rejects. Never chain verify and release in
-  one background command. This session's Codex outputs are in `.localdata/handover-20261121/`.
+- **Decisions:** D-121 to D-131. Next: D-132.
+- **Lessons:** the Mac (`ssh mac`) runs the tap-through tests in ~15 minutes on the iOS Mark's phone has; one run at a
+  time, one folder per branch; with its 8 GB a second booted simulator makes a run look hung. GitHub's runner is on
+  iOS 26.5 and often times out. The Linux Swift compiler accepts code Xcode rejects. The image tests run outside the
+  source tree: a test that reads a repository file must use `tests/source.py`'s `SOURCE`. Never chain verify and
+  release in one background command. Codex outputs of this session: `.localdata/handover-20261121/`.
 
 ## Now
 
-1. **TestFlight:** confirm which builds arrived, delete their branches, fix signing for b4 if needed, Mark's checks.
-2. **Read the no-match diagnostics** (#282) after a few days; bring Mark the matching questions.
-3. **#266, #270, #261** from the designs on their issues, each its own batch.
-4. **Retirement, 28 Nov** (#201): remove what batches 4, 6 and 8 replaced once #191's pass marks are met.
-5. **Live checks that close with use:** #272, #130, #142, #185, #188, #144/#145, #16/#17/#20/#22/#23/#54/#63 (#95).
+1. **The complication's app group** (Mark), then one TestFlight build from main; delete its branch when it arrives.
+2. **Mark's device checks** (above).
+3. **Read the no-match report** (#282) after a few days; fix #310.
+4. **#266, #270, #261** from the designs on their issues, each its own batch.
+5. **Covers and mix downloads:** why CAA still supplies 44.5% of covers and mix downloads succeed 41.4% (#201's
+   remaining rows cannot be retired until these move).
+6. **Live checks that close with use:** #272, #130, #142, #185, #188, #144/#145, #16/#17/#20/#22/#23/#54/#63 (#95).
 
 ## Next
 
-Findings #295–#306; #282's rule changes; #242 once Mark has chosen the numbers; #267 once designed. Then #226, #231,
-#225.
+Findings #295–#313; #312 (limits for downloads the server queues itself) needs a design. Then #226, #231, #225.
 
 ## Later
 
