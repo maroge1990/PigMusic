@@ -73,7 +73,14 @@ def schema():
     value["components"]["schemas"]["APIError"] = {
         "type": "object",
         "required": ["detail", "code"],
-        "properties": {"detail": {"type": "string"}, "code": {"type": "string"}},
+        "properties": {
+            "detail": {"type": "string"},
+            "code": {"type": "string"},
+            # With the code queue_limit (D-128): which limit, and for the
+            # rate the seconds until one more song fits.
+            "limit": {"type": "string"},
+            "retry_after": {"type": "integer"},
+        },
     }
     value["components"]["securitySchemes"] = {
         "deviceBearer": {"type": "http", "scheme": "bearer"}

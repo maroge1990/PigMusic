@@ -1,0 +1,74 @@
+{
+  "APIError": {
+    "properties": {
+      "code": {
+        "type": "string"
+      },
+      "detail": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "detail",
+      "code"
+    ],
+    "type": "object"
+  },
+  "AcquisitionResultDTO": {
+    "properties": {
+      "created": {
+        "title": "Created",
+        "type": "integer"
+      },
+      "downloads_enabled": {
+        "title": "Downloads Enabled",
+        "type": "boolean"
+      },
+      "existing": {
+        "title": "Existing",
+        "type": "integer"
+      },
+      "outcomes": {
+        "default": [],
+        "items": {
+          "enum": [
+            "created",
+            "existing",
+            "added",
+            "paused",
+            "excluded",
+            "in_library"
+          ],
+          "type": "string"
+        },
+        "title": "Outcomes",
+        "type": "array"
+      },
+      "paused": {
+        "default": 0,
+        "title": "Paused",
+        "type": "integer"
+      },
+      "paused_ids": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "title": "Paused Ids",
+        "type": "array"
+      },
+      "skipped": {
+        "title": "Skipped",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "created",
+      "existing",
+      "skipped",
+      "downloads_enabled"
+    ],
+    "title": "AcquisitionResultDTO",
+    "type": "object"
+  }
+}

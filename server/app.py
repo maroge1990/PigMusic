@@ -23,6 +23,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from .auth import Auth
 from .auth_logging import install_validation_redaction
 from .errors import install as install_error_responses
+from .queue_limits import QueueFull, full_answer
 from .routes.auth import auth_router, set_cookie
 from .routes.personal import personal_router
 from .security import MESSAGES, Security, audit_routes, legacy_test_enabled
@@ -1278,6 +1279,9 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
             return store.retry_request(request_id)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
+        except QueueFull as full:
+            # Past a waiting limit (D-128): the job stays as it was.
+            return JSONResponse(full_answer(full.limit), status_code=429)
 
     @app.post("/api/v1/admin/queue/{request_id}/cancel")
     def cancel(request_id: str):

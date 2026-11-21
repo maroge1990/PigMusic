@@ -143,6 +143,7 @@ def test_songs_the_household_has_are_taken_up_once_per_request(tmp_path, monkeyp
         "paused": 0,
         "paused_ids": [],
         "left_out": 0,
+        "over_limit": [],
         "limit": None,
         "retry_after": None,
         "outcomes": ["added"] * 30 + ["existing"],
@@ -320,6 +321,8 @@ def test_one_pass_leaves_the_queue_as_one_per_song_did(tmp_path, monkeypatch):
                 expected["downloads_enabled"] = one["downloads_enabled"]
                 expected["limit"] = one["limit"]
                 expected["retry_after"] = one["retry_after"]
+                # Positions, so not summed; none here (unlimited).
+                expected["over_limit"] = one["over_limit"]
 
         assert result == expected
         assert result["created"] >= 4 and result["existing"] >= 12

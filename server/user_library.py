@@ -1276,6 +1276,16 @@ class UserLibrary:
                 "SELECT 1 FROM queue WHERE id=? AND " + _MINE, (request_id, user_id)
             ).fetchone() and self.store.retry_joining(conn, request_id, [user_id]):
                 return {"retried": True}
+            row = conn.execute(
+                "SELECT payload FROM queue WHERE id=? AND " + _MINE,
+                (request_id, user_id),
+            ).fetchone()
+            if row:
+                # Queued again it waits for everyone on it: only with room
+                # (D-128); otherwise it stays as it was.
+                self.store.revivable(
+                    conn, request_id, json.loads(row[0]).get("requested_by", [])
+                )
             result = conn.execute(
                 "UPDATE queue SET status='waiting_for_sources',updated_at=CURRENT_TIMESTAMP "
                 "WHERE id=? AND status IN " + sql(RETRYABLE) + " AND EXISTS "

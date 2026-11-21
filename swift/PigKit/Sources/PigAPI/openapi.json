@@ -8,6 +8,12 @@
           },
           "detail": {
             "type": "string"
+          },
+          "limit": {
+            "type": "string"
+          },
+          "retry_after": {
+            "type": "integer"
           }
         },
         "required": [
@@ -54,12 +60,19 @@
                 "added",
                 "paused",
                 "excluded",
-                "in_library",
-                "over_limit"
+                "in_library"
               ],
               "type": "string"
             },
             "title": "Outcomes",
+            "type": "array"
+          },
+          "over_limit": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Over Limit",
             "type": "array"
           },
           "paused": {

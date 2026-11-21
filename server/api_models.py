@@ -537,27 +537,21 @@ class AcquisitionResultDTO(BaseModel):
     # One per song asked for, in order: created (a new request), existing
     # (already being added), added (the household's copy, now in your
     # library), paused (your own pause, left so), excluded (left out of the
-    # household's downloads), in_library (already yours) or over_limit (left
-    # out by a queue limit, D-128: nothing was written, so ask for it again
-    # later). Lets a client mark each song without asking again (Codex
-    # round 1 on batch K).
+    # household's downloads, or by a queue limit) or in_library (already
+    # yours). Lets a client mark each song without asking again (Codex round
+    # 1 on batch K). Closed: an installed iPhone can't read a new value.
     outcomes: list[
-        Literal[
-            "created",
-            "existing",
-            "added",
-            "paused",
-            "excluded",
-            "in_library",
-            "over_limit",
-        ]
+        Literal["created", "existing", "added", "paused", "excluded", "in_library"]
     ] = []
-    # Songs a queue limit left out (D-128), which limit (person_waiting,
+    # Songs a queue limit left out (D-128): how many, their positions (each
+    # also `excluded` in outcomes; nothing was made for them, so they are
+    # to be sent again later), which limit (person_waiting,
     # household_waiting or rate) and, for the rate, the seconds until one
     # more song fits. When every song sent was left out the answer is 429
     # with the code queue_limit and these same fields, so a client that
     # keeps a busy request to send again keeps these songs too.
     left_out: int = 0
+    over_limit: list[int] = []
     limit: Literal["person_waiting", "household_waiting", "rate"] | None = None
     retry_after: int | None = None
     downloads_enabled: bool

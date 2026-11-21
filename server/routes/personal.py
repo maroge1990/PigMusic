@@ -55,6 +55,7 @@ SERVER_CAPABILITIES = [
     "playlist_limit",
     "server_info",
 ]
+from ..queue_limits import QueueFull, full_answer
 from ..user_library import track_dto, SearchChanged
 from ..personal_removal import PersonalRemoval, RemovalChanged
 from ..household_policy import HouseholdPolicy
@@ -697,12 +698,7 @@ def personal_router(store, artist_jobs, recovery, mixes=None):
             # again (an older one would drop a song answered 200 with
             # nothing taken). The body still says what happened.
             return JSONResponse(
-                {
-                    "detail": "Too many songs are waiting to be added. "
-                    "Try again later.",
-                    "code": "queue_limit",
-                    **AcquisitionResultDTO.model_validate(result).model_dump(),
-                },
+                full_answer(**AcquisitionResultDTO.model_validate(result).model_dump()),
                 status_code=429,
                 headers=(
                     {"Retry-After": str(result["retry_after"])}
@@ -729,6 +725,9 @@ def personal_router(store, artist_jobs, recovery, mixes=None):
             return await run(users.retry_request, identity(request), request_id)
         except LookupError:
             raise HTTPException(404, "Not found in Downloads")
+        except QueueFull as full:
+            # Past a waiting limit (D-128): the request stays as it was.
+            return JSONResponse(full_answer(full.limit), status_code=429)
 
     @router.post("/requests/{request_id}/pause", response_model=PausedDTO)
     async def pause_request(request_id: str, request: Request):
