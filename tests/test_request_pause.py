@@ -406,3 +406,175 @@ def test_withdrawing_from_an_older_shared_pause_does_not_pass_it_on(tmp_path):
     result = users.request(owner, [wanted])
     assert (result["existing"], result["paused"]) == (1, 0)
     assert status(store, key) == "waiting_for_sources"
+
+
+def test_an_add_says_what_happened_to_each_song_in_order(tmp_path):
+    """Codex round 1 on batch K: a batch's totals can't say which song was
+    taken, and the iPhone asking again song by song recreated a request
+    cancelled meanwhile. The answer names each song's outcome, in order."""
+    store, owner, member = fixture(tmp_path)
+    users = store.user_libraries
+    household = {
+        "title": "Song 0",
+        "artist": "Artist",
+        "album_artist": "Artist",
+        "album": "Album",
+        "duration": 100,
+    }
+    kept = {**song("Kept"), "status": "missing"}
+    users.request(member, [kept])
+    with store.connect() as conn:
+        (key,) = conn.execute("SELECT id FROM queue").fetchone()
+        conn.execute(
+            "INSERT INTO documents VALUES (?,?)",
+            ("excluded:fixture", json.dumps({"track": song("Unwanted")})),
+        )
+    users.pause_request(member, key)
+    new = {**song("New", 2), "status": "missing"}
+    result = store.submit_catalogue(
+        [
+            new,
+            {**household, "status": "downloaded"},
+            {**song("Unwanted"), "status": "missing"},
+            {**kept},
+            {**new},
+            {**household, "status": "downloaded"},
+        ],
+        user_id=member,
+        resume_paused=True,
+    )
+    assert result["outcomes"] == [
+        "created",
+        "added",
+        "excluded",
+        "paused",
+        "existing",
+        "in_library",
+    ]
+    assert (result["created"], result["existing"], result["skipped"]) == (1, 2, 2)
+    assert result["paused"] == 1 and result["paused_ids"] == [key]
+
+
+def test_a_song_that_became_ambiguous_since_it_was_matched_is_not_queued(
+    tmp_path, monkeypatch
+):
+    """Codex confirmation on batch K: a refresh between matching and
+    submitting can leave two byte-distinct copies of the edition asked for.
+    The real index then answers `conflict`, with no copy: that is not a
+    missing song, so nothing is queued (a third download); it is left out
+    as before, and never said to be in the person's library."""
+    from server.matching import LibraryIndex
+
+    store, owner, member = fixture(tmp_path)
+    copy = {
+        "title": "Song 0",
+        "artist": "Artist",
+        "album_artist": "Artist",
+        "album": "Album",
+        "duration": 100,
+    }
+    refreshed = LibraryIndex(
+        {
+            "albums": [
+                {
+                    "id": "album",
+                    "title": "Album",
+                    "tracks": [
+                        {**copy, "id": "one", "sha256": "1" * 64},
+                        {**copy, "id": "two", "sha256": "2" * 64},
+                    ],
+                }
+            ]
+        }
+    )
+    asked = {**song("Song 0"), **copy, "explicit_edition": True}
+    assert refreshed.match(asked).kind == "conflict"
+    real = store.index.match
+    calls = []
+
+    def changing(track):
+        calls.append(track["title"])
+        return real(track) if len(calls) == 1 else refreshed.match(track)
+
+    monkeypatch.setattr(store.index, "match", changing)
+    result = store.user_libraries.request(member, [asked])
+    assert len(calls) == 2
+    assert result["outcomes"] == ["excluded"] and result["skipped"] == 1
+    with store.connect() as conn:
+        assert conn.execute("SELECT count(*) FROM queue").fetchone()[0] == 0
+        assert not conn.execute(
+            "SELECT 1 FROM library_members WHERE user_id=?", (member,)
+        ).fetchone()
+
+
+def test_a_song_gone_from_the_library_since_it_was_matched_is_asked_for(
+    tmp_path, monkeypatch
+):
+    """Codex round 2 on batch K: the person's Add matches songs to the
+    household library first, then submits. A library refresh in between
+    that loses the copy left the song neither added nor queued, answered
+    `in_library` (and counted skipped before that). It is asked for."""
+    store, owner, member = fixture(tmp_path)
+    users = store.user_libraries
+    household = {
+        **song("Song 0"),
+        "artist": "Artist",
+        "album_artist": "Artist",
+        "album": "Album",
+        "duration": 100,
+    }
+    from server.matching import Match
+
+    real = store.index.match
+    calls = []
+
+    def changing(track):
+        calls.append(track["title"])
+        # The refresh: the household copy is gone by the second look.
+        return real(track) if len(calls) == 1 else Match("absent")
+
+    monkeypatch.setattr(store.index, "match", changing)
+    result = users.request(member, [household])
+    assert len(calls) == 2
+    assert result["outcomes"] == ["created"]
+    with store.connect() as conn:
+        assert conn.execute("SELECT count(*) FROM queue").fetchone()[0] == 1
+        assert not conn.execute(
+            "SELECT 1 FROM library_members WHERE user_id=?", (member,)
+        ).fetchone()
+
+
+def test_an_add_left_paused_names_the_paused_request(tmp_path, monkeypatch):
+    """#276: the iPhone clears a song's Paused mark when the request it was
+    left paused under resumes, so the answer names that request: here one
+    from another edition (Greatest Hits), which the added song's own title,
+    artist and album don't identify."""
+    app, owner, member, token, _ = household(tmp_path, monkeypatch)
+    store = app.state.store
+    hits = {
+        "title": "Wanted",
+        "artist": "Example",
+        "album": "Greatest Hits",
+        "album_artist": "Example",
+        "duration": 3,
+        "musicbrainz_release_id": "11111111-1111-4111-8111-111111111111",
+    }
+    with client_for(app, token) as client:
+        first = client.post("/api/v1/requests", json={"tracks": [hits]})
+        assert first.status_code == 200, first.text
+        assert first.json()["paused_ids"] == []
+        with store.connect() as conn:
+            (key,) = conn.execute("SELECT id FROM queue").fetchone()
+        assert client.post(f"/api/v1/requests/{key}/pause").status_code == 200
+        studio = {
+            **hits,
+            "album": "Studio",
+            "musicbrainz_release_id": "22222222-2222-4222-8222-222222222222",
+        }
+        again = client.post("/api/v1/requests", json={"tracks": [studio]})
+    assert again.status_code == 200, again.text
+    assert again.json()["paused"] == 1
+    assert again.json()["paused_ids"] == [key]
+    assert first.json()["outcomes"] == ["created"]
+    assert again.json()["outcomes"] == ["paused"]
+    assert status(store, key) == "paused"

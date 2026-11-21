@@ -1794,6 +1794,13 @@ class Store:
                     ),
                 )
         created = existing = skipped = paused = 0
+        # The paused requests an Add left paused, by request ID, so the iPhone
+        # clears a song's Paused mark when that request resumes (#276).
+        paused_ids = []
+        # What happened to each song, in the order given (Codex round 1 on
+        # batch K): a batch's totals can't say which song was taken, and
+        # asking again to find out could undo a cancel.
+        outcomes = []
         # Songs that already had an unfinished job: the queue is reconciled
         # for them once, after the last song, not once each (#237). Nothing
         # below reads what a reconcile writes (quality target, claim token,
@@ -1831,10 +1838,13 @@ class Store:
                     )
                 ):
                     skipped += 1
+                    outcomes.append("excluded")
                     continue
                 if track["status"] == "downloaded":
+                    review = False
                     if user_id:
-                        matched = self.index.match(track).track
+                        found = self.index.match(track)
+                        matched = found.track
                         if matched:
                             from .user_library import bump
 
@@ -1857,9 +1867,25 @@ class Store:
                                 # not left out (#211). The iPhone reads a
                                 # skipped song as excluded from downloads.
                                 existing += 1
+                                outcomes.append("added")
                                 continue
-                    skipped += 1
-                    continue
+                        elif found.status == "missing":
+                            # The library changed since the song was matched
+                            # (Codex round 2 on batch K): the copy is gone,
+                            # so it is asked for as any missing song, never
+                            # dropped nor reported as in the library. (An
+                            # ignored insert above means it is theirs.)
+                            track = {**track, "status": "missing"}
+                        else:
+                            # Two copies now match and need review (Codex
+                            # confirmation on batch K): never queued as
+                            # missing, which could download a third; left
+                            # out as before, and not said to be yours.
+                            review = True
+                    if track["status"] == "downloaded":
+                        skipped += 1
+                        outcomes.append("excluded" if review else "in_library")
+                        continue
                 payload = {
                     k: v
                     for k, v in track.items()
@@ -1967,6 +1993,8 @@ class Store:
                 ):
                     # Their own pause: Add leaves it, Resume resumes (#264).
                     paused += 1
+                    outcomes.append("paused")
+                    paused_ids.append(key)
                 elif prior and prior[0] not in {"cancelled", "failed"}:
                     if user_id:
                         previous = json.loads(prior[1])
@@ -1992,18 +2020,21 @@ class Store:
                     else:
                         joined = True
                     existing += 1
+                    outcomes.append("existing")
                 elif prior:
                     conn.execute(
                         "UPDATE queue SET status='waiting_for_sources',payload=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                         (json.dumps(payload), key),
                     )
                     created += 1
+                    outcomes.append("created")
                 else:
                     conn.execute(
                         "INSERT INTO queue(id,payload,status) VALUES (?,?,'waiting_for_sources')",
                         (key, json.dumps(payload)),
                     )
                     created += 1
+                    outcomes.append("created")
             if taken_up or joined:
                 from .household_policy import HouseholdPolicy
 
@@ -2017,6 +2048,8 @@ class Store:
             "existing": existing,
             "skipped": skipped,
             "paused": paused,
+            "paused_ids": paused_ids,
+            "outcomes": outcomes,
             "downloads_enabled": settings["enabled"],
         }
 

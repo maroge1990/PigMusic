@@ -65,6 +65,10 @@ public struct Album: Codable, Sendable, Identifiable, Hashable {
   public var duration: Double?
   public var tracks: [Track]?
   public var musicbrainzReleaseId: String?
+  /// When its newest song joined this person's library (UTC ISO 8601, so
+  /// it sorts as text), for Recently added (D-120, #281); none from an
+  /// older server or for an album of requested songs only.
+  public var addedAt: String?
 }
 
 public struct Artist: Codable, Sendable, Identifiable, Hashable {
@@ -362,6 +366,9 @@ public enum LibrarySort: String, Codable, Sendable, CaseIterable {
   case title, artist, titleDescending
   /// Newest first; albums only (D-120).
   case year
+  /// Newest added first; albums only (D-120 screen 30, #281). Albums with
+  /// no added time follow in title order.
+  case recentlyAdded
 }
 
 extension String {

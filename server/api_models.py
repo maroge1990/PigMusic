@@ -54,6 +54,9 @@ class AlbumDTO(BaseModel):
     codecs: list[str] = Field(default_factory=list)
     compilation: bool = False
     server_state: ServerState = "in_library"
+    # When its newest song joined this person's library (UTC ISO 8601), for
+    # "Recently added" (D-120, #281); none for an album of requested songs.
+    added_at: str | None = None
 
 
 class ArtistDTO(BaseModel):
@@ -527,6 +530,18 @@ class AcquisitionResultDTO(BaseModel):
     # Songs the person paused themselves: Add leaves them paused; Resume in
     # Downloads resumes them (#264).
     paused: int = 0
+    # Those paused requests' IDs, one per song left paused: Resume in
+    # Downloads names the request, so the iPhone clears that song's mark by
+    # it, never by title (#276).
+    paused_ids: list[str] = []
+    # One per song asked for, in order: created (a new request), existing
+    # (already being added), added (the household's copy, now in your
+    # library), paused (your own pause, left so), excluded (left out of the
+    # household's downloads) or in_library (already yours). Lets a client
+    # mark each song without asking again (Codex round 1 on batch K).
+    outcomes: list[
+        Literal["created", "existing", "added", "paused", "excluded", "in_library"]
+    ] = []
     downloads_enabled: bool
 
 

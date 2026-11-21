@@ -96,6 +96,27 @@ private func entry(_ id: String, album: String, seconds: Double, position: Int) 
   #expect(LibrarySortChoice.options(.artists) == [.title, .titleDescending])
   #expect(LibrarySortChoice.options(.albums).contains(.year))
   #expect(!LibrarySortChoice.options(.tracks).contains(.year))
+  // #281 (D-120 screen 30): Albums offer Recently added first.
+  #expect(LibrarySortChoice.options(.albums).first == .recentlyAdded)
+  #expect(LibrarySortChoice.name(.recentlyAdded, in: .albums) == "Recently added")
+  #expect(!LibrarySortChoice.options(.tracks).contains(.recentlyAdded))
+  #expect(!LibrarySortChoice.options(.artists).contains(.recentlyAdded))
+}
+
+/// #281: an album from the native sync carries when it was added; one from
+/// an older server has none.
+@Test func anAlbumCarriesWhenItWasAdded() throws {
+  let decoder = LibraryCodec.decoder()
+  let album = try decoder.decode(
+    Album.self,
+    from: Data(#"{"id":"a","title":"A","artist":"X","added_at":"2026-09-21T14:13:20Z"}"#.utf8))
+  #expect(album.addedAt == "2026-09-21T14:13:20Z")
+  let older = try decoder.decode(
+    Album.self, from: Data(#"{"id":"a","title":"A","artist":"X"}"#.utf8))
+  #expect(older.addedAt == nil)
+  // Saved as the server names it, so the library's sort finds it.
+  let saved = String(decoding: try LibraryCodec.encoder().encode(album), as: UTF8.self)
+  #expect(saved.contains(#""added_at":"2026-09-21T14:13:20Z""#))
 }
 
 private let serverJSON = #"""

@@ -60,11 +60,26 @@ extension PlaylistRemoval {
   /// use them (Codex round 1 on batch D): less those whose removal waits for
   /// its Undo (`hides`) or that this iPhone already removed from that
   /// version (`ledger`), with their positions. Undo brings a song back.
+  /// A removal still waiting in the edit outbox (`pending`, offline) is left
+  /// out too (#277): one whose playlist, revision and position are what this
+  /// copy's song would be sent as. It stays apart from the ledger, which
+  /// counts only removals the server applied.
   public static func shown(
-    _ playlist: Playlist, ledger: PlaylistRemovalLedger, hides: (String) -> Bool
+    _ playlist: Playlist, ledger: PlaylistRemovalLedger, pending: [PendingMutation] = [],
+    hides: (String) -> Bool
   ) -> [(position: Int, entry: PlaylistEntry)] {
-    (playlist.entries ?? []).enumerated().filter { position, _ in
-      !ledger.removed(playlist: playlist.id, position: position, revision: playlist.revision)
+    let queued: [Sent] = pending.compactMap { item in
+      let edit = item.mutation
+      guard item.state == "queued", edit.action == "remove", edit.playlistId == playlist.id,
+        let revision = edit.revision, let position = edit.position
+      else { return nil }
+      return Sent(position, revision)
+    }
+    return (playlist.entries ?? []).enumerated().filter { position, _ in
+      guard
+        let sent = ledger.plan(playlist: playlist.id, position: position, revision: playlist.revision)
+      else { return false }
+      return !queued.contains(sent)
         && !hides(undoKey(playlist: playlist.id, revision: playlist.revision, position: position))
     }.map { (position: $0.offset, entry: $0.element) }
   }

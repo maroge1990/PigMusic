@@ -262,7 +262,13 @@ struct CollectionActionsMenu: View {
     case .addToLibrary:
       Button("Add \(missing) song\(missing == 1 ? "" : "s") to library", systemImage: "plus") {
         if let addMissing {
-          Task { await addMissing() }
+          // The page's own Add belongs to the account that chose it too: one
+          // that ended before it ran adds nothing (#280).
+          let stamp = model.currentGeneration
+          Task {
+            guard model.isCurrent(stamp) else { return }
+            await addMissing()
+          }
         } else {
           withSongs { await model.addToLibrary($0) }
         }
@@ -579,15 +585,10 @@ struct RequestsView: View {
       }
       done.append(id)
     }
-    // Only a song whose Resume went through loses its paused mark; other
-    // songs' marks stay (Codex round 1 on batch D).
+    // Only the songs left paused under a request whose Resume went through
+    // lose their paused mark, by its ID (#276); other songs' marks stay.
     if tap == .resume {
-      let items = groups.flatMap { group in group.items.map { (group, $0) } }
-      for (group, item) in items where done.contains(item.id) {
-        model.requestedSongs.resumed(
-          title: item.title, artist: item.artist ?? group.artist,
-          album: item.album ?? (group.songs == 1 ? nil : group.title))
-      }
+      for id in done { model.requestedSongs.resumed(request: id) }
     }
     // Read the list first: reading it clears the page's message.
     await load(reset: true)
@@ -608,6 +609,9 @@ struct RequestsView: View {
     error = nil
     defer { loading = false }
     let offset = reset ? 0 : (next ?? 0)
+    // Before the list is asked for: it clears no paused mark made after
+    // (Codex confirmation on batch K).
+    let fetched = model.requestedSongs.asking()
     do {
       let page = try await model.readCatalogue { try await $0.requestGroups(offset: offset) }
       if reset {
@@ -622,6 +626,14 @@ struct RequestsView: View {
         }
       }
       next = page.nextOffset
+      // Paused marks follow the server's list: a request resumed on another
+      // device, or by a Resume whose answer was lost, isn't paused here
+      // (Codex round 1 on batch K). Only what this page reports counts: a
+      // request it leaves out keeps its mark (Codex round 2).
+      model.requestedSongs.reconcile(
+        statuses: Dictionary(
+          page.groups.flatMap(\.items).map { ($0.id, $0.status) }, uniquingKeysWith: { a, _ in a }),
+        fetched: fetched)
       enabled = page.downloadsEnabled
       model.serverActiveRequests = page.active
       loaded = true

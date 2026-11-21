@@ -16,6 +16,12 @@ public struct ShazamRequestOutcome: Sendable, Hashable {
   /// Songs it already had requested.
   public var existing = 0
   public var skipped = 0
+  /// Songs the person paused before: left paused (#264).
+  public var paused = 0
+  /// The Shazam ids of songs the server took or that are in your library
+  /// now (#259): no longer missing. A song left out, left paused, or one an
+  /// older server's totals can't place is not among them.
+  public var taken: [String] = []
   /// The Shazam ids of songs the catalogue has no exact version of: not requested.
   public var unmatched: [String] = []
   public var downloadsEnabled = true
@@ -40,7 +46,9 @@ public enum ShazamRequests {
   {
     var outcome = ShazamRequestOutcome()
     var tracks: [Track] = []
-    var seen = Set<String>()
+    // Each request's Shazam ids: two Shazams of one recording share it.
+    var shazamIds: [[String]] = []
+    var seen: [String: Int] = [:]
     for song in songs {
       guard let appleId = song.appleId else {
         outcome.unmatched.append(song.shazamId)
@@ -52,18 +60,29 @@ public enum ShazamRequests {
         outcome.unmatched.append(song.shazamId)
         continue
       }
-      guard seen.insert(resolved.id).inserted else { continue }
+      if let at = seen[resolved.id] {
+        shazamIds[at].append(song.shazamId)
+        continue
+      }
+      seen[resolved.id] = tracks.count
       tracks.append(song.requestTrack(resolved))
+      shazamIds.append([song.shazamId])
     }
     for start in stride(from: 0, to: tracks.count, by: 500) {
       try Task.checkCancellation()
       guard await current() else { throw CancellationError() }
-      let result = try await source.requestMusic(
-        Array(tracks[start..<min(start + 500, tracks.count)]))
+      let batch = start..<min(start + 500, tracks.count)
+      let result = try await source.requestMusic(Array(tracks[batch]))
       outcome.created += result.created
       outcome.existing += result.existing
       outcome.skipped += result.skipped
+      outcome.paused += result.paused
       outcome.downloadsEnabled = outcome.downloadsEnabled && result.downloadsEnabled
+      // Each song by the server's answer for it; the Add is sent once and
+      // never again to find out (Codex round 1 on batch K).
+      for (index, taken) in zip(batch, result.songsTaken(batch.count)) where taken {
+        outcome.taken += shazamIds[index]
+      }
     }
     return outcome
   }

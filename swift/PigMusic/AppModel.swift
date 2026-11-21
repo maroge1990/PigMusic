@@ -66,7 +66,8 @@ enum PlayOrigin: Hashable {
   var syncing = false
   var message: String?
   var songSort: LibrarySort = .title
-  var albumSort: LibrarySort = .title
+  /// Recently added first (D-120 screen 30, #281).
+  var albumSort: LibrarySort = .recentlyAdded
   var artistSort: LibrarySort = .title
   var songs: [Track] = []
   var albums: [Album] = []
@@ -1317,7 +1318,6 @@ enum PlayOrigin: Hashable {
     let stamp = account.generation
     var drained = RequestOutbox.Report()
     var titles: [String: String] = [:]
-    var sentTracks: [String: Track] = [:]
     defer {
       flushingRequests = false
       // Codex round 2: a song left out or refused says so.
@@ -1327,13 +1327,20 @@ enum PlayOrigin: Hashable {
     for _ in 0..<10 {
       for track in await RequestOutbox.pending(store) where titles[track.id] == nil {
         titles[track.id] = track.title
-        sentTracks[track.id] = track
       }
       let report: RequestOutbox.Report
+      // Each song's tick as its own Add goes: a Resume after it can't be
+      // undone by its answer (Codex round 1 on batch K), and a pause after a
+      // Resume is not mistaken for an old one (round 2).
+      var asked: [String: Int] = [:]
       do {
         report = try await RequestOutbox.send(
           store: store, isCurrent: { [account] in account.isCurrent(stamp) }
-        ) { try await service.requestMusic($0) }
+        ) { tracks in
+          let tick = self.requestedSongs.asking()
+          for track in tracks { asked[track.id] = tick }
+          return try await service.requestMusic(tracks)
+        }
       } catch {
         if account.isCurrent(stamp) { notify(error) }
         return
@@ -1343,7 +1350,8 @@ enum PlayOrigin: Hashable {
       requestedSongs.sent(report.requested)
       requestedSongs.refused(report.skipped + report.refused)
       // Paused before, so left paused (#264): marked paused, never excluded.
-      requestedSongs.pausedOnServer(report.paused.compactMap { sentTracks[$0] })
+      // Under the requests the server named, which Resume clears (#276).
+      requestedSongs.pausedOnServer(report.pausedRequests, askedAt: asked)
       if !report.requested.isEmpty || !report.skipped.isEmpty || !report.refused.isEmpty
         || !report.paused.isEmpty
       {
@@ -1524,6 +1532,16 @@ enum PlayOrigin: Hashable {
     catalogueMemory.forget(key)
     try? await store?.removeCached("catalogue-etag:" + key)
     try? await store?.removeCached("catalogue:" + key)
+  }
+  /// iOS is short of memory (#253): the page answers kept in memory (up to
+  /// `CatalogueMemory.limit`, each as large as an album or a search) and
+  /// the cover colours go. Pages read them again from this device; decoded
+  /// artwork is an `NSCache`, which iOS empties itself.
+  func receivedMemoryWarning() {
+    let answers = catalogueMemory.count
+    catalogueMemory.clear()
+    coverSwatches = [:]
+    DiagnosticsLog.shared.record("lifecycle", "memory warning: let go of \(answers) page answers")
   }
   /// The last catalogue answer for a key, so a revisited page draws at once.
   /// Pages still refresh it through `cachedCatalogue`.
@@ -2017,7 +2035,8 @@ enum PlayOrigin: Hashable {
   /// A playlist's songs as its page and its menus use them: less those
   /// removed here, waiting for their Undo or already applied (Codex round 1).
   func shownEntries(_ playlist: Playlist) -> [(position: Int, entry: PlaylistEntry)] {
-    PlaylistRemoval.shown(playlist, ledger: removals) { undo.hides($0) }
+    // A removal still waiting offline is left out too (#277).
+    PlaylistRemoval.shown(playlist, ledger: removals, pending: pendingEdits) { undo.hides($0) }
   }
   static func undoKey(mix: String, song: String) -> String { "mix-song:" + mix + ":" + song }
   static func undoKey(download id: String) -> String { "download:" + id }

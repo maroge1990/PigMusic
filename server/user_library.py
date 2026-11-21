@@ -336,6 +336,17 @@ def library_cover(store, track):
     )
 
 
+def added_at(times):
+    """When the newest of these songs joined a library, as UTC ISO 8601;
+    None for none."""
+    newest = max(times, default=None)
+    if newest is None:
+        return None
+    return (
+        datetime.fromtimestamp(newest, timezone.utc).isoformat().replace("+00:00", "Z")
+    )
+
+
 def add_pending(albums, household_albums, pending):
     """Show requested songs in the album they will join, with their state.
 
@@ -599,16 +610,26 @@ class UserLibrary:
             if previous and previous[0] == signature:
                 self.cache.move_to_end(user_id)
                 return previous[1]
-            members = {
-                r[0]
-                for r in conn.execute(
-                    "SELECT track_id FROM library_members WHERE user_id=?", (user_id,)
-                )
-            }
+            # When each song joined this person's library: an album's
+            # added_at is its newest song's, for "Recently added" on the web
+            # and the iPhone (D-120, #281).
+            added = dict(
+                conn.execute(
+                    "SELECT track_id, added_at FROM library_members WHERE user_id=?",
+                    (user_id,),
+                ).fetchall()
+            )
+            members = set(added)
             # Playlist edits bump the membership counter (other devices must
             # notice them) without changing any music. Then keep the very same
             # music objects, so native capture can skip re-serialising them.
-            content = (signature[1], signature[3], signature[4], frozenset(members))
+            # A song removed and added again is the same music joined later.
+            content = (
+                signature[1],
+                signature[3],
+                signature[4],
+                frozenset(added.items()),
+            )
             if previous and previous[2] == content:
                 value = {
                     **previous[1],
@@ -640,6 +661,7 @@ class UserLibrary:
                             "cover_sha": cover_sha,
                             "tracks": tracks,
                             "track_count": len(tracks),
+                            "added_at": added_at(added[t["id"]] for t in tracks),
                             "duration": sum(t.get("duration", 0) for t in tracks),
                             "codecs": sorted(
                                 {t.get("codec", "") for t in tracks if t.get("codec")}
@@ -1131,32 +1153,14 @@ class UserLibrary:
         projection = self.projection(user_id)
         from .playlists import Playlists
 
-        # When each song joined this person's library: an album's added_at is
-        # its newest song's, for the web's "Recently added" sort (D-120).
-        with self.store.connect() as conn:
-            added = dict(
-                conn.execute(
-                    "SELECT track_id, added_at FROM library_members WHERE user_id=?",
-                    (user_id,),
-                ).fetchall()
-            )
-
-        def added_at(album):
-            times = [added[t["id"]] for t in album["tracks"] if t["id"] in added]
-            if not times:
-                return None
-            return (
-                datetime.fromtimestamp(max(times), timezone.utc)
-                .isoformat()
-                .replace("+00:00", "Z")
-            )
-
         return {
             **{key: value for key, value in projection.items() if key != "tracks"},
             "albums": [
                 {
                     **{k: v for k, v in a.items() if k not in {"tracks", "cover_key"}},
-                    "added_at": added_at(a),
+                    # The projection's: its newest song's join (D-120, #281);
+                    # none for an album of requested songs only.
+                    "added_at": a.get("added_at"),
                 }
                 for a in projection["albums"]
             ],

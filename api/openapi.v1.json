@@ -30,10 +30,34 @@
             "title": "Existing",
             "type": "integer"
           },
+          "outcomes": {
+            "default": [],
+            "items": {
+              "enum": [
+                "created",
+                "existing",
+                "added",
+                "paused",
+                "excluded",
+                "in_library"
+              ],
+              "type": "string"
+            },
+            "title": "Outcomes",
+            "type": "array"
+          },
           "paused": {
             "default": 0,
             "title": "Paused",
             "type": "integer"
+          },
+          "paused_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Paused Ids",
+            "type": "array"
           },
           "skipped": {
             "title": "Skipped",
@@ -89,6 +113,11 @@
       },
       "AlbumDTO": {
         "properties": {
+          "added_at": {
+            "nullable": true,
+            "title": "Added At",
+            "type": "string"
+          },
           "artist": {
             "title": "Artist",
             "type": "string"
@@ -193,6 +222,11 @@
       },
       "AlbumDetail": {
         "properties": {
+          "added_at": {
+            "nullable": true,
+            "title": "Added At",
+            "type": "string"
+          },
           "artist": {
             "title": "Artist",
             "type": "string"
@@ -1927,6 +1961,11 @@
       },
       "FoundAlbum": {
         "properties": {
+          "added_at": {
+            "nullable": true,
+            "title": "Added At",
+            "type": "string"
+          },
           "artist": {
             "title": "Artist",
             "type": "string"

@@ -213,3 +213,76 @@ def test_up_next_swipes_to_remove_in_the_player_with_no_edit():
     menu = library.split("private struct UpNextRow: View {", 1)[1]
     for item in (".moveEarlier", ".moveLater", ".removeFromUpNext"):
         assert item in menu.split("\n}\n", 1)[0], item
+
+
+def test_a_playlists_add_says_what_happened_past_the_reload():
+    """#260: the playlist page's Add missing songs wrote its result to the
+    page's own line, which the reload after the Add cleared at once. The
+    result goes to the app's notice bar, which the reload doesn't touch."""
+    page = (APP / "PlaylistViews.swift").read_text()
+    page = page.split("struct PlaylistView: View {", 1)[1]
+    add = page.split("private func addMissing() async {", 1)[1].split("\n  }\n", 1)[0]
+    assert "model.notifyDone(AcquisitionResult.playlistNotice(" in add
+    assert "message" not in add
+    assert "reloadAfterEdit = true" in add
+    load = page.split("private func load() async {", 1)[1].split("\n  }\n", 1)[0]
+    assert "notices" not in load
+
+
+def test_a_playlists_own_add_belongs_to_the_account_that_chose_it():
+    """#280: the collection menu's actions note the account and do nothing
+    once it ended (batch D), but the playlist page's own Add to library ran
+    unguarded, so songs read for one account could be added for the next."""
+    menus = (APP / "PersonalActionsViews.swift").read_text()
+    add = menus.split("case .addToLibrary:", 1)[1].split("case .addToPlaylist:", 1)[0]
+    page = add.split("if let addMissing {", 1)[1].split("} else {", 1)[0]
+    stamp = page.index("let stamp = model.currentGeneration")
+    guard = page.index("guard model.isCurrent(stamp) else { return }")
+    assert stamp < page.index("Task {") < guard < page.index("await addMissing()")
+
+
+def test_a_memory_warning_lets_go_of_page_answers():
+    """#253: iOS ended the app nine times in a day for memory pressure. The
+    page answers kept in memory (up to 400, any size) never went; a memory
+    warning now lets go of them and the cover colours, and says so in the
+    diagnostics log. The day's memory figures go in the export."""
+    app = (APP / "PigMusicApp.swift").read_text()
+    assert "UIApplication.didReceiveMemoryWarningNotification" in app
+    memory = app.split("private struct MemoryWarning: ViewModifier {", 1)[1]
+    assert "model.receivedMemoryWarning()" in memory.split("\n}\n", 1)[0]
+    assert ".modifier(MemoryWarning(model: model))" in app
+    assert "metrics.peakMemory = bytes(payload.memoryMetrics?.peakMemoryUsage)" in app
+    assert "averageSuspendedMemory.averageMeasurement" in app
+    model = (APP / "AppModel.swift").read_text()
+    warning = model.split("func receivedMemoryWarning() {", 1)[1]
+    warning = warning.split("\n  }\n", 1)[0]
+    assert "catalogueMemory.clear()" in warning
+    assert "coverSwatches = [:]" in warning
+    assert 'DiagnosticsLog.shared.record("lifecycle"' in warning
+
+
+def test_paused_marks_follow_resumes_and_the_request_list():
+    """Codex round 1 on batch K: an Add answer on its way when Resume went
+    through marked the song Paused again, and a Resume elsewhere (or one
+    whose answer was lost) left the mark. The Add is timed before it goes,
+    and the Downloads list reconciles the marks."""
+    model = (APP / "AppModel.swift").read_text()
+    flush = model.split("func flushRequests() async {", 1)[1].split("\n  }\n", 1)[0]
+    # Codex round 2: the tick is taken per POST, inside the send.
+    send = flush.split("report = try await RequestOutbox.send(", 1)[1]
+    send = send.split("} catch {", 1)[0]
+    assert send.index("let tick = self.requestedSongs.asking()") < send.index(
+        "return try await service.requestMusic(tracks)"
+    )
+    assert "pausedOnServer(report.pausedRequests, askedAt: asked)" in flush
+    views = (APP / "PersonalActionsViews.swift").read_text()
+    load = views.split("private func load(reset: Bool) async {", 1)[1]
+    load = load.split("\n  }\n", 1)[0]
+    assert "model.requestedSongs.reconcile(" in load
+    assert "complete:" not in load
+    # Codex confirmation on batch K: the list is stamped before it is asked
+    # for, and only ever clears marks.
+    assert load.index("let fetched = model.requestedSongs.asking()") < load.index(
+        "model.readCatalogue"
+    )
+    assert "fetched: fetched)" in load

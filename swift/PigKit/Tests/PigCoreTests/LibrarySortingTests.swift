@@ -218,6 +218,22 @@ struct LibraryReloadGateTests {
     #expect(try await store.albums(sort: .year).map(\.id) == ["new", "mid", "old", "none"])
     #expect(try await store.totalDuration() == 150.5)
   }
+  /// #281 (D-120 screen 30): Albums sort by when they were added, newest
+  /// first; albums the server gave no time follow in today's title order.
+  @Test func albumsSortByRecentlyAddedThenTitle() async throws {
+    let store = try LibraryStore(path: ":memory:")
+    let albums: [Album] = try LibraryCodec.decoder().decode(
+      [Album].self,
+      from: Data(
+        (#"[{"id":"old","title":"A","artist":"X","added_at":"2026-01-02T00:00:00Z"},{"id":"z","title":"Z","artist":"X"},"#
+          + #"{"id":"new","title":"C","artist":"X","added_at":"2026-11-20T09:30:00Z"},{"id":"b","title":"B","artist":"X","added_at":null}]"#)
+          .utf8))
+    #expect(albums.first?.addedAt == "2026-01-02T00:00:00Z")
+    try await store.replace(LibrarySnapshot(revision: "one", albums: albums))
+    #expect(try await store.albums(sort: .recentlyAdded).map(\.id) == ["new", "old", "b", "z"])
+    // Saved and read back with its time.
+    #expect(try await store.album(id: "new")?.addedAt == "2026-11-20T09:30:00Z")
+  }
   /// Codex round 1 on batch E: Songs' Play plays the whole library, not the
   /// first page; a row's tap starts at its song and plays on past the page.
   @Test func songsPlayTheWholeLibraryInItsSort() async throws {
