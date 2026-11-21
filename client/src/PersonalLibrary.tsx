@@ -15,6 +15,7 @@ import { PersonalQuality } from "./PersonalQuality";
 import { SearchPage } from "./SearchPage";
 import { Cover } from "./Cover";
 import { fromTrack, PAUSED_NOTICE, songBody, type AddResult } from "./songs";
+import { leftOutMessage, leftOutOf } from "./queueLimits";
 import { albumSummary, mergeAlbumTracks } from "./albumTracks";
 import { warmCovers, whenIdle } from "./prefetch";
 import { usePlayer } from "./Player";
@@ -269,9 +270,16 @@ export function PersonalLibrary({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tracks: wanted.map(songBody) }),
       });
-      // Songs you paused stay paused (#264).
-      if (result.paused) notify(PAUSED_NOTICE);
-      const ids = new Set(wanted.map((s) => s.key));
+      // Songs you paused stay paused (#264); a queue limit says how many it
+      // left out (D-128).
+      const notices = [
+        result.paused && PAUSED_NOTICE,
+        leftOutMessage(result),
+      ].filter(Boolean);
+      if (notices.length) notify(notices.join(" "));
+      // A song left out stays missing, to be added again.
+      const kept = new Set(leftOutOf(wanted, result));
+      const ids = new Set(wanted.filter((s) => !kept.has(s)).map((s) => s.key));
       setRelease(
         (old) =>
           old && {

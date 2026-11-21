@@ -17,6 +17,9 @@ import PigStore
     case stale
     /// The server ended this device's session; the rest stay.
     case signedOut
+    /// A queue limit kept songs (D-128): they stay, to be sent again when
+    /// `RequestRetry` says.
+    case limited
   }
   /// What the server said, song by song.
   public struct Report: Equatable, Sendable {
@@ -31,6 +34,12 @@ import PigStore
     /// Refused, with the server's reason.
     public var refused: [String] = []
     public var reason: String?
+    /// Songs still in the outbox after a pass a queue limit kept songs in
+    /// (D-128): to be sent again later.
+    public var waiting = 0
+    /// The limit that kept them, and for the rate when one more fits.
+    public var limit: String?
+    public var retryAfter: Int?
     public var downloadsEnabled = true
     public var stop: Stop = .done
     public init() {}
@@ -43,6 +52,9 @@ import PigStore
       pausedRequests.merge(later.pausedRequests) { $0 + $1 }
       refused += later.refused
       reason = later.reason ?? reason
+      waiting = later.waiting
+      limit = later.limit
+      retryAfter = later.retryAfter
       downloadsEnabled = downloadsEnabled && later.downloadsEnabled
       stop = later.stop
     }
@@ -52,11 +64,22 @@ import PigStore
     public func notice(titles: [String: String]) -> String? {
       RequestNotice.text(
         refused: refused.count, reason: reason,
-        excluded: skipped.first.map { titles[$0] ?? "that song" }, paused: !paused.isEmpty)
+        excluded: skipped.first.map { titles[$0] ?? "that song" }, paused: !paused.isEmpty,
+        waiting: waiting)
     }
   }
 
   static let key = "request-outbox"
+  static let retryKey = "request-outbox-retry"
+
+  /// When the outbox may be sent again after a queue limit kept songs
+  /// (D-128), kept beside it so it outlives the app.
+  public static func retry(_ store: LibraryStore) async -> RequestRetry {
+    ((try? await store.cached(retryKey, as: RequestRetry.self)) ?? nil) ?? RequestRetry()
+  }
+  public static func saveRetry(_ retry: RequestRetry, to store: LibraryStore) async throws {
+    try await store.updateCached(retryKey, as: RequestRetry.self) { $0 = retry }
+  }
 
   /// The requests waiting, oldest first.
   public static func pending(_ store: LibraryStore) async -> [Track] {
@@ -76,7 +99,10 @@ import PigStore
   /// the server's counts say what happened to each song (Codex round 2: a
   /// batch answer can't tell which song was left out). A song leaves the
   /// outbox once the server has answered for it; a song requested meanwhile
-  /// waits for the next send.
+  /// waits for the next send. A song a queue limit left out stays (D-128):
+  /// past the rate the pass ends there, as every later new song would be
+  /// refused too; past a waiting limit it goes on, as a later song may join
+  /// a job already queued. Either way the pass ends `limited`.
   public static func send(
     store: LibraryStore, isCurrent: () -> Bool,
     request: ([Track]) async throws -> AcquisitionResult
@@ -93,15 +119,24 @@ import PigStore
           report.stop = .stale
           return report
         }
+        let answer = result.outboxAnswer
+        if answer == .kept {
+          // A queue limit left it out (D-128): it stays, never dropped.
+          report.limit = result.limit ?? report.limit ?? "person_waiting"
+          report.retryAfter = result.retryAfter
+          if RequestRetry.stopsPass(result.limit) { return await limited(report, store) }
+          continue
+        }
         try await remove(track.id, from: store)
         report.downloadsEnabled = report.downloadsEnabled && result.downloadsEnabled
-        if result.created + result.existing > 0 {
+        switch answer {
+        case .requested:
           report.requested.append(track.id)
-        } else if result.paused > 0 {
+        case .paused:
           // The person paused it before: it stays paused (#264), not left out.
           report.paused.append(track.id)
           report.pausedRequests[track.id] = result.pausedIds
-        } else {
+        case .skipped, .kept:
           report.skipped.append(track.id)
         }
       } catch NativeFailure.authentication {
@@ -125,6 +160,14 @@ import PigStore
         return report
       }
     }
+    return report.limit == nil ? report : await limited(report, store)
+  }
+
+  /// A pass a queue limit kept songs in: how many wait now.
+  private static func limited(_ report: Report, _ store: LibraryStore) async -> Report {
+    var report = report
+    report.waiting = await pending(store).count
+    report.stop = .limited
     return report
   }
 

@@ -302,7 +302,7 @@ struct PlaylistView: View {
       var batches: [AcquisitionResult] = []
       for batch in stride(from: 0, to: requested.count, by: 500) {
         let tracks = Array(requested[batch..<min(batch + 500, requested.count)])
-        batches.append(try await model.performPersonal { try await $0.requestMusic(tracks) })
+        batches.append(try await model.requestNow(tracks))
       }
       // Every batch's answer, paused songs included, in the notice bar: the
       // page's own reload would clear its line (Codex confirmation, batch D).

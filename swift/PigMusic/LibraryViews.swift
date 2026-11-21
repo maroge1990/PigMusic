@@ -590,7 +590,7 @@ struct AlbumView: View {
     requesting = true
     defer { requesting = false }
     do {
-      let result = try await model.performPersonal { try await $0.requestMusic(missing) }
+      let result = try await model.requestNow(missing)
       requestMessage = result.sentence
       release = nil
       await loadRelease()

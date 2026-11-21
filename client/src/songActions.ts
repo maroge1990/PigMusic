@@ -1,4 +1,5 @@
-import { api, currentSession } from "./api";
+import { ApiError, api, currentSession } from "./api";
+import { leftOutMessage, leftOutOf, type LeftOut } from "./queueLimits";
 import { batches } from "./limits";
 import { expectedSession, withSession } from "./sessionId";
 import { notify, notifyError, offerUndo } from "./notices";
@@ -95,6 +96,9 @@ export async function addSongsToLibrary(
   let paused = 0;
   async function send(rest: Song[], addedBefore: number): Promise<void> {
     let adding = addedBefore;
+    // Songs a queue limit left out (D-128), and the answer that named it.
+    let leftOut: Song[] = [];
+    let limit: LeftOut = {};
     const parts = batches(rest);
     for (let i = 0; i < parts.length; i++) {
       try {
@@ -107,9 +111,29 @@ export async function addSongsToLibrary(
         );
         adding += result.created + result.existing;
         paused += result.paused || 0;
+        if (result.left_out) {
+          leftOut = leftOut.concat(leftOutOf(parts[i], result));
+          limit = result;
+        }
       } catch (e) {
-        const left = parts.slice(i).flat();
+        // Songs an earlier batch's limit left out go with the rest: Try
+        // again sends them all, and the count says them all (Codex).
+        const left = leftOut.concat(parts.slice(i).flat());
         if (adding) changed();
+        if (e instanceof ApiError && e.code === "queue_limit") {
+          const refused = e.body as LeftOut;
+          if (refused.limit !== "rate") {
+            // Past a waiting limit a later song may still join a job
+            // already queued (Codex round 2): this batch was left out, and
+            // the next is sent.
+            leftOut = leftOut.concat(parts[i]);
+            limit = refused;
+            continue;
+          }
+          // Past the rate every later new song would be refused too: Try
+          // again sends all those left out and those not yet sent.
+          return limited(adding, left, refused);
+        }
         notifyError(
           adding
             ? `Adding ${count(adding)} to your library. Couldn't add the other ${count(left.length)}. Try again.`
@@ -119,6 +143,7 @@ export async function addSongsToLibrary(
         return;
       }
     }
+    if (leftOut.length) return limited(adding, leftOut, limit);
     notify(
       [
         adding && `Adding ${count(adding)} to your library.`,
@@ -128,6 +153,21 @@ export async function addSongsToLibrary(
         .join(" ") || "Nothing to add",
     );
     changed();
+  }
+  /** Some songs past a queue limit: what was added, and how many weren't,
+   * with Try again for those. */
+  function limited(adding: number, left: Song[], limit: LeftOut) {
+    if (adding) changed();
+    notifyError(
+      [
+        adding && `Adding ${count(adding)} to your library.`,
+        paused && PAUSED_NOTICE,
+        leftOutMessage(limit, left.length),
+      ]
+        .filter(Boolean)
+        .join(" "),
+      () => send(left, adding),
+    );
   }
   function changed() {
     window.dispatchEvent(new Event("music-library-changed"));

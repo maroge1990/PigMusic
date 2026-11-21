@@ -8,6 +8,12 @@
           },
           "detail": {
             "type": "string"
+          },
+          "limit": {
+            "type": "string"
+          },
+          "retry_after": {
+            "type": "integer"
           }
         },
         "required": [
@@ -30,6 +36,21 @@
             "title": "Existing",
             "type": "integer"
           },
+          "left_out": {
+            "default": 0,
+            "title": "Left Out",
+            "type": "integer"
+          },
+          "limit": {
+            "enum": [
+              "person_waiting",
+              "household_waiting",
+              "rate"
+            ],
+            "nullable": true,
+            "title": "Limit",
+            "type": "string"
+          },
           "outcomes": {
             "default": [],
             "items": {
@@ -46,6 +67,14 @@
             "title": "Outcomes",
             "type": "array"
           },
+          "over_limit": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Over Limit",
+            "type": "array"
+          },
           "paused": {
             "default": 0,
             "title": "Paused",
@@ -58,6 +87,11 @@
             },
             "title": "Paused Ids",
             "type": "array"
+          },
+          "retry_after": {
+            "nullable": true,
+            "title": "Retry After",
+            "type": "integer"
           },
           "skipped": {
             "title": "Skipped",
@@ -426,6 +460,11 @@
           },
           "in_library": {
             "title": "In Library",
+            "type": "integer"
+          },
+          "left_out": {
+            "default": 0,
+            "title": "Left Out",
             "type": "integer"
           },
           "missing": {

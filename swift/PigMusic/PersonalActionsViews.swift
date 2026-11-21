@@ -154,8 +154,11 @@ struct SongActionsMenu: View {
   }
   private func request(_ track: Track) async {
     do {
-      let result = try await model.performPersonal { try await $0.requestMusic([track]) }
-      if result.downloadsEnabled {
+      let result = try await model.requestNow([track])
+      if result.leftOut > 0 {
+        // Kept to send again (D-128).
+        model.notify(result.sentence)
+      } else if result.downloadsEnabled {
         model.confirmations += 1
       } else {
         model.notify("Adding. Downloads are off on the server, so it will wait.")

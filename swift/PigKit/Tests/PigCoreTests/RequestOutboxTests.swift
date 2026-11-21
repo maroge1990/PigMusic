@@ -72,6 +72,52 @@ private struct Offline: Error {}
     #expect(await RequestOutbox.pending(store).isEmpty)
   }
 
+  /// D-128: past the rate a song a queue limit left out stays in the
+  /// outbox and the pass ends there (every later new song would be refused
+  /// too); the notice says how many wait to be sent.
+  @Test func aSongPastTheRateIsKeptAndEndsThePass() async throws {
+    let (store, root) = try makeStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try await RequestOutbox.add(first, to: store)
+    try await RequestOutbox.add(second, to: store)
+    var sent: [String] = []
+    let report = try await RequestOutbox.send(store: store, isCurrent: { true }) { tracks in
+      sent.append(tracks[0].id)
+      return .limited(1, limit: "rate", retryAfter: 30)
+    }
+    #expect(sent == ["first"])
+    #expect(report.stop == .limited && report.waiting == 2)
+    #expect(report.limit == "rate" && report.retryAfter == 30)
+    #expect(report.skipped.isEmpty && report.requested.isEmpty)
+    #expect(await RequestOutbox.pending(store).map(\.id) == ["first", "second"])
+    #expect(
+      report.notice(titles: [:]) == "2 songs will be added later.")
+    // Once there is room both go, and nothing waits.
+    let later = try await RequestOutbox.send(store: store, isCurrent: { true }) { _ in created }
+    #expect(later.requested == ["first", "second"] && later.waiting == 0)
+    #expect(later.stop == .done)
+    #expect(await RequestOutbox.pending(store).isEmpty)
+  }
+
+  /// Codex round 1: a song at a waiting limit at the head of the outbox
+  /// kept every later one from being sent, though a later one could join a
+  /// job already queued. The pass goes on past it.
+  @Test func aSongPastAWaitingLimitIsKeptAndThePassGoesOn() async throws {
+    let (store, root) = try makeStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try await RequestOutbox.add(first, to: store)
+    try await RequestOutbox.add(second, to: store)
+    let report = try await RequestOutbox.send(store: store, isCurrent: { true }) { tracks in
+      tracks[0].id == "first"
+        ? .limited(1, limit: "person_waiting", retryAfter: nil)
+        : AcquisitionResult(created: 0, existing: 1, skipped: 0, downloadsEnabled: true)
+    }
+    #expect(report.requested == ["second"])
+    #expect(report.stop == .limited && report.waiting == 1)
+    #expect(report.limit == "person_waiting")
+    #expect(await RequestOutbox.pending(store).map(\.id) == ["first"])
+  }
+
   @Test func aLeftOutOrRefusedSongIsExplained() {
     var report = RequestOutbox.Report()
     #expect(report.notice(titles: [:]) == nil)

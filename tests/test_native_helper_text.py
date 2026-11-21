@@ -51,6 +51,16 @@ REMOVED = {
         "Phone unavailable",
         "Albums play gapless",
     ],
+    # D-131 (#242): the queue-limit sentences are short, with no numbers.
+    "PigKit/Sources/PigDomain/PersonalActions.swift": [
+        "waiting to be sent",
+        "PigMusic will try again",
+        "Couldn't try again yet",
+        "songs waiting",
+    ],
+    "PigKit/Sources/PigDomain/ApplePlaylists.swift": [
+        "too many are waiting on the server"
+    ],
     # D-122 (#292): the Watch is not only for running.
     "PigKit/Sources/PigCompanion/WatchStatus.swift": ["Ready for your run"],
     "PigMusicUITests/Watch/WatchDemoTests.swift": ["Ready for your run"],

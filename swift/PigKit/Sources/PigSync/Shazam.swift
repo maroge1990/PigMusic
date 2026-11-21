@@ -24,6 +24,13 @@ public struct ShazamRequestOutcome: Sendable, Hashable {
   public var taken: [String] = []
   /// The Shazam ids of songs the catalogue has no exact version of: not requested.
   public var unmatched: [String] = []
+  /// Songs a queue limit left out (D-128), to keep in the request outbox
+  /// and send again, and their Shazam ids.
+  public var leftOut: [Track] = []
+  public var leftOutIds: [String] = []
+  /// The limit that left them out, and for the rate when one more fits.
+  public var limit: String?
+  public var retryAfter: Int?
   public var downloadsEnabled = true
   public init() {}
 }
@@ -82,6 +89,14 @@ public enum ShazamRequests {
       // never again to find out (Codex round 1 on batch K).
       for (index, taken) in zip(batch, result.songsTaken(batch.count)) where taken {
         outcome.taken += shazamIds[index]
+      }
+      for position in result.overLimit where (0..<batch.count).contains(position) {
+        outcome.leftOut.append(tracks[batch.lowerBound + position])
+        outcome.leftOutIds += shazamIds[batch.lowerBound + position]
+      }
+      if !result.overLimit.isEmpty {
+        outcome.limit = result.limit
+        outcome.retryAfter = result.retryAfter
       }
     }
     return outcome

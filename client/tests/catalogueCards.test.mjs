@@ -273,6 +273,43 @@ test("Add from a card sends only the songs to add, under the session that chose 
   assert.equal(cardMark(now), "requested");
 });
 
+test("Add from a card past a queue limit says so and leaves those songs to add again", async () => {
+  // D-128 (#242): a song a limit left out is `excluded`, its position in
+  // over_limit; the card offers it again and says why it wasn't added.
+  clearSessionReads();
+  setSessionId("s1");
+  serve({
+    "/api/v1/requests": {
+      created: 1,
+      existing: 0,
+      skipped: 0,
+      left_out: 1,
+      over_limit: [1],
+      limit: "rate",
+      retry_after: 90,
+      outcomes: ["created", "excluded"],
+    },
+  });
+  let shown = [];
+  const stop = subscribe((all) => (shown = all));
+  const now = await addCatalogueAlbum(
+    [row("a", "missing"), row("b", "missing")],
+    "s1",
+  );
+  stop();
+  assert.deepEqual(
+    now.map((r) => r.state),
+    ["pending", "missing"],
+  );
+  assert.equal(nothingLeftToAdd(now), false);
+  assert.equal(cardMark(now), null);
+  assert.equal(
+    shown.at(-1).text,
+    "Adding 1 song to your library. Couldn't add 1 song: too many are waiting. Try again later.",
+  );
+  clearNotices();
+});
+
 test("a collection's songs read after another sign-in act for nobody, and fail silently", async () => {
   setSessionId("s1");
   let acted = false;

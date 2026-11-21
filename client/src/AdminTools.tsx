@@ -11,12 +11,14 @@ import {
   X,
 } from "lucide-react";
 import {
+  ApiError,
   api,
   apiFetch,
   isUnconfirmed,
   updateArtworkRevision,
   writeFailure,
 } from "./api";
+import { RETRY_REFUSED } from "./queueLimits";
 import { formatCount, formatDuration } from "./format";
 import { PageHeader, SectionHeader } from "./PageHeader";
 import { Cover } from "./Cover";
@@ -681,7 +683,12 @@ export function AdminTools({ route }: { route: Route }) {
         await api<Queue>(`/v1/admin/queue/${id}/${action}`, { method: "POST" }),
       );
     } catch (e) {
-      setError((e as Error).message);
+      // A Retry a waiting limit refused (D-128): the job stays as it was.
+      setError(
+        e instanceof ApiError && e.code === "queue_limit"
+          ? RETRY_REFUSED
+          : (e as Error).message,
+      );
     } finally {
       setBusy(false);
     }

@@ -129,11 +129,14 @@ public struct AppleImportCounts: Codable, Sendable, Hashable {
   public var household: Int
   public var missing: Int
   public var requested: Int
-  public init(inLibrary: Int, household: Int, missing: Int, requested: Int) {
+  /// Missing songs a queue limit left out (D-128); nil from an older server.
+  public var leftOut: Int?
+  public init(inLibrary: Int, household: Int, missing: Int, requested: Int, leftOut: Int? = nil) {
     self.inLibrary = inLibrary
     self.household = household
     self.missing = missing
     self.requested = requested
+    self.leftOut = leftOut
   }
 }
 
@@ -209,8 +212,12 @@ public enum AppleImport {
     if counts.requested > 0 {
       lines.append(
         "Adding \(songs(counts.requested)) to your library; they join the playlist once added.")
-    } else if counts.missing > 0 {
+    } else if counts.missing > 0 && (counts.leftOut ?? 0) == 0 {
       lines.append("The missing songs join the playlist if they're added to your library later.")
+    }
+    if let leftOut = counts.leftOut, leftOut > 0 {
+      // Past a queue limit (D-128): the playlist keeps them to add later.
+      lines.append(AcquisitionResult.leftOutNotice(leftOut))
     }
     if result.capped {
       lines.append("Only the first \(limit) songs were added.")

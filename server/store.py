@@ -1,5 +1,6 @@
 from .queue_states import CANCELLABLE, DONE, FINISHED, PAUSED, PENDING, RETRYABLE, sql
 from .lifecycle import TimedRLock, coordinated, step
+from .queue_limits import QueueFull, QueueLimits
 import itertools
 import json
 import hashlib
@@ -99,6 +100,8 @@ class Store:
         self.data_version = next(self.versions)
         # Holds over a second are logged with their holder (LOCK1).
         self.lifecycle_lock = TimedRLock("lifecycle_lock")
+        # What a person may queue (D-128); the rate is kept here, in memory.
+        self.queue_limits = QueueLimits()
         # Mix playback leases against mix cache cleanup only. Playback must not
         # wait for library work (syncs, scans, exports) under lifecycle_lock;
         # cleanup takes this after lifecycle_lock, never the other way round.
@@ -1174,6 +1177,12 @@ class Store:
         if not twin:
             return None
         twin_id, twin_status, joined = twin
+        # Joining makes that job wait for each newcomer too (D-128): only
+        # while they have room. Its own place in the household it has.
+        newcomers = [p for p in people if p not in joined.get("requested_by", [])]
+        limit = self.queue_limits.full(conn, newcomers, new_job=False)
+        if limit:
+            raise QueueFull(limit)
         scopes = old.get("request_scope") or {}
         moved = False
         for person in people:
@@ -1208,6 +1217,19 @@ class Store:
             HouseholdPolicy(self).reconcile_pending(conn)
         return twin_id
 
+    def revivable(self, conn, request_id, people):
+        """Raises QueueFull when queuing this failed or cancelled job again
+        would pass a waiting limit (D-128): the household's, or that of any
+        person on it (it waits for each of them). The job is left as it
+        was. A job in any other state is the caller's to refuse."""
+        status = conn.execute(
+            "SELECT status FROM queue WHERE id=?", (request_id,)
+        ).fetchone()
+        if status and status[0] in RETRYABLE:
+            limit = self.queue_limits.full(conn, people, new_job=True)
+            if limit:
+                raise QueueFull(limit)
+
     def retry_request(self, request_id):
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -1217,6 +1239,7 @@ class Store:
             people = json.loads(row[0]).get("requested_by", []) if row else []
             # Everyone on the job joins the other one; the job stays as it is.
             if not self.retry_joining(conn, request_id, people):
+                self.revivable(conn, request_id, people)
                 result = conn.execute(
                     "UPDATE queue SET status='waiting_for_sources',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN "
                     + sql(RETRYABLE),
@@ -1773,7 +1796,7 @@ class Store:
 
     @coordinated
     def submit_catalogue(
-        self, tracks, preferred=None, user_id=None, resume_paused=False
+        self, tracks, preferred=None, user_id=None, resume_paused=False, limited=False
     ):
         """Queue catalogue songs. `resume_paused` only for a person asking
         for them now (#228): a song whose job another person paused resumes,
@@ -1781,7 +1804,11 @@ class Store:
         household library (removed since) is queued again (#211). Automatic
         paths (artist monitoring) leave both alone. A job the person paused
         themselves stays paused and is counted as `paused`: only Resume in
-        Downloads resumes it, so a stale page's Add can't (#264)."""
+        Downloads resumes it, so a stale page's Add can't (#264).
+        `limited`, for a person asking (D-128): a song that would make a new
+        job past one of the queue limits is left out (`over_limit`), counted
+        in the same transaction as the insert, so two requests at once can't
+        both take the last room."""
         settings = self.download_settings()
         if preferred and tracks:
             album_id = self.album_key(tracks[0])
@@ -1793,7 +1820,10 @@ class Store:
                         json.dumps({"profile": preferred}),
                     ),
                 )
-        created = existing = skipped = paused = 0
+        created = existing = skipped = paused = left_out = 0
+        room = None
+        # Positions of the songs a queue limit left out (D-128).
+        over_limit = []
         # The paused requests an Add left paused, by request ID, so the iPhone
         # clears a song's Paused mark when that request resumes (#276).
         paused_ids = []
@@ -1814,6 +1844,8 @@ class Store:
         taken_up = []
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if limited and user_id:
+                room = self.queue_limits.room(conn, user_id)
             # Read both legacy and edition-aware exclusions once per batch.
             exclusions = [
                 json.loads(r[0])
@@ -1995,6 +2027,19 @@ class Store:
                     paused += 1
                     outcomes.append("paused")
                     paused_ids.append(key)
+                elif (
+                    room
+                    and prior
+                    and prior[0] in PENDING
+                    and user_id not in (json.loads(prior[1]).get("requested_by") or [])
+                    and not room.admit(new_job=False)
+                ):
+                    # Joining someone else's unfinished job makes it wait for
+                    # this person too: past their limit it is left out
+                    # (D-128), and they are not added to it.
+                    over_limit.append(len(outcomes))
+                    left_out += 1
+                    outcomes.append("excluded")
                 elif prior and prior[0] not in {"cancelled", "failed"}:
                     if user_id:
                         previous = json.loads(prior[1])
@@ -2021,6 +2066,14 @@ class Store:
                         joined = True
                     existing += 1
                     outcomes.append("existing")
+                elif room and not room.admit(new_job=True):
+                    # A new job past a limit (D-128): left out, nothing
+                    # written; asking again later queues it. Its outcome is
+                    # `excluded`, which every client already reads as left
+                    # out; `over_limit` names its position.
+                    over_limit.append(len(outcomes))
+                    left_out += 1
+                    outcomes.append("excluded")
                 elif prior:
                     conn.execute(
                         "UPDATE queue SET status='waiting_for_sources',payload=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -2043,12 +2096,23 @@ class Store:
                     HouseholdPolicy(self).membership_changed(conn, taken_up)
                 else:
                     HouseholdPolicy(self).reconcile_pending(conn)
+        limit = {"limit": None, "retry_after": None}
+        if room:
+            # Committed: the songs admitted are recorded in the person's
+            # window now, and only now, so a request that rolled back took
+            # nothing. The lifecycle lock (`coordinated`) is still held, so
+            # the next request counts its room after this record.
+            self.queue_limits.take(user_id, room.used)
+            limit = room.answer()
         return {
             "created": created,
             "existing": existing,
             "skipped": skipped,
             "paused": paused,
             "paused_ids": paused_ids,
+            "left_out": left_out,
+            "over_limit": over_limit,
+            **limit,
             "outcomes": outcomes,
             "downloads_enabled": settings["enabled"],
         }

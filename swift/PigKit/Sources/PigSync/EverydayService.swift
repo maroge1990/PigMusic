@@ -150,6 +150,12 @@ extension NativeService {
     {
     case .ok: return
     case .unauthorized: throw NativeFailure.authentication
+    // A waiting limit refused it (D-128): the request stays as it was.
+    case .tooManyRequests(let answer):
+      if (try? answer.body.json.code) == "queue_limit" {
+        throw NativeFailure.unavailable(AcquisitionResult.retryRefused)
+      }
+      throw ServerBusy()
     default:
       throw NativeFailure.unavailable(
         "Couldn't confirm the new attempt. Refresh before trying again.")

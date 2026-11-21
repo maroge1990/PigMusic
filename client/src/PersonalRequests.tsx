@@ -1,7 +1,8 @@
 import { notify } from "./notices";
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, CircleAlert, RotateCw } from "lucide-react";
-import { api } from "./api";
+import { ApiError, api } from "./api";
+import { RETRY_REFUSED } from "./queueLimits";
 import { Cover, catalogueCover } from "./Cover";
 import { DownloadLog } from "./DownloadLog";
 import { Empty, InlineError, Loading } from "./EmptyState";
@@ -187,7 +188,11 @@ export function PersonalRequests() {
       window.dispatchEvent(new Event("music-requests-changed"));
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      // A waiting limit refused it (D-128): the song stays as it was.
+      if (e instanceof ApiError && e.code === "queue_limit") {
+        setError(RETRY_REFUSED);
+        window.dispatchEvent(new Event("music-requests-changed"));
+      } else setError((e as Error).message);
     } finally {
       setBusy(false);
     }

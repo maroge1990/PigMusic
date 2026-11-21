@@ -1446,13 +1446,22 @@ private struct ShazamInboxView: View {
           await model.isCurrent(stamp)
         }
       }
-      // Marked only when the server took it (#259): an unmatched song, one
-      // left out or one left paused stays missing, so it can be added again.
+      // Songs a queue limit left out go to the request outbox, to be sent
+      // again, as from any other Add (D-128).
+      try await model.keepForLater(
+        outcome.leftOut, limit: outcome.limit, retryAfter: outcome.retryAfter, generation: stamp)
+      // Marked only when the server took it (#259) or the outbox keeps it:
+      // an unmatched song, one excluded or one left paused stays missing,
+      // so it can be added again.
       requested.formUnion(outcome.taken)
+      requested.formUnion(outcome.leftOutIds)
       let result = AcquisitionResult(
         created: outcome.created, existing: outcome.existing, skipped: outcome.skipped,
-        paused: outcome.paused, downloadsEnabled: outcome.downloadsEnabled)
-      let matched = outcome.created + outcome.existing + outcome.skipped + outcome.paused
+        paused: outcome.paused, leftOut: outcome.leftOut.count,
+        downloadsEnabled: outcome.downloadsEnabled)
+      let matched =
+        outcome.created + outcome.existing + outcome.skipped + outcome.paused
+        + outcome.leftOut.count
       let unmatched = outcome.unmatched.count
       message = .info(
         [

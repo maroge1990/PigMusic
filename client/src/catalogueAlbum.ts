@@ -11,6 +11,7 @@ import {
   type Song as Row,
 } from "./songs";
 import type { Track } from "./types";
+import { leftOutMessage } from "./queueLimits";
 
 export type CatalogueSong = {
   id: string;
@@ -143,6 +144,8 @@ export function addedMessage(result: AddResult) {
   if (adding > 0) parts.push(`Adding ${songs(adding)} to your library.`);
   if (result.skipped > 0) parts.push(`Skipped ${songs(result.skipped)}.`);
   if (result.paused) parts.push(PAUSED_NOTICE);
+  // Past a queue limit (D-128): the album page's Add and a card's.
+  if (result.left_out) parts.push(leftOutMessage(result));
   return parts.join(" ") || "Already in your library.";
 }
 
@@ -174,7 +177,8 @@ export function nothingLeftToAdd(rows: Row[] | null) {
 /**
  * The rows after an Add, from the server's answer for each song sent (the
  * songs `addable` picked, in order): created or existing are on their way,
- * added or in_library are yours, paused stays paused, and excluded is left
+ * added or in_library are yours, paused stays paused, and excluded (a song
+ * a queue limit left out too, D-128, its position in `over_limit`) is left
  * as it was, so Add can offer it again. Null when the answer doesn't say
  * song by song: the card then reads the album again.
  */

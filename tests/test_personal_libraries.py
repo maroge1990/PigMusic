@@ -731,6 +731,7 @@ def test_apple_music_playlist_becomes_own_exact_copy(tmp_path, monkeypatch):
             "household": 1,
             "missing": 1,
             "requested": 0,
+            "left_out": 0,
         }
         playlist = body["playlist"]
         assert playlist["name"] == "Road Trip"
@@ -782,6 +783,7 @@ def test_apple_music_playlist_becomes_own_exact_copy(tmp_path, monkeypatch):
             "household": 0,
             "missing": 2,
             "requested": 2,
+            "left_out": 0,
         }
         titles = sorted(i["title"] for i in store.queue()["items"])
         assert titles == ["Missing", "New"]
@@ -807,7 +809,13 @@ def test_apple_music_playlist_keeps_live_and_studio_apart(tmp_path, monkeypatch)
         [{"title": "Three", "artist": "Artist", "album": "Three", "duration": 200}],
         True,
     )
-    assert counts == {"in_library": 0, "household": 0, "missing": 1, "requested": 1}
+    assert counts == {
+        "in_library": 0,
+        "household": 0,
+        "missing": 1,
+        "requested": 1,
+        "left_out": 0,
+    }
     entry = Playlists(app.state.store, member).detail(playlist_id)["entries"][0]
     assert entry["status"] == "missing" and not entry["household_available"]
     queued = app.state.store.queue()["items"]

@@ -1,4 +1,5 @@
 import { api, apiFetch, cachedLibrary } from "./api";
+import type { LeftOut } from "./queueLimits";
 import { discoverUrl } from "./navigation";
 import type { Track } from "./types";
 
@@ -144,9 +145,10 @@ export type AddResult = {
   skipped: number;
   /** Songs you paused: Add leaves them paused (#264). */
   paused?: number;
-  /** What happened to each song, in the order sent. */
+  /** What happened to each song, in the order sent (one a queue limit
+   * left out is `excluded`, its position in `over_limit`). */
   outcomes?: AddOutcome[];
-};
+} & LeftOut;
 export type AddOutcome =
   | "created"
   | "existing"
