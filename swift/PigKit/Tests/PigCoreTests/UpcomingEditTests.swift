@@ -488,11 +488,18 @@ private func eventually(_ condition: @Sendable () async -> Bool) async throws {
     }
     let stops = output.stops
     var restarts: [Double] = []
-    session.onUpdate = { if $0.state == .preparing { restarts.append($0.elapsed) } }
+    // Audio scheduled from the restart on (output.stop() came just before
+    // it is published). The old queue may still schedule a block between
+    // the edit and the stream's answer; stop() discards it unheard.
+    var mark = 0
+    session.onUpdate = {
+      guard $0.state == .preparing else { return }
+      restarts.append($0.elapsed)
+      mark = output.captured.count
+    }
     // Heard since the last clock reading: only a fresh position has it.
     output.consume()
     let heard = output.positionFrames
-    let mark = output.captured.count
     session.updateUpcoming([items[0], items[2]])
     try await waitUntil { !restarts.isEmpty }
     try await playToEnd(session, output)
@@ -534,8 +541,13 @@ private func eventually(_ condition: @Sendable () async -> Bool) async throws {
     #expect(session.snapshot.occurrenceID == items[0].id)
     let stops = output.stops
     var restarts: [QueuePlaybackSnapshot] = []
-    session.onUpdate = { if $0.state == .preparing { restarts.append($0) } }
-    let mark = output.captured.count
+    // Audio scheduled from the restart on: see the test above.
+    var mark = 0
+    session.onUpdate = {
+      guard $0.state == .preparing else { return }
+      restarts.append($0)
+      mark = output.captured.count
+    }
     session.updateUpcoming([items[0], items[2]])
     try await waitUntil { !restarts.isEmpty }
     try await playToEnd(session, output)
@@ -716,8 +728,13 @@ private func eventually(_ condition: @Sendable () async -> Bool) async throws {
     #expect(session.snapshot.occurrenceID == items[0].id)
     let stops = output.stops
     var restarts: [QueuePlaybackSnapshot] = []
-    session.onUpdate = { if $0.state == .preparing { restarts.append($0) } }
-    let mark = output.captured.count
+    // Audio scheduled from the restart on: see the test above.
+    var mark = 0
+    session.onUpdate = {
+      guard $0.state == .preparing else { return }
+      restarts.append($0)
+      mark = output.captured.count
+    }
     let queued = editTrack(edit == .playNext ? "x" : "d")
     let edited =
       edit == .playNext ? [items[0], queued, items[1], items[2]] : [items[0], queued]
