@@ -1258,6 +1258,8 @@ enum PlayOrigin: Hashable {
   @ObservationIgnored private var requestRetry = RequestRetry()
   @ObservationIgnored private var requestRetryLoaded = false
   @ObservationIgnored private var requestRetryTask: Task<Void, Never>?
+  /// Counts arms: a send that started before the last one can't clear it.
+  @ObservationIgnored private var requestRetryArms = 0
   static func undoKey(request id: String) -> String { "request:" + id }
   static func undoKey(cancelRequest id: String) -> String { "request-cancel:" + id }
   func isRequested(_ id: String) -> Bool {
@@ -1358,6 +1360,7 @@ enum PlayOrigin: Hashable {
     guard account.isCurrent(stamp) else { return }
     let delay = requestRetry.kept(
       limit: limit, retryAfter: retryAfter, at: Date().timeIntervalSince1970)
+    requestRetryArms += 1
     let saved = requestRetry
     try? await RequestOutbox.saveRetry(saved, to: store)
     guard account.isCurrent(stamp) else { return }
@@ -1401,6 +1404,7 @@ enum PlayOrigin: Hashable {
       return
     }
     flushingRequests = true
+    let arms = requestRetryArms
     var drained = RequestOutbox.Report()
     var titles: [String: String] = [:]
     defer {
@@ -1449,13 +1453,24 @@ enum PlayOrigin: Hashable {
       }
       switch report.stop {
       case .done:
-        if await RequestOutbox.pending(store).isEmpty {
+        let empty = await RequestOutbox.pending(store).isEmpty
+        // The read may have outlasted this account, or an Add sent at once
+        // may have kept songs and armed a send meanwhile (Codex
+        // confirmation round): then this drain changes nothing of it.
+        guard account.isCurrent(stamp) else { return }
+        if empty {
           // Nothing kept by a limit any more.
-          if requestRetry != RequestRetry() {
+          if requestRetry != RequestRetry(), requestRetryArms == arms {
             requestRetry.cleared()
             requestRetryTask?.cancel()
             try? await RequestOutbox.saveRetry(RequestRetry(), to: store)
             guard account.isCurrent(stamp) else { return }
+            // Armed during that write: the newer time is the one saved.
+            if requestRetryArms != arms {
+              let armed = requestRetry
+              try? await RequestOutbox.saveRetry(armed, to: store)
+              guard account.isCurrent(stamp) else { return }
+            }
           }
           await refreshServerRequests()
           return

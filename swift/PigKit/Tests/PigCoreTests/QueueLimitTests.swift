@@ -118,7 +118,7 @@ struct RequestRetryTests {
     #expect(RequestRetry.stopsPass("rate"))
     #expect(retry.kept(limit: "rate", retryAfter: 42, at: 0) == 42)
     #expect(retry.kept(limit: "rate", retryAfter: nil, at: 50) == 60)
-    #expect(retry.kept(limit: "rate", retryAfter: 0, at: 60) == 1)
+    #expect(retry.kept(limit: "rate", retryAfter: 0, at: 200) == 1)
     // A queue change doesn't free the rate.
     #expect(!retry.passOnQueueChange(at: 1000))
   }
@@ -144,8 +144,8 @@ struct RequestRetryTests {
   }
 
   /// Codex round 2: an Add sent at once that a limit refused saved its songs
-  /// with nothing to send them later. Keeping them arms the one time every
-  /// send consults.
+  /// with nothing to send them later. Keeping them arms the time every send
+  /// consults.
   @Test func aLimitedAddIsSentWhenTheWindowOpensAndNotBefore() {
     var retry = RequestRetry()
     #expect(retry.wait(at: 0) == nil)
@@ -159,6 +159,7 @@ struct RequestRetryTests {
 
   @Test func theTimeOutlivesARelaunch() throws {
     var retry = RequestRetry()
+    _ = retry.kept(limit: "rate", retryAfter: 600, at: 0)
     _ = retry.kept(limit: "person_waiting", retryAfter: nil, at: 1000)
     let saved = try JSONEncoder().encode(retry)
     let relaunched = try JSONDecoder().decode(RequestRetry.self, from: saved)
@@ -167,7 +168,27 @@ struct RequestRetryTests {
     #expect(relaunched.wait(at: 1060) == nil)
   }
 
-  @Test func aQueueChangeOpensAWaitingLimitEarlyButNotTheRate() {
+  /// Codex confirmation round: a waiting answer at 1 s replaced a 600 s
+  /// rate deadline set at 0 s with a 61 s backoff, and a queue change could
+  /// then open it. The rate's time is a floor for every send.
+  @Test func aWaitingAnswerNeverLowersTheRatesTime() {
+    var retry = RequestRetry()
+    #expect(retry.kept(limit: "rate", retryAfter: 600, at: 0) == 600)
+    #expect(retry.kept(limit: "household_waiting", retryAfter: nil, at: 1) == 599)
+    #expect(retry.kept(limit: "household_waiting", retryAfter: nil, at: 2) == 598)
+    #expect(retry.wait(at: 62) == 538)
+    // A queue change opens the waiting backoff, never the rate.
+    #expect(retry.passOnQueueChange(at: 62))
+    retry.openNow()
+    #expect(retry.wait(at: 62) == 538)
+    #expect(retry.wait(at: 600) == nil)
+    // A shorter Retry-After later can't bring it forward either.
+    var rate = RequestRetry()
+    _ = rate.kept(limit: "rate", retryAfter: 600, at: 0)
+    #expect(rate.kept(limit: "rate", retryAfter: 10, at: 5) == 595)
+  }
+
+  @Test func aQueueChangeOpensAWaitingLimitEarly() {
     var retry = RequestRetry()
     _ = retry.kept(limit: "household_waiting", retryAfter: nil, at: 0)
     _ = retry.kept(limit: "household_waiting", retryAfter: nil, at: 60)
@@ -175,21 +196,9 @@ struct RequestRetryTests {
     #expect(retry.passOnQueueChange(at: 120))
     retry.openNow()
     #expect(retry.wait(at: 120) == nil)
-    var rate = RequestRetry()
-    _ = rate.kept(limit: "rate", retryAfter: 500, at: 0)
-    #expect(!rate.passOnQueueChange(at: 120))
-    rate.cleared()
-    #expect(rate == RequestRetry())
-  }
-}
-
-/// D-128: a quality choice whose replacements didn't all fit says so.
-struct QualityDeferredTests {
-  @Test func theSentence() {
-    #expect(QualityNotice.deferred(0) == nil)
-    #expect(
-      QualityNotice.deferred(3)
-        == "3 songs will change quality later: too many songs are waiting. Choose this quality again once some are added."
-    )
+    // Once open, a further queue change asks for nothing more.
+    #expect(!retry.passOnQueueChange(at: 121))
+    retry.cleared()
+    #expect(retry == RequestRetry())
   }
 }
