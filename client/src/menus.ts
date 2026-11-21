@@ -86,10 +86,19 @@ export type CollectionMenuItem =
 
 /** The collection menu for an album, artist, playlist or mix. Save and Hide
  * this edition live only in a mix's menu. */
-export function collectionMenu(kind: CollectionKind): CollectionMenuItem[][] {
+export function collectionMenu(
+  kind: CollectionKind,
+  /** False where there is nothing to add the collection by: a catalogue
+   * artist's page has no Add to library, so neither has its card (#267). */
+  canAddToLibrary = true,
+): CollectionMenuItem[][] {
   const groups: CollectionMenuItem[][] = [
     ["play", "shuffle", "play-next"],
-    ["add-to-library", "add-to-playlist", "download"],
+    [
+      ...(canAddToLibrary ? (["add-to-library"] as const) : []),
+      "add-to-playlist",
+      "download",
+    ],
   ];
   if (kind === "mix") groups.push(["save-mix", "hide-edition"]);
   return groups;

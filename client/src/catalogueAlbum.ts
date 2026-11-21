@@ -155,3 +155,32 @@ export function cardMark(rows: Row[] | null): BadgeState | null {
   if (!rows?.length || rows.some((r) => addable(r) || r.checking)) return null;
   return rows.every((r) => r.state === "saved") ? "library" : "requested";
 }
+
+/** A release's artwork, as Cover's catalogueCover names it. */
+export const releaseArtwork = (id: string) =>
+  `/api/v1/catalogue/artwork/release/${encodeURIComponent(id)}`;
+
+/** One of an artist's popular songs, as /popularity lists it. */
+export type PopularSong = {
+  id: string;
+  title: string;
+  artist: string;
+  album: string;
+  release_id: string;
+};
+
+/** An artist's popular songs as rows, in the chart's order: the artist
+ * page's Popular songs, and what its card plays (#267). */
+export function popularRows(artistId: string, songs: PopularSong[]): Row[] {
+  return songs.map((song) => ({
+    key: "popular:" + song.id,
+    title: song.title,
+    artist: song.artist,
+    album: song.album,
+    cover: releaseArtwork(song.release_id),
+    state: "missing",
+    release_id: song.release_id,
+    recording_id: song.id,
+    artist_id: artistId,
+  }));
+}

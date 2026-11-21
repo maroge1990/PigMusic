@@ -83,6 +83,7 @@ export function useCollectionMenu({
   mix,
   addToLibrary = addSongsToLibrary,
   cannotAdd = false,
+  canAddToLibrary = true,
   buttonClass = "song-more collection-more",
 }: {
   kind: CollectionKind;
@@ -98,6 +99,8 @@ export function useCollectionMenu({
   /** Known to have nothing left to add: Add to library is off, as the
    * album page's Add is. */
   cannotAdd?: boolean;
+  /** False where the collection has no Add to library at all. */
+  canAddToLibrary?: boolean;
   /** A page's own ⋯ sits with its Play and Shuffle. */
   buttonClass?: string;
 }) {
@@ -155,14 +158,15 @@ export function useCollectionMenu({
     "save-mix": () => mix?.save(),
     "hide-edition": () => mix?.hide(),
   };
-  const groups: MenuEntry[][] = collectionMenu(kind).map((group) =>
-    group.map((item) => ({
-      key: item,
-      label: collectionMenuLabels[item],
-      icon: icons[item],
-      run: actions[item],
-      disabled: item === "add-to-library" && cannotAdd,
-    })),
+  const groups: MenuEntry[][] = collectionMenu(kind, canAddToLibrary).map(
+    (group) =>
+      group.map((item) => ({
+        key: item,
+        label: collectionMenuLabels[item],
+        icon: icons[item],
+        run: actions[item],
+        disabled: item === "add-to-library" && cannotAdd,
+      })),
   );
   const parts = (
     <>

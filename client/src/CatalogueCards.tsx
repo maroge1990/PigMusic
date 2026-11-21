@@ -1,7 +1,12 @@
 import { useState, type ReactNode } from "react";
 import { currentSession } from "./api";
 import { cardMark } from "./catalogueAlbum";
-import { addCatalogueAlbum, catalogueAlbumSongs } from "./catalogueActions";
+import {
+  addCatalogueAlbum,
+  cardFailure,
+  catalogueAlbumSongs,
+  catalogueArtistSongs,
+} from "./catalogueActions";
 import { useCollectionMenu } from "./CollectionMenu";
 import { StateBadge } from "./StateBadge";
 import type { Song } from "./songs";
@@ -43,7 +48,9 @@ export function CatalogueAlbumCard({
     title,
     songs: async () => {
       const session = currentSession();
-      const list = await catalogueAlbumSongs(group, artistId);
+      const list = await catalogueAlbumSongs(group, artistId).catch((e) => {
+        throw cardFailure(e, title);
+      });
       remember(session, list);
       return list;
     },
@@ -58,6 +65,38 @@ export function CatalogueAlbumCard({
   return (
     <div className="collection-card" {...menu.target}>
       {children(mark && <StateBadge state={mark} iconOnly />)}
+      {parts}
+    </div>
+  );
+}
+
+/**
+ * A card for a catalogue artist (D-129, #267): the one collection menu, its
+ * songs the artist's popular songs, as the artist's page lists them. The
+ * artist's page has no Add to library, so neither has the card.
+ */
+export function CatalogueArtistCard({
+  artistId,
+  name,
+  children,
+}: {
+  /** The catalogue artist the card opens. */
+  artistId: string;
+  name: string;
+  children: ReactNode;
+}) {
+  const { menu, parts } = useCollectionMenu({
+    kind: "artist",
+    title: name,
+    songs: () =>
+      catalogueArtistSongs(artistId).catch((e) => {
+        throw cardFailure(e, name);
+      }),
+    canAddToLibrary: false,
+  });
+  return (
+    <div className="collection-card" {...menu.target}>
+      {children}
       {parts}
     </div>
   );

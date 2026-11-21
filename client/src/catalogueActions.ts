@@ -12,6 +12,9 @@ import {
   markYours,
   nothingToAdd,
   openingEdition,
+  popularRows,
+  type PopularSong,
+  releaseArtwork,
   releaseSongs,
   type CatalogueRelease,
   type Editions,
@@ -22,6 +25,13 @@ import { songBody, withLibrary, type AddResult, type Song } from "./songs";
 
 export const NO_EDITIONS = "No editions of this album are available.";
 export const LOOKUP_FAILED = "Couldn't check your library. Try again.";
+/** A card whose songs couldn't be read, with no sentence of the server's to
+ * say why (the iPhone's words, D-117). */
+export const couldntLoad = (name: string) =>
+  `Couldn't load ${name}. Try again.`;
+
+/** The server's own sentence for a catalogue read it refused. */
+export class CatalogueRefusal extends Error {}
 
 /** A catalogue read; a refusal carries the server's words. */
 export async function catalogueRequest<T>(
@@ -31,15 +41,35 @@ export async function catalogueRequest<T>(
   const response = await apiFetch("/api/v1/catalogue/" + path, options);
   const data = await response.json();
   if (!response.ok)
-    throw new Error(
-      typeof data.detail === "string" ? data.detail : "Catalogue unavailable",
-    );
+    throw typeof data.detail === "string"
+      ? new CatalogueRefusal(data.detail)
+      : new Error("Catalogue unavailable");
   return data;
 }
 
-/** The release cover, as Cover's catalogueCover names it. */
-const releaseCover = (id: string) =>
-  `/api/v1/catalogue/artwork/release/${encodeURIComponent(id)}`;
+/** A card's lookup failure as the card says it: the server's own sentence
+ * when it gave one, else "Couldn't load <name>. Try again." */
+export function cardFailure(error: unknown, name: string): Error {
+  return error instanceof CatalogueRefusal ||
+    (error as Error)?.message === NO_EDITIONS
+    ? (error as Error)
+    : new Error(couldntLoad(name));
+}
+
+/**
+ * A catalogue artist's popular songs, as the artist's page lists them
+ * (ArtistPopular): the songs yours play from your library, the rest as the
+ * page's rows do. No popular songs is a failure: there is nothing to play.
+ */
+export async function catalogueArtistSongs(artistId: string): Promise<Song[]> {
+  const body = await catalogueRequest<{ songs?: PopularSong[] }>(
+    `artists/${encodeURIComponent(artistId)}/popularity`,
+  );
+  const plain = popularRows(artistId, body.songs || []);
+  if (!plain.length) throw new Error("No popular songs");
+  // As on the page: a failed lookup leaves the songs as the chart has them.
+  return withLibrary(plain).catch(() => plain);
+}
 
 /**
  * A release group's songs as its page would show them: the edition it opens
@@ -60,7 +90,7 @@ export async function catalogueAlbumSongs(
   const release = await catalogueRequest<CatalogueRelease>(
     `releases/${encodeURIComponent(opening)}`,
   );
-  const plain = releaseSongs(release, artistId, releaseCover(release.id));
+  const plain = releaseSongs(release, artistId, releaseArtwork(release.id));
   try {
     return markYours(plain, await withLibrary(lookedUp(plain)));
   } catch {

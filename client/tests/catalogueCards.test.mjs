@@ -18,11 +18,18 @@ const {
   nothingToAdd,
   openingEdition,
 } = await import("../src/catalogueAlbum.ts");
-const { isLatest, latestChoice } = await import("../src/menus.ts");
-const { setSessionId } = await import("../src/sessionId.ts");
-const { addCatalogueAlbum, catalogueAlbumSongs } = await import(
-  "../src/catalogueActions.ts"
+const { collectionMenu, isLatest, latestChoice } = await import(
+  "../src/menus.ts"
 );
+const { setSessionId } = await import("../src/sessionId.ts");
+const {
+  CatalogueRefusal,
+  NO_EDITIONS,
+  addCatalogueAlbum,
+  cardFailure,
+  catalogueAlbumSongs,
+  catalogueArtistSongs,
+} = await import("../src/catalogueActions.ts");
 const { withCollection } = await import("../src/songActions.ts");
 const { clearSessionReads } = await import("../src/api.ts");
 const { clearNotices, subscribe } = await import("../src/notices.ts");
@@ -245,4 +252,64 @@ test("a collection's songs read after another sign-in act for nobody, and fail s
     () => (acted = true),
   );
   assert.equal(acted, false);
+});
+
+test("a catalogue artist's menu has no Add to library; other menus keep it", () => {
+  const words = (groups) => groups.flat();
+  assert.deepEqual(words(collectionMenu("artist", false)), [
+    "play",
+    "shuffle",
+    "play-next",
+    "add-to-playlist",
+    "download",
+  ]);
+  assert.ok(words(collectionMenu("artist")).includes("add-to-library"));
+  assert.ok(words(collectionMenu("album")).includes("add-to-library"));
+});
+
+test("a card's failure keeps the server's sentence, else says Couldn't load", () => {
+  assert.equal(
+    cardFailure(new CatalogueRefusal("Release not found"), "X").message,
+    "Release not found",
+  );
+  assert.equal(cardFailure(new Error(NO_EDITIONS), "X").message, NO_EDITIONS);
+  assert.equal(
+    cardFailure(new Error("Catalogue unavailable"), "Album one").message,
+    "Couldn't load Album one. Try again.",
+  );
+  assert.equal(
+    cardFailure(new TypeError("Failed to fetch"), "Pop star").message,
+    "Couldn't load Pop star. Try again.",
+  );
+});
+
+test("an artist card's songs are the page's popular songs, in order, yours marked", async () => {
+  clearSessionReads();
+  setSessionId("s1");
+  serve({
+    "/api/v1/catalogue/artists/mb-p/popularity": {
+      songs: [
+        { id: "r1", title: "One", artist: "P", album: "H", release_id: "h" },
+        { id: "r2", title: "Two", artist: "P", album: "H", release_id: "h" },
+      ],
+      albums: [],
+    },
+    "/api/v1/library/lookup": {
+      tracks: [null, { id: "mine", title: "Two", artist: "P" }],
+    },
+  });
+  const songs = await catalogueArtistSongs("mb-p");
+  assert.deepEqual(
+    songs.map((s) => [s.title, s.state, s.recording_id, s.artist_id]),
+    [
+      ["One", "missing", "r1", "mb-p"],
+      ["Two", "saved", "r2", "mb-p"],
+    ],
+  );
+  clearSessionReads();
+  setSessionId("s1");
+  serve({
+    "/api/v1/catalogue/artists/mb-e/popularity": { songs: [], albums: [] },
+  });
+  await assert.rejects(catalogueArtistSongs("mb-e"));
 });

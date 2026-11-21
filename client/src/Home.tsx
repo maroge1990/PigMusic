@@ -8,7 +8,7 @@ import { withLibrary, type Song } from "./songs";
 import { warmArtist, whenIdle } from "./prefetch";
 import { MixPage, Mixes } from "./Mixes";
 import { CollectionCard, albumSongs } from "./CollectionMenu";
-import { CatalogueAlbumCard } from "./CatalogueCards";
+import { CatalogueAlbumCard, CatalogueArtistCard } from "./CatalogueCards";
 import {
   CoverPlay,
   ShelfLoading,
@@ -188,7 +188,14 @@ function HomeSection({ kind }: { kind: "popular" | "recommended" }) {
                     {card}
                   </CatalogueAlbumCard>
                 ) : (
-                  card()
+                  // An artist's card plays the page's popular songs (D-129).
+                  <CatalogueArtistCard
+                    key={item.id}
+                    artistId={item.artist_id}
+                    name={item.name}
+                  >
+                    {card()}
+                  </CatalogueArtistCard>
                 );
               })}
             </div>

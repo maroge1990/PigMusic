@@ -71,6 +71,14 @@ type Options = {
   editions?: Promise<void>;
   /** The edition read fails with these words. */
   failRelease?: string;
+  /** The edition read fails with no words of the server's. */
+  failReleaseBare?: boolean;
+  /** The popular artist's popular songs (default two). */
+  popular?: string[];
+  /** Held until the test opens it: the artist's popular songs answer. */
+  popularity?: Promise<void>;
+  /** The popular songs read fails with no words of the server's. */
+  failPopularity?: boolean;
   /** Titles the library lookup says are yours. */
   yours?: string[];
   /** Who /v1/me says is signed in. */
@@ -149,25 +157,52 @@ async function home(target: Page | BrowserContext, options: Options = {}) {
           tracks: [song("rel-live", "Live song", 1)],
         },
       }),
+    "/v1/catalogue/artists/mb-pop/popularity": async (route) => {
+      await options.popularity;
+      await route
+        .fulfill(
+          options.failPopularity
+            ? { status: 500, json: {} }
+            : {
+                json: {
+                  enabled: true,
+                  albums: [],
+                  ranked_album_ids: [],
+                  songs: (options.popular ?? ["Hit one", "Hit two"]).map(
+                    (title, i) => ({
+                      id: `rec-pop-${i}`,
+                      title,
+                      artist: "Pop star",
+                      album: "Hits",
+                      release_id: "rel-hits",
+                    }),
+                  ),
+                },
+              },
+        )
+        .catch(() => {});
+    },
     "/v1/catalogue/releases/rel-studio": (route) =>
-      options.failRelease
-        ? route.fulfill({
-            status: 404,
-            json: { detail: options.failRelease, code: "not_found" },
-          })
-        : route.fulfill({
-            json: {
-              id: "rel-studio",
-              title: "Album one",
-              artist: "Someone",
-              date: "2025",
-              description: "",
-              tracks: [
-                song("rel-studio", "First song", 1),
-                song("rel-studio", "Second song", 2),
-              ],
-            },
-          }),
+      options.failReleaseBare
+        ? route.fulfill({ status: 500, json: {} })
+        : options.failRelease
+          ? route.fulfill({
+              status: 404,
+              json: { detail: options.failRelease, code: "not_found" },
+            })
+          : route.fulfill({
+              json: {
+                id: "rel-studio",
+                title: "Album one",
+                artist: "Someone",
+                date: "2025",
+                description: "",
+                tracks: [
+                  song("rel-studio", "First song", 1),
+                  song("rel-studio", "Second song", 2),
+                ],
+              },
+            }),
     "/v1/library/lookup": (route) => {
       const asked = JSON.parse(route.request().postData() || "{}").songs as {
         title: string;
@@ -414,4 +449,148 @@ test("an artist page's album cards have the collection menu", async ({
   await expect(
     page.getByRole("menu", { name: "Catalogue album" }).getByRole("menuitem"),
   ).toHaveText(collectionWords);
+});
+
+test("an album lookup that fails without the server's words says Couldn't load", async ({
+  page,
+}) => {
+  await home(page, { failReleaseBare: true });
+  await page.goto("/#/home");
+  await choose(page, "Play");
+  await expect(
+    page.getByText("Couldn't load Album one. Try again."),
+  ).toBeVisible();
+  expect(await queued(page)).toEqual([]);
+});
+
+// The artist card: its songs are the artist's popular songs (D-129).
+const artistDots = (page: Page) =>
+  page.getByRole("button", { name: "More options for Pop star" });
+const chooseForArtist = async (page: Page, item: string) => {
+  await artistDots(page).click();
+  await page
+    .getByRole("menu", { name: "Pop star" })
+    .getByRole("menuitem", { name: item, exact: true })
+    .click();
+};
+// The artist's page has no Add to library, so the card has none either.
+const artistWords = collectionWords.filter((w) => w !== "Add to library");
+
+test("a popular artist card has the collection menu, without Add to library, once", async ({
+  page,
+}) => {
+  await home(page);
+  await page.goto("/#/home");
+  await artistDots(page).click();
+  const menu = page.getByRole("menu", { name: "Pop star" });
+  await expect(menu.getByRole("menuitem")).toHaveText(artistWords);
+  for (const item of await menu.getByRole("menuitem").all())
+    await expect(item.locator("svg")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(artistDots(page)).toHaveCount(1);
+  // A right-click on the card opens the same menu.
+  await page
+    .locator(".collection-card", { hasText: "Pop star" })
+    .locator("button.album-card")
+    .click({ button: "right" });
+  await expect(
+    page.getByRole("menu", { name: "Pop star" }).getByRole("menuitem"),
+  ).toHaveText(artistWords);
+});
+
+test("Play on an artist card waits for the popular songs, then plays them in order", async ({
+  page,
+}) => {
+  const popularity = gate();
+  await home(page, { popularity: popularity.shut, yours: ["Hit two"] });
+  await page.goto("/#/home");
+  await chooseForArtist(page, "Play");
+  await expect(artistDots(page)).toHaveAttribute("aria-busy", "true");
+  await page.waitForTimeout(300);
+  expect(await queued(page)).toEqual([]);
+  popularity.open();
+  await expect.poll(() => queued(page)).toEqual(["Hit one", "Hit two"]);
+  await expect(artistDots(page)).not.toHaveAttribute("aria-busy", "true");
+});
+
+test("an artist with no popular songs says Couldn't load and plays nothing", async ({
+  page,
+}) => {
+  await home(page, { popular: [] });
+  await page.goto("/#/home");
+  await chooseForArtist(page, "Play");
+  await expect(
+    page.getByText("Couldn't load Pop star. Try again."),
+  ).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(await queued(page)).toEqual([]);
+  await expect(page.locator(".mini-player")).toBeHidden();
+});
+
+test("an artist's popular songs read that fails says Couldn't load", async ({
+  page,
+}) => {
+  await home(page, { failPopularity: true });
+  await page.goto("/#/home");
+  await chooseForArtist(page, "Shuffle");
+  await expect(
+    page.getByText("Couldn't load Pop star. Try again."),
+  ).toBeVisible();
+  expect(await queued(page)).toEqual([]);
+});
+
+test("Play chosen twice on an artist card plays once", async ({ page }) => {
+  const popularity = gate();
+  await home(page, { popularity: popularity.shut });
+  await page.goto("/#/home");
+  // Play next first, then Play twice: only the last choice acts.
+  await chooseForArtist(page, "Play next");
+  await chooseForArtist(page, "Play");
+  await chooseForArtist(page, "Play");
+  popularity.open();
+  await expect.poll(() => queued(page)).toEqual(["Hit one", "Hit two"]);
+  await page.waitForTimeout(500);
+  expect(await queued(page)).toEqual(["Hit one", "Hit two"]);
+});
+
+test("an artist's popular songs answered after another sign-in play nothing", async ({
+  context,
+}) => {
+  let who = "u1";
+  const popularity = gate();
+  await home(context, { popularity: popularity.shut, who: () => who });
+  const page = await context.newPage();
+  await page.goto("/#/home");
+  await chooseForArtist(page, "Play");
+  who = "u2";
+  const other = await context.newPage();
+  await other.goto("/#/home");
+  await other.evaluate(() => {
+    const channel = new BroadcastChannel("pig-music-session");
+    channel.postMessage({ change: "signed-in", tab: "other-tab", at: 1 });
+    channel.close();
+  });
+  await page.waitForTimeout(500);
+  popularity.open();
+  await page.waitForTimeout(1000);
+  expect(await queued(page)).toEqual([]);
+  await expect(page.locator(".mini-player")).toBeHidden();
+});
+
+test("the artist card's menu works with the keyboard and gives focus back", async ({
+  page,
+}) => {
+  await home(page);
+  await page.goto("/#/home");
+  await artistDots(page).focus();
+  await page.keyboard.press("Enter");
+  const menu = page.getByRole("menu", { name: "Pop star" });
+  await expect(
+    menu.getByRole("menuitem", { name: "Play", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(menu.getByRole("menuitem", { name: "Download" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  await expect(artistDots(page)).toBeFocused();
 });
