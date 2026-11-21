@@ -227,6 +227,29 @@ def waived(track, c):
     return asked == offered and (not asked or identified(track, c))
 
 
+def jiosaavn_rank(track, c, url, wanted):
+    """Several JioSaavn copies of the recording: the same album first
+    (`wanted`: without " - Single" and edition words), then a matching ISRC,
+    then an exact artist credit before a leading-"The" alias (D-130, #308),
+    then a fixed order, so the same song picks the same copy every time."""
+    return (
+        album_title(c.get("album") or "", c.get("channel")) != wanted,
+        not (track.get("isrcs") and c.get("isrc") in track["isrcs"]),
+        aliased(track, c),
+        url,
+    )
+
+
+def youtube_rank(track, c, wanted):
+    """Several YouTube videos of the recording: the same album first, then an
+    exact artist credit before an alias (D-130, #308), then a fixed order."""
+    return (
+        album_title(c.get("album") or "", c.get("channel")) != wanted,
+        aliased(track, c),
+        c["video_id"],
+    )
+
+
 def rejection(track, c):
     """The song rule's checks in order: the first one a search result fails
     (one of REASONS), or None when it is the song (`acceptable`). Instant
@@ -679,17 +702,7 @@ class RemoteAudio:
                     songs,
                 )
             wanted = album_title(track.get("album") or "", track.get("artist"))
-            # An exact artist credit first (D-130), then the same album,
-            # then a fixed order: the same song picks the same video every
-            # time.
-            video = min(
-                found,
-                key=lambda c: (
-                    aliased(track, c),
-                    album_title(c.get("album") or "", c.get("channel")) != wanted,
-                    c["video_id"],
-                ),
-            )["video_id"]
+            video = min(found, key=lambda c: youtube_rank(track, c, wanted))["video_id"]
             self.videos[key] = (time.monotonic() + RESOLVED_SECONDS, video)
             self.videos.move_to_end(key)
             while len(self.videos) > RESOLVED_ENTRIES:
@@ -793,21 +806,8 @@ class RemoteAudio:
                     query,
                     results,
                 )
-            # Several copies of the recording: an exact artist credit first
-            # (D-130), then the same album (without " - Single" and edition
-            # words), then a matching ISRC, then a fixed order, so the same
-            # song picks the same copy every time.
             wanted = album_title(track.get("album") or "", track.get("artist"))
-            url = min(
-                urls,
-                key=lambda u: (
-                    aliased(track, urls[u]),
-                    album_title(urls[u].get("album") or "", urls[u].get("channel"))
-                    != wanted,
-                    not (track.get("isrcs") and urls[u].get("isrc") in track["isrcs"]),
-                    u,
-                ),
-            )
+            url = min(urls, key=lambda u: jiosaavn_rank(track, urls[u], u, wanted))
             parsed = urlsplit(url)
             if (
                 parsed.scheme != "https"

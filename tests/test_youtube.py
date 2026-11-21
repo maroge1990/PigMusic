@@ -1141,3 +1141,80 @@ def test_an_exact_artist_credit_wins_over_a_leading_the_alias(
             assert youtube.looked_up == ["b" * 11]
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("alias_first", [False, True])
+def test_the_requested_album_and_isrc_outrank_an_exact_credit(
+    tmp_path, monkeypatch, alias_first
+):
+    """#308 (Codex): "Killers" on Hot Fuss with the requested ISRC lost to
+    "The Killers" on a compilation, in both sources. The album and ISRC
+    decide first; the credit only breaks a tie."""
+    from server.remote import RemoteAudio
+
+    async def probe(client, url):
+        return None
+
+    monkeypatch.setattr(RemoteAudio, "probe", staticmethod(probe))
+    isrc = "USIR20400274"
+    song = {
+        "artist": "The Killers",
+        "title": "Mr. Brightside",
+        "album": "Hot Fuss",
+        "duration": 222,
+        "isrcs": [isrc],
+    }
+    saavns = [
+        {
+            "channel": "Killers",
+            "title": "Mr. Brightside",
+            "album": "Hot Fuss",
+            "duration": "222",
+            "isrc": isrc,
+            "source_url": "https://aac.saavncdn.com/z_320.mp4",
+        },
+        {
+            "channel": "The Killers",
+            "title": "Mr. Brightside",
+            "album": "Direct Hits",
+            "duration": "222",
+            "source_url": "https://aac.saavncdn.com/a_320.mp4",
+        },
+    ]
+    videos = [
+        {
+            **ON_YOUTUBE,
+            "channel": "Killers",
+            "title": "Mr. Brightside",
+            "album": "Hot Fuss",
+            "duration": 222,
+            "video_id": "z" * 11,
+        },
+        {
+            **ON_YOUTUBE,
+            "channel": "The Killers",
+            "title": "Mr. Brightside",
+            "album": "Direct Hits",
+            "duration": 222,
+            "video_id": "a" * 11,
+        },
+    ]
+    if not alias_first:
+        saavns.reverse()
+        videos.reverse()
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            both = resolver_with(FakeYouTube(videos), lambda *_: saavns, tmp_path)
+            found = await both.stream(client, song, "member")
+            assert found == {
+                "url": "https://aac.saavncdn.com/z_320.mp4",
+                "source": "jiosaavn",
+            }
+            youtube = FakeYouTube(videos)
+            only = resolver_with(youtube, lambda *_: [], tmp_path / "yt")
+            found = await only.stream(client, song, "member")
+            assert found["source"] == "youtube"
+            assert youtube.looked_up == ["z" * 11]
+
+    asyncio.run(scenario())

@@ -17,6 +17,7 @@ from server.downloader import (
 from server.library import normalise
 from server.matching import (
     ACQUISITION_TOLERANCE,
+    album_title,
     flavour,
     primary_artist,
     recording_kind,
@@ -838,3 +839,96 @@ def test_a_song_named_with_a_version_word_is_not_another_recording():
     # A featured credit is no qualifier: "(feat. The Piano Guys)" marks nothing.
     feat = on_jiosaavn("Foo Fighters", "Everlong (feat. The Piano Guys)", "Hits", 250)
     assert why(EVERLONG, feat) == "matched"
+
+
+def old_jiosaavn_rank(track, c, url, wanted):
+    """JioSaavn's choice among matches as at 4e8ee9c (frozen copy)."""
+    return (
+        album_title(c.get("album") or "", c.get("channel")) != wanted,
+        not (track.get("isrcs") and c.get("isrc") in track["isrcs"]),
+        url,
+    )
+
+
+def old_youtube_rank(track, c, wanted):
+    """YouTube's choice among matches as at 4e8ee9c (frozen copy)."""
+    return (
+        album_title(c.get("album") or "", c.get("channel")) != wanted,
+        c["video_id"],
+    )
+
+
+KILLERS_ISRC = "USIR20400274"
+
+
+def copies():
+    for n, (channel, album, isrc) in enumerate(
+        itertools.product(
+            ("The Killers", "The Killers, Guest", "Killers"),
+            (
+                "Hot Fuss",
+                "Hot Fuss (Deluxe Edition)",
+                "Direct Hits",
+                "Killers - Hot Fuss",
+            ),
+            (KILLERS_ISRC, None, "GBAAA0000002"),
+        )
+    ):
+        yield {
+            "channel": channel,
+            "title": "Mr. Brightside",
+            "album": album,
+            "isrc": isrc,
+            "url": f"https://aac.saavncdn.com/{n:02d}.mp4",
+            "video_id": f"{n:02d}" * 5 + "x",
+        }
+
+
+def test_each_source_chooses_as_before_and_an_exact_credit_breaks_ties():
+    """#308 (Codex): an exact credit outranked a matching album and ISRC.
+    Without an alias every list of two or three copies gets the copy it got
+    at 4e8ee9c, from either source; with one, the choice is as good by album
+    and ISRC as before, and exact whenever an exact copy is as good."""
+    from server.remote import jiosaavn_rank, youtube_rank
+
+    pool = list(copies())
+    compared = 0
+    for isrcs in (None, [KILLERS_ISRC]):
+        track = {
+            "artist": "The Killers",
+            "title": "Mr. Brightside",
+            "album": "Hot Fuss",
+        }
+        if isrcs:
+            track["isrcs"] = isrcs
+        wanted = album_title(track["album"], track["artist"])
+        ranks = (
+            (
+                lambda c: jiosaavn_rank(track, c, c["url"], wanted),
+                lambda c: old_jiosaavn_rank(track, c, c["url"], wanted),
+                2,
+            ),
+            (
+                lambda c: youtube_rank(track, c, wanted),
+                lambda c: old_youtube_rank(track, c, wanted),
+                1,
+            ),
+        )
+        for size in (2, 3):
+            for listed in itertools.permutations(pool, size):
+                aliases = [c["channel"] == "Killers" for c in listed]
+                for new, old, merit in ranks:
+                    chosen, before = min(listed, key=new), min(listed, key=old)
+                    if not any(aliases):
+                        assert chosen is before, (track, listed)
+                    else:
+                        best = old(before)[:merit]
+                        assert old(chosen)[:merit] == best, (track, listed)
+                        exact = [
+                            c
+                            for c in listed
+                            if c["channel"] != "Killers" and old(c)[:merit] == best
+                        ]
+                        assert (chosen["channel"] != "Killers") == bool(exact)
+                    compared += 1
+    assert compared == 2 * 2 * (36 * 35 + 36 * 35 * 34)
