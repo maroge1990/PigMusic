@@ -349,11 +349,16 @@ struct QualityView: View {
   private func choose(_ value: String?) async {
     guard pick.startSave(value) else { return }
     do {
-      try await model.performPersonal {
+      let deferred = try await model.performPersonal {
         try await $0.saveQuality(scope: scope, id: id, preferred: value)
       }
       pick.finishSave(succeeded: true)
-      message = nil
+      // Replacements past a waiting limit are said (D-128).
+      if let notice = QualityNotice.deferred(deferred) {
+        message = .info(notice)
+      } else {
+        message = nil
+      }
     } catch {
       pick.finishSave(succeeded: false)
       message = .error(error.userMessage)

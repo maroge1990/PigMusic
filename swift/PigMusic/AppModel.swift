@@ -341,6 +341,7 @@ enum PlayOrigin: Hashable {
               await refreshServerRequests()
               // Room may have come for songs a waiting limit kept (D-128).
               if requestRetry.passOnQueueChange(at: Date().timeIntervalSince1970) {
+                requestRetry.openNow()
                 await flushRequests()
               }
             }
@@ -1255,6 +1256,7 @@ enum PlayOrigin: Hashable {
   @ObservationIgnored private var toldWaiting = 0
   /// When to send those again, and the wait for it (D-128).
   @ObservationIgnored private var requestRetry = RequestRetry()
+  @ObservationIgnored private var requestRetryLoaded = false
   @ObservationIgnored private var requestRetryTask: Task<Void, Never>?
   static func undoKey(request id: String) -> String { "request:" + id }
   static func undoKey(cancelRequest id: String) -> String { "request-cancel:" + id }
@@ -1324,17 +1326,55 @@ enum PlayOrigin: Hashable {
   func requestNow(_ tracks: [Track]) async throws -> AcquisitionResult {
     let stamp = account.generation
     let result = try await performPersonal { try await $0.requestMusic(tracks) }
-    try await keepForLater(result.leftOut(of: tracks), generation: stamp)
+    try await keepForLater(
+      result.leftOut(of: tracks), limit: result.limit, retryAfter: result.retryAfter,
+      generation: stamp)
     return result
   }
-  /// Songs a queue limit left out of an Add (D-128): into the request
-  /// outbox, marked as requested, for the account that asked.
-  func keepForLater(_ tracks: [Track], generation stamp: Int) async throws {
+  /// The one place songs a queue limit left out of an Add sent at once are
+  /// kept (D-128): into the request outbox, marked as requested, for the
+  /// account that asked; and the outbox's next send is set from the answer
+  /// that left them out, so they are sent then, never sooner.
+  func keepForLater(
+    _ tracks: [Track], limit: String?, retryAfter: Int?, generation stamp: Int
+  ) async throws {
     guard !tracks.isEmpty, account.isCurrent(stamp), let store else { return }
     for track in tracks {
       try await RequestOutbox.add(track, to: store)
+      // Another account may have signed in during the write (Codex round
+      // 2): the marks are its own now.
+      guard account.isCurrent(stamp) else { return }
       requestedSongs.queued(track.id)
     }
+    await armRequestRetry(
+      limit: limit ?? "person_waiting", retryAfter: retryAfter, store: store, generation: stamp)
+  }
+  /// Songs were kept by a limit: the next send of the outbox is set, saved
+  /// beside it, and a wait for then started (D-128).
+  private func armRequestRetry(
+    limit: String?, retryAfter: Int?, store: LibraryStore, generation stamp: Int
+  ) async {
+    await loadRequestRetry(store, generation: stamp)
+    guard account.isCurrent(stamp) else { return }
+    let delay = requestRetry.kept(
+      limit: limit, retryAfter: retryAfter, at: Date().timeIntervalSince1970)
+    let saved = requestRetry
+    try? await RequestOutbox.saveRetry(saved, to: store)
+    guard account.isCurrent(stamp) else { return }
+    if let delay {
+      retryRequests(after: delay, generation: stamp)
+    } else {
+      requestRetryTask?.cancel()
+    }
+  }
+  /// The outbox's next send as saved with it, once per account: a relaunch
+  /// keeps waiting for it.
+  private func loadRequestRetry(_ store: LibraryStore, generation stamp: Int) async {
+    guard !requestRetryLoaded else { return }
+    let saved = await RequestOutbox.retry(store)
+    guard account.isCurrent(stamp), !requestRetryLoaded else { return }
+    requestRetry = saved
+    requestRetryLoaded = true
   }
   /// Sends the outbox again after `seconds`, unless the account changed
   /// meanwhile; one such wait at a time.
@@ -1351,8 +1391,16 @@ enum PlayOrigin: Hashable {
   /// the app's notice on every page (#245).
   func flushRequests() async {
     guard !flushingRequests, let store, let service, person != nil else { return }
-    flushingRequests = true
     let stamp = account.generation
+    await loadRequestRetry(store, generation: stamp)
+    guard account.isCurrent(stamp), !flushingRequests else { return }
+    // Songs a queue limit kept wait for their time (D-128): a refresh, a new
+    // Add or a relaunch before it sends nothing, and the wait is (re)started.
+    if let wait = requestRetry.wait(at: Date().timeIntervalSince1970) {
+      retryRequests(after: wait, generation: stamp)
+      return
+    }
+    flushingRequests = true
     var drained = RequestOutbox.Report()
     var titles: [String: String] = [:]
     defer {
@@ -1403,19 +1451,20 @@ enum PlayOrigin: Hashable {
       case .done:
         if await RequestOutbox.pending(store).isEmpty {
           // Nothing kept by a limit any more.
-          _ = requestRetry.passed(limit: nil, retryAfter: nil, at: Date().timeIntervalSince1970)
-          requestRetryTask?.cancel()
+          if requestRetry != RequestRetry() {
+            requestRetry.cleared()
+            requestRetryTask?.cancel()
+            try? await RequestOutbox.saveRetry(RequestRetry(), to: store)
+            guard account.isCurrent(stamp) else { return }
+          }
           await refreshServerRequests()
           return
         }
       case .limited:
         // Songs a queue limit kept (D-128): sent again when RequestRetry
         // says, for this account only.
-        if let delay = requestRetry.passed(
-          limit: report.limit, retryAfter: report.retryAfter, at: Date().timeIntervalSince1970)
-        {
-          retryRequests(after: delay, generation: stamp)
-        }
+        await armRequestRetry(
+          limit: report.limit, retryAfter: report.retryAfter, store: store, generation: stamp)
         return
       case .offline, .stale:
         return
@@ -2347,6 +2396,7 @@ enum PlayOrigin: Hashable {
     // Songs a queue limit kept are this account's: no wait sends them later.
     requestRetryTask?.cancel()
     requestRetry = RequestRetry()
+    requestRetryLoaded = false
     toldWaiting = 0
     similarIDs = []
     watch?.disconnect()

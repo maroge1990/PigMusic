@@ -116,9 +116,9 @@ struct RequestRetryTests {
   @Test func theRateWaitsForTheServersRetryAfter() {
     var retry = RequestRetry()
     #expect(RequestRetry.stopsPass("rate"))
-    #expect(retry.passed(limit: "rate", retryAfter: 42, at: 0) == 42)
-    #expect(retry.passed(limit: "rate", retryAfter: nil, at: 50) == 60)
-    #expect(retry.passed(limit: "rate", retryAfter: 0, at: 60) == 1)
+    #expect(retry.kept(limit: "rate", retryAfter: 42, at: 0) == 42)
+    #expect(retry.kept(limit: "rate", retryAfter: nil, at: 50) == 60)
+    #expect(retry.kept(limit: "rate", retryAfter: 0, at: 60) == 1)
     // A queue change doesn't free the rate.
     #expect(!retry.passOnQueueChange(at: 1000))
   }
@@ -127,7 +127,7 @@ struct RequestRetryTests {
     var retry = RequestRetry()
     #expect(!RequestRetry.stopsPass("person_waiting"))
     let delays = (0..<7).map { i in
-      retry.passed(limit: "person_waiting", retryAfter: nil, at: Double(i))
+      retry.kept(limit: "person_waiting", retryAfter: nil, at: Double(i))
     }
     #expect(delays == [60, 120, 240, 480, 900, 900, 900])
     #expect(!retry.passOnQueueChange(at: 6 + 59))
@@ -136,10 +136,60 @@ struct RequestRetryTests {
 
   @Test func aPassThatKeptNothingForgetsItAll() {
     var retry = RequestRetry()
-    _ = retry.passed(limit: "household_waiting", retryAfter: nil, at: 0)
-    #expect(retry.passed(limit: nil, retryAfter: nil, at: 100) == nil)
+    _ = retry.kept(limit: "household_waiting", retryAfter: nil, at: 0)
+    #expect(retry.kept(limit: nil, retryAfter: nil, at: 100) == nil)
     #expect(retry == RequestRetry())
     #expect(!retry.passOnQueueChange(at: 1000))
-    #expect(retry.passed(limit: "household_waiting", retryAfter: nil, at: 200) == 60)
+    #expect(retry.kept(limit: "household_waiting", retryAfter: nil, at: 200) == 60)
+  }
+
+  /// Codex round 2: an Add sent at once that a limit refused saved its songs
+  /// with nothing to send them later. Keeping them arms the one time every
+  /// send consults.
+  @Test func aLimitedAddIsSentWhenTheWindowOpensAndNotBefore() {
+    var retry = RequestRetry()
+    #expect(retry.wait(at: 0) == nil)
+    #expect(retry.kept(limit: "rate", retryAfter: 30, at: 100) == 30)
+    // A refresh before then doesn't send it again.
+    #expect(retry.wait(at: 100) == 30)
+    #expect(retry.wait(at: 129.5) == 0.5)
+    // At the time, it is sent.
+    #expect(retry.wait(at: 130) == nil)
+  }
+
+  @Test func theTimeOutlivesARelaunch() throws {
+    var retry = RequestRetry()
+    _ = retry.kept(limit: "person_waiting", retryAfter: nil, at: 1000)
+    let saved = try JSONEncoder().encode(retry)
+    let relaunched = try JSONDecoder().decode(RequestRetry.self, from: saved)
+    #expect(relaunched == retry)
+    #expect(relaunched.wait(at: 1030) == 30)
+    #expect(relaunched.wait(at: 1060) == nil)
+  }
+
+  @Test func aQueueChangeOpensAWaitingLimitEarlyButNotTheRate() {
+    var retry = RequestRetry()
+    _ = retry.kept(limit: "household_waiting", retryAfter: nil, at: 0)
+    _ = retry.kept(limit: "household_waiting", retryAfter: nil, at: 60)
+    #expect(retry.wait(at: 120) == 60)
+    #expect(retry.passOnQueueChange(at: 120))
+    retry.openNow()
+    #expect(retry.wait(at: 120) == nil)
+    var rate = RequestRetry()
+    _ = rate.kept(limit: "rate", retryAfter: 500, at: 0)
+    #expect(!rate.passOnQueueChange(at: 120))
+    rate.cleared()
+    #expect(rate == RequestRetry())
+  }
+}
+
+/// D-128: a quality choice whose replacements didn't all fit says so.
+struct QualityDeferredTests {
+  @Test func theSentence() {
+    #expect(QualityNotice.deferred(0) == nil)
+    #expect(
+      QualityNotice.deferred(3)
+        == "3 songs will change quality later: too many songs are waiting. Choose this quality again once some are added."
+    )
   }
 }

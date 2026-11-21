@@ -70,6 +70,16 @@ import PigStore
   }
 
   static let key = "request-outbox"
+  static let retryKey = "request-outbox-retry"
+
+  /// When the outbox may be sent again after a queue limit kept songs
+  /// (D-128), kept beside it so it outlives the app.
+  public static func retry(_ store: LibraryStore) async -> RequestRetry {
+    ((try? await store.cached(retryKey, as: RequestRetry.self)) ?? nil) ?? RequestRetry()
+  }
+  public static func saveRetry(_ retry: RequestRetry, to store: LibraryStore) async throws {
+    try await store.updateCached(retryKey, as: RequestRetry.self) { $0 = retry }
+  }
 
   /// The requests waiting, oldest first.
   public static func pending(_ store: LibraryStore) async -> [Track] {

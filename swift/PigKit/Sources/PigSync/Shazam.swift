@@ -28,6 +28,9 @@ public struct ShazamRequestOutcome: Sendable, Hashable {
   /// and send again, and their Shazam ids.
   public var leftOut: [Track] = []
   public var leftOutIds: [String] = []
+  /// The limit that left them out, and for the rate when one more fits.
+  public var limit: String?
+  public var retryAfter: Int?
   public var downloadsEnabled = true
   public init() {}
 }
@@ -90,6 +93,10 @@ public enum ShazamRequests {
       for position in result.overLimit where (0..<batch.count).contains(position) {
         outcome.leftOut.append(tracks[batch.lowerBound + position])
         outcome.leftOutIds += shazamIds[batch.lowerBound + position]
+      }
+      if !result.overLimit.isEmpty {
+        outcome.limit = result.limit
+        outcome.retryAfter = result.retryAfter
       }
     }
     return outcome

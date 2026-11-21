@@ -1448,7 +1448,8 @@ private struct ShazamInboxView: View {
       }
       // Songs a queue limit left out go to the request outbox, to be sent
       // again, as from any other Add (D-128).
-      try await model.keepForLater(outcome.leftOut, generation: stamp)
+      try await model.keepForLater(
+        outcome.leftOut, limit: outcome.limit, retryAfter: outcome.retryAfter, generation: stamp)
       // Marked only when the server took it (#259) or the outbox keeps it:
       // an unmatched song, one excluded or one left paused stays missing,
       // so it can be added again.
