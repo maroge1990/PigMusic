@@ -609,8 +609,11 @@ public actor NativeService: LibrarySource {
     case .unauthorized: throw NativeFailure.authentication
     // Busy or restarting: the request outbox keeps it for the next try
     // (Codex round 1 on #206). A busy write the server can't confirm and a
-    // server error say so (#239).
-    case .tooManyRequests: throw ServerBusy()
+    // server error say so (#239). Every song past a queue limit (D-128) is
+    // answered so: those songs are kept to send again, as any left out.
+    case .tooManyRequests(let answer):
+      if (try? answer.body.json.code) == "queue_limit" { return .limited(tracks.count) }
+      throw ServerBusy()
     case .serviceUnavailable(let answer):
       throw ServerAnswer.unconfirmed(code: try? answer.body.json.code) ?? ServerBusy()
     case .undocumented(let status, let payload) where status >= 500:

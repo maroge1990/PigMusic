@@ -72,6 +72,30 @@ private struct Offline: Error {}
     #expect(await RequestOutbox.pending(store).isEmpty)
   }
 
+  /// D-128: a song a queue limit left out stays in the outbox, as do the
+  /// songs after it, and the notice says how many wait to be sent.
+  @Test func aSongPastAQueueLimitIsKeptToSendAgain() async throws {
+    let (store, root) = try makeStore()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try await RequestOutbox.add(first, to: store)
+    try await RequestOutbox.add(second, to: store)
+    var sent: [String] = []
+    let report = try await RequestOutbox.send(store: store, isCurrent: { true }) { tracks in
+      sent.append(tracks[0].id)
+      return .limited(1)
+    }
+    #expect(sent == ["first"])
+    #expect(report.stop == .offline && report.waiting == 2)
+    #expect(report.skipped.isEmpty && report.requested.isEmpty)
+    #expect(await RequestOutbox.pending(store).map(\.id) == ["first", "second"])
+    #expect(
+      report.notice(titles: [:]) == "2 songs waiting to be sent. PigMusic will try again later.")
+    // Once there is room both go, and nothing waits.
+    let later = try await RequestOutbox.send(store: store, isCurrent: { true }) { _ in created }
+    #expect(later.requested == ["first", "second"] && later.waiting == 0)
+    #expect(await RequestOutbox.pending(store).isEmpty)
+  }
+
   @Test func aLeftOutOrRefusedSongIsExplained() {
     var report = RequestOutbox.Report()
     #expect(report.notice(titles: [:]) == nil)

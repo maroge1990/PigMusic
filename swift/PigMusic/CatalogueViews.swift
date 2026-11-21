@@ -731,7 +731,9 @@ struct CatalogueReleaseView: View {
     requestUnconfirmed = false
     defer { requesting = false }
     do {
-      _ = try await model.performPersonal { try await $0.requestMusic(tracks) }
+      let result = try await model.requestNow(tracks)
+      // Songs kept to send again are said (D-128).
+      if result.leftOut > 0 { model.notify(result.sentence) }
       await load()
     } catch is CancellationError {} catch NativeFailure.busyUnconfirmed {
       requestUnconfirmed = true

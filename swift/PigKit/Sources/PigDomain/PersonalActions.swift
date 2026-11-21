@@ -34,13 +34,16 @@ public struct AcquisitionResult: Codable, Sendable {
   /// The server requests those songs were left paused under (#276).
   public let pausedIds: [String]
   /// What happened to each song sent, in order (Codex round 1 on batch K):
-  /// created, existing, added, paused, excluded or in_library. Empty from
-  /// an older server.
+  /// created, existing, added, paused, excluded, in_library or over_limit.
+  /// Empty from an older server.
   public let outcomes: [String]
+  /// Songs a queue limit left out (D-128): nothing was made for them, so
+  /// they are sent again later.
+  public let leftOut: Int
   public let downloadsEnabled: Bool
   public init(
     created: Int, existing: Int, skipped: Int, paused: Int = 0, pausedIds: [String] = [],
-    outcomes: [String] = [], downloadsEnabled: Bool
+    outcomes: [String] = [], leftOut: Int = 0, downloadsEnabled: Bool
   ) {
     self.created = created
     self.existing = existing
@@ -48,10 +51,11 @@ public struct AcquisitionResult: Codable, Sendable {
     self.paused = paused
     self.pausedIds = pausedIds
     self.outcomes = outcomes
+    self.leftOut = leftOut
     self.downloadsEnabled = downloadsEnabled
   }
   private enum CodingKeys: String, CodingKey {
-    case created, existing, skipped, paused, pausedIds, outcomes, downloadsEnabled
+    case created, existing, skipped, paused, pausedIds, outcomes, leftOut, downloadsEnabled
   }
   public init(from decoder: any Decoder) throws {
     let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -62,7 +66,43 @@ public struct AcquisitionResult: Codable, Sendable {
     paused = try values.decodeIfPresent(Int.self, forKey: .paused) ?? 0
     pausedIds = try values.decodeIfPresent([String].self, forKey: .pausedIds) ?? []
     outcomes = try values.decodeIfPresent([String].self, forKey: .outcomes) ?? []
+    leftOut = try values.decodeIfPresent(Int.self, forKey: .leftOut) ?? 0
     downloadsEnabled = try values.decode(Bool.self, forKey: .downloadsEnabled)
+  }
+  /// What the server's busy answer `queue_limit` stands for (D-128): every
+  /// one of the `count` songs sent was left out, and nothing was made.
+  public static func limited(_ count: Int) -> AcquisitionResult {
+    AcquisitionResult(
+      created: 0, existing: 0, skipped: 0,
+      outcomes: Array(repeating: "over_limit", count: count), leftOut: count,
+      downloadsEnabled: true)
+  }
+  /// The songs of `sent` (in the order sent) a queue limit left out, to be
+  /// kept and sent again. From an answer without one outcome per song,
+  /// none can be told apart: none.
+  public func leftOut<Song>(of sent: [Song]) -> [Song] {
+    guard leftOut > 0, outcomes.count == sent.count else { return [] }
+    return zip(sent, outcomes).filter { $0.1 == "over_limit" }.map(\.0)
+  }
+  /// What the request outbox does with its one song's answer (D-128).
+  public enum OutboxAnswer: Equatable, Sendable {
+    /// Being added, or already was.
+    case requested
+    /// The person had paused it: it stays paused (#264).
+    case paused
+    /// Left out for good (excluded, or already yours).
+    case skipped
+    /// A queue limit left it out: it stays in the outbox to send again.
+    case kept
+  }
+  public var outboxAnswer: OutboxAnswer {
+    if leftOut > 0 { return .kept }
+    if created + existing > 0 { return .requested }
+    return paused > 0 ? .paused : .skipped
+  }
+  /// Songs kept to send again later (D-128). Wording awaiting the owner.
+  public static func waitingNotice(_ count: Int) -> String {
+    "\(count) song\(count == 1 ? "" : "s") waiting to be sent. PigMusic will try again later."
   }
   /// Nothing new was asked for and a paused song stays paused (#264): the
   /// person is told where to resume it, never that it was left out.
@@ -100,6 +140,8 @@ extension AcquisitionResult {
       skipped > 0 ? "Skipped \(songs(skipped))." : nil,
       // The one sentence for it, as on the web (DESIGN.md's table).
       paused > 0 ? Self.pausedNotice : nil,
+      // Kept to send again (D-128).
+      leftOut > 0 ? Self.waitingNotice(leftOut) : nil,
     ].compactMap { $0 }
     return parts.isEmpty ? "Already in your library." : parts.joined(separator: " ")
   }
@@ -113,6 +155,7 @@ extension AcquisitionResult {
       existing: results.reduce(0) { $0 + $1.existing },
       skipped: results.reduce(0) { $0 + $1.skipped },
       paused: results.reduce(0) { $0 + $1.paused },
+      leftOut: results.reduce(0) { $0 + $1.leftOut },
       downloadsEnabled: results.allSatisfy(\.downloadsEnabled))
   }
   /// A playlist's Add of its missing songs in one line: household copies
@@ -129,6 +172,8 @@ extension AcquisitionResult {
   /// downloads are off, or where to resume paused songs (alone or beside
   /// added ones).
   public var menuNotice: String? {
+    // Songs kept to send again are always said (D-128).
+    if leftOut > 0 { return sentence }
     let waiting = created + existing > 0
     guard paused > 0 else { return downloadsEnabled ? nil : Self.downloadsOffNotice }
     // Where to resume is always said; downloads being off too when other
@@ -145,9 +190,9 @@ extension AcquisitionResult {
 /// the paused sentence when a song stayed paused (#264, Codex round 1 on
 /// batch D: it is never hidden by the rest).
 public enum RequestNotice {
-  public static func text(refused: Int, reason: String?, excluded: String?, paused: Bool)
-    -> String?
-  {
+  public static func text(
+    refused: Int, reason: String?, excluded: String?, paused: Bool, waiting: Int = 0
+  ) -> String? {
     var parts: [String] = []
     if let reason {
       parts.append(refused > 1 ? "Couldn't add \(refused) songs: \(reason)" : reason)
@@ -155,6 +200,8 @@ public enum RequestNotice {
       parts.append("Couldn't add \(excluded): it's excluded from this server's downloads.")
     }
     if paused { parts.append(AcquisitionResult.pausedNotice) }
+    // Kept in the outbox by a queue limit (D-128).
+    if waiting > 0 { parts.append(AcquisitionResult.waitingNotice(waiting)) }
     return parts.isEmpty ? nil : parts.joined(separator: " ")
   }
 }

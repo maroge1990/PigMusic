@@ -1247,6 +1247,8 @@ enum PlayOrigin: Hashable {
   /// those waiting for their Undo they show Requested at once.
   var requestedSongs = RequestMarks()
   @ObservationIgnored private var flushingRequests = false
+  /// How many songs a queue limit kept in the outbox when last told (D-128).
+  @ObservationIgnored private var toldWaiting = 0
   static func undoKey(request id: String) -> String { "request:" + id }
   static func undoKey(cancelRequest id: String) -> String { "request-cancel:" + id }
   func isRequested(_ id: String) -> Bool {
@@ -1309,6 +1311,20 @@ enum PlayOrigin: Hashable {
       return true
     }
   }
+  /// Asks the server for `tracks` now. Songs a queue limit left out join the
+  /// request outbox, marked as requested, and are sent again with it later
+  /// (D-128): never dropped.
+  func requestNow(_ tracks: [Track]) async throws -> AcquisitionResult {
+    let stamp = account.generation
+    let result = try await performPersonal { try await $0.requestMusic(tracks) }
+    let kept = result.leftOut(of: tracks)
+    guard !kept.isEmpty, account.isCurrent(stamp), let store else { return result }
+    for track in kept {
+      try await RequestOutbox.add(track, to: store)
+      requestedSongs.queued(track.id)
+    }
+    return result
+  }
   /// Sends the request outbox; a failure to reach the server keeps it for
   /// the next refresh. Songs left out or refused say so once per drain, in
   /// the app's notice on every page (#245).
@@ -1320,6 +1336,11 @@ enum PlayOrigin: Hashable {
     var titles: [String: String] = [:]
     defer {
       flushingRequests = false
+      // Songs a queue limit keeps here are told once, not on every
+      // refresh, until their number changes (D-128).
+      let waiting = drained.waiting
+      if waiting == toldWaiting { drained.waiting = 0 }
+      if account.isCurrent(stamp) { toldWaiting = waiting }
       // Codex round 2: a song left out or refused says so.
       if account.isCurrent(stamp), let notice = drained.notice(titles: titles) { notify(notice) }
     }
@@ -2177,7 +2198,7 @@ enum PlayOrigin: Hashable {
           AcquisitionResult(created: added, existing: 0, skipped: 0, downloadsEnabled: true))
       }
       if !missing.isEmpty {
-        results.append(try await performPersonal { try await $0.requestMusic(missing) })
+        results.append(try await requestNow(missing))
       }
       // The whole answer, paused songs included (Codex round 2 on batch D).
       if let notice = AcquisitionResult.combined(results).menuNotice {

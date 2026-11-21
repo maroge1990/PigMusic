@@ -31,6 +31,9 @@ import PigStore
     /// Refused, with the server's reason.
     public var refused: [String] = []
     public var reason: String?
+    /// Songs still in the outbox when a queue limit stopped the send
+    /// (D-128): kept, to be sent again later.
+    public var waiting = 0
     public var downloadsEnabled = true
     public var stop: Stop = .done
     public init() {}
@@ -43,6 +46,7 @@ import PigStore
       pausedRequests.merge(later.pausedRequests) { $0 + $1 }
       refused += later.refused
       reason = later.reason ?? reason
+      waiting = later.waiting
       downloadsEnabled = downloadsEnabled && later.downloadsEnabled
       stop = later.stop
     }
@@ -52,7 +56,8 @@ import PigStore
     public func notice(titles: [String: String]) -> String? {
       RequestNotice.text(
         refused: refused.count, reason: reason,
-        excluded: skipped.first.map { titles[$0] ?? "that song" }, paused: !paused.isEmpty)
+        excluded: skipped.first.map { titles[$0] ?? "that song" }, paused: !paused.isEmpty,
+        waiting: waiting)
     }
   }
 
@@ -93,15 +98,24 @@ import PigStore
           report.stop = .stale
           return report
         }
+        let answer = result.outboxAnswer
+        if answer == .kept {
+          // A queue limit left it out (D-128): it stays, as do the rest,
+          // for the next send, never dropped.
+          report.waiting = await pending(store).count
+          report.stop = .offline
+          return report
+        }
         try await remove(track.id, from: store)
         report.downloadsEnabled = report.downloadsEnabled && result.downloadsEnabled
-        if result.created + result.existing > 0 {
+        switch answer {
+        case .requested:
           report.requested.append(track.id)
-        } else if result.paused > 0 {
+        case .paused:
           // The person paused it before: it stays paused (#264), not left out.
           report.paused.append(track.id)
           report.pausedRequests[track.id] = result.pausedIds
-        } else {
+        case .skipped, .kept:
           report.skipped.append(track.id)
         }
       } catch NativeFailure.authentication {
