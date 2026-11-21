@@ -91,6 +91,13 @@ type Options = {
   failPopularity?: boolean;
   /** Held until the test opens it: the library album's read. */
   libraryAlbum?: Promise<void>;
+  /** Held until the test opens it: every library lookup. */
+  lookup?: Promise<void>;
+  /** How many recommended albums besides Album one. */
+  more?: number;
+  /** Held until the test opens it: the change feed's answer, then its
+   * `queue` event with these requests. */
+  feed?: { open: Promise<void>; items: () => unknown[] };
   /** Held until the test opens it: Start radio's first answer. */
   radio?: Promise<void>;
   /** Titles the library lookup says are yours. */
@@ -106,6 +113,9 @@ type Options = {
 async function home(target: Page | BrowserContext, options: Options = {}) {
   const added: string[][] = [];
   const listed: string[][] = [];
+  // Further recommended albums: "Album k" (rg-k), its one edition rel-k
+  // with "Song k.1" and "Song k.2" (recordings rec-rel-k-1 and -2).
+  const more = Array.from({ length: options.more ?? 0 }, (_, i) => i + 2);
   // Where the server has each song since the test's Adds.
   const server = {
     requested: new Set<string>(),
@@ -135,6 +145,13 @@ async function home(target: Page | BrowserContext, options: Options = {}) {
               artist_id: "mb-someone",
               kind: "album",
             },
+            ...more.map((k) => ({
+              id: `rg-${k}`,
+              name: `Album ${k}`,
+              artist: "Someone",
+              artist_id: "mb-someone",
+              kind: "album",
+            })),
           ],
           songs: [],
         },
@@ -230,7 +247,8 @@ async function home(target: Page | BrowserContext, options: Options = {}) {
                 tracks: [studio("First song", 1), studio("Second song", 2)],
               },
             }),
-    "/v1/library/lookup": (route) => {
+    "/v1/library/lookup": async (route) => {
+      await options.lookup;
       const asked = JSON.parse(route.request().postData() || "{}").songs as {
         title: string;
       }[];
@@ -316,6 +334,39 @@ async function home(target: Page | BrowserContext, options: Options = {}) {
           display_name: who() === "u1" ? "Pat" : "Sam",
           role: "member",
           session_id: who() === "u1" ? "session-1" : "session-2",
+        },
+      });
+  }
+  if (options.feed) {
+    const feed = options.feed;
+    answers["/v1/events"] = async (route) => {
+      await feed.open;
+      await route
+        .fulfill({
+          contentType: "text/event-stream",
+          body: `retry: 600000\nevent: queue\ndata: ${JSON.stringify({ items: feed.items() })}\n\n`,
+        })
+        .catch(() => {});
+    };
+  }
+  for (const k of more) {
+    answers[`/v1/catalogue/groups/rg-${k}/editions`] = (route) =>
+      route.fulfill({
+        json: {
+          total: 1,
+          editions: [edition(`rel-${k}`)],
+          recommended_id: `rel-${k}`,
+        },
+      });
+    answers[`/v1/catalogue/releases/rel-${k}`] = (route) =>
+      route.fulfill({
+        json: {
+          id: `rel-${k}`,
+          title: `Album ${k}`,
+          artist: "Someone",
+          date: "2025",
+          description: "",
+          tracks: [1, 2].map((n) => song(`rel-${k}`, `Song ${k}.${n}`, n)),
         },
       });
   }
@@ -876,14 +927,141 @@ test("a cancelled add shows on the card, and Add is offered again", async ({
   await page.goto("/#/home");
   await choose(page, "Add to library");
   await expect(card(page).getByRole("img", { name: "Adding" })).toBeVisible();
-  // Cancelled in Downloads: the requests change.
+  // The change feed lists the two new requests, then (cancelled in
+  // Downloads) neither.
+  await sendQueue(page, [job("j1", 1, "waiting"), job("j2", 2, "waiting")]);
+  await page.waitForTimeout(800);
   server.requested.clear();
-  await page.evaluate(() =>
-    window.dispatchEvent(new Event("music-requests-changed")),
-  );
+  await sendQueue(page, []);
   await expect(card(page).getByRole("img", { name: "Adding" })).toHaveCount(0);
   await dots(page).click();
   await expect(addItem(page)).toBeEnabled();
+});
+
+/** A request in the change feed for Album one's song n (or another
+ * album's, by its release). */
+const job = (
+  id: string,
+  n: number,
+  status: string,
+  release = "rel-studio",
+) => ({
+  id,
+  title:
+    release === "rel-studio" ? ["First song", "Second song"][n - 1] : `Song`,
+  musicbrainz_release_id: release,
+  musicbrainz_recording_id: `rec-${release}-${n}`,
+  status,
+  received_bytes: 0,
+});
+/** The change feed sends this list of requests, relayed as the shell
+ * relays it: the list, then the plain "requests changed". */
+const sendQueue = (page: Page, items: unknown[]) =>
+  page.evaluate((items) => {
+    window.dispatchEvent(new CustomEvent("music-queue", { detail: { items } }));
+    window.dispatchEvent(new Event("music-requests-changed"));
+  }, items);
+
+// Codex round 2: every queue change, download progress included, made
+// every card that had been used read its album again.
+test("only a card whose own songs' requests changed reads its album again", async ({
+  page,
+}) => {
+  await home(page, { more: 2 });
+  await page.goto("/#/home");
+  // All three cards have looked their albums up (Play on each).
+  for (const name of ["Album one", "Album 2", "Album 3"]) {
+    await page
+      .getByRole("button", { name: `More options for ${name}` })
+      .click();
+    await page
+      .getByRole("menu", { name })
+      .getByRole("menuitem", { name: "Play", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: `More options for ${name}` }),
+    ).not.toHaveAttribute("aria-busy", "true");
+  }
+  const reads: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (/\/catalogue\/(groups|releases)\/|\/library\/lookup/.test(path))
+      reads.push(path);
+  });
+  // Someone else's song downloading, then its progress: no card reads.
+  const other = (bytes: number) => ({
+    ...job("x1", 1, "downloading", "rel-other"),
+    received_bytes: bytes,
+  });
+  await sendQueue(page, [other(10)]);
+  await sendQueue(page, [other(20)]);
+  await page.waitForTimeout(1200);
+  expect(reads).toEqual([]);
+  // A burst of changes to Album 2's songs: Album 2 alone reads, once.
+  const two = (status: string, bytes = 0) => ({
+    ...job("j2", 1, status, "rel-2"),
+    received_bytes: bytes,
+  });
+  await sendQueue(page, [other(30), two("waiting")]);
+  await sendQueue(page, [other(40), two("searching")]);
+  await sendQueue(page, [other(50), two("downloading", 5)]);
+  await expect
+    .poll(() => reads, { timeout: 3000 })
+    .toEqual([
+      "/api/v1/catalogue/groups/rg-2/editions",
+      "/api/v1/catalogue/releases/rel-2",
+      "/api/v1/library/lookup",
+    ]);
+  // Its download progressing changes nothing more.
+  await sendQueue(page, [other(60), two("downloading", 50)]);
+  await sendQueue(page, [other(70), two("downloading", 90)]);
+  await page.waitForTimeout(1200);
+  expect(reads).toHaveLength(3);
+});
+
+// Codex round 2: a change that came while the first lookup was on its way
+// was missed, and the lookup's older answer kept.
+test("a request change during a card's first lookup is read again before it shows", async ({
+  page,
+}) => {
+  const lookup = gate();
+  const { server } = await home(page, { lookup: lookup.shut });
+  await page.goto("/#/home");
+  // Already being added before the card was first used.
+  server.requested.add("First song");
+  server.requested.add("Second song");
+  await sendQueue(page, [job("j1", 1, "waiting"), job("j2", 2, "waiting")]);
+  // The release has been read (both on their way); the library lookup,
+  // the lookup's last step, waits.
+  const asked = page.waitForRequest("**/api/v1/library/lookup");
+  await choose(page, "Play");
+  await asked;
+  // Meanwhile both are cancelled in Downloads, and the feed says so.
+  server.requested.clear();
+  await sendQueue(page, []);
+  await page.waitForTimeout(300);
+  lookup.open();
+  // The card reads again before it shows anything: nothing is being added.
+  await page.waitForTimeout(1500);
+  await expect(card(page).getByRole("img", { name: "Adding" })).toHaveCount(0);
+  await dots(page).click();
+  await expect(addItem(page)).toBeEnabled();
+});
+
+test("the change feed's queue event reaches the cards", async ({ page }) => {
+  const feed = gate();
+  let items: unknown[] = [];
+  const { server } = await home(page, {
+    feed: { open: feed.shut, items: () => items },
+  });
+  await page.goto("/#/home");
+  await choose(page, "Add to library");
+  await expect(card(page).getByRole("img", { name: "Adding" })).toBeVisible();
+  // Cancelled elsewhere; the feed then says so.
+  server.requested.clear();
+  items = [{ ...job("j1", 1, "cancelled") }];
+  feed.open();
+  await expect(card(page).getByRole("img", { name: "Adding" })).toHaveCount(0);
 });
 
 // Codex round 2: replacing choices count from the gesture, whichever read

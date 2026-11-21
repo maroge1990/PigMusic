@@ -2,6 +2,7 @@ import { drainPending, reopenDeferred } from "./deferred";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { setSessionId } from "./sessionId";
+import { rememberQueue } from "./queueFeed";
 import { notifyError } from "./notices";
 import { openSessionChannel } from "./sessionChannel";
 import { NoticeArea } from "./Notice";
@@ -478,7 +479,24 @@ function useServerEvents(active: boolean, admin: boolean) {
         admin ? "/api/v1/events?admin=true" : "/api/v1/events",
       );
       events.addEventListener("revision", changed);
-      events.addEventListener("queue", requests);
+      events.addEventListener("queue", (event) => {
+        // The list itself goes to the catalogue cards (queueFeed.ts): each
+        // reads its album again only when its own songs changed (#267).
+        try {
+          const detail = JSON.parse((event as MessageEvent).data);
+          if (Array.isArray(detail?.items)) {
+            rememberQueue(detail.items);
+            window.dispatchEvent(
+              new CustomEvent("music-queue", {
+                detail: { items: detail.items },
+              }),
+            );
+          }
+        } catch {
+          /* a malformed message waits for the next one */
+        }
+        requests();
+      });
       events.addEventListener("revoked", () =>
         window.dispatchEvent(new Event("music-auth-required")),
       );
