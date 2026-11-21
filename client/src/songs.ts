@@ -145,9 +145,17 @@ export type AddResult = {
   skipped: number;
   /** Songs you paused: Add leaves them paused (#264). */
   paused?: number;
-  /** One per song sent, in order (a song a limit left out is `excluded`). */
-  outcomes?: string[];
+  /** What happened to each song, in the order sent (one a queue limit
+   * left out is `excluded`, its position in `over_limit`). */
+  outcomes?: AddOutcome[];
 } & LeftOut;
+export type AddOutcome =
+  | "created"
+  | "existing"
+  | "added"
+  | "paused"
+  | "excluded"
+  | "in_library";
 /** An Add that met a song you paused: only Downloads resumes it (#264). */
 export const PAUSED_NOTICE = "Paused. Resume it in Downloads.";
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Play, Shuffle } from "lucide-react";
 import { currentSession } from "./api";
+import { chooseReplace } from "./playChoice";
 import { usePlayer } from "./Player";
 import { shuffled } from "./shuffle";
 import { fromTrack } from "./songs";
@@ -28,6 +29,9 @@ export function PlayLibrary({ total }: { total: number }) {
     setBusy(true);
     setError("");
     const generation = currentSession();
+    // A replacing choice, counted from the tap (playChoice.ts, #267).
+    const newest = chooseReplace();
+    const stillMine = () => currentSession() === generation && newest();
     try {
       if (shuffle) {
         const starts = new Set<number>();
@@ -35,7 +39,7 @@ export function PlayLibrary({ total }: { total: number }) {
         while (starts.size < Math.min(SAMPLE_PAGES, windows))
           starts.add(Math.floor(Math.random() * windows) * SAMPLE_SIZE);
         const pages = await Promise.all([...starts].map(libraryPage));
-        if (currentSession() !== generation) return;
+        if (!stillMine()) return;
         const queue = shuffled(pages.flatMap(playable));
         if (queue.length) player.play(queue, 0);
         return;
@@ -43,10 +47,10 @@ export function PlayLibrary({ total }: { total: number }) {
       // One reader for the first songs and every refill (Codex round 2).
       const read = librarySource();
       const queue = await read();
-      if (currentSession() !== generation) return;
+      if (!stillMine()) return;
       if (queue.length) player.play(queue, 0, read);
     } catch (e) {
-      if (currentSession() === generation) setError((e as Error).message);
+      if (stillMine()) setError((e as Error).message);
     } finally {
       setBusy(false);
     }

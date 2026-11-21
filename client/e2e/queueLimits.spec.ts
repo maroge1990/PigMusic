@@ -81,7 +81,8 @@ async function albumPage(page: Page, add: (route: Route) => unknown) {
   await page
     .getByRole("button", { name: `Find more by ${artist.name}` })
     .click();
-  await page.getByRole("button", { name: /New Night/ }).click();
+  // The card itself, not its menu (D-129).
+  await page.getByRole("button", { name: /^New Night/ }).click();
   await page
     .getByRole("button", { name: "Add to library", exact: true })
     .click();

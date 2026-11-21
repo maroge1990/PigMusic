@@ -427,34 +427,28 @@ def test_members_can_stream_a_catalogue_song_by_its_recording(tmp_path, monkeypa
         assert missing.status_code == 422
 
 
-def test_relayed_remote_audio_uses_a_signed_link_bound_to_its_listener(
+def test_passed_through_remote_audio_uses_a_signed_link_bound_to_its_listener(
     tmp_path, monkeypatch
 ):
-    from server.remote import RemoteAudio
+    from starlette.responses import Response
 
-    async def no_direct_stream(self, client, track):
+    from server.remote import RemoteAudio
+    from server.youtube import YouTubeStream
+
+    async def no_direct_stream(self, client, track, speculative=False):
         raise ValueError("No unique remote recording matched this release.")
 
-    def find(self, source, track):
-        return {"source": source}
+    async def on_youtube(self, track, speculative=False):
+        return {"youtube": "fixture", "address": {}, "source": "youtube"}
 
-    def download(self, source, track, candidate):
-        assert source == "zvu4no"
-        self.directory.mkdir(parents=True, exist_ok=True)
-        path = self.directory / "fixture.mp3"
-        path.write_bytes(b"relayed audio bytes")
-        return path
+    async def response(self, method, range_header):
+        assert self.video_id == "fixture" and range_header == "bytes=0-6"
+        return Response(b"youtube", status_code=206)
 
     monkeypatch.setattr(RemoteAudio, "resolve", no_direct_stream)
-    monkeypatch.setattr(RemoteAudio, "find", find)
-    monkeypatch.setattr(RemoteAudio, "download", download)
+    monkeypatch.setattr(RemoteAudio, "on_youtube", on_youtube)
+    monkeypatch.setattr(YouTubeStream, "response", response)
     app, owner = protected(tmp_path, monkeypatch)
-    # The relays are out of instant listening during the YouTube trial
-    # (D-89); their serving code stays until #201 and is tested here.
-    from server.remote import RELAYED
-
-    app.state.look_ahead.remote_audio.relays = RELAYED
-    app.state.look_ahead.remote_audio.youtube = None
     code = app.state.auth.setup_code(owner, "member", "Member")
     app.state.auth.activate(code["code"], PASSWORD, "fixture")
     member = app.state.auth.login(
@@ -471,11 +465,11 @@ def test_relayed_remote_audio_uses_a_signed_link_bound_to_its_listener(
             headers={"Authorization": "Bearer " + member},
         )
         assert played.status_code == 200, played.text
-        assert played.json()["source"] == "Remote · zvu4no"
+        assert played.json()["source"] == "Remote · YouTube"
         url = played.json()["url"]
         assert url.startswith("/api/v1/remote-playback/streams/") and "sig=" in url
         response = client.get(url, headers={"Range": "bytes=0-6"})
-        assert response.status_code == 206 and response.content == b"relayed"
+        assert response.status_code == 206 and response.content == b"youtube"
         assert client.get(url + "x").status_code == 403
         bare = url.split("?")[0]
         assert client.get(bare).status_code == 401

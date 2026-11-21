@@ -164,26 +164,3 @@ def test_fanart_uses_artist_id_private_header_and_persistent_sanitised_photo(tmp
 
     asyncio.run(run())
     assert len(calls) == 2
-
-
-def test_artistgrid_collision_is_rejected_without_image_request(tmp_path):
-    store = Store(tmp_path)
-
-    async def run():
-        calls = []
-
-        def transport(request):
-            calls.append(request)
-            return httpx.Response(200, text="name,url\nA-B,x\nAB,y\n")
-
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(transport)
-        ) as client:
-            portraits = Portraits(
-                store, Catalogue(store), Artwork(store, Catalogue(store))
-            )
-            assert await portraits.get(client, "A-B") is None
-            assert await portraits.get(client, "A-B") is None
-        assert len(calls) == 1
-
-    asyncio.run(run())

@@ -399,7 +399,7 @@ def owned(api, artist, title):
 @scenario("remote")
 def remote(args, api, media, records):
     """Songs not in the household, from online sources as the phone streams
-    them: asked twice, so the second shows the server's relay cache."""
+    them: asked twice, so the second shows the server's kept matches."""
     for entry in args.song or REMOTE_SONGS:
         artist, title, album, seconds = (entry.split("|") + ["", "", "", "0"])[:4]
         if owned(api, artist, title):
@@ -415,7 +415,7 @@ def remote(args, api, media, records):
                 found = answer.json()
                 record["source"] = found.get("source")
                 url = found["url"]
-                record["route"] = "relayed" if url.startswith("/") else "direct"
+                record["route"] = "through server" if url.startswith("/") else "direct"
                 try:
                     record["open"] = timed_get(media, url)
                 except httpx.HTTPError as exc:

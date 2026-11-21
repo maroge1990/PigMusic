@@ -381,37 +381,25 @@ ON_YOUTUBE = {
 }
 
 
-def resolver_with(youtube, jiosaavn, tmp_path, asked=None):
+def resolver_with(youtube, jiosaavn, tmp_path):
     from server.remote import RemoteAudio
 
-    def relay_search(source, track):
-        asked.append(source) if asked is not None else None
-        return []
-
-    return RemoteAudio(
-        jiosaavn,
-        directory=tmp_path / "relay",
-        relay_search=relay_search,
-        youtube=youtube,
-        relays=(),
-    )
+    return RemoteAudio(jiosaavn, youtube=youtube)
 
 
 def test_a_tap_jiosaavn_misses_plays_from_youtube_through_the_server(
     tmp_path, monkeypatch
 ):
-    asked = []
     youtube = FakeYouTube([ON_YOUTUBE])
-    resolver = resolver_with(youtube, lambda *_: [], tmp_path, asked)
+    resolver = resolver_with(youtube, lambda *_: [], tmp_path)
 
     async def scenario():
         async with httpx.AsyncClient() as client:
             found = await resolver.stream(client, SONG, "member")
-            assert found["source"] == "youtube" and "relay" in found
-            stream = resolver.relay(found["relay"], "member")
+            assert found["source"] == "youtube" and "token" in found
+            stream = resolver.streamed(found["token"], "member")
             assert isinstance(stream, YouTubeStream) and stream.video_id == VIDEO
-            assert resolver.relay(found["relay"], "someone else") is None
-            assert asked == []  # FreeMp3Cloud and zvu4no are not asked (D-89).
+            assert resolver.streamed(found["token"], "someone else") is None
             # A wrong song on YouTube is no match: the shared song rule decides.
             youtube.songs_found = [{**ON_YOUTUBE, "title": "Song (Live)"}]
             with pytest.raises(ValueError, match="No source has"):
@@ -520,7 +508,6 @@ def test_a_tap_through_the_api_streams_youtubes_bytes_by_range(tmp_path, monkeyp
     remote = app.state.look_ahead.remote_audio
     remote.search = lambda *_: []
     remote.youtube = FakeYouTube([ON_YOUTUBE])
-    assert remote.relays == ()  # FreeMp3Cloud and zvu4no out of instant (D-89).
     token = app.state.auth.login("mark", PASSWORD, "device", "phone", "ios", "x")
     with TestClient(
         app,
@@ -852,3 +839,422 @@ def test_the_reason_given_agrees_with_the_song_rule():
         for c in candidates:
             reason = why(track, c)
             assert (reason == "matched") == acceptable(track, c), (track, c, reason)
+
+
+def issuing(resolver):
+    """`stream` with the lookup already answered by YouTube."""
+
+    async def shared(client, track):
+        return {"youtube": VIDEO, "address": address(), "source": "youtube"}
+
+    resolver.shared = shared
+    return lambda user: asyncio.run(resolver.stream(None, SONG, user))["token"]
+
+
+def test_stream_tokens_drop_only_the_expired_and_stay_within_their_caps(
+    tmp_path, monkeypatch
+):
+    """Codex, #201 round 1 (medium): each YouTube token rebuilt the whole
+    token map, which had no cap. Expired tokens now go from the front only,
+    and each person, and everyone together, keep at most a fixed number:
+    when full, the oldest goes, and only its owner's."""
+    from server import remote
+
+    monkeypatch.setattr(remote, "STREAMS_PER_PERSON", 3)
+    monkeypatch.setattr(remote, "STREAMS", 5)
+    resolver = resolver_with(FakeYouTube([]), lambda *_: [], tmp_path)
+    issue = issuing(resolver)
+    mark = [issue("mark") for _ in range(4)]
+    assert resolver.streamed(mark[0], "mark") is None  # Mark's oldest went.
+    assert all(resolver.streamed(t, "mark") for t in mark[1:])
+    sam = [issue("sam") for _ in range(3)]
+    # Five in all: the oldest overall (Mark's) went, Sam's stay.
+    assert len(resolver.streams) == 5
+    assert resolver.streamed(mark[1], "mark") is None
+    assert all(resolver.streamed(t, "sam") for t in sam)
+    assert {u: len(h) for u, h in resolver.held.items()} == {"mark": 2, "sam": 3}
+    # Expired tokens leave from the front when the next is issued.
+    now = time.monotonic()
+    monkeypatch.setattr(remote.time, "monotonic", lambda: now + remote.TOKEN_SECONDS)
+    fresh = issue("sam")
+    assert list(resolver.streams) == [fresh]
+    assert {u: list(h) for u, h in resolver.held.items()} == {"sam": [fresh]}
+
+
+@pytest.mark.loop_timing
+def test_issuing_a_token_with_the_map_full_is_quick(tmp_path):
+    from server import remote
+
+    resolver = resolver_with(FakeYouTube([]), lambda *_: [], tmp_path)
+    issuing(resolver)
+
+    async def fill_and_time():
+        for n in range(remote.STREAMS):
+            await resolver.stream(None, SONG, f"person-{n % 10}")
+        assert len(resolver.streams) == remote.STREAMS
+        slowest = 0
+        for _ in range(50):
+            began = time.perf_counter()
+            await resolver.stream(None, SONG, "person-0")
+            slowest = max(slowest, time.perf_counter() - began)
+        return slowest
+
+    slowest = asyncio.run(fill_and_time())
+    assert len(resolver.streams) == remote.STREAMS
+    assert slowest < 0.005, slowest
+
+
+def test_a_tap_on_a_chart_song_with_no_length_plays_from_another_album(
+    tmp_path, monkeypatch
+):
+    """D-130 (#282): live, "Foo Fighters - Everlong" (no known length) was
+    refused from The Colour And The Shape; it now plays from JioSaavn, which
+    still wins over YouTube (D-89)."""
+    from server.remote import RemoteAudio
+
+    async def probe(client, url):
+        return None
+
+    monkeypatch.setattr(RemoteAudio, "probe", staticmethod(probe))
+    everlong = {"artist": "Foo Fighters", "title": "Everlong", "album": "Greatest Hits"}
+    on_saavn = {
+        "channel": "Foo Fighters",
+        "title": "Everlong",
+        "album": "The Colour And The Shape",
+        "duration": "250",
+        "source_url": "https://aac.saavncdn.com/everlong_320.mp4",
+    }
+    youtube = FakeYouTube(
+        [
+            {
+                **ON_YOUTUBE,
+                "channel": "Foo Fighters",
+                "title": "Everlong",
+                "duration": 250,
+            }
+        ]
+    )
+    resolver = resolver_with(youtube, lambda *_: [on_saavn], tmp_path)
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            found = await resolver.stream(client, everlong, "member")
+            assert found == {"url": on_saavn["source_url"], "source": "jiosaavn"}
+
+    asyncio.run(scenario())
+
+
+def test_a_re_recording_named_only_in_a_youtube_title_is_not_the_original(
+    tmp_path,
+):
+    """#308 (Codex): an original Fearless "Love Story" with no length played
+    YouTube's "Love Story (Taylor's Version - 2021)" from a compilation: the
+    title check strips the year-bearing qualifier and the album said
+    nothing. The title's qualifiers now count."""
+    original = {"artist": "Taylor Swift", "title": "Love Story", "album": "Fearless"}
+    youtube = FakeYouTube(
+        [
+            {
+                **ON_YOUTUBE,
+                "channel": "Taylor Swift",
+                "title": "Love Story (Taylor's Version - 2021)",
+                "album": "Country Collection",
+                "duration": 235,
+            }
+        ]
+    )
+    resolver = resolver_with(youtube, lambda *_: [], tmp_path)
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            with pytest.raises(ValueError, match="No source has"):
+                await resolver.stream(client, original, "member")
+
+    asyncio.run(scenario())
+    assert youtube.looked_up == []
+
+
+def test_a_tap_with_only_karaoke_and_tribute_results_is_still_no_match(tmp_path):
+    """D-130 relaxes the album, never the artist or the version: karaoke,
+    tribute and lullaby copies stay refused, and the no match says why."""
+    everlong = {"artist": "Foo Fighters", "title": "Everlong", "album": "Greatest Hits"}
+    karaoke = [
+        {
+            "channel": "ZZang KARAOKE",
+            "title": "Everlong",
+            "album": "Everlong (Karaoke Version)",
+            "duration": "250",
+            "source_url": "https://aac.saavncdn.com/k_320.mp4",
+        },
+        {
+            "channel": "Foo Fighters",
+            "title": "Everlong",
+            "album": "Lullaby Versions of Foo Fighters",
+            "duration": "240",
+            "source_url": "https://aac.saavncdn.com/l_320.mp4",
+        },
+        {
+            "channel": "Foo Fighters",
+            "title": "Everlong",
+            "album": "The Karaoke Hits",
+            "duration": "250",
+            "source_url": "https://aac.saavncdn.com/h_320.mp4",
+        },
+    ]
+    youtube = FakeYouTube(
+        [
+            {**ON_YOUTUBE, "channel": "String Tribute Players", "title": "Everlong"},
+            {
+                **ON_YOUTUBE,
+                "channel": "Foo Fighters",
+                "title": "Everlong (Acoustic Version)",
+            },
+        ]
+    )
+    resolver = resolver_with(youtube, lambda *_: karaoke, tmp_path)
+    resolver.performance = Recorder()
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            with pytest.raises(ValueError, match="No source has"):
+                await resolver.stream(client, everlong, "member")
+
+    asyncio.run(scenario())
+    misses = {e[1]: e[3] for e in resolver.performance.events if e[2] == "no match"}
+    assert json.loads(misses["jiosaavn"])["reasons"] == {
+        "artist": 1,
+        "album": 1,  # The lullaby album: not ordinary.
+        "version": 1,  # "Karaoke" in the album.
+    }
+    assert json.loads(misses["youtube"])["reasons"] == {"artist": 1, "title": 1}
+
+
+@pytest.mark.parametrize("strict_first", [False, True])
+def test_an_ordinary_tap_never_answers_an_explicit_edition_at_the_same_time(
+    tmp_path, monkeypatch, strict_first
+):
+    """Codex, D-130 review: overlapping taps shared one lookup by song name
+    alone, so an explicit edition (Everlong on Greatest Hits) took the
+    ordinary tap's other album (The Colour And The Shape), whichever came
+    first. Each now gets its own rule's answer."""
+    import time as clock
+
+    from server.remote import RemoteAudio
+
+    async def probe(client, url):
+        return None
+
+    monkeypatch.setattr(RemoteAudio, "probe", staticmethod(probe))
+    on_saavn = {
+        "channel": "Foo Fighters",
+        "title": "Everlong",
+        "album": "The Colour And The Shape",
+        "duration": "250",
+        "source_url": "https://aac.saavncdn.com/everlong_320.mp4",
+    }
+
+    def search(*_):
+        clock.sleep(0.2)  # Long enough for the second tap to overlap.
+        return [on_saavn]
+
+    ordinary = {"artist": "Foo Fighters", "title": "Everlong", "album": "Greatest Hits"}
+    strict = {**ordinary, "explicit_edition": True}
+    resolver = resolver_with(FakeYouTube([]), search, tmp_path)
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            order = [strict, ordinary] if strict_first else [ordinary, strict]
+            first = asyncio.ensure_future(resolver.stream(client, order[0], "a"))
+            await asyncio.sleep(0.05)
+            second = asyncio.ensure_future(resolver.stream(client, order[1], "b"))
+            return dict(
+                zip(
+                    ("strict", "ordinary") if strict_first else ("ordinary", "strict"),
+                    await asyncio.gather(first, second, return_exceptions=True),
+                )
+            )
+
+    found = asyncio.run(scenario())
+    assert found["ordinary"] == {"url": on_saavn["source_url"], "source": "jiosaavn"}
+    assert isinstance(found["strict"], ValueError), found["strict"]
+
+
+@pytest.mark.parametrize("exact_first", [False, True])
+def test_an_exact_artist_credit_wins_over_a_leading_the_alias(
+    tmp_path, monkeypatch, exact_first
+):
+    """Codex, D-130 review: once "Killers" counted as "The Killers", each
+    source picked between the two by address alone. The exact credit is now
+    chosen, whatever order the source gave; JioSaavn still wins (D-89)."""
+    from server.remote import RemoteAudio
+
+    async def probe(client, url):
+        return None
+
+    monkeypatch.setattr(RemoteAudio, "probe", staticmethod(probe))
+    song = {
+        "artist": "The Killers",
+        "title": "Mr. Brightside",
+        "album": "Hot Fuss",
+        "duration": 222,
+    }
+
+    def saavn(channel, url):
+        return {
+            "channel": channel,
+            "title": "Mr. Brightside",
+            "album": "Hot Fuss",
+            "duration": "222",
+            "source_url": f"https://aac.saavncdn.com/{url}_320.mp4",
+        }
+
+    def video(channel, video_id):
+        return {
+            **ON_YOUTUBE,
+            "channel": channel,
+            "title": "Mr. Brightside",
+            "album": "Hot Fuss",
+            "duration": 222,
+            "video_id": video_id,
+        }
+
+    # The alias sorts first by address, so only the credit can pick the
+    # exact one.
+    saavns = [saavn("Killers", "a"), saavn("The Killers", "b")]
+    videos = [video("Killers", "a" * 11), video("The Killers", "b" * 11)]
+    if exact_first:
+        saavns.reverse()
+        videos.reverse()
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            both = resolver_with(FakeYouTube(videos), lambda *_: saavns, tmp_path)
+            found = await both.stream(client, song, "member")
+            assert found == {
+                "url": "https://aac.saavncdn.com/b_320.mp4",
+                "source": "jiosaavn",
+            }
+            youtube = FakeYouTube(videos)
+            only = resolver_with(youtube, lambda *_: [], tmp_path / "yt")
+            found = await only.stream(client, song, "member")
+            assert found["source"] == "youtube"
+            assert youtube.looked_up == ["b" * 11]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("alias_first", [False, True])
+def test_the_requested_album_and_isrc_outrank_an_exact_credit(
+    tmp_path, monkeypatch, alias_first
+):
+    """#308 (Codex): "Killers" on Hot Fuss with the requested ISRC lost to
+    "The Killers" on a compilation, in both sources. The album and ISRC
+    decide first; the credit only breaks a tie."""
+    from server.remote import RemoteAudio
+
+    async def probe(client, url):
+        return None
+
+    monkeypatch.setattr(RemoteAudio, "probe", staticmethod(probe))
+    isrc = "USIR20400274"
+    song = {
+        "artist": "The Killers",
+        "title": "Mr. Brightside",
+        "album": "Hot Fuss",
+        "duration": 222,
+        "isrcs": [isrc],
+    }
+    saavns = [
+        {
+            "channel": "Killers",
+            "title": "Mr. Brightside",
+            "album": "Hot Fuss",
+            "duration": "222",
+            "isrc": isrc,
+            "source_url": "https://aac.saavncdn.com/z_320.mp4",
+        },
+        {
+            "channel": "The Killers",
+            "title": "Mr. Brightside",
+            "album": "Direct Hits",
+            "duration": "222",
+            "source_url": "https://aac.saavncdn.com/a_320.mp4",
+        },
+    ]
+    videos = [
+        {
+            **ON_YOUTUBE,
+            "channel": "Killers",
+            "title": "Mr. Brightside",
+            "album": "Hot Fuss",
+            "duration": 222,
+            "video_id": "z" * 11,
+        },
+        {
+            **ON_YOUTUBE,
+            "channel": "The Killers",
+            "title": "Mr. Brightside",
+            "album": "Direct Hits",
+            "duration": 222,
+            "video_id": "a" * 11,
+        },
+    ]
+    if not alias_first:
+        saavns.reverse()
+        videos.reverse()
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            both = resolver_with(FakeYouTube(videos), lambda *_: saavns, tmp_path)
+            found = await both.stream(client, song, "member")
+            assert found == {
+                "url": "https://aac.saavncdn.com/z_320.mp4",
+                "source": "jiosaavn",
+            }
+            youtube = FakeYouTube(videos)
+            only = resolver_with(youtube, lambda *_: [], tmp_path / "yt")
+            found = await only.stream(client, song, "member")
+            assert found["source"] == "youtube"
+            assert youtube.looked_up == ["z" * 11]
+
+    asyncio.run(scenario())
+
+
+def test_a_miss_for_one_credit_never_answers_another_that_reads_alike(
+    tmp_path, monkeypatch
+):
+    """#308 (Codex): misses were remembered by the normalised song name, so
+    a miss for "The-Dream" answered a tap on "The Dream" for 30 minutes,
+    though the rule tells the two apart. Misses now use the provider
+    caches' key, the credit as written included; a tap and the look-ahead
+    both read them."""
+    from server.remote import RemoteAudio
+
+    async def probe(client, url):
+        return None
+
+    monkeypatch.setattr(RemoteAudio, "probe", staticmethod(probe))
+    found = {
+        "channel": "Dream",  # "The Dream" without its article; not "The-Dream".
+        "title": "Falsetto",
+        "album": "Love vs. Money",
+        "duration": "220",
+        "source_url": "https://aac.saavncdn.com/falsetto_320.mp4",
+    }
+    hyphen = {"artist": "The-Dream", "title": "Falsetto", "album": "Love vs. Money"}
+    spaced = {**hyphen, "artist": "The Dream"}
+    resolver = resolver_with(FakeYouTube([]), lambda *_: [found], tmp_path)
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            with pytest.raises(ValueError, match="No source has"):
+                await resolver.stream(client, hyphen, "member")
+            assert await resolver.match(client, spaced) == found["source_url"]
+            resolver.cache.clear()
+            played = await resolver.stream(client, spaced, "member")
+            assert played == {"url": found["source_url"], "source": "jiosaavn"}
+            # The hyphenated credit's own miss still holds.
+            with pytest.raises(ValueError):
+                await resolver.stream(client, hyphen, "member")
+
+    asyncio.run(scenario())

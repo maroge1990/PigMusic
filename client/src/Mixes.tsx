@@ -3,6 +3,7 @@ import { ArrowLeft, Play, Radio, Shuffle } from "lucide-react";
 import { api } from "./api";
 import { CollectionCard, useCollectionMenu } from "./CollectionMenu";
 import { shuffled } from "./shuffle";
+import { chooseReplace } from "./playChoice";
 import { usePlayer } from "./Player";
 import { SongRow } from "./SongRow";
 import { fromMixTrack, type Song } from "./songs";
@@ -212,14 +213,20 @@ export function Mixes() {
   const player = usePlayer();
   const [starting, setStarting] = useState(false);
   function startRadio() {
+    // A replacing choice, counted from the tap: only a later one wins,
+    // whichever answer comes first (playChoice.ts, Codex round 2 on #267).
+    const newest = chooseReplace();
     setStarting(true);
     void api<{ tracks: Track[] }>("/v1/radio")
       .then((batch) => {
+        if (!newest()) return;
         if (batch.tracks.length)
           player.play(batch.tracks.map((t) => fromMixTrack(t, true)));
         else setError("Your radio is still preparing. Try again shortly.");
       })
-      .catch((e) => setError(e.message))
+      .catch((e) => {
+        if (newest()) setError(e.message);
+      })
       .finally(() => setStarting(false));
   }
   function dropEdition(id: string) {

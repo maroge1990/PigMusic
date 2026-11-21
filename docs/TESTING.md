@@ -144,7 +144,7 @@ Use these for playback that is slow or patchy on the real server. The probe and 
    Each song: its address, the file's opening (`Range: bytes=0-`, as playback asks) and a read near its end, each with the server's timing and ID; `--full` also times whole files. `--repeat 0 --interval 300` keeps going as a canary. It changes nothing beyond the test member's own mix leases.
 
    Other scenarios take the same `--server`, `--token-file` and optional `--output`, and each ends with how often the server's event loop stalled while it ran:
-   - `remote`: songs not in the household, from online sources, asked twice (the second shows the relay cache), with each source's search and transfer time (`jiosaavn-miss`, `zvu4no-found`, `zvu4no-transfer`, `relay-cache`). `--song "Artist|Title|Album|Seconds"` picks songs; household songs are skipped.
+   - `remote`: songs not in the household, from online sources, asked twice (the second shows the server's kept matches), with each source's search time (`jiosaavn-miss`, `youtube-found`) and whether the audio comes direct or through the server. `--song "Artist|Title|Album|Seconds"` picks songs; household songs are skipped.
    - `idle`: one song warm, then after each `--gap` seconds (default 60, 300 and 900) on the same connections.
    - `browse`: the app's screens and library sync, each opened twice.
    - `artwork`: the share of library, Home and artist artwork that is real, then again after `--settle` seconds (the server fetches missing art when asked).

@@ -11,13 +11,17 @@ export function songFile(song: Song): string | null {
   return (song.saved || song.server)?.id || song.cache_id || null;
 }
 
-/** Saves songs' files to this computer, one browser download each. */
+/** Saves songs' files to this computer, one browser download each. The
+ * downloads are spaced out; any still waiting when the session that asked
+ * ends are not made (Codex round 1 on #267). */
 export function downloadSongs(songs: Song[]) {
   const files = songs.filter((s) => songFile(s));
   if (!files.length)
     return notifyError("Couldn't download: nothing here is on the server yet.");
+  const generation = currentSession();
   files.forEach((song, i) =>
     setTimeout(() => {
+      if (currentSession() !== generation) return;
       const link = document.createElement("a");
       link.href = `/api/v1/tracks/${encodeURIComponent(songFile(song)!)}/file`;
       link.download = `${song.artist} - ${song.title}`;
@@ -55,15 +59,25 @@ export async function setFavourite(song: Song, favourite: boolean) {
 /**
  * Runs a collection action on its songs under the session that chose it
  * (Codex, #249): the session is taken before the songs are read, and the
- * action is dropped if another account signed in meanwhile.
+ * action is dropped, its failure too, if the session ended or another
+ * account signed in meanwhile.
  */
 export async function withCollection(
   songs: () => Promise<Song[]>,
   act: (list: Song[], session: string | null) => unknown,
 ) {
   const session = expectedSession();
-  const list = await songs();
-  if (expectedSession() !== session) return;
+  const generation = currentSession();
+  const ended = () =>
+    expectedSession() !== session || currentSession() !== generation;
+  let list: Song[];
+  try {
+    list = await songs();
+  } catch (e) {
+    if (ended()) return;
+    throw e;
+  }
+  if (ended()) return;
   return act(list, session);
 }
 

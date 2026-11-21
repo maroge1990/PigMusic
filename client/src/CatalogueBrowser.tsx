@@ -1,13 +1,12 @@
+import { isUnconfirmed, peekCatalogue } from "./api";
 import {
-  apiFetch,
-  detailOr,
-  isUnconfirmed,
-  peekCatalogue,
-  writeFailure,
-} from "./api";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { formatDate } from "./format";
-import { leftOutMessage } from "./queueLimits";
 import {
   ChevronLeft,
   ChevronRight,
@@ -22,6 +21,12 @@ import {
 import { Cover, catalogueCover } from "./Cover";
 import { PageHeader, SectionHeader } from "./PageHeader";
 import { ArtistPopular } from "./ArtistPopular";
+import { CatalogueAlbumCard } from "./CatalogueCards";
+import {
+  NO_EDITIONS,
+  catalogueRequest,
+  requestAlbum,
+} from "./catalogueActions";
 import { MusicLink } from "./MusicLink";
 import { mergePage } from "./discography";
 import { ArtistAcquisition } from "./ArtistAcquisition";
@@ -34,52 +39,21 @@ import type { Discography } from "./discography";
 import { SongRow } from "./SongRow";
 import { usePlayer } from "./Player";
 import { shuffled } from "./shuffle";
+import { withLibrary, type Song as Row } from "./songs";
 import {
-  songBody,
-  withLibrary,
-  type AddResult,
-  PAUSED_NOTICE,
-  type Song as Row,
-} from "./songs";
-import type { Track } from "./types";
+  addable,
+  addedMessage,
+  checking,
+  lookedUp,
+  markYours,
+  nothingToAdd,
+  openingEdition,
+  pending,
+  releaseSongs,
+  type CatalogueRelease as Release,
+  type Editions,
+} from "./catalogueAlbum";
 import { EmptyLine, InlineError, Loading } from "./EmptyState";
-
-function releaseSongs(release: Release, artistId: string): Row[] {
-  const cover = catalogueCover("release", release.id);
-  return release.tracks.map((t) => ({
-    key: release.id + ":" + t.id,
-    title: t.title,
-    artist: t.artist,
-    album: release.title,
-    album_artist: release.artist,
-    duration: t.duration,
-    year: t.year,
-    track_number: t.track_number,
-    disc_number: t.disc_number,
-    cover: t.saved_track?.cover_url || cover,
-    // The server says where each song stands (CatalogueTrackDTO).
-    state:
-      t.server_state === "in_library" && t.saved_track
-        ? "saved"
-        : t.server_state === "household_available" && t.household_track
-          ? "server"
-          : pending(t)
-            ? "pending"
-            : "missing",
-    saved:
-      t.server_state === "in_library" ? t.saved_track || undefined : undefined,
-    server:
-      t.server_state === "household_available"
-        ? t.household_track || undefined
-        : undefined,
-    release_id: release.id,
-    track_id: t.id,
-    recording_id: t.musicbrainz_recording_id,
-    artist_id: artistId,
-    explicit_edition: t.explicit_edition,
-    recording_kind: t.recording_kind,
-  }));
-}
 
 type Group = {
   id: string;
@@ -100,61 +74,6 @@ type Edition = {
   formats: string[];
   track_count: number;
 };
-type Song = {
-  id: string;
-  title: string;
-  artist: string;
-  duration: number;
-  year?: string | number;
-  disc_number: number;
-  track_number: number;
-  status: string;
-  presence_note: string;
-  server_state?:
-    | "not_in_library"
-    | "household_available"
-    | "requested"
-    | "in_library"
-    | "failed";
-  saved_track?: Track | null;
-  household_track?: Track | null;
-  received_bytes?: number;
-  total_bytes?: number;
-  musicbrainz_recording_id?: string;
-  /** On an edition other than the recommended one: requests keep it. */
-  explicit_edition?: boolean;
-  /** A Live, Remix or Demo release's songs are those recordings. */
-  recording_kind?: string[];
-};
-type Release = {
-  id: string;
-  title: string;
-  artist: string;
-  date: string;
-  description: string;
-  tracks: Song[];
-};
-// A song Add to library would add: not on the server yet, or a household
-// copy someone else already has.
-// Not while it is still being looked up (#263).
-const addable = (row: Row) =>
-  !row.checking && (row.state === "missing" || row.state === "server");
-// A song the server is still adding for you.
-const pending = (song: { server_state?: string }) =>
-  song.server_state === "requested";
-const songs = (n: number) => `${n} ${n === 1 ? "song" : "songs"}`;
-/** The confirmation for an Add to library, from the server's counts; the
- * iPhone words it the same way. */
-function addedMessage(result: AddResult) {
-  const adding = result.created + result.existing;
-  const parts = [];
-  if (adding > 0) parts.push(`Adding ${songs(adding)} to your library.`);
-  if (result.skipped > 0) parts.push(`Skipped ${songs(result.skipped)}.`);
-  if (result.paused) parts.push(PAUSED_NOTICE);
-  // Past a queue limit (D-128).
-  if (result.left_out) parts.push(leftOutMessage(result));
-  return parts.join(" ") || "Already in your library.";
-}
 export function CatalogueBrowser({
   artist,
   close,
@@ -168,15 +87,7 @@ export function CatalogueBrowser({
   initialGroup?: string;
   owner?: boolean;
 }) {
-  async function request<T>(path: string, options?: RequestInit): Promise<T> {
-    const response = await apiFetch("/api/v1/catalogue/" + path, options);
-    const data = await response.json();
-    if (!response.ok)
-      throw new Error(
-        typeof data.detail === "string" ? data.detail : "Catalogue unavailable",
-      );
-    return data;
-  }
+  const request = catalogueRequest;
   const [otherReleases, setOtherReleases] = useState(false);
   const cachedPopularity = peekCatalogue<{
     ranked_album_ids?: string[];
@@ -264,25 +175,22 @@ export function CatalogueBrowser({
   const [lookups, setLookups] = useState(0);
   useEffect(() => {
     if (!release) return setRows([]);
-    const plain = releaseSongs(release, artist.id);
+    const plain = releaseSongs(
+      release,
+      artist.id,
+      catalogueCover("release", release.id),
+    );
     // A song matches any edition unless it is an explicit edition: the
     // library lookup may mark the others yours (a compilation copy counts),
     // but an explicit edition keeps the release answer's state. Until the
     // lookup answers, those songs can't be added: one you have on another
     // album would be added again (#263).
-    setRows(
-      plain.map((r) =>
-        r.explicit_edition || !addable(r) ? r : { ...r, checking: true },
-      ),
-    );
+    setRows(checking(plain));
     let active = true;
-    void withLibrary(plain.filter((r) => !r.explicit_edition))
+    void withLibrary(lookedUp(plain))
       .then((found) => {
         if (!active) return;
-        const yours = new Map(
-          found.filter((s) => s.state === "saved").map((s) => [s.key, s]),
-        );
-        setRows(plain.map((r) => yours.get(r.key) || r));
+        setRows(markYours(plain, found));
       })
       .catch(() => {
         // Add stays off until the lookup answers (#263).
@@ -450,25 +358,14 @@ export function CatalogueBrowser({
     setBusy(true);
     setError("");
     try {
-      const data = await request<{
-        editions: Edition[];
-        total: number;
-        recommended_id?: string;
-      }>(`groups/${g.id}/editions`);
+      const data = await request<Editions<Edition>>(`groups/${g.id}/editions`);
       setEditions(data.editions);
       setEditionTotal(data.total);
-      if (data.editions.length) {
-        setRelease(
-          await request<Release>(
-            `releases/${data.recommended_id || data.editions[0].id}`,
-          ),
-        );
-        history.replaceState(
-          null,
-          "",
-          "#" + discoverUrl(artist, data.recommended_id || data.editions[0].id),
-        );
-      } else setError("No editions of this album are available.");
+      const opening = openingEdition(data);
+      if (opening) {
+        setRelease(await request<Release>(`releases/${opening}`));
+        history.replaceState(null, "", "#" + discoverUrl(artist, opening));
+      } else setError(NO_EDITIONS);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -495,19 +392,7 @@ export function CatalogueBrowser({
     setBusy(true);
     setError("");
     try {
-      const response = await apiFetch("/api/v1/requests", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // Only songs you can add: one already yours would come back as
-        // skipped, and resending one on its way would resume it if paused.
-        body: JSON.stringify({ tracks: rows.filter(addable).map(songBody) }),
-      });
-      if (!response.ok)
-        throw await writeFailure(
-          response,
-          detailOr("Couldn't add this album. Try again."),
-        );
-      notify(addedMessage((await response.json()) as AddResult));
+      notify(addedMessage(await requestAlbum(rows)));
       // Each song's state as the server now has it, not a guess.
       await refreshRelease(release.id);
       window.dispatchEvent(new Event("music-library-changed"));
@@ -660,11 +545,7 @@ export function CatalogueBrowser({
             )}
           </div>
           {rows.length > 0 && !rows.some((r) => addable(r) || r.checking) && (
-            <p className="muted">
-              {rows.every((r) => r.state === "saved")
-                ? "Already in your library: nothing to add."
-                : "Nothing to add: every song is in your library or being added."}
-            </p>
+            <p className="muted">{nothingToAdd(rows)}</p>
           )}
           <div className="song-list">
             {rows.map((row, i) => (
@@ -802,36 +683,52 @@ export function CatalogueBrowser({
             {(otherReleases
               ? groups.slice(0, visible)
               : groups.slice(albumStart, albumStart + albumSize)
-            ).map((g) => (
-              <button
-                className={otherReleases ? "result-row" : "album-card"}
-                key={scope + ":" + g.id}
-                disabled={busy}
-                onClick={() => openGroup(g)}
-              >
-                <Cover
+            ).map((g) => {
+              const card = (mark?: ReactNode) => (
+                <button
+                  className={otherReleases ? "result-row" : "album-card"}
+                  key={scope + ":" + g.id}
+                  disabled={busy}
+                  onClick={() => openGroup(g)}
+                >
+                  <Cover
+                    title={g.title}
+                    src={catalogueCover("release-group", g.id)}
+                  />
+                  <div>
+                    <strong>{g.title}</strong>
+                    <span>
+                      {[formatDate(g.date), g.type].filter(Boolean).join(" · ")}
+                    </span>
+                  </div>
+                  {g.saved_album_id ? (
+                    <span
+                      className="saved-icon discography-saved"
+                      title={`${g.saved_songs ?? 0} of your songs`}
+                    >
+                      <CircleCheck size={14} />
+                      In your library
+                    </span>
+                  ) : (
+                    mark || <ArrowRight size={16} />
+                  )}
+                </button>
+              );
+              // The album cards get the one collection menu (D-129); the
+              // list of singles, EPs and more stays rows.
+              return otherReleases ? (
+                card()
+              ) : (
+                <CatalogueAlbumCard
+                  key={scope + ":" + g.id}
+                  group={g.id}
                   title={g.title}
-                  src={catalogueCover("release-group", g.id)}
-                />
-                <div>
-                  <strong>{g.title}</strong>
-                  <span>
-                    {[formatDate(g.date), g.type].filter(Boolean).join(" · ")}
-                  </span>
-                </div>
-                {g.saved_album_id ? (
-                  <span
-                    className="saved-icon discography-saved"
-                    title={`${g.saved_songs ?? 0} of your songs`}
-                  >
-                    <CircleCheck size={14} />
-                    In your library
-                  </span>
-                ) : (
-                  <ArrowRight size={16} />
-                )}
-              </button>
-            ))}
+                  artistId={artist.id}
+                >
+                  {card}
+                </CatalogueAlbumCard>
+              );
+            })}
           </div>
           <button
             className="secondary-button"

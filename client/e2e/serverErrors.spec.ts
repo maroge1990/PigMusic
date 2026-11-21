@@ -255,7 +255,7 @@ test("an album download the proxy timed out on says it may have been requested",
   await page
     .getByRole("button", { name: `Find more by ${artist.name}` })
     .click();
-  await page.getByRole("button", { name: /New Night/ }).click();
+  await page.getByRole("button", { name: /^New Night/ }).click();
   await page
     .getByRole("button", { name: "Add to library", exact: true })
     .click();

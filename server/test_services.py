@@ -21,8 +21,6 @@ HOSTS = frozenset(
         "rss.marketingtools.apple.com",
         "webservice.fanart.tv",
         "assets.fanart.tv",
-        "artists.artistgrid.cx",
-        "assets.artistgrid.cx",
     }
 )
 

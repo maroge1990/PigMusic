@@ -219,19 +219,19 @@ def test_workers_show_the_error_class_only():
 
 
 @pytest.mark.server_error_expected
-def test_a_relay_token_in_the_path_is_never_kept_or_logged(
+def test_a_stream_token_in_the_path_is_never_kept_or_logged(
     tmp_path, monkeypatch, caplog
 ):
-    """A relayed stream's path is its credential: an error while serving it
+    """A passed-through stream's path is its credential: an error while serving it
     keeps the route's template, never the token."""
     from server.remote import RemoteAudio
 
-    token = "relaytoken0123456789secret"
+    token = "streamtoken0123456789secret"
 
     def broken(self, *args):
-        raise RuntimeError("relay failed")
+        raise RuntimeError("stream failed")
 
-    monkeypatch.setattr(RemoteAudio, "relay", broken)
+    monkeypatch.setattr(RemoteAudio, "streamed", broken)
     with signed_in(tmp_path, monkeypatch) as (app, client):
         caplog.clear()
         answer = client.get(f"/api/v1/remote-playback/streams/{token}?x=1")

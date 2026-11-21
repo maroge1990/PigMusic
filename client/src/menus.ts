@@ -86,14 +86,48 @@ export type CollectionMenuItem =
 
 /** The collection menu for an album, artist, playlist or mix. Save and Hide
  * this edition live only in a mix's menu. */
-export function collectionMenu(kind: CollectionKind): CollectionMenuItem[][] {
+export function collectionMenu(
+  kind: CollectionKind,
+  /** False where there is nothing to add the collection by: a catalogue
+   * artist's page has no Add to library, so neither has its card (#267). */
+  canAddToLibrary = true,
+): CollectionMenuItem[][] {
   const groups: CollectionMenuItem[][] = [
     ["play", "shuffle", "play-next"],
-    ["add-to-library", "add-to-playlist", "download"],
+    [
+      ...(canAddToLibrary ? (["add-to-library"] as const) : []),
+      "add-to-playlist",
+      "download",
+    ],
   ];
   if (kind === "mix") groups.push(["save-mix", "hide-edition"]);
   return groups;
 }
+
+/** A collection menu's kinds of action (#267). Play and Shuffle replace the
+ * queue: a later one replaces an earlier one still reading its songs, so
+ * only the last choice plays (and playChoice.ts does the same across the
+ * app). Play next only adds, so it is its own kind; it, Add to library and
+ * Download can't be taken back once made: while one is on its way, choosing
+ * it again does nothing, so a double click acts once. */
+export type ActionSlot = "play" | "queue" | "add" | "download";
+export type Choice = { slot: ActionSlot; n: number; done: boolean };
+
+/** Records a new choice of this kind, or null when it is to be ignored. */
+export function latestChoice(
+  latest: Map<ActionSlot, Choice>,
+  slot: ActionSlot,
+): Choice | null {
+  const before = latest.get(slot);
+  if (slot !== "play" && before && !before.done) return null;
+  const choice = { slot, n: (before?.n ?? 0) + 1, done: false };
+  latest.set(slot, choice);
+  return choice;
+}
+
+/** Whether no later choice of the same kind has replaced this one. */
+export const isLatest = (latest: Map<ActionSlot, Choice>, choice: Choice) =>
+  latest.get(choice.slot) === choice;
 
 /** Words for each item; the menus show exactly these. */
 export const songMenuLabels: Record<SongMenuItem, string> = {

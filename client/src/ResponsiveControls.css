@@ -75,9 +75,16 @@
 .home-grid .album-card > small {
   display: block;
 }
-.full-album-grid > button {
+.full-album-grid > button,
+.full-album-grid > .collection-card {
   min-width: 0;
   max-width: 240px;
+  text-align: left;
+}
+/* An album card with its collection menu (D-129): the card fills its cell. */
+.full-album-grid > .collection-card > .album-card {
+  width: 100%;
+  min-width: 0;
   text-align: left;
 }
 .full-album-grid .cover {

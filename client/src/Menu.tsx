@@ -7,7 +7,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { Ellipsis } from "lucide-react";
+import { Ellipsis, LoaderCircle } from "lucide-react";
 import { focusMenuItem, menuKeys } from "./menuKeys";
 
 /** How long a touch must rest on a row or card before its menu opens. */
@@ -151,10 +151,13 @@ export function MenuButton({
   menu,
   label,
   className = "song-more",
+  busy = false,
 }: {
   menu: MenuControl;
   label: string;
   className?: string;
+  /** Something chosen from the menu is still on its way: the spinner. */
+  busy?: boolean;
 }) {
   return (
     <button
@@ -164,9 +167,14 @@ export function MenuButton({
       aria-label={label}
       aria-haspopup="menu"
       aria-expanded={menu.isOpen}
+      aria-busy={busy || undefined}
       onClick={() => (menu.isOpen ? menu.close() : menu.open())}
     >
-      <Ellipsis size={20} />
+      {busy ? (
+        <LoaderCircle size={20} className="spin" aria-hidden="true" />
+      ) : (
+        <Ellipsis size={20} />
+      )}
     </button>
   );
 }

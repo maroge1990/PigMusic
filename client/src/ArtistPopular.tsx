@@ -4,14 +4,9 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Cover, catalogueCover } from "./Cover";
 import { SongRow } from "./SongRow";
 import { withLibrary, type Song as Row } from "./songs";
+import { popularRows, type PopularSong } from "./catalogueAlbum";
 type Group = { id: string; title: string; date: string; type: string };
-type Song = {
-  id: string;
-  title: string;
-  artist: string;
-  album: string;
-  release_id: string;
-};
+type Song = PopularSong;
 export function ArtistPopular({
   id,
   openAlbum,
@@ -23,18 +18,8 @@ export function ArtistPopular({
 }) {
   const path = `/api/v1/catalogue/artists/${id}/popularity`;
   const cached = peekCatalogue<{ songs: Song[]; albums: Group[] }>(path);
-  const toRows = (songs: Song[]): Row[] =>
-    songs.map((song) => ({
-      key: "popular:" + song.id,
-      title: song.title,
-      artist: song.artist,
-      album: song.album,
-      cover: catalogueCover("release", song.release_id),
-      state: "missing",
-      release_id: song.release_id,
-      recording_id: song.id,
-      artist_id: id,
-    }));
+  // The same rows the artist's card plays (#267).
+  const toRows = (songs: Song[]): Row[] => popularRows(id, songs);
   const [data, setData] = useState<{ songs: Song[]; albums: Group[] } | null>(
     cached || null,
   );

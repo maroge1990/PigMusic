@@ -83,8 +83,8 @@ export function MediaSettings() {
     <section className="system-panel download-panel">
       <h2>Artwork &amp; playback</h2>
       <p>
-        Artist portraits use Fanart when configured, then ArtistGrid, then album
-        artwork. Saved music plays directly from your server.
+        Artist portraits come from Deezer, then Fanart when configured, then
+        album artwork. Saved music plays directly from your server.
       </p>
       {settings && (
         <>

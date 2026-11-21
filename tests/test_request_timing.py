@@ -182,9 +182,9 @@ def test_slow_and_unanswered_requests_are_logged_with_pool_state(caplog):
             pass
         return sent
 
-    asyncio.run(call(slow, "/api/v1/remote-playback/streams/secret-relay-token"))
-    relayed = caplog.records.pop().getMessage()
-    assert "secret-relay-token" not in relayed and "streams/[redacted]" in relayed
+    asyncio.run(call(slow, "/api/v1/remote-playback/streams/secret-stream-token"))
+    streamed = caplog.records.pop().getMessage()
+    assert "secret-stream-token" not in streamed and "streams/[redacted]" in streamed
     sent = asyncio.run(call(slow, "/api/v1/library"))
     headers = dict(sent[0]["headers"])
     assert b"work;dur=" in headers[b"server-timing"]

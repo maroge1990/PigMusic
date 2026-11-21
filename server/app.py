@@ -88,8 +88,8 @@ from .media import (
     saved_track_ids,
     settings as private_media_settings,
 )
-from .remote import LABELS, RelayTransfer, RemoteAudio
-from .youtube import YouTube, YouTubeStream
+from .remote import LABELS, RemoteAudio
+from .youtube import YouTube
 from .performance import Performance
 from .lookahead import LookAhead
 from .scanner import LibraryScanner
@@ -130,15 +130,8 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     backgrounds = Backgrounds(store, artwork, fanart)
     logos = Logos(store, fanart)
     source_runtime = SourceRuntime(store)
-    remote_audio = RemoteAudio(
-        directory=store.directory / "remote-cache",
-        runtime=source_runtime,
-        # YouTube for instant listening on trial (#193, D-91); FreeMp3Cloud and
-        # zvu4no leave instant listening meanwhile and stay download sources
-        # (D-89).
-        youtube=YouTube(store.directory / "youtube"),
-        relays=(),
-    )
+    # Instant listening: JioSaavn and YouTube (#193, D-89, D-121).
+    remote_audio = RemoteAudio(youtube=YouTube(store.directory / "youtube"))
     # The parity targets' counters (#191): downloads find it on the store.
     performance = store.performance = Performance(store.directory)
     remote_audio.performance = performance
@@ -1650,19 +1643,11 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
     @app.get("/api/v1/remote-playback/streams/{token}", tags=["personal-library"])
     @app.head("/api/v1/remote-playback/streams/{token}", tags=["personal-library"])
     async def playback_relayed(token: str, request: Request):
-        found = await asyncio.to_thread(
-            remote_audio.relay, token, request.state.user["id"]
-        )
+        found = remote_audio.streamed(token, request.state.user["id"])
         if not found:
             raise HTTPException(404, "This stream has expired. Play the song again.")
-        if isinstance(found, (RelayTransfer, YouTubeStream)):
-            # Still arriving (#23), or passed through from YouTube (#193).
-            return await found.response(request.method, request.headers.get("range"))
-        return FileResponse(
-            found[0],
-            media_type=found[1],
-            headers={"Cache-Control": "private, no-store"},
-        )
+        # Passed through from YouTube (#193).
+        return await found.response(request.method, request.headers.get("range"))
 
     async def remote_playback(track, request, canonicalise=False):
         """A tap on a song outside the library, counted for the instant-play
@@ -1743,7 +1728,7 @@ def create_app(data_dir: Path | None = None, client_dir: Path | None = None):
                 "No reliable remote stream matched this album. You can still add it to your library.",
             )
         url = found.get("url") or security.sign_url(
-            "/api/v1/remote-playback/streams/" + found["relay"],
+            "/api/v1/remote-playback/streams/" + found["token"],
             request.state.user,
             request.state.session,
         )
