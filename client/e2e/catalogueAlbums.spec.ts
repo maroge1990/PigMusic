@@ -182,7 +182,7 @@ test("an unconfirmed album add's late re-read never replaces the album opened si
     ],
     unconfirmed,
   );
-  await page.getByRole("button", { name: /Album A/ }).click();
+  await page.getByRole("button", { name: /^Album A/ }).click();
   await expect(page.getByText("Song A")).toBeVisible();
   mock.hold("r-a");
   await page
@@ -192,7 +192,7 @@ test("an unconfirmed album add's late re-read never replaces the album opened si
   await expect.poll(() => mock.reads("r-a")).toBe(2);
   // Back to the artist, and on to album B while A's re-read is out.
   await page.locator(".back-link").click();
-  await page.getByRole("button", { name: /Album B/ }).click();
+  await page.getByRole("button", { name: /^Album B/ }).click();
   await expect(page.getByText("Song B")).toBeVisible();
   await mock.release();
   await expect(page.getByRole("heading", { name: "Album B" })).toBeVisible();
@@ -216,7 +216,7 @@ test("an album's songs can't be added until the library lookup says whose they a
       await route.fulfill({ json: { tracks: [null] } }).catch(() => {});
     },
   );
-  await page.getByRole("button", { name: /Album A/ }).click();
+  await page.getByRole("button", { name: /^Album A/ }).click();
   await expect(page.getByText("Song A")).toBeVisible();
   const album = page.getByRole("button", {
     name: "Add to library",
@@ -241,7 +241,7 @@ async function onOtherEdition(
     [{ id: "g-x", title: "Main", editions: [main, other] }],
     add,
   );
-  await page.getByRole("button", { name: /Main/ }).click();
+  await page.getByRole("button", { name: /^Main/ }).click();
   await expect(page.getByText("Song M")).toBeVisible();
   await page.getByRole("button", { name: /Choose another edition/ }).click();
   await page.getByRole("button", { name: /Other/ }).click();
@@ -270,7 +270,7 @@ test("a row Add's late re-read never replaces the edition chosen since (#263)", 
   await page.getByRole("button", { name: "Add Song O to library" }).click();
   await expect.poll(() => mock.reads("r-other")).toBe(2);
   await page.getByRole("button", { name: /Choose another edition/ }).click();
-  await page.getByRole("button", { name: /Main/ }).click();
+  await page.getByRole("button", { name: /^Main/ }).click();
   await expect(page.getByText("Song M")).toBeVisible();
   await mock.release();
   await expect(page.getByText("Song M")).toBeVisible();
@@ -296,7 +296,7 @@ test("adding a song you paused shows it paused and points to Downloads (#264)", 
         },
       }),
   );
-  await page.getByRole("button", { name: /Album A/ }).click();
+  await page.getByRole("button", { name: /^Album A/ }).click();
   await page.getByRole("button", { name: "Add Song A to library" }).click();
   await expect(page.locator(".notice-area")).toContainText(
     "Paused. Resume it in Downloads.",
@@ -321,7 +321,7 @@ test("a library lookup that fails says so, and Try again asks again (#263)", asy
         ? route.fulfill({ status: 500, json: { detail: "Broken" } })
         : route.fulfill({ json: { tracks: [null] } }),
   );
-  await page.getByRole("button", { name: /Album A/ }).click();
+  await page.getByRole("button", { name: /^Album A/ }).click();
   const notices = page.locator(".notice-area");
   await expect(notices).toContainText(
     "Couldn't check your library. Try again.",
@@ -348,7 +348,7 @@ test("an older row refresh never overwrites a newer one on the same edition (#26
     [{ id: "g-x", title: "Main", editions: [main, two] }],
     added(1, 0),
   );
-  await page.getByRole("button", { name: /Main/ }).click();
+  await page.getByRole("button", { name: /^Main/ }).click();
   await page.getByRole("button", { name: /Choose another edition/ }).click();
   await page.getByRole("button", { name: /Other/ }).click();
   await expect(page.getByText("Song P")).toBeVisible();
@@ -383,7 +383,7 @@ test("an older poll never overwrites a newer row refresh (#263)", async ({
     [{ id: "g-x", title: "Main", editions: [main, two] }],
     added(1, 0),
   );
-  await page.getByRole("button", { name: /Main/ }).click();
+  await page.getByRole("button", { name: /^Main/ }).click();
   await page.getByRole("button", { name: /Choose another edition/ }).click();
   await page.getByRole("button", { name: /Other/ }).click();
   await expect(page.getByText("Song P")).toBeVisible();
@@ -424,13 +424,13 @@ test("a row Add answered after an edition switch doesn't drop the new edition's 
         .catch(() => {});
     },
   );
-  await page.getByRole("button", { name: /Main/ }).click();
+  await page.getByRole("button", { name: /^Main/ }).click();
   await page.getByRole("button", { name: /Choose another edition/ }).click();
   await page.getByRole("button", { name: /Other/ }).click();
   await page.getByRole("button", { name: "Add Song O to library" }).click();
   // Back to the main edition while that Add is out.
   await page.getByRole("button", { name: /Choose another edition/ }).click();
-  await page.getByRole("button", { name: /Main/ }).click();
+  await page.getByRole("button", { name: /^Main/ }).click();
   await expect(page.getByText("Song M")).toBeVisible();
   mock.hold("r-main");
   await page
@@ -461,7 +461,7 @@ test("an older poll never undoes the edition chosen again (#263)", async ({
     [{ id: "g-x", title: "Main", editions: [polled, other] }],
     added(1, 0),
   );
-  await page.getByRole("button", { name: /Main/ }).click();
+  await page.getByRole("button", { name: /^Main/ }).click();
   await expect(page.getByText("Song M")).toBeVisible();
   mock.hold("r-main");
   await expect.poll(() => mock.reads("r-main"), { timeout: 8000 }).toBe(2);
@@ -470,7 +470,7 @@ test("an older poll never undoes the edition chosen again (#263)", async ({
   await expect(page.getByRole("img", { name: "Adding" })).toHaveCount(2);
   // The same edition chosen again while the poll is out.
   await page.getByRole("button", { name: /Choose another edition/ }).click();
-  await page.getByRole("button", { name: /Main/ }).click();
+  await page.getByRole("button", { name: /^Main/ }).click();
   await expect.poll(() => mock.reads("r-main")).toBe(3);
   await mock.answer(3);
   const saved = page.getByRole("img", { name: "In your library" });

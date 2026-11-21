@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   CircleArrowDown,
   EyeOff,
@@ -14,6 +14,10 @@ import { MenuButton, MenuPopup, useMenu, type MenuEntry } from "./Menu";
 import {
   collectionMenu,
   collectionMenuLabels,
+  isLatest,
+  latestChoice,
+  type ActionSlot,
+  type Choice,
   type CollectionKind,
   type CollectionMenuItem,
 } from "./menus";
@@ -77,33 +81,77 @@ export function useCollectionMenu({
   title,
   songs,
   mix,
+  addToLibrary = addSongsToLibrary,
+  cannotAdd = false,
   buttonClass = "song-more collection-more",
 }: {
   kind: CollectionKind;
   title: string;
   songs: () => Promise<Song[]>;
   mix?: { save: () => void; hide: () => void };
+  /** Add to library for this collection; `tryAgain` repeats the choice. */
+  addToLibrary?: (
+    list: Song[],
+    session: string | null,
+    tryAgain: () => void,
+  ) => unknown;
+  /** Known to have nothing left to add: Add to library is off, as the
+   * album page's Add is. */
+  cannotAdd?: boolean;
   /** A page's own ⋯ sits with its Play and Shuffle. */
   buttonClass?: string;
 }) {
   const player = usePlayer();
   const menu = useMenu();
   const picker = useRef<PlaylistPickerHandle>(null);
+  // While the songs are read (a catalogue album is looked up first), the ⋯
+  // shows the spinner. Each kind of action keeps only its latest choice: a
+  // second click, or Shuffle after Play, replaces the first, so nothing
+  // acts twice; nothing acts once the card has gone (#267).
+  const latest = useRef(new Map<ActionSlot, Choice>());
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  const [busy, setBusy] = useState(0);
   // Every action takes its session before reading the songs (Codex).
   const withSongs =
-    (act: (list: Song[], session: string | null) => unknown) => () =>
-      void withCollection(songs, act).catch((e) =>
-        notifyError((e as Error).message),
-      );
+    (
+      slot: ActionSlot,
+      act: (list: Song[], session: string | null, again: () => void) => unknown,
+    ) =>
+    () => {
+      const choice = latestChoice(latest.current, slot);
+      if (!choice) return;
+      const current = () => alive.current && isLatest(latest.current, choice);
+      const again = withSongs(slot, act);
+      setBusy((n) => n + 1);
+      void withCollection(songs, (list, session) =>
+        current() ? act(list, session, again) : undefined,
+      )
+        .catch((e) => {
+          if (current()) notifyError((e as Error).message);
+        })
+        .finally(() => {
+          choice.done = true;
+          if (alive.current) setBusy((n) => n - 1);
+        });
+    };
   const actions: Record<CollectionMenuItem, () => void> = {
-    play: withSongs((list) => list.length && player.play(list, 0)),
-    shuffle: withSongs((list) => list.length && player.play(shuffled(list), 0)),
-    "play-next": withSongs((list) => player.playNext(list)),
-    "add-to-library": withSongs((list, session) =>
-      addSongsToLibrary(list, session),
+    play: withSongs("play", (list) => list.length && player.play(list, 0)),
+    shuffle: withSongs(
+      "play",
+      (list) => list.length && player.play(shuffled(list), 0),
+    ),
+    "play-next": withSongs("play", (list) => player.playNext(list)),
+    "add-to-library": withSongs("add", (list, session, again) =>
+      addToLibrary(list, session, again),
     ),
     "add-to-playlist": () => picker.current?.open(menu.trigger.current!),
-    download: withSongs((list) => downloadSongs(list)),
+    download: withSongs("download", (list) => downloadSongs(list)),
     "save-mix": () => mix?.save(),
     "hide-edition": () => mix?.hide(),
   };
@@ -113,6 +161,7 @@ export function useCollectionMenu({
       label: collectionMenuLabels[item],
       icon: icons[item],
       run: actions[item],
+      disabled: item === "add-to-library" && cannotAdd,
     })),
   );
   const parts = (
@@ -121,6 +170,7 @@ export function useCollectionMenu({
         menu={menu}
         label={`More options for ${title}`}
         className={buttonClass}
+        busy={busy > 0}
       />
       <MenuPopup menu={menu} label={title} groups={groups} />
       <PlaylistPicker

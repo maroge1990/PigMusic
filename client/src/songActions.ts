@@ -54,15 +54,25 @@ export async function setFavourite(song: Song, favourite: boolean) {
 /**
  * Runs a collection action on its songs under the session that chose it
  * (Codex, #249): the session is taken before the songs are read, and the
- * action is dropped if another account signed in meanwhile.
+ * action is dropped, its failure too, if the session ended or another
+ * account signed in meanwhile.
  */
 export async function withCollection(
   songs: () => Promise<Song[]>,
   act: (list: Song[], session: string | null) => unknown,
 ) {
   const session = expectedSession();
-  const list = await songs();
-  if (expectedSession() !== session) return;
+  const generation = currentSession();
+  const ended = () =>
+    expectedSession() !== session || currentSession() !== generation;
+  let list: Song[];
+  try {
+    list = await songs();
+  } catch (e) {
+    if (ended()) return;
+    throw e;
+  }
+  if (ended()) return;
   return act(list, session);
 }
 

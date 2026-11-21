@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { api } from "./api";
 import { Cover, catalogueCover } from "./Cover";
 import { discoverUrl } from "./navigation";
@@ -8,6 +8,7 @@ import { withLibrary, type Song } from "./songs";
 import { warmArtist, whenIdle } from "./prefetch";
 import { MixPage, Mixes } from "./Mixes";
 import { CollectionCard, albumSongs } from "./CollectionMenu";
+import { CatalogueAlbumCard } from "./CatalogueCards";
 import {
   CoverPlay,
   ShelfLoading,
@@ -145,33 +146,51 @@ function HomeSection({ kind }: { kind: "popular" | "recommended" }) {
             </div>
           ) : (
             <div className="home-grid">
-              {feed![collection].map((item) => (
-                <button
-                  className="album-card"
-                  key={item.id}
-                  onClick={() => {
-                    location.hash =
-                      discoverUrl({
-                        id: item.artist_id,
-                        name: item.artist || item.name,
-                      }) + (collection === "albums" ? "&group=" + item.id : "");
-                  }}
-                >
-                  <Cover
+              {feed![collection].map((item) => {
+                const card = (mark?: ReactNode) => (
+                  <button
+                    className="album-card"
+                    key={item.id}
+                    onClick={() => {
+                      location.hash =
+                        discoverUrl({
+                          id: item.artist_id,
+                          name: item.artist || item.name,
+                        }) +
+                        (collection === "albums" ? "&group=" + item.id : "");
+                    }}
+                  >
+                    <Cover
+                      title={item.name}
+                      artist={collection === "artists"}
+                      src={
+                        collection === "artists"
+                          ? `/api/v1/catalogue/artists/${item.id}/artwork`
+                          : catalogueCover("release-group", item.id)
+                      }
+                    />
+                    <strong>{item.name}</strong>
+                    <span className="card-caption">
+                      {collection !== "artists" && item.artist}
+                      {mark}
+                    </span>
+                  </button>
+                );
+                // An album gets the one collection menu (D-129); its
+                // release group opens on the edition its page would.
+                return collection === "albums" ? (
+                  <CatalogueAlbumCard
+                    key={item.id}
+                    group={item.id}
                     title={item.name}
-                    artist={collection === "artists"}
-                    src={
-                      collection === "artists"
-                        ? `/api/v1/catalogue/artists/${item.id}/artwork`
-                        : catalogueCover("release-group", item.id)
-                    }
-                  />
-                  <strong>{item.name}</strong>
-                  <span className="card-caption">
-                    {collection !== "artists" && item.artist}
-                  </span>
-                </button>
-              ))}
+                    artistId={item.artist_id}
+                  >
+                    {card}
+                  </CatalogueAlbumCard>
+                ) : (
+                  card()
+                );
+              })}
             </div>
           )}
         </section>

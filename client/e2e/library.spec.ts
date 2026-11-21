@@ -290,7 +290,7 @@ test("a live release's songs are requested as live recordings", async ({
   await page
     .getByRole("button", { name: `Find more by ${artist.name}` })
     .click();
-  await page.getByRole("button", { name: /Concert Night/ }).click();
+  await page.getByRole("button", { name: /^Concert Night/ }).click();
   await expect.poll(() => looked).toBeTruthy();
   expect(looked).toMatchObject({
     songs: [{ title: "Von dutch", duration: 180, recording_kind: ["live"] }],
