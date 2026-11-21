@@ -27,13 +27,13 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
   Watch delivery test with the complication on his active face (#219 has what the diagnostics should show; whether the
   iPhone's push wakes the Watch app depends on the watchOS version); Shazam (#124: it should now end in a result or Try
   again; the export shows where it stops).
-- **Words for Mark to OK:** "Couldn't create <name>. Try again."; "N waiting"; "Whether your music is ready to play on
-  Apple Watch."
+- **Decided 21 Nov:** the three wordings (D-127), queue limits (D-128, #242: ready to build), the full menu on
+  catalogue cards (D-129, #267: ready to build).
 - **Parked with the next design on the issue:** #266 (`batch-h-266-parked`), #270 (`batch-270-minimal-parked`), #261
   (`batch-k`).
 - **Waiting on Mark, one at a time:** #267 (what Play does on a catalogue card); #242 (queue limit numbers); the
   matching questions in #282 once live data is in; ShazamKit ticked for the app's identifier.
-- **Decisions:** D-121 to D-126. Next: D-127.
+- **Decisions:** D-121 to D-129. Next: D-130.
 - **Lessons:** the Mac (`ssh mac`, Mark's wish on 21 Nov when he is its only user) runs the tap-through tests in ~15
   minutes on the iOS his phone has; one run at a time, one folder per branch, and with its 8 GB a second booted
   simulator makes a run look hung. GitHub's runner is on iOS 26.5 and often times out or reports an empty iPhone log.
