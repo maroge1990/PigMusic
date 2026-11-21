@@ -461,6 +461,7 @@ class RemoteAudio:
             # ordinary request never serves a stricter one (Codex, 5 Nov).
             bool(track.get("explicit_edition")),
             tuple(sorted(track.get("isrcs") or [])),
+            track.get("isrc"),
             tuple(sorted(recording_kind(track))),
         )
 
@@ -559,16 +560,13 @@ class RemoteAudio:
         )
 
     def miss_key(self, track):
-        """A miss holds only for a request with the same constraints: an
-        ISRC, a length or an edition another request lacks may still match."""
-        constraints = [
-            self.name(track),
-            sorted(track.get("isrcs") or []),
-            track.get("duration"),
-            bool(track.get("explicit_edition")),
-            track.get("recording_kind"),
-        ]
-        return hashlib.sha256(json.dumps(constraints, default=str).encode()).hexdigest()
+        """A miss holds only for a request with the same lookup inputs as the
+        provider caches (`key`): the artist credit as written included, so a
+        miss for "The-Dream" never answers "The Dream" (#308), and an ISRC,
+        a length or an edition another request lacks may still match."""
+        return hashlib.sha256(
+            json.dumps(self.key(track), default=str).encode()
+        ).hexdigest()
 
     async def _locate(self, client, track):
         began = time.monotonic()
@@ -655,17 +653,6 @@ class RemoteAudio:
             time.monotonic() - began,
             "; ".join(steps),
         )
-
-    def name(self, track):
-        # Players describe a catalogue song by its release and recording; the
-        # other fields can differ slightly between a preparation and a play.
-        if track.get("musicbrainz_release_id") and track.get(
-            "musicbrainz_recording_id"
-        ):
-            key = [track["musicbrainz_release_id"], track["musicbrainz_recording_id"]]
-        else:
-            key = [normalise(track.get(k) or "") for k in ("artist", "title", "album")]
-        return hashlib.sha256(json.dumps(key).encode()).hexdigest()[:32]
 
     async def match(self, client, track):
         """Look-ahead (#192): JioSaavn's match, then YouTube's, kept for the

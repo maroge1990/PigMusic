@@ -1218,3 +1218,43 @@ def test_the_requested_album_and_isrc_outrank_an_exact_credit(
             assert youtube.looked_up == ["z" * 11]
 
     asyncio.run(scenario())
+
+
+def test_a_miss_for_one_credit_never_answers_another_that_reads_alike(
+    tmp_path, monkeypatch
+):
+    """#308 (Codex): misses were remembered by the normalised song name, so
+    a miss for "The-Dream" answered a tap on "The Dream" for 30 minutes,
+    though the rule tells the two apart. Misses now use the provider
+    caches' key, the credit as written included; a tap and the look-ahead
+    both read them."""
+    from server.remote import RemoteAudio
+
+    async def probe(client, url):
+        return None
+
+    monkeypatch.setattr(RemoteAudio, "probe", staticmethod(probe))
+    found = {
+        "channel": "Dream",  # "The Dream" without its article; not "The-Dream".
+        "title": "Falsetto",
+        "album": "Love vs. Money",
+        "duration": "220",
+        "source_url": "https://aac.saavncdn.com/falsetto_320.mp4",
+    }
+    hyphen = {"artist": "The-Dream", "title": "Falsetto", "album": "Love vs. Money"}
+    spaced = {**hyphen, "artist": "The Dream"}
+    resolver = resolver_with(FakeYouTube([]), lambda *_: [found], tmp_path)
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            with pytest.raises(ValueError, match="No source has"):
+                await resolver.stream(client, hyphen, "member")
+            assert await resolver.match(client, spaced) == found["source_url"]
+            resolver.cache.clear()
+            played = await resolver.stream(client, spaced, "member")
+            assert played == {"url": found["source_url"], "source": "jiosaavn"}
+            # The hyphenated credit's own miss still holds.
+            with pytest.raises(ValueError):
+                await resolver.stream(client, hyphen, "member")
+
+    asyncio.run(scenario())
