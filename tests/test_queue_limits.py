@@ -18,6 +18,7 @@ import pytest
 from server import queue_limits
 from server.queue_limits import QueueLimits
 from server.store import Store
+from source import SOURCE
 from test_request_matrix import Household, release, track
 
 
@@ -629,9 +630,11 @@ def test_a_partial_answer_fits_the_schema_installed_iphones_have(tmp_path, monke
         assert busy.json()["over_limit"] == [0]
 
 
-CURRENT = json.loads(
-    (Path(__file__).parents[1] / "api" / "openapi.v1.json").read_text()
-)["components"]["schemas"]
+# From the checkout, which the image tests mount at PIG_MUSIC_SOURCE: the
+# tests themselves run outside the source tree there.
+CURRENT = json.loads((SOURCE / "api" / "openapi.v1.json").read_text())["components"][
+    "schemas"
+]
 
 
 def test_every_queue_limit_answer_fits_the_current_error_schema(tmp_path, monkeypatch):
