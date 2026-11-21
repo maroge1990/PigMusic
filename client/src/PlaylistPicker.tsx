@@ -77,8 +77,10 @@ export function PlaylistPicker({
       popup.current?.hidePopover();
       notify("Added to playlist");
     } catch (e) {
-      // Already said in the notice area, with its Try again.
-      if (e instanceof ReportedFailure) popup.current?.hidePopover();
+      // Already said in the notice area, with its Try again; or dropped
+      // because the session that chose it ended: nothing to say.
+      if (e instanceof ReportedFailure || e instanceof AttemptEnded)
+        popup.current?.hidePopover();
       else setError((e as Error).message);
     } finally {
       setBusy(false);

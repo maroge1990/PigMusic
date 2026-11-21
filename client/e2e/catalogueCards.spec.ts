@@ -89,6 +89,7 @@ type Options = {
  * the second, a live one is first) and one popular artist. */
 async function home(target: Page | BrowserContext, options: Options = {}) {
   const added: string[][] = [];
+  const listed: string[][] = [];
   const answers: Record<string, (route: Route) => Promise<void>> = {
     "/v1/home/recommended": (route) =>
       route.fulfill({
@@ -236,6 +237,22 @@ async function home(target: Page | BrowserContext, options: Options = {}) {
         json: { url: "/api/v1/playback/files/silence", source: "JioSaavn" },
       }),
     "/v1/remote-playback/prepare": (route) => route.fulfill({ json: {} }),
+    "/v1/playlists": (route) =>
+      route.fulfill({
+        json: { playlists: [{ id: "p1", name: "Road trip", track_count: 0 }] },
+      }),
+    "/v1/playlists/p1": (route) =>
+      route.fulfill({
+        json: { id: "p1", name: "Road trip", revision: 1, entries: [] },
+      }),
+    "/v1/playlists/p1/songs": (route) => {
+      listed.push(
+        JSON.parse(route.request().postData() || "{}").tracks.map(
+          (t: { title: string }) => t.title,
+        ),
+      );
+      return route.fulfill({ json: { revision: 2 } });
+    },
   };
   if (options.who) {
     const who = options.who;
@@ -254,7 +271,7 @@ async function home(target: Page | BrowserContext, options: Options = {}) {
   await target.addInitScript(() => {
     HTMLMediaElement.prototype.play = () => Promise.resolve();
   });
-  return { added };
+  return { added, listed };
 }
 
 const card = (page: Page) =>
@@ -609,4 +626,58 @@ test("the artist card's menu works with the keyboard and gives focus back", asyn
   await page.keyboard.press("Escape");
   await expect(menu).toBeHidden();
   await expect(artistDots(page)).toBeFocused();
+});
+
+/** Another tab signs in as Sam. */
+async function signInElsewhere(context: BrowserContext) {
+  const other = await context.newPage();
+  await other.goto("/#/home");
+  await other.evaluate(() => {
+    const channel = new BroadcastChannel("pig-music-session");
+    channel.postMessage({ change: "signed-in", tab: "other-tab", at: 1 });
+    channel.close();
+  });
+}
+
+test("Add to playlist from the card adds the album's songs and says so", async ({
+  page,
+}) => {
+  const { listed } = await home(page);
+  await page.goto("/#/home");
+  await choose(page, "Add to playlist");
+  await page
+    .getByRole("menu", { name: "Add Album one to playlist" })
+    .getByRole("menuitem", { name: "Road trip" })
+    .click();
+  await expect(page.getByText("Added to playlist")).toBeVisible();
+  expect(listed).toEqual([["First song", "Second song"]]);
+});
+
+// Codex round 1: a playlist add dropped by a session change was announced.
+test("Add to playlist dropped by another sign-in is neither sent nor announced", async ({
+  context,
+}) => {
+  let who = "u1";
+  const editions = gate();
+  const { listed } = await home(context, {
+    editions: editions.shut,
+    who: () => who,
+  });
+  const page = await context.newPage();
+  await page.goto("/#/home");
+  await choose(page, "Add to playlist");
+  await page
+    .getByRole("menu", { name: "Add Album one to playlist" })
+    .getByRole("menuitem", { name: "Road trip" })
+    .click();
+  who = "u2";
+  await signInElsewhere(context);
+  await page.waitForTimeout(500);
+  const read = page.waitForResponse("**/catalogue/releases/rel-studio");
+  editions.open();
+  await read;
+  await page.waitForTimeout(1500);
+  expect(listed).toEqual([]);
+  // Counted now: a notice would still be showing (it stays for seconds).
+  expect(await page.getByText("Added to playlist").count()).toBe(0);
 });

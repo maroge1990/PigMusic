@@ -23,7 +23,7 @@ import {
 } from "./menus";
 import { notifyError } from "./notices";
 import { usePlayer } from "./Player";
-import { addToPlaylist } from "./playlists";
+import { AttemptEnded, addToPlaylist } from "./playlists";
 import { PlaylistPicker, type PlaylistPickerHandle } from "./PlaylistPicker";
 import { shuffled } from "./shuffle";
 import {
@@ -180,11 +180,18 @@ export function useCollectionMenu({
       <PlaylistPicker
         ref={picker}
         title={title}
-        add={(id) =>
-          withCollection(songs, (list, session) =>
-            addToPlaylist(id, list.map(songBody), session),
-          )
-        }
+        add={async (id) => {
+          // A choice dropped (the card gone, the session ended or changed)
+          // says so, so the picker never reports it added (Codex round 1
+          // on #267).
+          let sent = false;
+          await withCollection(songs, (list, session) => {
+            if (!alive.current) return;
+            sent = true;
+            return addToPlaylist(id, list.map(songBody), session);
+          });
+          if (!sent) throw new AttemptEnded();
+        }}
       />
     </>
   );
