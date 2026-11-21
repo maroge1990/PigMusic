@@ -8,7 +8,7 @@ import logging
 import re
 import secrets
 import time
-from collections import Counter, OrderedDict
+from collections import Counter, OrderedDict, deque
 from urllib.parse import urlsplit
 
 import httpx
@@ -50,6 +50,13 @@ LABELS = {
 # A stream link the server passes through (YouTube's, #193) lasts as long as
 # a signed playback link.
 TOKEN_SECONDS = 6 * 3600
+# Tokens kept at once, per person and in all. A person playing YouTube songs
+# back to back without pause makes about 2 a minute at most (~700 in a
+# token's 6 hours, nearly all for songs long finished); a player only ever
+# uses its current and next song's. When full, the oldest token goes: a
+# player still using it would get 404 and must play the song again.
+STREAMS_PER_PERSON = 1000
+STREAMS = 10_000
 # A song no source has is not searched for again for a while; a failure of a
 # source or the network only briefly (REMOTE1: a miss took 30-35 s each time).
 MISS_SECONDS = 30 * 60
@@ -280,8 +287,10 @@ class RemoteAudio:
         # {name: (monotonic expiry, exception type, message)}
         self.misses = {}
         # Event-loop owned: {token: (monotonic expiry, YouTubeStream, user ID)}
-        # for the streams the server passes through.
-        self.streams = {}
+        # for the streams the server passes through, in issue order, and
+        # {user ID: deque of that person's tokens}, in the same order.
+        self.streams = OrderedDict()
+        self.held = {}
         # Counts each source's answer for the parity targets (#191); set by
         # the app.
         self.performance = None
@@ -310,12 +319,33 @@ class RemoteAudio:
         if "url" in found:
             return found
         now = time.monotonic()
-        self.streams = {k: v for k, v in self.streams.items() if v[0] > now}
+        # Every token lives TOKEN_SECONDS, so the oldest issued expires first:
+        # only expired ones are taken, from the front (Codex, #201 round 1).
+        while self.streams and next(iter(self.streams.values()))[0] <= now:
+            self.forget(next(iter(self.streams)))
+        held = self.held.setdefault(user_id, deque())
+        if len(held) >= STREAMS_PER_PERSON:
+            self.forget(held[0])
+        if len(self.streams) >= STREAMS:
+            self.forget(next(iter(self.streams)))
         token = secrets.token_urlsafe(24)
         # Played through the server: the address is tied to its network.
         target = YouTubeStream(self.youtube, found["youtube"], found["address"], client)
         self.streams[token] = (now + TOKEN_SECONDS, target, user_id)
+        self.held.setdefault(user_id, deque()).append(token)
         return {"token": token, "source": found["source"]}
+
+    def forget(self, token):
+        """Drop a token. Each person's tokens and the whole map are both in
+        issue order, so a token taken from either front is its owner's oldest."""
+        _, _, user_id = self.streams.pop(token)
+        held = self.held[user_id]
+        if held and held[0] == token:
+            held.popleft()
+        else:  # Never expected; kept correct rather than fast.
+            held.remove(token)
+        if not held:
+            del self.held[user_id]
 
     def streamed(self, token, user_id):
         """The stream behind a token, only for the person it was made for."""

@@ -839,3 +839,66 @@ def test_the_reason_given_agrees_with_the_song_rule():
         for c in candidates:
             reason = why(track, c)
             assert (reason == "matched") == acceptable(track, c), (track, c, reason)
+
+
+def issuing(resolver):
+    """`stream` with the lookup already answered by YouTube."""
+
+    async def shared(client, track):
+        return {"youtube": VIDEO, "address": address(), "source": "youtube"}
+
+    resolver.shared = shared
+    return lambda user: asyncio.run(resolver.stream(None, SONG, user))["token"]
+
+
+def test_stream_tokens_drop_only_the_expired_and_stay_within_their_caps(
+    tmp_path, monkeypatch
+):
+    """Codex, #201 round 1 (medium): each YouTube token rebuilt the whole
+    token map, which had no cap. Expired tokens now go from the front only,
+    and each person, and everyone together, keep at most a fixed number:
+    when full, the oldest goes, and only its owner's."""
+    from server import remote
+
+    monkeypatch.setattr(remote, "STREAMS_PER_PERSON", 3)
+    monkeypatch.setattr(remote, "STREAMS", 5)
+    resolver = resolver_with(FakeYouTube([]), lambda *_: [], tmp_path)
+    issue = issuing(resolver)
+    mark = [issue("mark") for _ in range(4)]
+    assert resolver.streamed(mark[0], "mark") is None  # Mark's oldest went.
+    assert all(resolver.streamed(t, "mark") for t in mark[1:])
+    sam = [issue("sam") for _ in range(3)]
+    # Five in all: the oldest overall (Mark's) went, Sam's stay.
+    assert len(resolver.streams) == 5
+    assert resolver.streamed(mark[1], "mark") is None
+    assert all(resolver.streamed(t, "sam") for t in sam)
+    assert {u: len(h) for u, h in resolver.held.items()} == {"mark": 2, "sam": 3}
+    # Expired tokens leave from the front when the next is issued.
+    now = time.monotonic()
+    monkeypatch.setattr(remote.time, "monotonic", lambda: now + remote.TOKEN_SECONDS)
+    fresh = issue("sam")
+    assert list(resolver.streams) == [fresh]
+    assert {u: list(h) for u, h in resolver.held.items()} == {"sam": [fresh]}
+
+
+@pytest.mark.loop_timing
+def test_issuing_a_token_with_the_map_full_is_quick(tmp_path):
+    from server import remote
+
+    resolver = resolver_with(FakeYouTube([]), lambda *_: [], tmp_path)
+    issuing(resolver)
+
+    async def fill_and_time():
+        for n in range(remote.STREAMS):
+            await resolver.stream(None, SONG, f"person-{n % 10}")
+        assert len(resolver.streams) == remote.STREAMS
+        slowest = 0
+        for _ in range(50):
+            began = time.perf_counter()
+            await resolver.stream(None, SONG, "person-0")
+            slowest = max(slowest, time.perf_counter() - began)
+        return slowest
+
+    slowest = asyncio.run(fill_and_time())
+    assert len(resolver.streams) == remote.STREAMS
+    assert slowest < 0.005, slowest
