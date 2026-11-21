@@ -88,7 +88,9 @@ class Portraits:
                         photos.sort(key=lambda p: int(p.get("likes", 0)), reverse=True)
                         url = photos[0]["url"] if photos else None
                 except (httpx.HTTPError, ValueError, KeyError):
-                    pass
+                    # Fanart (or the artist lookup) may have one: only a
+                    # confirmed miss is remembered for a day.
+                    unsure = True
             if url:
                 try:
                     return await self.keep(client, url, target, "fanart")

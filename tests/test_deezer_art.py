@@ -608,6 +608,55 @@ def test_portraits_saved_before_the_silhouette_fix_are_fetched_again_when_asked_
     assert store.read_document(saved_answer) == {"file": old.name}
 
 
+def test_a_fanart_outage_is_retried_soon_not_remembered_for_a_day(tmp_path):
+    """Codex #201 round 1 (medium): after a clean Deezer miss, a Fanart error
+    was remembered as a 24-hour miss, so a portrait Fanart had again minutes
+    later was skipped. Only a confirmed miss is remembered for a day."""
+    import time
+
+    from server.media import save_settings
+    from server.store import Store
+
+    store = Store(tmp_path)
+    save_settings(store, True, False, "f" * 32)
+    linked = {
+        "artist/"
+        + ARTIST: {
+            "name": "Radiohead",
+            "relations": [{"url": {"resource": "https://www.deezer.com/artist/399"}}],
+        }
+    }
+    portraits = Portraits(store, Catalogue(linked), Artwork(store, Catalogue(linked)))
+    fanart = {"up": False}
+
+    def handle(request):
+        if request.url.host == "api.deezer.com":
+            return httpx.Response(200, json={"picture_xl": NO_PHOTO})
+        if request.url.host == "webservice.fanart.tv":
+            if not fanart["up"]:
+                return httpx.Response(503)
+            photo = {"url": "https://assets.fanart.tv/photo.jpg", "likes": "1"}
+            return httpx.Response(200, json={"artistthumb": [photo]})
+        return httpx.Response(200, content=image_bytes())
+
+    async def get():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+            return await portraits.get(client, "Radiohead", ARTIST)
+
+    assert run(get()) is None
+    with store.connect() as conn:
+        (payload,) = conn.execute(
+            "SELECT payload FROM documents WHERE name LIKE 'portrait-missing:%'"
+        ).fetchone()
+    assert json.loads(payload)["retry_after"] <= time.time() + 300
+    # The short retry window passes and Fanart has recovered.
+    with store.connect() as conn:
+        conn.execute("DELETE FROM documents WHERE name LIKE 'portrait-missing:%'")
+    fanart["up"] = True
+    found = run(get())
+    assert found is not None and found.is_file()
+
+
 def test_artistgrid_is_never_asked_and_its_saved_portraits_still_serve(tmp_path):
     """#201: ArtistGrid supplied 0.4% of photos (under the 1% mark) and is
     retired. A miss on Deezer, with no Fanart key, asks nothing else; a
