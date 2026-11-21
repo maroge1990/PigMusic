@@ -509,7 +509,7 @@ def paced_search(monkeypatch, results):
 
 def test_freemp3cloud_searches_are_serialised_and_spaced(tmp_path, monkeypatch):
     """#140: the pacing was dead code; every caller of the shared search
-    (downloads, mixes, the relay) is now paced."""
+    (downloads and mixes) is now paced."""
     import threading
 
     from server.providers.contracts import Context

@@ -381,37 +381,25 @@ ON_YOUTUBE = {
 }
 
 
-def resolver_with(youtube, jiosaavn, tmp_path, asked=None):
+def resolver_with(youtube, jiosaavn, tmp_path):
     from server.remote import RemoteAudio
 
-    def relay_search(source, track):
-        asked.append(source) if asked is not None else None
-        return []
-
-    return RemoteAudio(
-        jiosaavn,
-        directory=tmp_path / "relay",
-        relay_search=relay_search,
-        youtube=youtube,
-        relays=(),
-    )
+    return RemoteAudio(jiosaavn, youtube=youtube)
 
 
 def test_a_tap_jiosaavn_misses_plays_from_youtube_through_the_server(
     tmp_path, monkeypatch
 ):
-    asked = []
     youtube = FakeYouTube([ON_YOUTUBE])
-    resolver = resolver_with(youtube, lambda *_: [], tmp_path, asked)
+    resolver = resolver_with(youtube, lambda *_: [], tmp_path)
 
     async def scenario():
         async with httpx.AsyncClient() as client:
             found = await resolver.stream(client, SONG, "member")
-            assert found["source"] == "youtube" and "relay" in found
-            stream = resolver.relay(found["relay"], "member")
+            assert found["source"] == "youtube" and "token" in found
+            stream = resolver.streamed(found["token"], "member")
             assert isinstance(stream, YouTubeStream) and stream.video_id == VIDEO
-            assert resolver.relay(found["relay"], "someone else") is None
-            assert asked == []  # FreeMp3Cloud and zvu4no are not asked (D-89).
+            assert resolver.streamed(found["token"], "someone else") is None
             # A wrong song on YouTube is no match: the shared song rule decides.
             youtube.songs_found = [{**ON_YOUTUBE, "title": "Song (Live)"}]
             with pytest.raises(ValueError, match="No source has"):
@@ -520,7 +508,6 @@ def test_a_tap_through_the_api_streams_youtubes_bytes_by_range(tmp_path, monkeyp
     remote = app.state.look_ahead.remote_audio
     remote.search = lambda *_: []
     remote.youtube = FakeYouTube([ON_YOUTUBE])
-    assert remote.relays == ()  # FreeMp3Cloud and zvu4no out of instant (D-89).
     token = app.state.auth.login("mark", PASSWORD, "device", "phone", "ios", "x")
     with TestClient(
         app,

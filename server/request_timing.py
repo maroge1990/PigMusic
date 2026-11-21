@@ -6,7 +6,7 @@ sensible one) and a list of timed phases. Both go back to the client
 share of a wait, and to the log for playback addresses and slow requests,
 with how busy the worker threads were. A watcher logs when the event loop
 itself was blocked. Paths are logged without their query, where signed media
-links carry their signature, and a relayed stream's path is masked.
+links carry their signature, and a passed-through stream's path is masked.
 """
 
 import asyncio
@@ -133,7 +133,7 @@ def describe(state):
 
 
 def public_path(path):
-    """`path` as it may be logged or shown: a relayed stream's path is its
+    """`path` as it may be logged or shown: a passed-through stream's path is its
     credential, so its token is replaced."""
     if path.startswith("/api/v1/remote-playback/streams/"):
         return "/api/v1/remote-playback/streams/[redacted]"

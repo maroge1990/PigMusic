@@ -10,7 +10,7 @@ from .contracts import ProviderError
 from .process import run_checked
 
 # freemp3cloud silently returns empty pages when searched in parallel or too
-# fast: its searches, from every caller (downloads, mixes, the relay), go one
+# fast: its searches, from every caller (downloads and mixes), go one
 # at a time and FREEMP3CLOUD_GAP seconds apart, and an empty answer is asked
 # again once after FREEMP3CLOUD_RETRY_PAUSE (#140).
 FREEMP3CLOUD_GAP = 2.5

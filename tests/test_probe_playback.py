@@ -147,7 +147,7 @@ class FakeServer:
             )
         if path == "/api/v1/remote-playback":
             found = {
-                "url": "/api/v1/remote-playback/streams/relay-token",
+                "url": "/api/v1/remote-playback/streams/stream-token",
                 "source": "Remote · YouTube",
             }
             return httpx.Response(
@@ -277,9 +277,9 @@ def test_remote_skips_household_songs_and_asks_twice(tmp_path, capsys):
     assert [r["attempt"] for r in records] == ["first", "again"]
     assert all(r["song"] == "The Weeknd - Blinding Lights" for r in records)
     first = records[0]
-    assert first["source"] == "Remote · YouTube" and first["route"] == "relayed"
+    assert first["source"] == "Remote · YouTube" and first["route"] == "through server"
     assert first["server"]["youtube-found"] == 12000 and first["open"]["status"] == 206
-    # The relayed audio is fetched without the device token.
+    # The passed-through audio is fetched without the device token.
     media = [
         h for m, p, h in server.seen if p.startswith("/api/v1/remote-playback/streams/")
     ]

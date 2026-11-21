@@ -267,35 +267,18 @@ def test_home_and_a_settled_search_look_up_their_songs(tmp_path, monkeypatch):
         assert looked_up == [(RELEASE, OTHER)] * 3
 
 
-def test_a_look_ahead_never_takes_the_relay_slots_a_tap_needs(tmp_path, monkeypatch):
-    """Codex, #192 round 1 (high): a look-ahead stops at JioSaavn's match. It
-    never searches the relays or starts a transfer, so songs nobody tapped
-    cannot hold every relay slot while a real tap waits, and its JioSaavn miss
-    is not remembered as a miss for the tap, which still asks the relays."""
-    import threading
-
+def test_a_look_ahead_miss_is_never_remembered_for_the_tap():
+    """Codex, #192 round 1 (high): a look-ahead's miss is not remembered as a
+    miss for the tap, which still asks every source."""
     import httpx
 
-    resolver = RemoteAudio(lambda *_: [], directory=tmp_path / "relay")
-    audio = tmp_path / "disposable.mp3"
-    audio.write_bytes(b"mock transfer")
-    found, fetched = [], []
-    release = threading.Event()
+    from test_youtube import ON_YOUTUBE, FakeYouTube
 
-    def find(source, track):
-        found.append((source, track["title"]))
-        return {"fixture": True}
-
-    def download(source, track, candidate):
-        fetched.append(track["title"])
-        release.wait(5)
-        return audio
-
-    monkeypatch.setattr(resolver, "find", find)
-    monkeypatch.setattr(resolver, "download", download)
+    youtube = FakeYouTube([])
+    resolver = RemoteAudio(lambda *_: [], youtube=youtube)
 
     def song(title):
-        return {"artist": "Fixture", "title": title, "album": "Fixture"}
+        return {"artist": "Artist", "title": title, "album": "Album", "duration": 200}
 
     def screen(*titles):
         def job(title):
@@ -314,27 +297,21 @@ def test_a_look_ahead_never_takes_the_relay_slots_a_tap_needs(tmp_path, monkeypa
     async def scenario():
         async with httpx.AsyncClient() as client:
             ahead = LookAhead(resolver, lambda: client, lambda: True)
-            ahead.screen("mark", screen("a", "b"))
+            ahead.screen("mark", screen("Song", "b"))
             ahead.screen("sam", screen("c", "d"))
             await until(lambda: not ahead.people)
             await asyncio.sleep(0.2)
-            assert found == [] and fetched == []  # No relay was asked.
             assert not ahead.people  # Every look-ahead has ended.
-            assert resolver.relay_slots._value == 3
+            assert sorted(youtube.searched) == ["Song", "b", "c", "d"]
             assert resolver.misses == {}
-            tap = asyncio.ensure_future(resolver.shared(client, song("tapped")))
-            await until(lambda: fetched)
-            assert fetched == ["tapped"]  # The tap's transfer started at once.
-            release.set()
-            assert (await tap)["source"] == "zvu4no"
-            # A tap on a song looked up ahead still reaches the relays.
-            assert (await resolver.shared(client, song("a")))["source"] == "zvu4no"
+            # A tap on a song looked up ahead still asks YouTube.
+            youtube.songs_found = [ON_YOUTUBE]
+            found = await resolver.shared(client, song("Song"))
+            assert found["source"] == "youtube"
+            assert youtube.searched.count("Song") == 2
             await ahead.close()
 
-    try:
-        asyncio.run(scenario())
-    finally:
-        release.set()
+    asyncio.run(scenario())
 
 
 def test_earlier_lookups_finishing_never_start_a_search_before_it_settles():
