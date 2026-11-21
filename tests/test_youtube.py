@@ -1047,3 +1047,67 @@ def test_an_ordinary_tap_never_answers_an_explicit_edition_at_the_same_time(
     found = asyncio.run(scenario())
     assert found["ordinary"] == {"url": on_saavn["source_url"], "source": "jiosaavn"}
     assert isinstance(found["strict"], ValueError), found["strict"]
+
+
+@pytest.mark.parametrize("exact_first", [False, True])
+def test_an_exact_artist_credit_wins_over_a_leading_the_alias(
+    tmp_path, monkeypatch, exact_first
+):
+    """Codex, D-130 review: once "Killers" counted as "The Killers", each
+    source picked between the two by address alone. The exact credit is now
+    chosen, whatever order the source gave; JioSaavn still wins (D-89)."""
+    from server.remote import RemoteAudio
+
+    async def probe(client, url):
+        return None
+
+    monkeypatch.setattr(RemoteAudio, "probe", staticmethod(probe))
+    song = {
+        "artist": "The Killers",
+        "title": "Mr. Brightside",
+        "album": "Hot Fuss",
+        "duration": 222,
+    }
+
+    def saavn(channel, url):
+        return {
+            "channel": channel,
+            "title": "Mr. Brightside",
+            "album": "Hot Fuss",
+            "duration": "222",
+            "source_url": f"https://aac.saavncdn.com/{url}_320.mp4",
+        }
+
+    def video(channel, video_id):
+        return {
+            **ON_YOUTUBE,
+            "channel": channel,
+            "title": "Mr. Brightside",
+            "album": "Hot Fuss",
+            "duration": 222,
+            "video_id": video_id,
+        }
+
+    # The alias sorts first by address, so only the credit can pick the
+    # exact one.
+    saavns = [saavn("Killers", "a"), saavn("The Killers", "b")]
+    videos = [video("Killers", "a" * 11), video("The Killers", "b" * 11)]
+    if exact_first:
+        saavns.reverse()
+        videos.reverse()
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            both = resolver_with(FakeYouTube(videos), lambda *_: saavns, tmp_path)
+            found = await both.stream(client, song, "member")
+            assert found == {
+                "url": "https://aac.saavncdn.com/b_320.mp4",
+                "source": "jiosaavn",
+            }
+            youtube = FakeYouTube(videos)
+            only = resolver_with(youtube, lambda *_: [], tmp_path / "yt")
+            found = await only.stream(client, song, "member")
+            assert found["source"] == "youtube"
+            assert youtube.looked_up == ["b" * 11]
+
+    asyncio.run(scenario())

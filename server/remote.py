@@ -16,7 +16,14 @@ import httpx
 from .request_timing import add_phase
 from .library import normalise
 from .downloader import duration, matches, mismatch
-from .matching import DISTINCT, album_title, flavour, primary_artist, recording_kind
+from .matching import (
+    DISTINCT,
+    album_title,
+    flavour,
+    lead_artist,
+    primary_artist,
+    recording_kind,
+)
 from .performance import DETAIL_CHARS
 from .providers.contracts import ProviderError
 from .vendor.jiosaavn import search_jiosaavn
@@ -143,11 +150,20 @@ def markers(*texts):
 
 
 def without_the(artist):
-    """The lead artist for instant listening (D-130): a leading "The" as a
-    whole word does not count ("The Goo Goo Dolls" is "Goo Goo Dolls"; "The
-    The" is "The The", not "The"; "Theory of a Deadman" keeps its name)."""
-    name = primary_artist(artist)
-    return name[4:] if name.startswith("the ") and name != "the the" else name
+    """The lead artist for instant listening (D-130): a leading "The", a
+    word of its own in the credit as written, does not count ("The Goo Goo
+    Dolls" is "Goo Goo Dolls"). "The The", "The-Dream" and "Theory of a
+    Deadman" keep their names."""
+    found = re.match(r"\s*the\s+(\S.*)$", lead_artist(artist), re.I)
+    if found and primary_artist(artist) != "the the":
+        return primary_artist(found[1])
+    return primary_artist(artist)
+
+
+def aliased(track, c):
+    """A result credited to the artist only once a leading "The" is dropped:
+    among one source's matches an exact credit is chosen first (Codex)."""
+    return primary_artist(c.get("channel")) != primary_artist(track["artist"])
 
 
 def rejection(track, c):
@@ -606,11 +622,13 @@ class RemoteAudio:
                     songs,
                 )
             wanted = album_title(track.get("album") or "", track.get("artist"))
-            # The same album first, then a fixed order: the same song picks
-            # the same video every time.
+            # An exact artist credit first (D-130), then the same album,
+            # then a fixed order: the same song picks the same video every
+            # time.
             video = min(
                 found,
                 key=lambda c: (
+                    aliased(track, c),
                     album_title(c.get("album") or "", c.get("channel")) != wanted,
                     c["video_id"],
                 ),
@@ -718,13 +736,15 @@ class RemoteAudio:
                     query,
                     results,
                 )
-            # Several copies of the recording: the same album first (without
-            # " - Single" and edition words), then a matching ISRC, then a
-            # fixed order, so the same song picks the same copy every time.
+            # Several copies of the recording: an exact artist credit first
+            # (D-130), then the same album (without " - Single" and edition
+            # words), then a matching ISRC, then a fixed order, so the same
+            # song picks the same copy every time.
             wanted = album_title(track.get("album") or "", track.get("artist"))
             url = min(
                 urls,
                 key=lambda u: (
+                    aliased(track, urls[u]),
                     album_title(urls[u].get("album") or "", urls[u].get("channel"))
                     != wanted,
                     not (track.get("isrcs") and urls[u].get("isrc") in track["isrcs"]),

@@ -632,6 +632,12 @@ def test_the_same_artist_with_or_without_a_leading_the():
     assert not same("Theory of a Deadman", "Theory")
     assert not same("The Weeknd", "The Weekend")
     assert not same("Thee Oh Sees", "Oh Sees")
+    # Codex, D-130 review: only "The" standing as a word in the credit as
+    # written; a hyphenated name is another artist.
+    assert not same("Dream", "The-Dream")
+    assert not same("The-Dream", "Dream")
+    assert same("The-Dream", "the-dream")
+    assert same("  The\tGoo Goo Dolls", "Goo Goo Dolls")
 
 
 # Album names that mark another performer's take on the song, each with a
