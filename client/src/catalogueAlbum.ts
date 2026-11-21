@@ -4,7 +4,12 @@
  * Add to library would add, and the words for what it did.
  */
 import type { BadgeState } from "./StateBadge";
-import { PAUSED_NOTICE, type AddResult, type Song as Row } from "./songs";
+import {
+  PAUSED_NOTICE,
+  type AddOutcome,
+  type AddResult,
+  type Song as Row,
+} from "./songs";
 import type { Track } from "./types";
 
 export type CatalogueSong = {
@@ -152,8 +157,45 @@ export function nothingToAdd(rows: Row[]) {
  * every song yours, or Add sent and the songs on their way; none while
  * nothing is known or some songs are still to add. */
 export function cardMark(rows: Row[] | null): BadgeState | null {
-  if (!rows?.length || rows.some((r) => addable(r) || r.checking)) return null;
-  return rows.every((r) => r.state === "saved") ? "library" : "requested";
+  if (!nothingLeftToAdd(rows)) return null;
+  if (rows!.every((r) => r.state === "saved")) return "library";
+  // A song you paused shows no "Adding" (#264): it waits for you.
+  return rows!.every((r) => r.state === "saved" || r.state === "pending")
+    ? "requested"
+    : null;
+}
+
+/** Known to have nothing Add to library could send, as the page's Add
+ * button is off: every song yours, on its way or paused. */
+export function nothingLeftToAdd(rows: Row[] | null) {
+  return !!rows?.length && !rows.some((r) => addable(r) || r.checking);
+}
+
+/**
+ * The rows after an Add, from the server's answer for each song sent (the
+ * songs `addable` picked, in order): created or existing are on their way,
+ * added or in_library are yours, paused stays paused, and excluded is left
+ * as it was, so Add can offer it again. Null when the answer doesn't say
+ * song by song: the card then reads the album again.
+ */
+export function afterAdd(rows: Row[], outcomes?: AddOutcome[]): Row[] | null {
+  const sent = rows.filter(addable);
+  if (!outcomes || outcomes.length !== sent.length) return null;
+  const outcome = new Map(sent.map((r, i) => [r.key, outcomes[i]]));
+  return rows.map((r) => {
+    switch (outcome.get(r.key)) {
+      case "created":
+      case "existing":
+        return { ...r, state: "pending" as const };
+      case "added":
+      case "in_library":
+        return { ...r, state: "saved" as const };
+      case "paused":
+        return { ...r, state: "paused" as const };
+      default:
+        return r;
+    }
+  });
 }
 
 /** A release's artwork, as Cover's catalogueCover names it. */

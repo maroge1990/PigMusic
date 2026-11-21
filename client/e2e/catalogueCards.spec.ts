@@ -28,7 +28,13 @@ const queued = (page: Page) =>
       ) ?? [],
   );
 
-const song = (release: string, title: string, n: number, saved = false) => ({
+const song = (
+  release: string,
+  title: string,
+  n: number,
+  saved = false,
+  requested = false,
+) => ({
   id: `t-${release}-${n}`,
   title,
   artist: "Someone",
@@ -36,7 +42,11 @@ const song = (release: string, title: string, n: number, saved = false) => ({
   track_number: n,
   disc_number: 1,
   musicbrainz_recording_id: `rec-${release}-${n}`,
-  server_state: saved ? "in_library" : "not_in_library",
+  server_state: saved
+    ? "in_library"
+    : requested
+      ? "requested"
+      : "not_in_library",
   saved_track: saved
     ? {
         id: `saved-${n}`,
@@ -83,6 +93,8 @@ type Options = {
   libraryAlbum?: Promise<void>;
   /** Titles the library lookup says are yours. */
   yours?: string[];
+  /** The Add answer's outcome for each song sent (default created). */
+  outcomes?: string[];
   /** Who /v1/me says is signed in. */
   who?: () => string;
 };
@@ -92,6 +104,19 @@ type Options = {
 async function home(target: Page | BrowserContext, options: Options = {}) {
   const added: string[][] = [];
   const listed: string[][] = [];
+  // Where the server has each song since the test's Adds.
+  const server = {
+    requested: new Set<string>(),
+    owned: new Set<string>(options.yours || []),
+  };
+  const studio = (title: string, n: number) =>
+    song(
+      "rel-studio",
+      title,
+      n,
+      server.owned.has(title),
+      server.requested.has(title),
+    );
   const answers: Record<string, (route: Route) => Promise<void>> = {
     "/v1/home/recommended": (route) =>
       route.fulfill({
@@ -200,10 +225,7 @@ async function home(target: Page | BrowserContext, options: Options = {}) {
                 artist: "Someone",
                 date: "2025",
                 description: "",
-                tracks: [
-                  song("rel-studio", "First song", 1),
-                  song("rel-studio", "Second song", 2),
-                ],
+                tracks: [studio("First song", 1), studio("Second song", 2)],
               },
             }),
     "/v1/library/lookup": (route) => {
@@ -213,7 +235,7 @@ async function home(target: Page | BrowserContext, options: Options = {}) {
       return route.fulfill({
         json: {
           tracks: asked.map((s, i) =>
-            options.yours?.includes(s.title)
+            server.owned.has(s.title)
               ? song("rel-studio", s.title, i + 1, true).saved_track
               : null,
           ),
@@ -225,13 +247,27 @@ async function home(target: Page | BrowserContext, options: Options = {}) {
         return route.fulfill({
           json: { items: [], next_offset: null, active: 0 },
         });
-      added.push(
-        JSON.parse(route.request().postData() || "{}").tracks.map(
-          (t: { title: string }) => t.title,
-        ),
-      );
+      const titles: string[] = JSON.parse(
+        route.request().postData() || "{}",
+      ).tracks.map((t: { title: string }) => t.title);
+      added.push(titles);
+      const outcomes = titles.map((_, i) => options.outcomes?.[i] ?? "created");
+      titles.forEach((title, i) => {
+        if (["created", "existing"].includes(outcomes[i]))
+          server.requested.add(title);
+        if (["added", "in_library"].includes(outcomes[i]))
+          server.owned.add(title);
+      });
+      const count = (...kinds: string[]) =>
+        outcomes.filter((o) => kinds.includes(o)).length;
       return route.fulfill({
-        json: { created: added.at(-1)!.length, existing: 0, skipped: 0 },
+        json: {
+          created: count("created"),
+          existing: count("existing", "added", "in_library"),
+          skipped: count("excluded"),
+          outcomes,
+          downloads_enabled: true,
+        },
       });
     },
     "/v1/remote-playback/catalogue": (route) =>
@@ -285,7 +321,7 @@ async function home(target: Page | BrowserContext, options: Options = {}) {
   await target.addInitScript(() => {
     HTMLMediaElement.prototype.play = () => Promise.resolve();
   });
-  return { added, listed };
+  return { added, listed, server };
 }
 
 const card = (page: Page) =>
@@ -740,4 +776,57 @@ test("a slow library card's Play never replaces a catalogue card's played since"
   await read;
   await page.waitForTimeout(800);
   expect((await queued(page)).sort()).toEqual(["First song", "Second song"]);
+});
+
+// Codex round 1: every song sent was marked Adding, whatever the server
+// did with it, and the card never looked again.
+const addItem = (page: Page) =>
+  page
+    .getByRole("menu", { name: "Album one" })
+    .getByRole("menuitem", { name: "Add to library" });
+
+test("a song the server left out can be added again from the card", async ({
+  page,
+}) => {
+  const { added } = await home(page, { outcomes: ["excluded", "created"] });
+  await page.goto("/#/home");
+  await choose(page, "Add to library");
+  await expect.poll(() => added).toEqual([["First song", "Second song"]]);
+  await expect(page.getByText("Adding 1 song to your library.")).toBeVisible();
+  await page.waitForTimeout(500);
+  await expect(card(page).getByRole("img", { name: "Adding" })).toHaveCount(0);
+  await dots(page).click();
+  await expect(addItem(page)).toBeEnabled();
+  await addItem(page).click();
+  // Only the song left out is asked for again.
+  await expect.poll(() => added.at(-1)).toEqual(["First song"]);
+});
+
+test("songs the household had are marked yours at once", async ({ page }) => {
+  await home(page, { outcomes: ["added", "added"] });
+  await page.goto("/#/home");
+  await choose(page, "Add to library");
+  await expect(
+    card(page).getByRole("img", { name: "In your library" }),
+  ).toBeVisible();
+  await expect(card(page).getByRole("img", { name: "Adding" })).toHaveCount(0);
+  await dots(page).click();
+  await expect(addItem(page)).toBeDisabled();
+});
+
+test("a cancelled add shows on the card, and Add is offered again", async ({
+  page,
+}) => {
+  const { server } = await home(page);
+  await page.goto("/#/home");
+  await choose(page, "Add to library");
+  await expect(card(page).getByRole("img", { name: "Adding" })).toBeVisible();
+  // Cancelled in Downloads: the requests change.
+  server.requested.clear();
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("music-requests-changed")),
+  );
+  await expect(card(page).getByRole("img", { name: "Adding" })).toHaveCount(0);
+  await dots(page).click();
+  await expect(addItem(page)).toBeEnabled();
 });

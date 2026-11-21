@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { currentSession } from "./api";
-import { cardMark } from "./catalogueAlbum";
+import { cardMark, nothingLeftToAdd } from "./catalogueAlbum";
 import {
   addCatalogueAlbum,
   cardFailure,
@@ -38,29 +38,77 @@ export function CatalogueAlbumCard({
     session: number;
     rows: Song[];
   } | null>(null);
-  const remember = (session: number, rows: Song[]) => {
-    if (currentSession() === session) setKnown({ session, rows });
+  const knownNow = useRef(known);
+  knownNow.current = known;
+  // Each read or Add is numbered as it starts; an answer is kept only if
+  // nothing that started later has been kept, so an older lookup never
+  // undoes a newer state.
+  const order = useRef({ started: 0, applied: 0 });
+  const begin = () => ({
+    stamp: ++order.current.started,
+    at: currentSession(),
+  });
+  const keep = (from: { stamp: number; at: number }, rows: Song[] | null) => {
+    if (currentSession() !== from.at || from.stamp <= order.current.applied)
+      return;
+    order.current.applied = from.stamp;
+    setKnown(rows && { session: from.at, rows });
   };
+  // Once the card knows where its songs stand, it reads them again, as the
+  // page does, whenever your library or your requests change: a song
+  // cancelled, finished or excluded shows as it now is (Codex round 1).
+  useEffect(() => {
+    let active = true;
+    let running = false;
+    let again = false;
+    const reread = () => {
+      if (!knownNow.current) return;
+      if (running) {
+        again = true;
+        return;
+      }
+      running = true;
+      const read = begin();
+      void catalogueAlbumSongs(group, artistId)
+        .then((rows) => active && keep(read, rows))
+        .catch(() => active && keep(read, null))
+        .finally(() => {
+          running = false;
+          if (again && active) {
+            again = false;
+            reread();
+          }
+        });
+    };
+    window.addEventListener("music-library-changed", reread);
+    window.addEventListener("music-requests-changed", reread);
+    return () => {
+      active = false;
+      window.removeEventListener("music-library-changed", reread);
+      window.removeEventListener("music-requests-changed", reread);
+    };
+  }, [group, artistId]);
   const rows = known && known.session === currentSession() ? known.rows : null;
   const mark = cardMark(rows);
   const { menu, parts } = useCollectionMenu({
     kind: "album",
     title,
     songs: async () => {
-      const session = currentSession();
+      const read = begin();
       const list = await catalogueAlbumSongs(group, artistId).catch((e) => {
         throw cardFailure(e, title);
       });
-      remember(session, list);
+      keep(read, list);
       return list;
     },
     addToLibrary: async (list, session, again) => {
-      const generation = currentSession();
+      // Numbered before it is sent: a read started after it is newer.
+      const add = begin();
       const now = await addCatalogueAlbum(list, session, again);
-      if (now) remember(generation, now);
+      if (now) keep(add, now);
     },
     // As on the page: no Add once nothing is left to add.
-    cannotAdd: mark !== null,
+    cannotAdd: nothingLeftToAdd(rows),
   });
   return (
     <div className="collection-card" {...menu.target}>

@@ -6,6 +6,7 @@
 import { apiFetch, currentSession, detailOr, writeFailure } from "./api";
 import {
   addable,
+  afterAdd,
   addedMessage,
   checking,
   lookedUp,
@@ -118,8 +119,9 @@ export async function requestAlbum(rows: Song[]): Promise<AddResult> {
 /**
  * Add to library from a catalogue album's card, as its page does it: the
  * same request and the same words, sent under the session that chose it.
- * Answers the rows as they now stand (the songs sent are being added), or
- * null when nothing was sent or the answer came to another session.
+ * Answers the rows as the server says it took each song, or null when
+ * nothing was sent, the answer came to another session, or it named no
+ * song by song (the card then reads the album again).
  */
 export async function addCatalogueAlbum(
   rows: Song[],
@@ -141,9 +143,8 @@ export async function addCatalogueAlbum(
     notify(addedMessage(result));
     window.dispatchEvent(new Event("music-library-changed"));
     window.dispatchEvent(new Event("music-requests-changed"));
-    return rows.map((r) =>
-      addable(r) ? { ...r, state: "pending" as const } : r,
-    );
+    // Each song as the server says it took it (Codex round 1 on #267).
+    return afterAdd(rows, result.outcomes);
   } catch (e) {
     if (currentSession() === generation) notifyError((e as Error).message);
     return null;

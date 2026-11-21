@@ -144,7 +144,16 @@ export type AddResult = {
   skipped: number;
   /** Songs you paused: Add leaves them paused (#264). */
   paused?: number;
+  /** What happened to each song, in the order sent. */
+  outcomes?: AddOutcome[];
 };
+export type AddOutcome =
+  | "created"
+  | "existing"
+  | "added"
+  | "paused"
+  | "excluded"
+  | "in_library";
 /** An Add that met a song you paused: only Downloads resumes it (#264). */
 export const PAUSED_NOTICE = "Paused. Resume it in Downloads.";
 

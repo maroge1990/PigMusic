@@ -11,13 +11,50 @@ globalThis.Event = class {
 };
 const {
   addable,
+  afterAdd,
   cardMark,
   checking,
   lookedUp,
   markYours,
+  nothingLeftToAdd,
   nothingToAdd,
   openingEdition,
 } = await import("../src/catalogueAlbum.ts");
+
+test("after an Add each song is as the server took it (Codex round 1)", () => {
+  const r = (key, state) => ({ key, title: key, artist: "A", state });
+  const rows = [
+    r("own", "saved"),
+    r("a", "missing"),
+    r("b", "server"),
+    r("c", "missing"),
+    r("d", "missing"),
+    r("e", "missing"),
+    r("f", "pending"),
+  ];
+  // Sent: a, b, c, d, e (the addable ones, in order).
+  const now = afterAdd(rows, [
+    "created",
+    "added",
+    "excluded",
+    "paused",
+    "in_library",
+  ]);
+  assert.deepEqual(
+    now.map((r) => r.state),
+    ["saved", "pending", "saved", "missing", "paused", "saved", "pending"],
+  );
+  // The excluded song can be added again; the mark waits for it.
+  assert.equal(nothingLeftToAdd(now), false);
+  assert.equal(cardMark(now), null);
+  // An answer that doesn't say song by song tells nothing.
+  assert.equal(afterAdd(rows, undefined), null);
+  assert.equal(afterAdd(rows, ["created"]), null);
+  // A paused song is not shown as Adding, but leaves nothing to add.
+  const paused = [r("a", "paused"), r("b", "pending")];
+  assert.equal(cardMark(paused), null);
+  assert.equal(nothingLeftToAdd(paused), true);
+});
 const { collectionMenu, isLatest, latestChoice } = await import(
   "../src/menus.ts"
 );
@@ -30,9 +67,7 @@ const {
   catalogueAlbumSongs,
   catalogueArtistSongs,
 } = await import("../src/catalogueActions.ts");
-const { downloadSongs, withCollection } = await import(
-  "../src/songActions.ts"
-);
+const { downloadSongs, withCollection } = await import("../src/songActions.ts");
 const { clearSessionReads } = await import("../src/api.ts");
 const { clearNotices, subscribe } = await import("../src/notices.ts");
 
@@ -209,7 +244,12 @@ test("Add from a card sends only the songs to add, under the session that chose 
   clearSessionReads();
   setSessionId("s2");
   const sent = serve({
-    "/api/v1/requests": { created: 1, existing: 0, skipped: 0 },
+    "/api/v1/requests": {
+      created: 1,
+      existing: 0,
+      skipped: 0,
+      outcomes: ["created"],
+    },
   });
   const rows = [
     row("a", "saved", { saved: { id: "x" } }),
