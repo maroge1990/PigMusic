@@ -16,7 +16,7 @@ import httpx
 from .request_timing import add_phase
 from .library import normalise
 from .downloader import duration, matches, mismatch
-from .matching import album_title, flavour, primary_artist, recording_kind
+from .matching import DISTINCT, album_title, flavour, primary_artist, recording_kind
 from .performance import DETAIL_CHARS
 from .providers.contracts import ProviderError
 from .vendor.jiosaavn import search_jiosaavn
@@ -111,19 +111,35 @@ DETAIL_RESULTS = 3
 
 # Album names that mark other people's recordings of a song (D-130): with no
 # known length an instant listen takes the song from any other album, but
-# not from these. Karaoke, instrumental, live, remix and cover albums are
-# refused earlier ("album kind", "version").
+# not from these. Read in `normalise`d text (case-folded, full-width letters
+# plain, punctuation as word breaks).
 NOT_ORDINARY = re.compile(
     r"\b(tributes?|lullab(?:y|ies)|covers|made popular by|originally performed by|"
-    r"8[ -]?bit)\b",
-    re.I,
+    r"8 ?bit)\b"
 )
+# An album naming another recording of its songs (Codex, D-130 review): the
+# title's version words (`DISTINCT`), the alterations (`ALTERED`), stripped
+# versions and re-recordings ("Fearless (Taylor's Version)"). Edition words
+# ("Remastered", "Deluxe", "Anniversary Edition") are not among them.
+RERECORDED = re.compile(r"\b(stripped|re ?record(?:ed|ing|ings)?|\w+ s version)\b")
 
 
 def ordinary(album):
     """An album the song itself may be on (D-130): named, and not one of
     NOT_ORDINARY. Compilations ("Summer Hits 2026") are ordinary."""
-    return bool(normalise(album or "")) and not NOT_ORDINARY.search(album or "")
+    text = normalise(album or "")
+    return bool(text) and not NOT_ORDINARY.search(text)
+
+
+def markers(*texts):
+    """The other-recording words in these texts, one form each ("Demos" is
+    "demo", "Sped Up" is "sped", "re-recorded" is "re record")."""
+    text = normalise(" ".join(t or "" for t in texts))
+    found = {re.sub(r"(?<=x)es$|s$", "", m[0]) for m in DISTINCT.finditer(text)}
+    found |= altered(text)
+    for word in RERECORDED.findall(text):
+        found.add("re record" if word.startswith("re") else word)
+    return frozenset(found)
 
 
 def without_the(artist):
@@ -159,7 +175,8 @@ def rejection(track, c):
     ):
         return "altered"
     # Only a plain studio song may come from another release: any release
-    # when its length is known, any ordinary album when it is not (D-130). A
+    # when its length is known; when it is not (D-130), any ordinary album
+    # naming no other recording the request does not name itself. A
     # live, demo, remix, session or altered recording is one performance
     # (another concert is another recording), so it must be the requested
     # album or carry one of its ISRCs; so must an edition chosen explicitly.
@@ -168,7 +185,12 @@ def rejection(track, c):
             not track.get("explicit_edition")
             and not recording_kind(track)
             and not altered(track.get("title"), track.get("album"))
-            and (track.get("duration") or ordinary(c.get("album")))
+            and (
+                track.get("duration")
+                or ordinary(c.get("album"))
+                and markers(c.get("album"))
+                <= markers(track.get("title"), track.get("album"))
+            )
         )
         or normalise(c.get("album", "")) == normalise(track["album"])
         or bool(track.get("isrcs") and c.get("isrc") and c["isrc"] in track["isrcs"])

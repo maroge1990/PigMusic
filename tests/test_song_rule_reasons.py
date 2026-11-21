@@ -200,7 +200,8 @@ def old_why(track, c):
 ISRC = "GBAAA0000001"
 # The generated albums D-130 counts as ordinary, listed here rather than read
 # from the new code; "Live at Leeds" and "The Remixes" are refused before the
-# album check, a lullaby album and no album at all are not ordinary.
+# album check; a lullaby album, a re-recording no request names and no album
+# at all are not ordinary.
 ORDINARY = {"Album", "Other Album", "Summer Hits 2026"}
 
 
@@ -251,6 +252,7 @@ def candidates(channel):
             "Live at Leeds",
             "The Remixes",
             "Lullaby Versions of Artist",
+            "Other Album (Taylor's Version)",
             "",
         ),
         (201, "3:26", "nan"),
@@ -293,8 +295,8 @@ def intended(track, c, old):
 
 @pytest.mark.parametrize("channel", CHANNELS)
 def test_downloads_decide_as_before_and_instant_listening_only_as_d130(channel):
-    """Every generated pair, 864 requests by 420 results per channel (362,880;
-    1,451,520 in all): downloads (`mismatch`, `matches`) give exactly the old
+    """Every generated pair, 864 requests by 480 results per channel (414,720;
+    1,658,880 in all): downloads (`mismatch`, `matches`) give exactly the old
     reason and answer; instant listening (`why`, `acceptable`) changes a
     pair's reason only where D-130 says, and every such pair changes."""
     every = list(candidates(channel))
@@ -314,7 +316,7 @@ def test_downloads_decide_as_before_and_instant_listening_only_as_d130(channel):
             else:
                 assert after == before, (track, c, before, after)
             compared += 1
-    assert compared == 864 * 420
+    assert compared == 864 * 480
     assert (changed, accepted) == EXPECTED[channel]
 
 
@@ -325,7 +327,7 @@ EXPECTED = {
     "Artist": (450, 330),
     "Artist, Guest": (450, 330),
     "Ärtist": (450, 330),
-    "The Artist": (77_112, 1_155),
+    "The Artist": (88_128, 1_269),
 }
 
 
@@ -569,6 +571,25 @@ STAYS_REFUSED = [
         on_jiosaavn("Band of Horses", "The Weight", "Music from Big Pink", 275),
         "artist",
     ),
+    # Codex, D-130 review: a re-recording, and markers in full-width letters
+    # or joined by hyphens.
+    (
+        request("Taylor Swift", "Love Story", "Fearless"),
+        on_jiosaavn("Taylor Swift", "Love Story", "Fearless (Taylor's Version)", 235),
+        "album",
+    ),
+    (
+        EVERLONG,
+        on_jiosaavn("Foo Fighters", "Everlong", "Piano Ｃｏｖｅｒｓ", 250),
+        "album",
+    ),
+    (
+        EVERLONG,
+        on_youtube(
+            "Foo Fighters", "Everlong", "Originally-Performed-by Foo Fighters", 250
+        ),
+        "album",
+    ),
 ]
 
 
@@ -636,3 +657,57 @@ def test_albums_naming_another_performer_are_not_ordinary():
         assert why({**EVERLONG, "duration": 250}, result) == "matched", marked
         lookalike = on_jiosaavn("Foo Fighters", "Everlong", plain, 250)
         assert why(EVERLONG, lookalike) == "matched", plain
+
+
+# Album words naming another recording of the song (Codex, D-130 review),
+# each with a look-alike: with no request length an album carrying one the
+# request does not name is refused. Words the earlier checks already refuse
+# (live, acoustic, demo, remix, karaoke, instrumental, session, unplugged,
+# cover, sped up, slowed, nightcore, reverb, 8D) are included to show they
+# stay refused; the others were accepted by 1b3a076.
+OTHER_RECORDING = [
+    ("Fearless (Taylor's Version)", "Taylor Made", True),
+    ("Red - Re-Recorded", "Recorded at Abbey Road", True),
+    ("The Anniversary Re-Recording", "20th Anniversary Edition", True),
+    ("Songs (Stripped)", "Striptease", True),
+    ("Summer Hits (Radio Edit)", "Edith", True),
+    ("Club Mix 2026", "Mixtape", True),
+    ("Everlong (Reprise)", "Enterprise", True),
+    ("Orchestral Rock", "Orchestration", True),
+    ("Piano Hits", "Pianola", True),
+    ("Live in Tokyo", "Alive", False),
+    ("Acoustic Hits", "Acoustics", False),
+    ("Demos", "Democracy", False),
+    ("Remixes", "Remixology", False),
+    ("Karaoke Party", "Karaok", False),
+    ("Instrumentals", "Instrument", False),
+    ("BBC Sessions", "Obsessions", False),
+    ("Unplugged", "Plugged In", False),
+    ("Cover Me", "Coverage", False),
+    ("Sped Up Hits", "Speedway", False),
+    ("Slowed Songs", "Slow Songs", False),
+    ("Nightcore Mix", "Nightclub", False),
+    ("Reverb Hits", "Reverberations", False),
+    ("8D Audio", "8 Days", False),
+]
+
+
+def test_albums_naming_another_recording_are_refused_without_a_length():
+    for marked, plain, new in OTHER_RECORDING:
+        result = on_jiosaavn("Foo Fighters", "Everlong", marked, 250)
+        assert why(EVERLONG, result) != "matched", marked
+        if new:
+            assert why(EVERLONG, result) == "album", marked
+        lookalike = on_jiosaavn("Foo Fighters", "Everlong", plain, 250)
+        assert why(EVERLONG, lookalike) == "matched", plain
+    # A marker the request names itself is no reason to refuse.
+    love_story = request("Taylor Swift", "Love Story", "Fearless (Taylor's Version)")
+    deluxe = on_jiosaavn(
+        "Taylor Swift", "Love Story", "Fearless (Taylor's Version) [Deluxe]", 235
+    )
+    assert why(love_story, deluxe) == "matched"
+    # Edition words stay ordinary (the owner's Wonderwall and Dreams).
+    for edition in ("Rumours (Super Deluxe)", "Expanded Edition", "Bonus Tracks"):
+        assert why(EVERLONG, on_jiosaavn("Foo Fighters", "Everlong", edition, 250)) == (
+            "matched"
+        ), edition
