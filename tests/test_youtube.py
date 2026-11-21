@@ -997,3 +997,53 @@ def test_a_tap_with_only_karaoke_and_tribute_results_is_still_no_match(tmp_path)
         "version": 1,  # "Karaoke" in the album.
     }
     assert json.loads(misses["youtube"])["reasons"] == {"artist": 1, "title": 1}
+
+
+@pytest.mark.parametrize("strict_first", [False, True])
+def test_an_ordinary_tap_never_answers_an_explicit_edition_at_the_same_time(
+    tmp_path, monkeypatch, strict_first
+):
+    """Codex, D-130 review: overlapping taps shared one lookup by song name
+    alone, so an explicit edition (Everlong on Greatest Hits) took the
+    ordinary tap's other album (The Colour And The Shape), whichever came
+    first. Each now gets its own rule's answer."""
+    import time as clock
+
+    from server.remote import RemoteAudio
+
+    async def probe(client, url):
+        return None
+
+    monkeypatch.setattr(RemoteAudio, "probe", staticmethod(probe))
+    on_saavn = {
+        "channel": "Foo Fighters",
+        "title": "Everlong",
+        "album": "The Colour And The Shape",
+        "duration": "250",
+        "source_url": "https://aac.saavncdn.com/everlong_320.mp4",
+    }
+
+    def search(*_):
+        clock.sleep(0.2)  # Long enough for the second tap to overlap.
+        return [on_saavn]
+
+    ordinary = {"artist": "Foo Fighters", "title": "Everlong", "album": "Greatest Hits"}
+    strict = {**ordinary, "explicit_edition": True}
+    resolver = resolver_with(FakeYouTube([]), search, tmp_path)
+
+    async def scenario():
+        async with httpx.AsyncClient() as client:
+            order = [strict, ordinary] if strict_first else [ordinary, strict]
+            first = asyncio.ensure_future(resolver.stream(client, order[0], "a"))
+            await asyncio.sleep(0.05)
+            second = asyncio.ensure_future(resolver.stream(client, order[1], "b"))
+            return dict(
+                zip(
+                    ("strict", "ordinary") if strict_first else ("ordinary", "strict"),
+                    await asyncio.gather(first, second, return_exceptions=True),
+                )
+            )
+
+    found = asyncio.run(scenario())
+    assert found["ordinary"] == {"url": on_saavn["source_url"], "source": "jiosaavn"}
+    assert isinstance(found["strict"], ValueError), found["strict"]

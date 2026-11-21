@@ -396,8 +396,10 @@ class RemoteAudio:
         return len(tracks)
 
     async def shared(self, client, track):
-        # Playing a song that is being prepared joins that work.
-        name = self.name(track)
+        # Playing a song that is being prepared joins that work, only when it
+        # asks under the same constraints (`key`, as the provider caches): an
+        # ordinary request's answer never serves an edition chosen explicitly.
+        name = self.key(track)
         missed = self.misses.get(self.miss_key(track))
         if missed and missed[0] > time.monotonic():
             raise missed[1](missed[2])
@@ -405,7 +407,10 @@ class RemoteAudio:
         if task is None:
             task = asyncio.ensure_future(self.locate(client, track))
             self.inflight[name] = task
-            task.add_done_callback(lambda _: self.inflight.pop(name, None))
+            task.add_done_callback(
+                lambda done: self.inflight.get(name) is done
+                and self.inflight.pop(name, None)
+            )
             task.add_done_callback(lambda t: t.cancelled() or t.exception())
         return await shared_result(task)
 
