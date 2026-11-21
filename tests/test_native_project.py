@@ -149,10 +149,10 @@ def test_the_watch_complication_is_embedded_in_the_watch_app_with_the_app_group(
     assert embed not in iphone
     # A watchOS extension under the Watch app's bundle id, at WidgetKit's point.
     bundles = re.findall(r"PRODUCT_BUNDLE_IDENTIFIER = ([\w.]+);", project)
-    assert bundles.count("au.com.pig.music.watchkitapp.complication") == 2
-    assert '"au.com.pig.music.watchkitapp.complication"' in source
+    assert bundles.count("au.com.pig.music.watchkitapp.widget") == 2
+    assert '"au.com.pig.music.watchkitapp.widget"' in source
     for config in project.split(
-        "PRODUCT_BUNDLE_IDENTIFIER = au.com.pig.music.watchkitapp.complication;"
+        "PRODUCT_BUNDLE_IDENTIFIER = au.com.pig.music.watchkitapp.widget;"
     )[1:]:
         settings = config.split("};", 1)[0]
         assert "SDKROOT = watchos;" in settings

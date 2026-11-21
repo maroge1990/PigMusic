@@ -745,7 +745,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = PigMusic;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
 				MARKETING_VERSION = 0.2.0;
-				PRODUCT_BUNDLE_IDENTIFIER = au.com.pig.music.watchkitapp.complication;
+				PRODUCT_BUNDLE_IDENTIFIER = au.com.pig.music.watchkitapp.widget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
 				SKIP_INSTALL = YES;
@@ -768,7 +768,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = PigMusic;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
 				MARKETING_VERSION = 0.2.0;
-				PRODUCT_BUNDLE_IDENTIFIER = au.com.pig.music.watchkitapp.complication;
+				PRODUCT_BUNDLE_IDENTIFIER = au.com.pig.music.watchkitapp.widget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
 				SKIP_INSTALL = YES;

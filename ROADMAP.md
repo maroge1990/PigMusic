@@ -21,7 +21,7 @@ the detail. What PigMusic is: [docs/PRODUCT.md](docs/PRODUCT.md).
 - **TestFlight (Xcode Cloud), four builds started 21 Nov, each adding to the last:** `testflight-20261121-b1` (G),
   `-b2` (G+L), `-b3` (G+L+K), `-b4` (all four, with the complication). Their status cannot be read from here: ask Mark
   which build numbers (2003 or later) arrived, then delete each branch. **b4 may fail to sign** (new identifier
-  `au.com.pig.music.watchkitapp.complication` and the app group on the Watch app): if so Mark enables App Groups on the
+  `au.com.pig.music.watchkitapp.widget` and the app group on the Watch app): if so Mark enables App Groups on the
   `.watchkitapp` identifier, registers the new identifier with App Groups, and b4 is pushed again as b5.
 - **Mark's device checks, as builds arrive:** the changed items from his 20 Nov round; listening for #279; the two-day
   Watch delivery test with the complication on his active face (#219 has what the diagnostics should show; whether the

@@ -543,7 +543,7 @@ def generate():
         }
         complication_settings = {
             "PRODUCT_NAME": "$(TARGET_NAME)",
-            "PRODUCT_BUNDLE_IDENTIFIER": "au.com.pig.music.watchkitapp.complication",
+            "PRODUCT_BUNDLE_IDENTIFIER": "au.com.pig.music.watchkitapp.widget",
             "GENERATE_INFOPLIST_FILE": "YES",
             "INFOPLIST_FILE": "PigMusicWatchComplication/Info.plist",
             "MARKETING_VERSION": "0.2.0",
