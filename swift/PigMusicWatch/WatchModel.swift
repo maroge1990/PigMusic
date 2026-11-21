@@ -9,6 +9,7 @@ import PigDomain
 import PigPlayback
 import UIKit
 import WatchKit
+import WidgetKit
 
 @MainActor @Observable final class WatchModel {
   var manifest = CompanionManifest(context: CompanionContext(revision: 0, account: nil), songs: [])
@@ -68,7 +69,20 @@ import WatchKit
     noteWake { $0.launched(background: background) }
   }
   /// The person opened the app.
-  func opened() { noteWake { $0.opened() } }
+  func opened() {
+    noteWake { $0.opened() }
+    checkComplications()
+  }
+  /// Asks WidgetKit how many PigMusic complications are on watch faces, for
+  /// the wake summary (D-125): background time depends on one being there.
+  func checkComplications() {
+    // @Sendable: WidgetKit may answer on another queue.
+    WidgetCenter.shared.getCurrentConfigurations { @Sendable [weak self] result in
+      guard case .success(let widgets) = result else { return }
+      let count = widgets.filter { $0.kind == WatchComplicationState.widgetKind }.count
+      Task { @MainActor in self?.noteWake { $0.complicationsOnFaces(count) } }
+    }
+  }
   /// The person left the app: the refresh window counts from here.
   func closed() { noteWake { $0.sawPerson() } }
   /// The library's songs, without those being removed.
@@ -86,6 +100,43 @@ import WatchKit
   }
   /// On the Watch and verified: plays with no iPhone or network.
   func isReady(_ song: CompanionSong) -> Bool { song.isReady(in: receipt) }
+  /// The watch-face complication's status (D-125): written to the App Group
+  /// when what it shows changes, and redrawn as `WatchComplicationReload`
+  /// allows, so a burst of arriving songs doesn't redraw it per song.
+  @ObservationIgnored private var complicationReload = WatchComplicationReload()
+  @ObservationIgnored private var complicationWritten: WatchComplicationState?
+  @ObservationIgnored private var complicationRedraw: Task<Void, Never>?
+  private static let complicationFile = FileManager.default.containerURL(
+    forSecurityApplicationGroupIdentifier: WatchComplicationState.appGroup
+  )?.appendingPathComponent(WatchComplicationState.fileName)
+  func updateComplication(now: Date = Date()) {
+    let state = WatchComplicationState(status: status, at: now)
+    if !state.shows(sameAs: complicationWritten), let file = Self.complicationFile {
+      do {
+        try state.encoded().write(to: file, options: .atomic)
+        complicationWritten = state
+      } catch {
+        DiagnosticsLog.shared.record(
+          "link", "complication status not saved: \(error.localizedDescription)")
+      }
+    }
+    switch complicationReload.changed(to: state, now: now) {
+    case .none: break
+    case .now:
+      complicationRedraw?.cancel()
+      complicationRedraw = nil
+      WidgetCenter.shared.reloadTimelines(ofKind: WatchComplicationState.widgetKind)
+    case .later(let date):
+      // One deferred redraw at a time; it draws whatever is current then.
+      guard complicationRedraw == nil else { return }
+      complicationRedraw = Task { [weak self] in
+        try? await Task.sleep(for: .seconds(max(1, date.timeIntervalSinceNow)))
+        guard !Task.isCancelled else { return }
+        self?.complicationRedraw = nil
+        self?.updateComplication()
+      }
+    }
+  }
   var playback = QueuePlaybackSnapshot()
   /// What the iPhone plays, for the home's iPhone row (D-104). Kept across
   /// launches: the phone sends it only when the song or play/pause changes.
@@ -129,6 +180,34 @@ import WatchKit
     let delivered = receivedThisRun > received
     noteWake { $0.linkTask(pending: pending || delivered) }
     planRefresh()
+  }
+  /// The iPhone's complication push (D-125): it just handed songs to the
+  /// link. Noted (new songs in it, sent recently, move the refresh window
+  /// on; a retry or a late push doesn't), then whatever waits is taken as in
+  /// the link's background task and the next refresh planned.
+  /// Run apart from the message that brought it: the delivery waits for
+  /// the link's deliveries to finish, that message among them.
+  @ObservationIgnored private var phoneWake: Task<Void, Never>?
+  func wokenByPhone(_ wake: CompanionWake, at date: Date = Date()) {
+    let active = appActive
+    // Songs of the library the Watch has applied are not new, judged from
+    // the archive's saved library as for a manifest (Codex round 2 on
+    // batch J). The wake and the delivery below run whatever this finds.
+    Task { [weak self] in
+      let applied = await self?.archive?.snapshot()
+      let known = applied?.songs.map(\.id) ?? []
+      self?.noteWake {
+        _ = $0.phonePushed(
+          songs: wake.songs ?? [], known: known, sentAt: wake.sentAt, active: active, at: date)
+      }
+      self?.planRefresh()
+    }
+    guard phoneWake == nil else { return }
+    phoneWake = Task { [weak self] in
+      await self?.finishBackgroundDelivery()
+      self?.planRefresh()
+      self?.phoneWake = nil
+    }
   }
   /// The Watch's scheduled refresh, which takes songs the iPhone handed to
   /// the link while the app wasn't running (#219).
@@ -247,7 +326,9 @@ import WatchKit
     let info = Bundle.main.infoDictionary
     let version =
       "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
-    // When watchOS woke the Watch app, above its log (#219).
+    // When watchOS woke the Watch app, above its log (#219). The
+    // complication count is asked for again for the next time.
+    checkComplications()
     let wakes = "Background wakes:\n" + wakeLog.summary() + "\n\n"
     let payload = CompanionDiagnostics(
       version: version,
@@ -323,6 +404,8 @@ import WatchKit
         self?.receivedThisRun += 1
         self?.noteWake { $0.received() }
       }
+      // Out of reach or back: the complication's status follows (Codex round 1 on batch J).
+      link?.onReachability = { [weak self] in self?.updateComplication() }
       link?.onActivated = { [weak self] in
         // After an unexpected end, the phone gets the log without being asked.
         if let self, DiagnosticsLog.shared.previousRunEndedUnexpectedly, !self.sentCrashNotice {
@@ -336,6 +419,10 @@ import WatchKit
         await self?.flushListens()
       }
       link?.onMessage = { [weak self] data in
+        if let wake = CompanionWake.decode(data) {
+          self?.wokenByPhone(wake)
+          return
+        }
         if let state = PhoneNowPlaying.decode(data) {
           if let self, state.supersedes(self.phoneNowPlaying) { self.phoneNowPlaying = state }
           return
@@ -531,6 +618,7 @@ import WatchKit
           + ", manifest applied=\(next.manifestApplied)")
     }
     receipt = next
+    updateComplication()
     restoreCheckpoint()
     await flushListens()
     await flushRequests()
@@ -539,6 +627,7 @@ import WatchKit
     guard let archive else { return }
     let receipt = await archive.receipt()
     self.receipt = receipt
+    updateComplication()
     do {
       try link?.publishReceipt(
         CompanionAcknowledgement(receipt: receipt, manifest: await archive.snapshot()))

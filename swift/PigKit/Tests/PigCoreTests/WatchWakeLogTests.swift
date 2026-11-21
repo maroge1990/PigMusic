@@ -250,7 +250,9 @@ struct WatchWakeLogTests {
       if log.songsListed(ids, previous: previous, at: at(Double(step) * 3)) { reopened += 1 }
       previous = ids
     }
-    #expect(reopened == WatchWakeLog.reopeningLimit)
+    // The first list came with the app just opened: the window was open, so
+    // it moved on without using a reopening (#300); then the limit.
+    #expect(reopened == WatchWakeLog.reopeningLimit + 1)
     #expect(log.reopenings == WatchWakeLog.reopeningLimit)
     #expect(log.refreshPlan(now: at(60), waiting: 1) == .none)
     // Opening the app starts afresh.
@@ -267,6 +269,153 @@ struct WatchWakeLogTests {
     // Full: a song never seen still counts as seen.
     #expect(log.songsListed(many + ["extra"], previous: many, at: at(3)) == false)
     #expect(log.seenSinceOpened.count == WatchWakeLog.listedCapacity)
+  }
+
+  /// #300 item 2: lists with new songs while the window is open used up the
+  /// reopenings before the window ever stopped.
+  @Test func newSongsWhileTheWindowIsOpenDontUseTheReopenings() {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    var previous: [String] = []
+    for step in 0..<20 {
+      let ids = previous + ["song\(step)"]
+      // Every 10 minutes, well inside the window.
+      let moved = log.songsListed(ids, previous: previous, at: at(0, minutes: Double(step) * 10))
+      #expect(moved)
+      previous = ids
+    }
+    #expect(log.reopenings == 0)
+    // Each one moved the window on: two hours from the last.
+    #expect(log.refreshPlan(now: at(5), waiting: 3) == .at(at(5, minutes: 30)))
+    #expect(log.refreshPlan(now: at(5, minutes: 11), waiting: 3) == .none)
+    #expect(log.refreshStoppedAt != nil)
+    // Once it has stopped, the full allowance of reopenings is still there.
+    var reopened = 0
+    for step in 0..<10 {
+      let ids = previous + ["late\(step)"]
+      if log.songsListed(ids, previous: previous, at: at(6 + Double(step) * 3)) { reopened += 1 }
+      previous = ids
+    }
+    #expect(reopened == WatchWakeLog.reopeningLimit)
+  }
+
+  /// Codex round 1 on batch J: the iPhone retried the same song every 30
+  /// minutes, each retry pushed, and every push restarted the two hours,
+  /// with no song ever accepted. A push now moves the window on only with
+  /// new songs: retries of songs already seen leave it to stop.
+  @Test func retryOnlyPushesLetTheWindowStop() {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    let first = log.phonePushed(songs: ["x"], sentAt: at(0), active: false, at: at(0))
+    #expect(first)
+    for step in 1...8 {
+      let time = at(0, minutes: Double(step) * 30)
+      let moved = log.phonePushed(songs: ["x"], sentAt: time, active: false, at: time)
+      #expect(!moved)
+    }
+    // Two hours from the last real mark (opened, and "x" first sent).
+    #expect(log.refreshPlan(now: at(2, minutes: 1), waiting: 1) == .none)
+    #expect(log.refreshStoppedAt == at(2, minutes: 1))
+    #expect(log.refreshPlan(now: at(4), waiting: 1) == .none)
+    // Every push still counted as a wake.
+    #expect(log.count(.phonePush, now: at(5)) == 9)
+    #expect(
+      log.summary(now: at(5)).contains(
+        "Woken by the iPhone's complication push: 9 times (9 while the app was not open)."))
+  }
+
+  @Test func genuinelyNewSongsInAPushReopenAStoppedWindow() {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    #expect(log.refreshPlan(now: at(3), waiting: 2) == .none)
+    #expect(log.refreshStoppedAt != nil)
+    let reopened = log.phonePushed(songs: ["x", "y"], sentAt: at(4), active: false, at: at(4))
+    #expect(reopened)
+    #expect(log.refreshStoppedAt == nil)
+    #expect(log.refreshPlan(now: at(4), waiting: 2) == .at(at(4, minutes: 30)))
+    // A stopped window reopening uses a reopening, as for a manifest.
+    #expect(log.reopenings == 1)
+    // The manifest naming the same songs then adds nothing more.
+    #expect(log.songsListed(["x", "y"], previous: [], at: at(4, minutes: 1)) == false)
+    // Nor does an empty list of songs.
+    let empty = log.phonePushed(songs: [], sentAt: at(5), active: false, at: at(5))
+    #expect(!empty)
+  }
+
+  /// Codex round 2 on batch J: opening the app clears the listed-song
+  /// memory, and a push for audio of songs the applied library already
+  /// listed spent a reopening. Those songs are known, as for a manifest.
+  @Test func aPushForSongsTheLibraryListsIsNoNewSend() {
+    var log = WatchWakeLog()
+    log.songsListed(["a", "b"], previous: [], at: at(0))
+    log.opened(at: at(1))
+    #expect(log.refreshPlan(now: at(4), waiting: 2) == .none)
+    #expect(log.refreshStoppedAt != nil)
+    let moved = log.phonePushed(
+      songs: ["a", "b"], known: ["a", "b"], sentAt: at(5), active: false, at: at(5))
+    #expect(!moved)
+    #expect(log.reopenings == 0 && log.refreshStoppedAt != nil)
+    // Still a wake.
+    #expect(log.count(.phonePush, now: at(6)) == 1)
+    // A song the library doesn't list yet is new.
+    let new = log.phonePushed(
+      songs: ["a", "c"], known: ["a", "b"], sentAt: at(6), active: false, at: at(6))
+    #expect(new)
+    #expect(log.reopenings == 1)
+  }
+
+  /// A push that arrives late, or from a clock far ahead, wakes but extends nothing.
+  @Test func aDelayedPushWakesButDoesntExtend() {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    #expect(log.refreshPlan(now: at(3), waiting: 2) == .none)
+    let late = log.phonePushed(
+      songs: ["x"], sentAt: at(3), active: false,
+      at: at(3).addingTimeInterval(WatchWakeLog.pushMaxAge))
+    #expect(!late)
+    #expect(log.refreshStoppedAt != nil)
+    let ahead = log.phonePushed(songs: ["y"], sentAt: at(5, minutes: 10), active: false, at: at(5))
+    #expect(!ahead)
+    // A few minutes either way is a clock difference, and counts.
+    let skewed = log.phonePushed(songs: ["z"], sentAt: at(6, minutes: 4), active: false, at: at(6))
+    #expect(skewed)
+    #expect(log.count(.phonePush, now: at(7)) == 3)
+  }
+
+  /// The listed-song memory and the reopening limit hold for pushes too.
+  @Test func pushesShareTheManifestsMemoryAndLimit() {
+    var log = WatchWakeLog()
+    log.opened(at: at(0))
+    var reopened = 0
+    for step in 0..<10 {
+      let time = at(3 + Double(step) * 3)
+      if log.phonePushed(songs: ["s\(step)"], sentAt: time, active: false, at: time) {
+        reopened += 1
+      }
+    }
+    #expect(reopened == WatchWakeLog.reopeningLimit)
+    let many = (0..<WatchWakeLog.listedCapacity).map { "id\($0)" }
+    var full = WatchWakeLog()
+    full.songsListed(many, previous: [], at: at(0))
+    let pushed = full.phonePushed(songs: ["new"], sentAt: at(3), active: false, at: at(3))
+    #expect(!pushed)
+  }
+
+  @Test func saysWhetherAComplicationIsOnAWatchFace() throws {
+    var log = WatchWakeLog()
+    #expect(log.summary(now: at(1)).contains("PigMusic complication on an Apple Watch face: not known yet."))
+    log.complicationsOnFaces(0)
+    #expect(log.summary(now: at(1)).contains("PigMusic complication on an Apple Watch face: no."))
+    log.complicationsOnFaces(2)
+    #expect(log.summary(now: at(1)).contains("PigMusic complication on an Apple Watch face: yes."))
+    let saved = try JSONDecoder().decode(WatchWakeLog.self, from: JSONEncoder().encode(log))
+    #expect(saved.faceComplications == 2)
+    // A log saved before it existed still decodes.
+    var old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(log)) as! [String: Any]
+    old.removeValue(forKey: "faceComplications")
+    let decoded = try JSONDecoder().decode(
+      WatchWakeLog.self, from: JSONSerialization.data(withJSONObject: old))
+    #expect(decoded.faceComplications == nil)
   }
 
   @Test func reSendingTheSameSongsAfterAStopDoesntReopen() {
@@ -287,7 +436,8 @@ struct WatchWakeLogTests {
     log.songsListed(["b"], previous: ["a"], at: at(3))
     var saved = try JSONDecoder().decode(WatchWakeLog.self, from: JSONEncoder().encode(log))
     #expect(saved == log)
-    #expect(saved.seenSinceOpened == ["a", "b"] && saved.reopenings == 2)
+    // "a" came while the window was open (#300): only "b" reopened it.
+    #expect(saved.seenSinceOpened == ["a", "b"] && saved.reopenings == 1)
     #expect(saved.songsListed(["a"], previous: ["b"], at: at(6)) == false)
     // A log saved before these existed decodes with nothing remembered.
     var old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(WatchWakeLog()))

@@ -23,6 +23,10 @@ import WatchConnectivity
   @ObservationIgnored var onMessage: (@MainActor (Data) async -> Void)?
   @ObservationIgnored var onRequest: (@MainActor (Data) async -> Data)?
   @ObservationIgnored var onActivated: (@MainActor () async -> Void)?
+  /// The iPhone came into or went out of reach (`reachable` already set).
+  @ObservationIgnored var onReachability: (@MainActor () -> Void)?
+  /// A complication push's payload, and whether it was delivered (iPhone).
+  @ObservationIgnored var onWakeFinished: (@MainActor (Data, Bool) -> Void)?
   @ObservationIgnored nonisolated let inbox: URL
   @ObservationIgnored private let session: WCSession?
   init(inbox: URL) throws {
@@ -123,6 +127,30 @@ import WatchConnectivity
     session.transferUserInfo(["payload": data])
     return true
   }
+  #if os(iOS)
+    /// Whether PigMusic's complication is on the active watch face (D-125);
+    /// nil while the session isn't active.
+    var complicationEnabled: Bool? {
+      guard let session, session.activationState == .activated else { return nil }
+      return session.isComplicationEnabled
+    }
+    /// Complication pushes watchOS still allows today; nil while the session isn't active.
+    var complicationPushesLeft: Int? {
+      guard let session, session.activationState == .activated else { return nil }
+      return session.remainingComplicationUserInfoTransfers
+    }
+    /// Wakes the Watch app through its complication (D-125, #219): watchOS
+    /// delivers the push at once, launching the app in the background, and
+    /// it arrives with the other messages (`onMessage`). False when it
+    /// couldn't be sent.
+    func pushComplication(_ data: Data) -> Bool {
+      guard let session, session.activationState == .activated, session.isPaired,
+        session.isWatchAppInstalled, session.isComplicationEnabled
+      else { return false }
+      _ = session.transferCurrentComplicationUserInfo(["payload": data])
+      return true
+    }
+  #endif
   func request(_ data: Data) async throws -> Data {
     guard let session, session.isReachable else { throw CompanionFailure.stale }
     return try await withCheckedThrowingContinuation { continuation in
@@ -235,6 +263,8 @@ import WatchConnectivity
       defer { self.deliveries.end() }
       self.reachable = reachable
       DiagnosticsLog.shared.record("link", "reachable=\(reachable)")
+      // Both ways: the Watch's complication says when the iPhone is out of reach.
+      self.onReachability?()
       if reachable { await self.onActivated?() }
     }
   }
@@ -341,6 +371,24 @@ import WatchConnectivity
       }
     }
     nonisolated func sessionDidDeactivate(_ session: WCSession) { session.activate() }
+    /// Only complication pushes are reported on (D-125, Codex round 2 on batch J).
+    nonisolated func session(
+      _ session: WCSession, didFinish userInfoTransfer: WCSessionUserInfoTransfer,
+      error: (any Error)?
+    ) {
+      guard userInfoTransfer.isCurrentComplicationInfo,
+        let data = userInfoTransfer.userInfo["payload"] as? Data
+      else { return }
+      let delivered = error == nil
+      let text = error?.localizedDescription
+      deliveries.begin()
+      Task { @MainActor in
+        defer { self.deliveries.end() }
+        DiagnosticsLog.shared.record(
+          "link", "complication push " + (delivered ? "delivered" : "failed: \(text ?? "")"))
+        self.onWakeFinished?(data, delivered)
+      }
+    }
     nonisolated func sessionWatchStateDidChange(_ session: WCSession) {
       let paired = session.isPaired
       let installed = session.isWatchAppInstalled

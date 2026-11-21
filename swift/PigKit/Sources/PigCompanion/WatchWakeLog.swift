@@ -49,6 +49,10 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
     case refreshStopped
     /// A manifest listed songs the previous one didn't: the window reopens.
     case listed
+    /// The iPhone's complication push arrived (it handed songs to the link,
+    /// D-125); `active` whether the app was on screen. Only new songs in it
+    /// move the window on (`phonePushed`).
+    case phonePush
   }
   public struct Event: Codable, Sendable, Equatable {
     public var at: Date
@@ -77,6 +81,9 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
   /// Saved optional, so a log saved before they existed still decodes.
   private var listedSeen: Set<String>?
   private var listedReopenings: Int?
+  /// PigMusic complications on watch faces, as WidgetKit last said; nil
+  /// until it has (D-125).
+  public private(set) var faceComplications: Int?
   /// Song ids listed since the app was last opened (Codex round 2 on batch G).
   public var seenSinceOpened: Set<String> { listedSeen ?? [] }
   /// Times new songs reopened the window since the app was last opened.
@@ -104,25 +111,67 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
   /// the Watch had applied listed. Songs listed in neither that library nor
   /// any other since the app was last opened are new songs the person sent:
   /// the window counts from here and any stop is lifted. So membership that
-  /// comes and goes (A, B, A, B) reopens it at most once per song, and at
-  /// most `reopeningLimit` times, until the app is opened (Codex round 2 on
-  /// batch G). Returns whether it reopened.
+  /// comes and goes (A, B, A, B) reopens it at most once per song (Codex
+  /// round 2 on batch G). Only reopening a window that had closed (stopped,
+  /// or run out) uses one of the `reopeningLimit` reopenings allowed until
+  /// the app is opened; new songs while it is open only move it on (#300).
+  /// Returns whether the window moved on or reopened.
   @discardableResult public mutating func songsListed(
     _ ids: some Sequence<String>, previous: some Sequence<String>, at date: Date = Date()
   ) -> Bool {
-    let current = Array(ids)
-    let before = Array(previous)
-    var seen = listedSeen ?? []
-    let full = seen.count >= Self.listedCapacity
-    let fresh = Set(current).subtracting(before).subtracting(seen)
-    for id in before + current where seen.count < Self.listedCapacity { seen.insert(id) }
-    listedSeen = seen
-    guard !full, !fresh.isEmpty, reopenings < Self.reopeningLimit else { return false }
-    listedReopenings = reopenings + 1
-    lastListed = date
-    refreshStoppedAt = nil
+    guard newSongs(Array(ids), alsoKnown: Array(previous), at: date) else { return false }
     note(Event(at: date, kind: .listed))
     return true
+  }
+  /// The iPhone's complication push (D-125). It always counts as a wake
+  /// (the caller takes what the link has waiting), but it moves the window
+  /// on, or reopens it, only with evidence of new songs: `songs`, the ids it
+  /// handed over, judged by the same rule as a manifest's (each song once
+  /// since the app was opened, the reopenings charged only when a stopped
+  /// window reopens), and only when it is fresh: sent less than `pushMaxAge`
+  /// before it arrived, and not further ahead than `clockSlack`. So a retry
+  /// of songs already seen, or a push delivered late, keeps nothing awake
+  /// (Codex round 1 on batch J). `known`: the songs of the library the Watch
+  /// has applied, which are not new either, as for a manifest (round 2).
+  /// Returns whether the window moved on.
+  @discardableResult public mutating func phonePushed(
+    songs: [String], known: [String] = [], sentAt: Date, active: Bool, at date: Date = Date()
+  ) -> Bool {
+    note(Event(at: date, kind: .phonePush, active: active))
+    let age = date.timeIntervalSince(sentAt)
+    guard age < Self.pushMaxAge, age > -WatchRefreshPlan.clockSlack else { return false }
+    return newSongs(songs, alsoKnown: known, at: date)
+  }
+  /// A push older than this when it arrives wakes but extends nothing.
+  public static let pushMaxAge: TimeInterval = 30 * 60
+  /// Songs in `ids` not in `alsoKnown` nor listed since the app was last
+  /// opened move the window on (#300: a reopening is used only when a
+  /// stopped window reopens). Once the memory is full nothing does.
+  private mutating func newSongs(_ ids: [String], alsoKnown: [String], at date: Date) -> Bool {
+    var seen = listedSeen ?? []
+    let full = seen.count >= Self.listedCapacity
+    let fresh = Set(ids).subtracting(alsoKnown).subtracting(seen)
+    for id in alsoKnown + ids where seen.count < Self.listedCapacity { seen.insert(id) }
+    listedSeen = seen
+    guard !full, !fresh.isEmpty else { return false }
+    if !windowOpen(at: date) {
+      guard reopenings < Self.reopeningLimit else { return false }
+      listedReopenings = reopenings + 1
+    }
+    lastListed = date
+    refreshStoppedAt = nil
+    return true
+  }
+  /// WidgetKit's count of PigMusic complications on watch faces.
+  public mutating func complicationsOnFaces(_ count: Int) {
+    faceComplications = max(0, count)
+  }
+  /// Whether refreshes may still be asked for: not stopped, and less than
+  /// the limit since the later mark.
+  private func windowOpen(at date: Date) -> Bool {
+    refreshStoppedAt == nil
+      && WatchRefreshPlan.windowOpen(
+        now: date, lastAccepted: lastAccepted, lastOpened: lastOpened, lastListed: lastListed)
   }
   public mutating func linkTask(pending: Bool, at date: Date = Date()) {
     note(Event(at: date, kind: .linkTask, pending: pending))
@@ -212,6 +261,10 @@ public struct WatchWakeLog: Codable, Sendable, Equatable {
         + "turned down by watchOS: \(count(.refreshRefused, now: now)).",
       waitingLine(now: now),
       "Songs received: \(received); songs accepted: \(accepted) (\(away) while the app was not open).",
+      "Woken by the iPhone's complication push: \(count(.phonePush, now: now)) times "
+        + "(\(count(.phonePush, now: now) { $0.active == false }) while the app was not open).",
+      "PigMusic complication on an Apple Watch face: "
+        + (faceComplications.map { $0 > 0 ? "yes" : "no" } ?? "not known yet") + ".",
     ]
     let gaps = recent(now: now).compactMap { $0.kind == .accepted ? $0.gap : nil }
     if !gaps.isEmpty {
