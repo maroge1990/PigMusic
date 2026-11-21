@@ -612,7 +612,9 @@ public actor NativeService: LibrarySource {
     // server error say so (#239). Every song past a queue limit (D-128) is
     // answered so: those songs are kept to send again, as any left out.
     case .tooManyRequests(let answer):
-      if (try? answer.body.json.code) == "queue_limit" { return .limited(tracks.count) }
+      if let body = try? answer.body.json, body.code == "queue_limit" {
+        return .limited(tracks.count, limit: body.limit, retryAfter: body.retry_after)
+      }
       throw ServerBusy()
     case .serviceUnavailable(let answer):
       throw ServerAnswer.unconfirmed(code: try? answer.body.json.code) ?? ServerBusy()

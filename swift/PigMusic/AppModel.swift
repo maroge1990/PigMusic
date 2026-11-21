@@ -339,6 +339,10 @@ enum PlayOrigin: Hashable {
               requestsRevision += 1
               await foundSearch?.serverChanged(reask: false)
               await refreshServerRequests()
+              // Room may have come for songs a waiting limit kept (D-128).
+              if requestRetry.passOnQueueChange(at: Date().timeIntervalSince1970) {
+                await flushRequests()
+              }
             }
           }
         } catch NativeFailure.authentication {
@@ -1249,6 +1253,9 @@ enum PlayOrigin: Hashable {
   @ObservationIgnored private var flushingRequests = false
   /// How many songs a queue limit kept in the outbox when last told (D-128).
   @ObservationIgnored private var toldWaiting = 0
+  /// When to send those again, and the wait for it (D-128).
+  @ObservationIgnored private var requestRetry = RequestRetry()
+  @ObservationIgnored private var requestRetryTask: Task<Void, Never>?
   static func undoKey(request id: String) -> String { "request:" + id }
   static func undoKey(cancelRequest id: String) -> String { "request-cancel:" + id }
   func isRequested(_ id: String) -> Bool {
@@ -1317,13 +1324,27 @@ enum PlayOrigin: Hashable {
   func requestNow(_ tracks: [Track]) async throws -> AcquisitionResult {
     let stamp = account.generation
     let result = try await performPersonal { try await $0.requestMusic(tracks) }
-    let kept = result.leftOut(of: tracks)
-    guard !kept.isEmpty, account.isCurrent(stamp), let store else { return result }
-    for track in kept {
+    try await keepForLater(result.leftOut(of: tracks), generation: stamp)
+    return result
+  }
+  /// Songs a queue limit left out of an Add (D-128): into the request
+  /// outbox, marked as requested, for the account that asked.
+  func keepForLater(_ tracks: [Track], generation stamp: Int) async throws {
+    guard !tracks.isEmpty, account.isCurrent(stamp), let store else { return }
+    for track in tracks {
       try await RequestOutbox.add(track, to: store)
       requestedSongs.queued(track.id)
     }
-    return result
+  }
+  /// Sends the outbox again after `seconds`, unless the account changed
+  /// meanwhile; one such wait at a time.
+  private func retryRequests(after seconds: Double, generation stamp: Int) {
+    requestRetryTask?.cancel()
+    requestRetryTask = Task { [weak self] in
+      try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+      guard !Task.isCancelled, let self, self.account.isCurrent(stamp) else { return }
+      await self.flushRequests()
+    }
   }
   /// Sends the request outbox; a failure to reach the server keeps it for
   /// the next refresh. Songs left out or refused say so once per drain, in
@@ -1381,9 +1402,21 @@ enum PlayOrigin: Hashable {
       switch report.stop {
       case .done:
         if await RequestOutbox.pending(store).isEmpty {
+          // Nothing kept by a limit any more.
+          _ = requestRetry.passed(limit: nil, retryAfter: nil, at: Date().timeIntervalSince1970)
+          requestRetryTask?.cancel()
           await refreshServerRequests()
           return
         }
+      case .limited:
+        // Songs a queue limit kept (D-128): sent again when RequestRetry
+        // says, for this account only.
+        if let delay = requestRetry.passed(
+          limit: report.limit, retryAfter: report.retryAfter, at: Date().timeIntervalSince1970)
+        {
+          retryRequests(after: delay, generation: stamp)
+        }
+        return
       case .offline, .stale:
         return
       case .signedOut:
@@ -2311,6 +2344,10 @@ enum PlayOrigin: Hashable {
     appliedEdits = []
     hiddenMixSongs = []
     requestedSongs = RequestMarks()
+    // Songs a queue limit kept are this account's: no wait sends them later.
+    requestRetryTask?.cancel()
+    requestRetry = RequestRetry()
+    toldWaiting = 0
     similarIDs = []
     watch?.disconnect()
     // Stale for every operation still running; live updates stop.

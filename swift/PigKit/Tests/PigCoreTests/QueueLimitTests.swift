@@ -2,20 +2,22 @@ import Foundation
 import PigDomain
 import Testing
 
-/// D-128 (#242): past a queue limit the server queues the songs that fit and
-/// answers the rest `over_limit` (or, when none fit, a busy `queue_limit`).
-/// The iPhone keeps those songs to send again and says how many wait.
+/// D-128 (#242): past a queue limit the server queues the songs that fit;
+/// the rest are `excluded` in outcomes (which every installed build reads)
+/// with their positions in `over_limit`, or, when none fit, a busy
+/// `queue_limit`. The iPhone keeps those songs to send again and says how
+/// many wait.
 struct QueueLimitTests {
   @Test func theAnswerSaysWhichSongsWereLeftOut() throws {
     let json = """
-      {"created": 1, "existing": 1, "skipped": 0, "left_out": 2, "limit": "rate",
-       "retry_after": 30,
-       "outcomes": ["created", "over_limit", "existing", "over_limit"],
+      {"created": 1, "existing": 1, "skipped": 0, "left_out": 2, "over_limit": [1, 3],
+       "limit": "rate", "retry_after": 30,
+       "outcomes": ["created", "excluded", "existing", "excluded"],
        "downloads_enabled": true}
       """
     let result = try LibraryCodec.decoder().decode(
       AcquisitionResult.self, from: Data(json.utf8))
-    #expect(result.leftOut == 2)
+    #expect(result.leftOut == 2 && result.limit == "rate" && result.retryAfter == 30)
     #expect(result.leftOut(of: ["a", "b", "c", "d"]) == ["b", "d"])
     // A song left out is not taken: it stays missing until sent again.
     #expect(result.songsTaken(4) == [true, false, true, false])
@@ -23,6 +25,17 @@ struct QueueLimitTests {
       result.sentence
         == "Adding 2 songs to your library. 2 songs waiting to be sent. PigMusic will try again later."
     )
+  }
+
+  @Test func aTrueExclusionIsNotKept() throws {
+    let json = """
+      {"created": 0, "existing": 0, "skipped": 1, "outcomes": ["excluded"],
+       "downloads_enabled": true}
+      """
+    let result = try LibraryCodec.decoder().decode(
+      AcquisitionResult.self, from: Data(json.utf8))
+    #expect(result.leftOut(of: ["a"]).isEmpty)
+    #expect(result.outboxAnswer == .skipped)
   }
 
   @Test func anOlderServerLeavesNothingOut() throws {
@@ -34,22 +47,23 @@ struct QueueLimitTests {
   }
 
   @Test func aBusyQueueLimitLeavesEverySongOut() {
-    let result = AcquisitionResult.limited(3)
+    let result = AcquisitionResult.limited(3, limit: "rate", retryAfter: 90)
     #expect(result.leftOut(of: [1, 2, 3]) == [1, 2, 3])
-    #expect(result.outboxAnswer == .kept)
+    #expect(result.outboxAnswer == .kept && result.retryAfter == 90)
     #expect(result.sentence == "3 songs waiting to be sent. PigMusic will try again later.")
     #expect(result.menuNotice == result.sentence)
   }
 
   @Test func theOutboxKeepsOnlyASongLeftOut() {
-    func answer(_ outcome: String) -> AcquisitionResult.OutboxAnswer {
+    func answer(_ outcome: String, limited: Bool = false) -> AcquisitionResult.OutboxAnswer {
       AcquisitionResult(
         created: outcome == "created" ? 1 : 0, existing: 0,
-        skipped: outcome == "excluded" ? 1 : 0, paused: outcome == "paused" ? 1 : 0,
-        outcomes: [outcome], leftOut: outcome == "over_limit" ? 1 : 0, downloadsEnabled: true
+        skipped: outcome == "excluded" && !limited ? 1 : 0,
+        paused: outcome == "paused" ? 1 : 0, outcomes: [outcome], leftOut: limited ? 1 : 0,
+        overLimit: limited ? [0] : [], downloadsEnabled: true
       ).outboxAnswer
     }
-    #expect(answer("over_limit") == .kept)
+    #expect(answer("excluded", limited: true) == .kept)
     #expect(answer("created") == .requested)
     #expect(answer("paused") == .paused)
     #expect(answer("excluded") == .skipped)
@@ -58,7 +72,7 @@ struct QueueLimitTests {
   @Test func severalAnswersCountTheSongsLeftOut() {
     let combined = AcquisitionResult.combined([
       AcquisitionResult(created: 2, existing: 0, skipped: 0, downloadsEnabled: true),
-      .limited(1),
+      .limited(1, limit: "person_waiting", retryAfter: nil),
     ])
     #expect(combined.leftOut == 1)
     #expect(
@@ -78,10 +92,54 @@ struct QueueLimitTests {
     )
   }
 
+  @Test func aRetryARefusedLimitSaysWhy() {
+    #expect(
+      AcquisitionResult.retryRefused("household_waiting")
+        == "Couldn't try again yet: the server already has 10,000 songs waiting. Try again once some are added."
+    )
+    #expect(AcquisitionResult.retryRefused("person_waiting").hasPrefix("Couldn't try again yet:"))
+  }
+
   @Test func theOutboxNoticeSaysHowManyWait() {
     #expect(
       RequestNotice.text(refused: 0, reason: nil, excluded: nil, paused: false, waiting: 4)
         == "4 songs waiting to be sent. PigMusic will try again later.")
     #expect(RequestNotice.text(refused: 0, reason: nil, excluded: nil, paused: false) == nil)
+  }
+}
+
+/// Codex round 1 on #242: songs a limit kept were sent again only at the
+/// next refresh, starting at the same song. Now the rate waits for the
+/// server's Retry-After; a waiting limit backs off from a minute to
+/// fifteen, or tries when the queue changes, at most once a minute.
+struct RequestRetryTests {
+  @Test func theRateWaitsForTheServersRetryAfter() {
+    var retry = RequestRetry()
+    #expect(RequestRetry.stopsPass("rate"))
+    #expect(retry.passed(limit: "rate", retryAfter: 42, at: 0) == 42)
+    #expect(retry.passed(limit: "rate", retryAfter: nil, at: 50) == 60)
+    #expect(retry.passed(limit: "rate", retryAfter: 0, at: 60) == 1)
+    // A queue change doesn't free the rate.
+    #expect(!retry.passOnQueueChange(at: 1000))
+  }
+
+  @Test func aWaitingLimitBacksOffAndTriesOnAQueueChange() {
+    var retry = RequestRetry()
+    #expect(!RequestRetry.stopsPass("person_waiting"))
+    let delays = (0..<7).map { i in
+      retry.passed(limit: "person_waiting", retryAfter: nil, at: Double(i))
+    }
+    #expect(delays == [60, 120, 240, 480, 900, 900, 900])
+    #expect(!retry.passOnQueueChange(at: 6 + 59))
+    #expect(retry.passOnQueueChange(at: 6 + 60))
+  }
+
+  @Test func aPassThatKeptNothingForgetsItAll() {
+    var retry = RequestRetry()
+    _ = retry.passed(limit: "household_waiting", retryAfter: nil, at: 0)
+    #expect(retry.passed(limit: nil, retryAfter: nil, at: 100) == nil)
+    #expect(retry == RequestRetry())
+    #expect(!retry.passOnQueueChange(at: 1000))
+    #expect(retry.passed(limit: "household_waiting", retryAfter: nil, at: 200) == 60)
   }
 }

@@ -34,16 +34,24 @@ public struct AcquisitionResult: Codable, Sendable {
   /// The server requests those songs were left paused under (#276).
   public let pausedIds: [String]
   /// What happened to each song sent, in order (Codex round 1 on batch K):
-  /// created, existing, added, paused, excluded, in_library or over_limit.
+  /// created, existing, added, paused, excluded or in_library. A song a
+  /// queue limit left out is `excluded`, its position in `overLimit`.
   /// Empty from an older server.
   public let outcomes: [String]
   /// Songs a queue limit left out (D-128): nothing was made for them, so
   /// they are sent again later.
   public let leftOut: Int
+  /// Their positions in the songs sent.
+  public let overLimit: [Int]
+  /// Which limit: person_waiting, household_waiting or rate.
+  public let limit: String?
+  /// For the rate: seconds until one more song fits.
+  public let retryAfter: Int?
   public let downloadsEnabled: Bool
   public init(
     created: Int, existing: Int, skipped: Int, paused: Int = 0, pausedIds: [String] = [],
-    outcomes: [String] = [], leftOut: Int = 0, downloadsEnabled: Bool
+    outcomes: [String] = [], leftOut: Int = 0, overLimit: [Int] = [], limit: String? = nil,
+    retryAfter: Int? = nil, downloadsEnabled: Bool
   ) {
     self.created = created
     self.existing = existing
@@ -52,10 +60,14 @@ public struct AcquisitionResult: Codable, Sendable {
     self.pausedIds = pausedIds
     self.outcomes = outcomes
     self.leftOut = leftOut
+    self.overLimit = overLimit
+    self.limit = limit
+    self.retryAfter = retryAfter
     self.downloadsEnabled = downloadsEnabled
   }
   private enum CodingKeys: String, CodingKey {
-    case created, existing, skipped, paused, pausedIds, outcomes, leftOut, downloadsEnabled
+    case created, existing, skipped, paused, pausedIds, outcomes, leftOut, overLimit, limit
+    case retryAfter, downloadsEnabled
   }
   public init(from decoder: any Decoder) throws {
     let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -67,22 +79,27 @@ public struct AcquisitionResult: Codable, Sendable {
     pausedIds = try values.decodeIfPresent([String].self, forKey: .pausedIds) ?? []
     outcomes = try values.decodeIfPresent([String].self, forKey: .outcomes) ?? []
     leftOut = try values.decodeIfPresent(Int.self, forKey: .leftOut) ?? 0
+    overLimit = try values.decodeIfPresent([Int].self, forKey: .overLimit) ?? []
+    limit = try values.decodeIfPresent(String.self, forKey: .limit)
+    retryAfter = try values.decodeIfPresent(Int.self, forKey: .retryAfter)
     downloadsEnabled = try values.decode(Bool.self, forKey: .downloadsEnabled)
   }
   /// What the server's busy answer `queue_limit` stands for (D-128): every
   /// one of the `count` songs sent was left out, and nothing was made.
-  public static func limited(_ count: Int) -> AcquisitionResult {
+  public static func limited(_ count: Int, limit: String?, retryAfter: Int?)
+    -> AcquisitionResult
+  {
     AcquisitionResult(
       created: 0, existing: 0, skipped: 0,
-      outcomes: Array(repeating: "over_limit", count: count), leftOut: count,
+      outcomes: Array(repeating: "excluded", count: count), leftOut: count,
+      overLimit: Array(0..<count), limit: limit, retryAfter: retryAfter,
       downloadsEnabled: true)
   }
   /// The songs of `sent` (in the order sent) a queue limit left out, to be
-  /// kept and sent again. From an answer without one outcome per song,
-  /// none can be told apart: none.
+  /// kept and sent again.
   public func leftOut<Song>(of sent: [Song]) -> [Song] {
-    guard leftOut > 0, outcomes.count == sent.count else { return [] }
-    return zip(sent, outcomes).filter { $0.1 == "over_limit" }.map(\.0)
+    let positions = Set(overLimit)
+    return sent.indices.filter { positions.contains($0) }.map { sent[$0] }
   }
   /// What the request outbox does with its one song's answer (D-128).
   public enum OutboxAnswer: Equatable, Sendable {
@@ -96,13 +113,20 @@ public struct AcquisitionResult: Codable, Sendable {
     case kept
   }
   public var outboxAnswer: OutboxAnswer {
-    if leftOut > 0 { return .kept }
+    if !overLimit.isEmpty { return .kept }
     if created + existing > 0 { return .requested }
     return paused > 0 ? .paused : .skipped
   }
   /// Songs kept to send again later (D-128). Wording awaiting the owner.
   public static func waitingNotice(_ count: Int) -> String {
     "\(count) song\(count == 1 ? "" : "s") waiting to be sent. PigMusic will try again later."
+  }
+  /// A Retry in Downloads a waiting limit refused (D-128): the job waits
+  /// for everyone who asked for it. The web's words; awaiting the owner.
+  public static func retryRefused(_ limit: String?) -> String {
+    limit == "household_waiting"
+      ? "Couldn't try again yet: the server already has 10,000 songs waiting. Try again once some are added."
+      : "Couldn't try again yet: too many songs are already waiting for the people who asked for this. Try again once some are added."
   }
   /// Nothing new was asked for and a paused song stays paused (#264): the
   /// person is told where to resume it, never that it was left out.
