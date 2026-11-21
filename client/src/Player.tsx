@@ -1,4 +1,5 @@
 import { api, apiFetch, currentSession } from "./api";
+import { played } from "./playChoice";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Play, Pause, LoaderCircle } from "lucide-react";
@@ -436,6 +437,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }
   function play(songs: Song[], index = 0, more?: MoreSongs) {
     if (!songs[index]) return;
+    // A choice still reading its songs no longer plays over this one.
+    played();
     resumeAt.current = 0;
     // The queue is its own copy: editing Up next never changes the page's
     // list it came from (Codex, #249).
@@ -467,12 +470,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const list = Array.isArray(s) ? s : [s];
     if (!list.length) return;
     if (!song) return play(list);
+    played();
     for (const next of [...list].reverse())
       insertNext(queue.current, cursor.current, next);
     setQueueVersion((v) => v + 1);
   }
   function addToQueue(s: Song) {
     if (!song) return play([s]);
+    played();
     queue.current.push(s);
     setQueueVersion((v) => v + 1);
   }

@@ -22,6 +22,7 @@ import {
   type CollectionMenuItem,
 } from "./menus";
 import { notifyError } from "./notices";
+import { choosePlay } from "./playChoice";
 import { usePlayer } from "./Player";
 import { AttemptEnded, addToPlaylist } from "./playlists";
 import { PlaylistPicker, type PlaylistPickerHandle } from "./PlaylistPicker";
@@ -129,7 +130,11 @@ export function useCollectionMenu({
     () => {
       const choice = latestChoice(latest.current, slot);
       if (!choice) return;
-      const current = () => alive.current && isLatest(latest.current, choice);
+      // A playing choice also gives way to anything played or queued since,
+      // from any card, row or page (Codex round 1 on #267).
+      const newest = slot === "play" ? choosePlay() : () => true;
+      const current = () =>
+        alive.current && isLatest(latest.current, choice) && newest();
       const again = withSongs(slot, act);
       setBusy((n) => n + 1);
       void withCollection(songs, (list, session) =>

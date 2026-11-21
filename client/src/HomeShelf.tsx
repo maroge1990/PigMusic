@@ -8,6 +8,7 @@ import {
 } from "react";
 import { Play } from "lucide-react";
 import { notifyError } from "./notices";
+import { choosePlay } from "./playChoice";
 import { usePlayer } from "./Player";
 import { withCollection } from "./songActions";
 import type { Song } from "./songs";
@@ -86,11 +87,15 @@ export function CoverPlay({
         type="button"
         aria-label={"Play " + title}
         title={"Play " + title}
-        onClick={() =>
+        onClick={() => {
+          // Plays only if nothing has been played since (Codex, #267).
+          const newest = choosePlay();
           void withCollection(songs, (list) => {
-            if (list.length) player.play(list, 0);
-          }).catch((e) => notifyError((e as Error).message))
-        }
+            if (list.length && newest()) player.play(list, 0);
+          }).catch((e) => {
+            if (newest()) notifyError((e as Error).message);
+          });
+        }}
       >
         <Play size={16} fill="currentColor" aria-hidden="true" />
       </button>

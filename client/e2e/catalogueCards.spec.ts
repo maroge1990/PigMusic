@@ -79,6 +79,8 @@ type Options = {
   popularity?: Promise<void>;
   /** The popular songs read fails with no words of the server's. */
   failPopularity?: boolean;
+  /** Held until the test opens it: the library album's read. */
+  libraryAlbum?: Promise<void>;
   /** Titles the library lookup says are yours. */
   yours?: string[];
   /** Who /v1/me says is signed in. */
@@ -237,6 +239,18 @@ async function home(target: Page | BrowserContext, options: Options = {}) {
         json: { url: "/api/v1/playback/files/silence", source: "JioSaavn" },
       }),
     "/v1/remote-playback/prepare": (route) => route.fulfill({ json: {} }),
+    [`/v1/albums/${album.id}`]: async (route) => {
+      await options.libraryAlbum;
+      await route.fulfill({ json: album }).catch(() => {});
+    },
+    "/v1/playback/t1/url": (route) =>
+      route.fulfill({
+        json: { url: "/api/v1/playback/files/silence", expires_in: 60 },
+      }),
+    "/v1/playback/t2/url": (route) =>
+      route.fulfill({
+        json: { url: "/api/v1/playback/files/silence", expires_in: 60 },
+      }),
     "/v1/playlists": (route) =>
       route.fulfill({
         json: { playlists: [{ id: "p1", name: "Road trip", track_count: 0 }] },
@@ -680,4 +694,50 @@ test("Add to playlist dropped by another sign-in is neither sent nor announced",
   expect(listed).toEqual([]);
   // Counted now: a notice would still be showing (it stays for seconds).
   expect(await page.getByText("Added to playlist").count()).toBe(0);
+});
+
+// Codex round 1: each card kept its own latest choice, so a slow card's
+// Play could replace what another card started meanwhile.
+const playFromLibraryCard = async (page: Page) => {
+  await page
+    .getByRole("button", { name: `More options for ${album.title}` })
+    .click();
+  await page
+    .getByRole("menu", { name: album.title })
+    .getByRole("menuitem", { name: "Play", exact: true })
+    .click();
+};
+
+test("a slow catalogue card's Play never replaces what another card played since", async ({
+  page,
+}) => {
+  const editions = gate();
+  await home(page, { editions: editions.shut });
+  await page.goto("/#/home");
+  await choose(page, "Play");
+  await playFromLibraryCard(page);
+  await expect.poll(() => queued(page)).toEqual(["Von dutch", "360"]);
+  const read = page.waitForResponse("**/catalogue/releases/rel-studio");
+  editions.open();
+  await read;
+  await page.waitForTimeout(800);
+  expect(await queued(page)).toEqual(["Von dutch", "360"]);
+});
+
+test("a slow library card's Play never replaces a catalogue card's played since", async ({
+  page,
+}) => {
+  const libraryAlbum = gate();
+  await home(page, { libraryAlbum: libraryAlbum.shut });
+  await page.goto("/#/home");
+  await playFromLibraryCard(page);
+  await choose(page, "Shuffle");
+  await expect
+    .poll(async () => (await queued(page)).sort())
+    .toEqual(["First song", "Second song"]);
+  const read = page.waitForResponse(`**/api/v1/albums/${album.id}`);
+  libraryAlbum.open();
+  await read;
+  await page.waitForTimeout(800);
+  expect((await queued(page)).sort()).toEqual(["First song", "Second song"]);
 });
