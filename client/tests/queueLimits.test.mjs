@@ -159,6 +159,67 @@ test("a later batch that fails keeps the songs an earlier limit left out", async
   clearNotices();
 });
 
+test("past a waiting limit the later batches are still sent", async () => {
+  // Codex round 2: one refused batch stopped the run, though a later song
+  // could still join a job already queued.
+  setSessionId("session-1");
+  const { MAX_SONGS_PER_REQUEST } = await import("../src/limits.ts");
+  const max = MAX_SONGS_PER_REQUEST;
+  const many = Array.from({ length: max + 2 }, (_, i) => song(i));
+  const sent = [];
+  globalThis.fetch = async (path, options) => {
+    const titles = JSON.parse(options.body).tracks.map((t) => t.title);
+    sent.push(titles);
+    if (sent.length === 1)
+      return Response.json(
+        {
+          detail: "Too many songs are waiting to be added. Try again later.",
+          code: "queue_limit",
+          limit: "household_waiting",
+          left_out: titles.length,
+          over_limit: titles.map((_, i) => i),
+          outcomes: titles.map(() => "excluded"),
+        },
+        { status: 429 },
+      );
+    return Response.json({
+      created: 0,
+      existing: 1,
+      skipped: 0,
+      left_out: 1,
+      over_limit: [1],
+      limit: "household_waiting",
+      outcomes: ["existing", "excluded"],
+    });
+  };
+  let shown = [];
+  const stop = subscribe((all) => (shown = all));
+  await addSongsToLibrary(many);
+  stop();
+  assert.equal(sent.length, 2);
+  const error = shown.find((n) => n.kind === "error");
+  assert.equal(
+    error.text,
+    `Adding 1 song to your library. Couldn't add ${max + 1} songs: the server already has 10,000 songs waiting. Try again once some are added.`,
+  );
+  clearNotices();
+});
+
+test("a quality choice says how many replacements wait", async () => {
+  const { qualityDeferredMessage, bulkLeftOutMessage } = await import(
+    "../src/queueLimits.ts"
+  );
+  assert.equal(qualityDeferredMessage(0), "");
+  assert.equal(
+    qualityDeferredMessage(3),
+    "3 songs will change quality later: too many songs are waiting. Choose this quality again once some are added.",
+  );
+  assert.equal(
+    bulkLeftOutMessage(2, "Submit the import again"),
+    "2 songs left out: too many songs are waiting. Submit the import again once some are added.",
+  );
+});
+
 test("a Retry a waiting limit refused says why", async () => {
   const { retryLimitMessage } = await import("../src/queueLimits.ts");
   assert.equal(

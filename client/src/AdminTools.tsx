@@ -18,7 +18,11 @@ import {
   updateArtworkRevision,
   writeFailure,
 } from "./api";
-import { retryLimitMessage, type LeftOut } from "./queueLimits";
+import {
+  bulkLeftOutMessage,
+  retryLimitMessage,
+  type LeftOut,
+} from "./queueLimits";
 import { formatCount, formatDuration } from "./format";
 import { PageHeader, SectionHeader } from "./PageHeader";
 import { Cover } from "./Cover";
@@ -291,11 +295,18 @@ export function AdminTools({ route }: { route: Route }) {
         created: number;
         existing: number;
         skipped: number;
+        left_out?: number;
       }>("/v1/admin/migration/submit", { method: "POST" });
 
       setReviewOpen(false);
       notify(
-        `${result.created} added to queue · ${result.existing} already queued · ${result.skipped} skipped`,
+        [
+          `${result.created} added to queue · ${result.existing} already queued · ${result.skipped} skipped`,
+          // Past the household's waiting limit (D-128).
+          bulkLeftOutMessage(result.left_out, "Submit the import again"),
+        ]
+          .filter(Boolean)
+          .join(". "),
       );
       go("/admin/downloads");
     } catch (e) {

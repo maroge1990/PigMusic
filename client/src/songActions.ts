@@ -107,9 +107,18 @@ export async function addSongsToLibrary(
         const left = leftOut.concat(parts.slice(i).flat());
         if (adding) changed();
         if (e instanceof ApiError && e.code === "queue_limit") {
-          // Every song of this batch was past a limit: the later ones
-          // would be too. Try again sends all those left out.
-          return limited(adding, left, e.body as LeftOut);
+          const refused = e.body as LeftOut;
+          if (refused.limit !== "rate") {
+            // Past a waiting limit a later song may still join a job
+            // already queued (Codex round 2): this batch was left out, and
+            // the next is sent.
+            leftOut = leftOut.concat(parts[i]);
+            limit = refused;
+            continue;
+          }
+          // Past the rate every later new song would be refused too: Try
+          // again sends all those left out and those not yet sent.
+          return limited(adding, left, refused);
         }
         notifyError(
           adding

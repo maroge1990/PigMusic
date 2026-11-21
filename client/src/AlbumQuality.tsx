@@ -1,6 +1,7 @@
 import { apiFetch, detailOr, isUnconfirmed, writeFailure } from "./api";
 import { useEffect, useState } from "react";
 import { QualitySelect, qualityLabel } from "./QualitySelect";
+import { qualityDeferredMessage } from "./queueLimits";
 export function AlbumQuality({
   id,
   notify,
@@ -48,7 +49,13 @@ export function AlbumQuality({
       const updated = await apiFetch(path).then((r) => r.json());
       setEffective(updated.effective_profile);
       notify(
-        `${data.created} replacements queued${data.downloads_enabled ? "" : " · downloads paused"}. Existing music stays until replacement succeeds.`,
+        [
+          `${data.created} replacements queued${data.downloads_enabled ? "" : " · downloads paused"}. Existing music stays until replacement succeeds.`,
+          // Past a waiting limit (D-128).
+          qualityDeferredMessage(data.deferred),
+        ]
+          .filter(Boolean)
+          .join(" "),
       );
     } catch (e) {
       setError((e as Error).message);
